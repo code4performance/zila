@@ -4,6 +4,14 @@
 
 Brasa compiles directly to native x86-64 machine code — no LLVM, no GC, no runtime overhead. It is designed to be **the language you reach for when you need bare-metal control without sacrificing expressiveness**.
 
+### The name
+
+*Brasa* is the Portuguese word for **ember** — a glowing coal that burns hot, long, and clean, without the noise of an open flame. That is exactly what this language aims to be: intense power, controlled heat, no waste.
+
+The name also carries a deliberate pun. Its creator is Brazilian, and in Brazilian Portuguese *"cara, que brasa!"* is slang for *"dude, that's fire!"* — the highest compliment something can get. If Brasa the language ever earns that reaction from systems programmers around the world, the name will have done its job.
+
+> **Brasa** = *ember* (PT) · *that's fire* (BR slang) · a systems language born in Brazil 🇧🇷
+
 ---
 
 ## Why Brasa?

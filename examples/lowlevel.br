@@ -1,0 +1,34 @@
+package main
+
+use mem
+
+embed "public/"
+
+let VERSION = "1.0"
+var counter: i32 = 0
+
+#[packed]
+type Header = record
+    tag: u8
+    len: u16
+end
+
+extern func MessageBoxA(hwnd: usize, text: *u8, caption: *u8, kind: u32) -> i32
+
+#[inline]
+func add(a: i32, b: i32) -> i32
+    return a + b
+end
+
+func poke()
+    unsafe
+        let port: *u8 = 0x3F8
+        port[0] = 'A'
+        let v = port[0] bitor 0x80
+        let m = v bitand 0xFF bitxor 3
+        let n = bitnot m
+        let a = &v
+        let b = a^
+        a^ = 7
+    end
+end

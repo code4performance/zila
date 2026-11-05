@@ -1,0 +1,208 @@
+(* ===========================================================
+   Brasa - formal grammar (EBNF)
+   Notation: | alternative   [ ] optional   { } zero or more
+             ( ) grouping    'x' literal    (* *) comment
+   Blocks end with 'end'. A newline terminates a statement (no ';').
+   Newlines are ignored inside ( ), [ ], { } lists and after binary
+   operators and '='. A line starting with '.' or '?.' continues the
+   previous expression (method chains). Comparisons do not chain.
+   A multi-line match arm body runs until the next arm or 'end'.
+   Method/field names after '.' may be keywords (app.use(...)).
+   =========================================================== *)
+
+
+(* ---------- Lexical ---------- *)
+
+letter     = 'a'..'z' | 'A'..'Z' | '_' ;
+digit      = '0'..'9' ;
+hex        = digit | 'a'..'f' | 'A'..'F' ;
+bin        = '0' | '1' ;
+ident      = letter { letter | digit } ;
+
+int_lit    = digit { digit | '_' }
+           | '0x' hex { hex | '_' }
+           | '0b' bin { bin | '_' } ;
+float_lit  = digit { digit } '.' digit { digit } [ exp ] ;
+exp        = ( 'e' | 'E' ) [ '+' | '-' ] digit { digit } ;
+char_lit   = "'" ( char | escape ) "'" ;
+text_lit   = '"' { char | escape | '{' expr '}' } '"' ;
+bool_lit   = 'true' | 'false' ;
+nil_lit    = 'nil' ;
+literal    = int_lit | float_lit | char_lit | text_lit | bool_lit | nil_lit ;
+
+comment    = '//' { any } EOL | '/*' { any } '*/' ;
+
+(* Reserved words:
+   package use type record enum func return var let
+   if else match for in while break continue defer spawn asm end async await
+   unsafe extern embed new try and or not true false nil
+   bitand bitor bitxor bitnot interface ref self *)
+
+
+(* ---------- Program and declarations ---------- *)
+
+file         = package_decl { use_decl } { top_decl } ;
+package_decl = 'package' ident ;
+use_decl     = 'use' qname { ',' qname } ;
+qname        = ident { '.' ident } ;
+
+top_decl      = [ attrs ] ( func_decl | type_decl | const_decl
+                          | var_decl | extern_decl | embed_decl ) ;
+
+attrs         = { '#[' ident [ '(' [ args ] ')' ] ']' } ;
+const_decl    = 'let' ident [ ':' type ] '=' expr ;
+var_decl      = 'var' ident [ ':' type ] [ '=' expr ] ;
+embed_decl    = 'embed' text_lit ;
+extern_decl   = 'extern' [ text_lit ] 'func' ident '(' [ extern_params ] ')' [ '->' type ] ;
+extern_params = param { ',' param } [ ',' '...' ] | '...' ;
+
+
+(* ---------- Types ---------- *)
+
+type_decl  = 'type' ident [ generics ] '=' type_body ;
+type_body  = 'record' { field } 'end'
+           | 'enum' { variant } 'end'          (* with or without data *)
+           | 'interface' { method_sig } 'end'   (* structural, Go-style *)
+           | type ;
+method_sig = 'func' ident '(' 'self' [ ',' params ] ')' [ '->' result ] ;
+field      = ident ':' type ;
+variant    = ident [ '(' type { ',' type } ')' ] [ ',' ] ;   (* Red, Green  or  Circle(int) *)
+generics   = '<' tparam { ',' tparam } '>' ;
+tparam     = ident [ ':' qname ] ;              (* T: Printable *)
+
+type       = base_type [ '?' ] ;                (* T? = optional value *)
+base_type  = qname [ '<' type { ',' type } '>' ]
+           | '*' type                           (* raw pointer *)
+           | '[' ']' type                       (* slice *)
+           | '[' int_lit ']' type               (* fixed array *)
+           | [ 'extern' [ text_lit ] ] 'func' '(' [ types ] ')' [ '->' result ] ;
+types      = type { ',' type } ;
+result     = type [ 'or' 'error' ] | 'error' ;  (* T or error = value or failure *)
+
+
+(* ---------- Functions ---------- *)
+
+func_decl  = [ 'async' ] 'func' [ receiver ] ident [ generics ] '(' [ params ] ')'
+             [ '->' result ] body ;     (* 'async': runs as a task, returns Future<T> *)
+receiver   = '(' [ 'ref' ] ident ':' type ')' ;  (* method; no inheritance *)
+params     = param { ',' param } ;
+param      = [ 'ref' ] ident ':' [ '...' ] type [ '=' expr ] ;   (* '...' = variadic *)
+lambda_param = [ 'ref' ] ident [ ':' [ '...' ] type ] [ '=' expr ] ;  (* type may be inferred *)
+                                                (* ref = pass by reference;
+                                                   without it, records are
+                                                   copied (no borrow checker) *)
+body       = { stmt } 'end' ;
+
+
+(* ---------- Statements ---------- *)
+
+stmt        = var_decl | const_decl | assign | if_stmt | match_stmt
+            | for_stmt | while_stmt | return_stmt | defer_stmt
+            | spawn_stmt | unsafe_stmt | asm_stmt
+            | 'break' | 'continue' | expr ;
+
+assign      = place assign_op expr ;
+assign_op   = '=' | '+=' | '-=' | '*=' | '/=' | '%=' ;
+place       = ident { '.' ident | '[' expr ']' | '^' } ;
+
+if_stmt     = 'if' expr { stmt }
+              { 'else' 'if' expr { stmt } }
+              [ 'else' { stmt } ] 'end' ;
+while_stmt  = 'while' expr { stmt } 'end' ;
+for_stmt    = 'for' ident [ ',' ident ] 'in' expr { stmt } 'end' ;
+match_stmt  = 'match' expr { pattern '->' ( expr | { stmt } ) } 'end' ;
+pattern     = pat_atom { '|' pat_atom } ;       (* '|' only here *)
+pat_atom    = '_' | literal | ident [ '(' ident { ',' ident } ')' ] ;
+return_stmt = 'return' [ expr ] ;
+defer_stmt  = 'defer' expr ;
+spawn_stmt  = 'spawn' call ;
+unsafe_stmt = 'unsafe' { stmt } 'end' ;
+asm_stmt    = 'asm' { text_lit } { asm_operand } [ asm_clobber ] 'end' ;
+asm_operand = ( 'in' | 'out' | 'inout' ) ident '=' expr ;
+asm_clobber = 'clobber' text_lit { ',' text_lit } ;
+call        = postfix ;                         (* must end in call_args *)
+
+
+(* ---------- Expressions (lowest to highest precedence) ---------- *)
+
+expr       = coalesce ;
+coalesce   = or_expr { '??' or_expr } ;
+or_expr    = and_expr { 'or' and_expr } ;
+and_expr   = cmp_expr { 'and' cmp_expr } ;
+cmp_expr   = range_expr [ cmp_op range_expr ] ;
+cmp_op     = '==' | '!=' | '<' | '<=' | '>' | '>=' ;
+range_expr = add_expr [ '..' add_expr ] ;
+add_expr   = mul_expr { ( '+' | '-' | 'bitor' | 'bitxor' ) mul_expr } ;
+mul_expr   = unary { ( '*' | '/' | '%' | '<<' | '>>' | 'bitand' ) unary } ;
+unary      = ( 'not' | 'bitnot' | '-' | '&' | '*' | 'try' | 'await' ) unary | postfix ;
+                                                (* 'await' = wait for a Future<T> and yield T
+                                                   (only in an async func or in main) *)
+                                                (* 'try' = propagate a failure to the caller
+                                                   (only in func -> T or error) *)
+                                                (* '&' = address-of only *)
+postfix    = primary { '.' ident | '?.' ident | '[' expr ']'
+                     | call_args | '^' } ;
+                                                (* '^'  = dereference
+                                                   '?.' = safe access on T? *)
+call_args  = '(' [ args ] ')' ;
+args       = arg { ',' arg } ;
+arg        = [ '...' ] [ 'ref' ] [ ident ':' ] expr ;   (* '...' = spread a list *)     (* 'ref' repeated at call
+                                                   site for visibility *)
+
+primary    = literal | ident | '(' expr ')' | list_lit | map_lit | record_lit
+           | lambda | if_expr | match_expr | new_expr ;
+list_lit   = '[' [ expr { ',' expr } ] ']' ;
+map_lit    = '{' [ expr ':' expr { ',' expr ':' expr } ] '}' ;
+record_lit = qname '{' [ field_init { ',' field_init } ] '}' ;
+field_init = ident ':' expr ;
+lambda     = 'func' '(' [ lambda_params ] ')' { stmt } 'end' ;   (* no '->' *)
+lambda_params = lambda_param { ',' lambda_param } ;
+if_expr    = if_stmt ;                          (* value of last expr *)
+match_expr = match_stmt ;
+new_expr   = 'new' type ;
+
+
+(* ---------- Semantic rules (not expressible in EBNF) ---------- *)
+
+(* Types
+   - Type inference is local: signatures are explicit, bodies are inferred.
+   - Literals: integer defaults to i32, float to f64; adapt to context.
+   - No implicit numeric coercion: i64(x) is an explicit conversion.
+   - 'nil' only exists in T?; flow typing narrows T? to T after a nil check
+     or an early return.
+   - 'try' (propagate) is only allowed in functions returning 'T or error' or 'error'.
+   - match over an enum (or a 'T or error' result: ok(v) / err(e)) must be
+     exhaustive unless it contains '_'.
+   - async func f() -> T returns Future<T>; `await` yields T, waits without blocking other
+     tasks, and may be used once per future. `await` is allowed only in an `async` function
+     and in `main`; async functions take no `ref` parameters.
+   - error("message") creates an error; e.message reads it; call() ?? x gives
+     a default when the call fails.
+   - Generics are monomorphized at compile time.
+   - Interfaces are structural: a type satisfies an interface if it has
+     the methods with matching signatures.
+   Values
+   - record/array values are copied on assignment and call;
+     'ref' passes by reference (no borrow checker, no lifetimes).
+   - Integer overflow: panic in debug, wraparound with --fast.
+   - 'text' is immutable UTF-8 (pointer + length); []u8 for raw bytes.
+   FFI & Assembly
+   - Calling C requires declaring `extern [abi] func ...` (abi defaults to "C").
+   - Calling extern functions, dereferencing raw pointers (`*T`), and inline `asm`
+     require an enclosing `unsafe` block.
+   - `...` at the end of an `extern` parameter list denotes C variadic functions.
+   - `extern [abi] func(...) -> T` is a function pointer type compatible with C callbacks.
+   - `#[export("name")]` exports a Brasa function with C ABI and unmangled symbol name.
+   - `#[c_layout]` on a record enforces standard C ABI struct alignment and padding.
+   - `#[link("lib")]` links external libraries; `#[link_src("path.c")]` compiles C files.
+   - `asm` blocks use plain string instruction templates with `@name` operand substitutions.
+   - Operands declare `in`, `out`, or `inout`. Register names (e.g. `eax`, `r`) bind hardware registers.
+   - Clobbers declare registers, flags ("cc"), or memory barriers ("memory") modified by the block.
+   - `#[naked]` omits function prologue/epilogue for custom low-level routines. *)
+
+
+(* ---------- Stdlib syntax extensions ---------- *)
+
+(* use web *)
+html_expr  = 'html' { html_node } 'end' ;
+(* html_node: markup with {expr} interpolation, and 'for'/'if' blocks *)

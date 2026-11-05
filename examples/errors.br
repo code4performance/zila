@@ -1,0 +1,28 @@
+package main
+
+func load(path: text) -> Config or error
+    let raw = try file.read(path)
+    let f = try file.open(path)
+    defer f.close()
+    return try json.parse(Config, raw)
+end
+
+func main() -> error
+    let email: text? = c.email
+    let e = email ?? "no email"
+    let n = email?.len
+    let cfg = load("a.json") ?? Config{}
+
+    if email == nil
+        return
+    end
+
+    match load("a.json")
+        ok(c)  -> use_config(c)
+        err(e) -> print("failed: {e.message}")
+    end
+
+    let ch = channel(i32)
+    spawn worker(ch)
+    print("got {ch.receive()}")
+end

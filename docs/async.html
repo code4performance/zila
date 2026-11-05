@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Async — Brasa</title>
+  <meta name="description" content="async/await in Brasa: futures, timers, files and TCP networking that never block the other tasks.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="index.html">brasa<span class="ember-dot">.</span><small>lang docs</small></a>
+    <nav class="site-nav">
+      <a href="index.html">Overview</a>
+      <a href="syntax.html">Syntax</a>
+      <a href="examples.html">Examples</a>
+      <a href="native.html">Native</a>
+      <a href="concurrency.html">Tasks</a>
+      <a href="async.html" aria-current="page">Async</a>
+      <a href="os.html">Brasa OS</a>
+      <a href="getting-started.html">Getting Started</a>
+    </nav>
+  </header>
+
+  <main>
+    <h1>Async</h1>
+    <p>Programs that wait — for time, a file, a network peer — should not freeze while they wait. In Brasa a function that waits is marked <code>async</code>, and <code>await</code> is the one place where a task gives up the processor so another can run. Everything here is compiled natively and needs the Windows target.</p>
+
+    <section id="basics">
+      <h2>async and await</h2>
+      <p>An <code>async func</code> starts running as soon as you call it and returns a <code>Future&lt;T&gt;</code> at once. <code>await</code> waits for the future and gives you its value, without blocking the other tasks.</p>
+      <pre><code><span class="kw">async</span> <span class="kw">func</span> double(n: int) -&gt; int
+    <span class="kw">await</span> sleep(100)
+    <span class="kw">return</span> n * 2
+<span class="kw">end</span>
+
+<span class="kw">func</span> main()
+    <span class="kw">let</span> a = double(1)          <span class="cm">// starts now</span>
+    <span class="kw">let</span> b = double(2)          <span class="cm">// starts now, too</span>
+    print(<span class="kw">await</span> a + <span class="kw">await</span> b)   <span class="cm">// about 100 ms in total, not 200</span>
+<span class="kw">end</span></code></pre>
+      <p>Rules to remember:</p>
+      <ul>
+        <li><code>await</code> is allowed only inside an <code>async func</code> and inside <code>main</code>; anywhere else the compiler tells you so.</li>
+        <li>A future can be awaited <strong>once</strong>. Awaiting it again stops the program with <code>future already awaited</code>.</li>
+        <li>An <code>async func</code> cannot take <code>ref</code> parameters: the task works on copies. Pass values or a channel.</li>
+        <li><code>await</code> does not create futures; it only waits for them. A future you never await still runs, and its result is released when nothing refers to it any more.</li>
+      </ul>
+    </section>
+
+    <section id="errors">
+      <h2>Errors</h2>
+      <p>An async function can fail like any other: end its signature with <code>or error</code>. The future then holds a <code>T or error</code>, so <code>try</code>, <code>match</code> and <code>??</code> work on the awaited value.</p>
+      <pre><code><span class="kw">async</span> <span class="kw">func</span> parse(s: text) -&gt; int <span class="kw">or</span> error
+    <span class="kw">if</span> s == <span class="str">"bad"</span>
+        <span class="kw">return</span> error(<span class="str">"cannot parse '{s}'"</span>)
+    <span class="kw">end</span>
+    <span class="kw">return</span> s.len
+<span class="kw">end</span>
+
+<span class="kw">func</span> main() -&gt; error
+    <span class="kw">let</span> n = <span class="kw">try</span> <span class="kw">await</span> parse(<span class="str">"abcd"</span>)           <span class="cm">// 4, or return the error</span>
+    <span class="kw">match</span> <span class="kw">await</span> parse(<span class="str">"bad"</span>)
+        ok(v)  -&gt; print(<span class="str">"parsed {v}"</span>)
+        err(e) -&gt; print(<span class="str">"failed: {e.message}"</span>)
+    <span class="kw">end</span>
+    <span class="kw">return</span>
+<span class="kw">end</span></code></pre>
+    </section>
+
+    <section id="timers">
+      <h2>Timers and waiting for several things</h2>
+      <dl class="cli">
+        <dt>sleep(ms)</dt>
+        <dd>A future that completes after at least <code>ms</code> milliseconds: <code>await sleep(100)</code>. Many sleeps overlap; three 100 ms sleeps take about 100 ms.</dd>
+
+        <dt>timeout(ms, future)</dt>
+        <dd>A future that gives the awaited value, or an error saying it timed out. If the original future can already fail, you still get a single <code>T or error</code>. The task behind a future that timed out keeps running to the end: there is no cancellation.</dd>
+
+        <dt>await all(futures)</dt>
+        <dd>Waits for every future in a list and gives their values in the original order.</dd>
+
+        <dt>await race(futures)</dt>
+        <dd>Gives the value of the first future to finish. The others keep running and are released when nothing refers to them.</dd>
+      </dl>
+      <pre><code><span class="kw">let</span> xs = <span class="kw">await</span> all([after(90, 1), after(30, 2), after(60, 3)])   <span class="cm">// [1, 2, 3]</span>
+<span class="kw">let</span> first = <span class="kw">await</span> race([after(300, 1), after(40, 2)])            <span class="cm">// 2, after about 40 ms</span>
+<span class="kw">let</span> r = <span class="kw">await</span> timeout(50, after(400, 1))                        <span class="cm">// err: timed out</span></code></pre>
+    </section>
+
+    <section id="files">
+      <h2>Files</h2>
+      <p>With <code>use fs</code>, reading and writing happen while other tasks keep running: the operating system moves the data and Brasa runs something else meanwhile. Big files are transferred in 64 KiB pieces.</p>
+      <pre><code><span class="kw">use</span> fs
+
+<span class="kw">try</span> <span class="kw">await</span> fs.write(<span class="str">"notes.txt"</span>, <span class="str">"hello"</span>)       <span class="cm">// creates or replaces the file</span>
+<span class="kw">let</span> text = <span class="kw">try</span> <span class="kw">await</span> fs.read(<span class="str">"notes.txt"</span>)</code></pre>
+      <p>Errors name the file and give Windows' reason, for example <code>missing.txt: The system cannot find the file specified.</code> Files are closed when the last reference to them goes away.</p>
+    </section>
+
+    <section id="network">
+      <h2>TCP networking</h2>
+      <p>With <code>use net</code> you can listen, accept, connect, read and write without blocking the other tasks. <code>read</code> gives empty text when the other side closed the connection.</p>
+      <pre><code><span class="kw">use</span> net
+
+<span class="kw">async</span> <span class="kw">func</span> echo_server(listener: net.Listener) -&gt; error
+    <span class="kw">let</span> conn = <span class="kw">try</span> <span class="kw">await</span> listener.accept()
+    <span class="kw">let</span> message = <span class="kw">try</span> <span class="kw">await</span> conn.read(64)
+    <span class="kw">try</span> <span class="kw">await</span> conn.write(<span class="str">"echo: {message}"</span>)
+    <span class="kw">await</span> conn.close()
+    <span class="kw">return</span>
+<span class="kw">end</span>
+
+<span class="kw">func</span> main() -&gt; error
+    <span class="kw">let</span> listener = <span class="kw">try</span> <span class="kw">await</span> net.listen(0)          <span class="cm">// 0 picks a free port: listener.port</span>
+    <span class="kw">let</span> server = echo_server(listener)
+    <span class="kw">let</span> client = <span class="kw">try</span> <span class="kw">await</span> net.connect(<span class="str">"127.0.0.1"</span>, listener.port)
+    <span class="kw">try</span> <span class="kw">await</span> client.write(<span class="str">"hello"</span>)
+    print(<span class="kw">try</span> <span class="kw">await</span> client.read(64))              <span class="cm">// echo: hello</span>
+    <span class="kw">try</span> <span class="kw">await</span> server
+    <span class="kw">return</span>
+<span class="kw">end</span></code></pre>
+      <p>This is <code>examples/async.br</code> in miniature; the full program also reads and writes a file and waits for three sleeps at once. Sockets close when the last reference goes away, or earlier with <code>close()</code>. The first <code>write</code> after the other side closed may still succeed (that is how TCP works); the next one fails with an error.</p>
+    </section>
+
+    <section id="how">
+      <h2>How tasks run</h2>
+      <ul>
+        <li>All tasks run on <strong>one thread</strong> and take turns. A task gives up the processor only at <code>await</code>, when it waits on a channel, with <code>task.yield()</code>, or when it finishes.</li>
+        <li>A task that computes for a long time without awaiting makes every other task wait.</li>
+        <li><code>async</code> functions, <code>spawn</code> and channels share the same scheduler and can be mixed freely.</li>
+        <li>If every task is waiting and there is no timer or file or network operation in progress, the program stops with <code>fatal: all tasks are asleep - deadlock!</code> and a non-zero exit code. Waiting for a timer is not a deadlock.</li>
+        <li>When <code>main</code> returns the program ends, even if other tasks are still running.</li>
+      </ul>
+    </section>
+
+    <section id="limits">
+      <h2>Limits in this version</h2>
+      <ul>
+        <li>Windows x64 only. A bare-metal kernel that uses <code>async</code> fails to build with a message saying so.</li>
+        <li>No parallelism (one thread) and no cancellation.</li>
+        <li>A future is awaited once.</li>
+        <li>Looking up a host name (not an address like <code>127.0.0.1</code>) uses the Windows resolver and blocks every task until it answers.</li>
+        <li>Only TCP over IPv4: no UDP, TLS, or directory operations, and the <code>ui</code> message loop does not yet run other tasks.</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    Brasa — a language with a human face. Docs generated from <code>brasa.ebnf</code> and <code>examples/*.br</code>.
+  </footer>
+</body>
+</html>

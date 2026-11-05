@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Examples — Brasa</title>
+  <meta name="description" content="Annotated walkthroughs of real Brasa programs: hello world, a REST API, a type system tour, and FFI/low-level code.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="index.html">brasa<span class="ember-dot">.</span><small>lang docs</small></a>
+    <nav class="site-nav">
+      <a href="index.html">Overview</a>
+      <a href="syntax.html">Syntax</a>
+      <a href="examples.html" aria-current="page">Examples</a>
+      <a href="native.html">Native</a>
+      <a href="concurrency.html">Tasks</a>
+      <a href="async.html">Async</a>
+      <a href="os.html">Brasa OS</a>
+      <a href="getting-started.html">Getting Started</a>
+    </nav>
+  </header>
+
+  <main>
+    <h1>Examples</h1>
+    <p>These are the same programs shipped in <code>examples/</code> in the repository. Run any of them yourself with <code>brasa-parse examples/&lt;name&gt;.br --run</code> — see <a href="getting-started.html">Getting Started</a>.</p>
+
+    <nav class="toc">
+      <h2>On this page</h2>
+      <ul>
+        <li><a href="#hello">Hello world</a></li>
+        <li><a href="#rest-api">REST API</a></li>
+        <li><a href="#types">Type system tour</a></li>
+        <li><a href="#ffi">FFI &amp; low-level</a></li>
+      </ul>
+    </nav>
+
+    <section id="hello">
+      <h2>Hello world</h2>
+      <div class="file-label">examples/hello.br</div>
+      <pre><code><span class="kw">package</span> main
+
+<span class="kw">use</span> http, db, json
+
+<span class="kw">type</span> Customer = <span class="kw">record</span>
+    id: i32
+    name: text
+    email: text?
+<span class="kw">end</span>
+
+<span class="kw">func</span> greet(c: Customer) -&gt; text
+    <span class="kw">return</span> <span class="str">"Hello, {c.name}!"</span>
+<span class="kw">end</span>
+
+<span class="kw">func</span> main()
+    <span class="kw">var</span> c = Customer{ id: 1, name: <span class="str">"Ana"</span> }
+    print(greet(c))
+
+    <span class="kw">for</span> i <span class="kw">in</span> 1..5
+        <span class="kw">if</span> i % 2 == 0
+            print(<span class="str">"{i} is even"</span>)
+        <span class="kw">end</span>
+    <span class="kw">end</span>
+<span class="kw">end</span></code></pre>
+      <p>This is the smallest complete Brasa program that still shows most of the language's flavor: a <code>record</code> type with an optional field (<code>email: text?</code>), a free function (<code>greet</code>) that builds a string with interpolation, a <code>record</code> literal (<code>Customer{ id: 1, name: "Ana" }</code>), and a <code>for ... in</code> loop over a range (<code>1..5</code>) with an <code>if</code> inside it. Running it with <code>--run</code> prints <code>Hello, Ana!</code> followed by the even numbers from 1 to 5.</p>
+    </section>
+
+    <section id="rest-api">
+      <h2>REST API</h2>
+      <div class="file-label">examples/rest_api.br</div>
+      <pre><code><span class="kw">package</span> main
+
+<span class="kw">use</span> http, db, db.postgres, json
+
+<span class="kw">type</span> Customer = <span class="kw">record</span>
+    id: i32
+    name: text
+<span class="kw">end</span>
+
+<span class="kw">func</span> main() -&gt; error
+    <span class="kw">let</span> conn = <span class="kw">try</span> db.open(<span class="str">"postgres://localhost/shop"</span>)
+    <span class="kw">defer</span> conn.close()
+
+    <span class="kw">var</span> app = http.server(port: 8080)
+
+    app.get(<span class="str">"/customers"</span>, <span class="kw">func</span>(req)
+        <span class="kw">let</span> rows = <span class="kw">try</span> conn.query(Customer, <span class="str">"select id, name from customers"</span>)
+        <span class="kw">return</span> http.json(rows)
+    <span class="kw">end</span>)
+
+    app.get(<span class="str">"/customers/:id"</span>, <span class="kw">func</span>(req)
+        <span class="kw">let</span> c = <span class="kw">try</span> conn.one(Customer, <span class="str">"select * from customers where id = $1"</span>, req.param(<span class="str">"id"</span>))
+        <span class="kw">return</span> http.json(c)
+    <span class="kw">end</span>)
+
+    app.post(<span class="str">"/customers"</span>, <span class="kw">func</span>(req)
+        <span class="kw">let</span> c = <span class="kw">try</span> req.body(Customer)
+        <span class="kw">try</span> conn.exec(<span class="str">"insert into customers(name) values($1)"</span>, c.name)
+        <span class="kw">return</span> http.created(c)
+    <span class="kw">end</span>)
+
+    app.run()
+<span class="kw">end</span></code></pre>
+      <p>This example shows error propagation and resource cleanup working together: <code>main</code> is declared <code>-&gt; error</code> (it can fail), so every fallible call starts with <code>try</code> — <code>try db.open(...)</code>, the queries, <code>try req.body(Customer)</code> — and any failure short-circuits the function immediately. <code>defer conn.close()</code> guarantees the connection is released whenever <code>main</code> returns, success or failure. Route handlers are passed as inline lambdas (<code>func(req) ... end</code>), and <code>conn.query(Customer, "...")</code> passes the <code>Customer</code> type itself as a value so the database layer knows how to shape the result rows — no reflection or code generation required.</p>
+    </section>
+
+    <section id="types">
+      <h2>Type system tour</h2>
+      <div class="file-label">examples/types.br</div>
+      <pre><code><span class="kw">package</span> main
+
+<span class="kw">type</span> Printable = <span class="kw">interface</span>
+    <span class="kw">func</span> to_text(<span class="kw">self</span>) -&gt; text
+<span class="kw">end</span>
+
+<span class="kw">type</span> Shape = <span class="kw">enum</span>
+    Circle(float)
+    Rect(float, float)
+    Empty
+<span class="kw">end</span>
+
+<span class="kw">type</span> Color = <span class="kw">enum</span>
+    Red, Green, Blue
+<span class="kw">end</span>
+
+<span class="kw">type</span> Stack&lt;T&gt; = <span class="kw">record</span>
+    items: []T
+<span class="kw">end</span>
+
+<span class="kw">type</span> Handler = <span class="kw">func</span>(Request) -&gt; Response <span class="kw">or</span> error
+<span class="kw">type</span> Middleware = <span class="kw">func</span>(Request, next: Handler) -&gt; Response <span class="kw">or</span> error
+<span class="kw">type</span> Table = Map&lt;text, List&lt;i32&gt;&gt;
+
+<span class="kw">type</span> User = <span class="kw">record</span>
+    id: i32
+    #[json(<span class="str">"full_name"</span>)] name: text
+    #[json(skip)] password: text
+    email: text?
+<span class="kw">end</span>
+
+<span class="kw">func</span> first&lt;T&gt;(items: []T) -&gt; T?
+    <span class="kw">if</span> items.len == 0
+        <span class="kw">return</span> <span class="kw">nil</span>
+    <span class="kw">end</span>
+    <span class="kw">return</span> items[0]
+<span class="kw">end</span>
+
+<span class="kw">func</span> show&lt;T: Printable&gt;(x: T)
+    print(x.to_text())
+<span class="kw">end</span>
+
+<span class="kw">func</span> (c: Customer) greet() -&gt; text
+    <span class="kw">return</span> <span class="str">"Hello, {c.name}"</span>
+<span class="kw">end</span>
+
+<span class="kw">func</span> (<span class="kw">ref</span> s: Server) <span class="kw">use</span>(m: Middleware)
+    s.chain.add(m)
+<span class="kw">end</span>
+
+<span class="kw">func</span> area(s: Shape) -&gt; float
+    <span class="kw">match</span> s
+        Circle(r)  -&gt; <span class="kw">return</span> 3.14159 * r * r
+        Rect(w, h) -&gt; <span class="kw">return</span> w * h
+        Empty      -&gt; <span class="kw">return</span> 0.0
+    <span class="kw">end</span>
+<span class="kw">end</span>
+
+<span class="kw">func</span> classify(n: i32) -&gt; text
+    <span class="kw">match</span> n
+        0 -&gt; <span class="kw">return</span> <span class="str">"zero"</span>
+        1 | 2 | 3 -&gt;
+            <span class="kw">let</span> s = <span class="str">"small"</span>
+            <span class="kw">return</span> s
+        -1 -&gt; <span class="kw">return</span> <span class="str">"minus one"</span>
+        _ -&gt; <span class="kw">return</span> <span class="str">"many"</span>
+    <span class="kw">end</span>
+<span class="kw">end</span>
+
+<span class="kw">func</span> fill(<span class="kw">ref</span> buf: Buffer, n: i32 = 4)
+    buf.n = n
+<span class="kw">end</span>
+
+<span class="kw">func</span> log(msg: text, args: ...any)
+    print(msg)
+<span class="kw">end</span>
+
+<span class="kw">func</span> main()
+    <span class="kw">var</span> b = Buffer{}
+    fill(<span class="kw">ref</span> b)
+    fill(<span class="kw">ref</span> b, n: 8)
+    <span class="kw">let</span> xs = [1, 2, 3]
+    log(<span class="str">"x"</span>, ...xs)
+<span class="kw">end</span></code></pre>
+      <p>This file is a tour of Brasa's type declarations in one place: a structural <code>interface</code> (<code>Printable</code>), an <code>enum</code> with data (<code>Shape</code>) consumed exhaustively by <code>match</code> in <code>area</code>, an <code>enum</code> (<code>Color</code>), a generic <code>record</code> (<code>Stack&lt;T&gt;</code>), function-type aliases (<code>Handler</code>, <code>Middleware</code>), and a record with field attributes controlling JSON (de)serialization (<code>User</code>). It also demonstrates generic functions with an interface bound (<code>show&lt;T: Printable&gt;</code>), a method with a <code>ref</code> receiver (<code>(ref s: Server) use(...)</code>), multi-way <code>match</code> patterns (<code>1 | 2 | 3</code>), a default parameter (<code>n: i32 = 4</code>), and a variadic parameter spread at the call site (<code>log("x", ...xs)</code>).</p>
+    </section>
+
+    <section id="ui">
+      <h2>Native windows</h2>
+      <div class="file-label">examples/ui.br</div>
+      <pre><code><span class="kw">package</span> main
+
+<span class="kw">use</span> ui
+
+<span class="kw">func</span> main()
+    <span class="kw">var</span> win = ui.Window(<span class="str">"Customers"</span>, 640, 480)
+
+    <span class="kw">var</span> name = ui.TextBox()
+    <span class="kw">var</span> list = ui.ListView()
+    <span class="kw">var</span> add  = ui.Button(<span class="str">"Add"</span>)
+
+    add.onClick(<span class="kw">func</span>()
+        list.add(name.text)
+        name.text = <span class="str">""</span>
+    <span class="kw">end</span>)
+
+    win.layout(ui.vstack(name, add, list))
+    win.show()
+    ui.run()
+<span class="kw">end</span></code></pre>
+      <p>The <code>ui</code> library is written in Brasa on top of the Win32 API. <code>ui.Window</code>, <code>ui.TextBox</code>, <code>ui.Button</code> and <code>ui.ListView</code> are real native controls; <code>vstack</code> lays them out; the lambda passed to <code>onClick</code> runs when the button is pressed (or Enter is pressed in the text box). Build it with <code>brasa-parse examples/ui.br -o ui.exe</code>.</p>
+    </section>
+
+    <section id="async-example">
+      <h2>Async: waiting, files and TCP</h2>
+      <div class="file-label">examples/async.br</div>
+      <pre><code><span class="cm">// async/await: waiting, files and TCP in one program.</span>
+<span class="cm">//</span>
+<span class="cm">//   brasa-parse examples/async.br -o async.exe</span>
+<span class="cm">//</span>
+<span class="cm">// An `async func` starts running when it is called and returns a Future.</span>
+<span class="cm">// `await` waits for a future without blocking the other tasks.</span>
+
+<span class="kw">package</span> main
+
+<span class="kw">use</span> fs
+<span class="kw">use</span> net
+
+<span class="kw">async</span> <span class="kw">func</span> fetch_title(id: int) -&gt; text
+    <span class="kw">await</span> sleep(100)
+    <span class="kw">return</span> <span class="str">"title {id}"</span>
+<span class="kw">end</span>
+
+<span class="kw">async</span> <span class="kw">func</span> echo_server(listener: net.Listener) -&gt; error
+    <span class="kw">let</span> conn = <span class="kw">try</span> <span class="kw">await</span> listener.accept()
+    <span class="kw">let</span> message = <span class="kw">try</span> <span class="kw">await</span> conn.read(64)
+    <span class="kw">try</span> <span class="kw">await</span> conn.write(<span class="str">"echo: {message}"</span>)
+    <span class="kw">await</span> conn.close()
+    <span class="kw">return</span>
+<span class="kw">end</span>
+
+<span class="kw">func</span> main() -&gt; error
+    <span class="cm">// three 100 ms waits overlap: all of it takes about 100 ms, not 300</span>
+    <span class="kw">let</span> titles = <span class="kw">await</span> all([fetch_title(1), fetch_title(2), fetch_title(3)])
+    print(<span class="str">"{titles[0]}, {titles[1]}, {titles[2]}"</span>)
+
+    <span class="cm">// files</span>
+    <span class="kw">try</span> <span class="kw">await</span> fs.write(<span class="str">"brasa-example.txt"</span>, <span class="str">"written by an async function"</span>)
+    print(<span class="kw">try</span> <span class="kw">await</span> fs.read(<span class="str">"brasa-example.txt"</span>))
+
+    <span class="cm">// a TCP server and a client in the same program</span>
+    <span class="kw">let</span> listener = <span class="kw">try</span> <span class="kw">await</span> net.listen(0)
+    <span class="kw">let</span> server = echo_server(listener)
+    <span class="kw">let</span> client = <span class="kw">try</span> <span class="kw">await</span> net.connect(<span class="str">"127.0.0.1"</span>, listener.port)
+    <span class="kw">try</span> <span class="kw">await</span> client.write(<span class="str">"hello"</span>)
+    print(<span class="kw">try</span> <span class="kw">await</span> client.read(64))
+    <span class="kw">try</span> <span class="kw">await</span> server
+    <span class="kw">return</span>
+<span class="kw">end</span></code></pre>
+      <p>Three one-hundred-millisecond waits overlap, so <code>await all(...)</code> takes about 100 ms. The program then writes and reads a file and runs a TCP server and client in the same process; <code>try await</code> turns any failure into an early return. See <a href="async.html">Async</a>.</p>
+    </section>
+
+    <section id="ffi">
+      <h2>FFI &amp; low-level</h2>
+      <p class="note">The whole of <code>examples/ffi.br</code>. See <code>brasa-ffi.md</code> for the full FFI and inline-assembly specification.</p>
+      <div class="file-label">examples/ffi.br</div>
+      <pre><code><span class="kw">package</span> main
+
+<span class="kw">use</span> c
+
+<span class="cm">// ---- calling C ----</span>
+
+#[link(<span class="str">"m"</span>)]
+<span class="kw">extern</span> <span class="str">"C"</span> <span class="kw">func</span> sqrt(x: f64) -&gt; f64
+
+<span class="kw">extern</span> <span class="str">"C"</span> <span class="kw">func</span> printf(fmt: *c.char, ...) -&gt; c.int
+
+<span class="kw">extern</span> <span class="str">"C"</span> <span class="kw">func</span> qsort(base: *c.void, n: c.size_t, size: c.size_t,
+                      cmp: <span class="kw">extern</span> <span class="str">"C"</span> <span class="kw">func</span>(*c.void, *c.void) -&gt; c.int)
+
+#[link_src(<span class="str">"vendor/crc.c"</span>)]
+<span class="kw">extern</span> <span class="str">"C"</span> <span class="kw">func</span> crc32(data: *u8, len: usize) -&gt; u32
+
+#[stdcall_example]
+<span class="kw">extern</span> <span class="str">"stdcall"</span> <span class="kw">func</span> MessageBoxA(hwnd: usize, text: *c.char, caption: *c.char, kind: u32) -&gt; c.int
+
+#[c_layout]
+<span class="kw">type</span> Point = <span class="kw">record</span>
+    x: f64
+    y: f64
+<span class="kw">end</span>
+
+<span class="cm">// ---- being called from C ----</span>
+
+#[export(<span class="str">"brasa_add"</span>)]
+<span class="kw">func</span> add(a: i32, b: i32) -&gt; i32
+    <span class="kw">return</span> a + b
+<span class="kw">end</span>
+
+<span class="cm">// ---- inline assembly ----</span>
+
+#[cfg(<span class="str">"x86_64"</span>)]
+<span class="kw">func</span> rdtsc() -&gt; u64
+    <span class="kw">var</span> lo: u32 = 0
+    <span class="kw">var</span> hi: u32 = 0
+    <span class="kw">unsafe</span>
+        <span class="kw">asm</span>
+            <span class="str">"rdtsc"</span>
+            out eax = lo
+            out edx = hi
+        <span class="kw">end</span>
+    <span class="kw">end</span>
+    <span class="kw">return</span> u64(hi) &lt;&lt; 32 <span class="kw">bitor</span> u64(lo)
+<span class="kw">end</span>
+
+#[cfg(<span class="str">"x86_64"</span>)]
+<span class="kw">func</span> add_asm(a: u64, b: u64) -&gt; u64
+    <span class="kw">var</span> r: u64 = a
+    <span class="kw">unsafe</span>
+        <span class="kw">asm</span>
+            <span class="str">"add @r, @b"</span>
+            inout r = r
+            <span class="kw">in</span> b = b
+            clobber <span class="str">"cc"</span>
+        <span class="kw">end</span>
+    <span class="kw">end</span>
+    <span class="kw">return</span> r
+<span class="kw">end</span>
+
+#[naked]
+#[cfg(<span class="str">"x86_64"</span>)]
+<span class="kw">func</span> halt()
+    <span class="kw">asm</span>
+        <span class="str">"cli"</span>
+        <span class="str">"hlt"</span>
+    <span class="kw">end</span>
+<span class="kw">end</span>
+
+<span class="kw">func</span> main()
+    <span class="kw">unsafe</span>
+        printf(c.cstr(<span class="str">"sqrt(2) = %f\n"</span>), sqrt(2.0))
+    <span class="kw">end</span>
+    print(<span class="str">"tsc: {rdtsc()}"</span>)
+<span class="kw">end</span></code></pre>
+      <p>This program exercises Brasa on both sides of the C boundary. <code>extern "C" func sqrt(...)</code> and <code>printf</code> declare foreign functions pulled in via <code>#[link("m")]</code> (link against <code>libm</code>); <code>printf</code>'s trailing <code>...</code> marks it as C-variadic. <code>qsort</code>'s <code>cmp</code> parameter shows an <code>extern "C" func(...)</code> type used as a C-compatible function-pointer callback. <code>#[c_layout]</code> on <code>Point</code> pins field order and alignment to match a C <code>struct</code> exactly, so it can be passed across the FFI boundary safely. <code>#[export("brasa_add")]</code> does the reverse — it exposes a Brasa function to C callers under a fixed, unmangled symbol name. <code>rdtsc</code> reads the CPU timestamp counter with a short inline <code>asm</code> block, using <code>out eax = lo</code> / <code>out edx = hi</code> to bind two hardware registers to Brasa variables. Every one of these operations — calling <code>extern</code> functions and running <code>asm</code> — is wrapped in <code>unsafe</code>, since the compiler can't verify what happens on the other side of the boundary. See the <a href="syntax.html#ffi">FFI section of the syntax guide</a> and the project's <code>brasa-ffi.md</code> for the full specification.</p>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    Brasa — a language with a human face. Docs generated from <code>brasa.ebnf</code> and <code>examples/*.br</code>.
+  </footer>
+</body>
+</html>

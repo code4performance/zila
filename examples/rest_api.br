@@ -1,0 +1,33 @@
+package main
+
+use http, db, db.postgres, json
+
+type Customer = record
+    id: i32
+    name: text
+end
+
+func main() -> error
+    let conn = try db.open("postgres://localhost/shop")
+    defer conn.close()
+
+    var app = http.server(port: 8080)
+
+    app.get("/customers", func(req)
+        let rows = try conn.query(Customer, "select id, name from customers")
+        return http.json(rows)
+    end)
+
+    app.get("/customers/:id", func(req)
+        let c = try conn.one(Customer, "select * from customers where id = $1", req.param("id"))
+        return http.json(c)
+    end)
+
+    app.post("/customers", func(req)
+        let c = try req.body(Customer)
+        try conn.exec("insert into customers(name) values($1)", c.name)
+        return http.created(c)
+    end)
+
+    app.run()
+end

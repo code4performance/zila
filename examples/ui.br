@@ -1,0 +1,20 @@
+package main
+
+use ui
+
+func main()
+    var win = ui.Window("Customers", 640, 480)
+
+    var name = ui.TextBox()
+    var list = ui.ListView()
+    var add  = ui.Button("Add")
+
+    add.onClick(func()
+        list.add(name.text)
+        name.text = ""
+    end)
+
+    win.layout(ui.vstack(name, add, list))
+    win.show()
+    ui.run()
+end

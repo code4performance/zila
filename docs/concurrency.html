@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tasks and channels — Brasa</title>
+  <meta name="description" content="spawn, channels and the cooperative task scheduler of Brasa.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="index.html">brasa<span class="ember-dot">.</span><small>lang docs</small></a>
+    <nav class="site-nav">
+      <a href="index.html">Overview</a>
+      <a href="syntax.html">Syntax</a>
+      <a href="examples.html">Examples</a>
+      <a href="native.html">Native</a>
+      <a href="concurrency.html" aria-current="page">Tasks</a>
+      <a href="async.html">Async</a>
+      <a href="os.html">Brasa OS</a>
+      <a href="getting-started.html">Getting Started</a>
+    </nav>
+  </header>
+
+  <main>
+    <h1>Tasks and channels</h1>
+    <p>A <strong>task</strong> is a function running next to the others. Tasks talk through <strong>channels</strong>. They are lightweight (thousands are fine), cooperative, and share one scheduler with <a href="async.html">async/await</a>.</p>
+
+    <section id="spawn">
+      <h2>spawn and channel</h2>
+      <p><code>spawn f(x)</code> starts <code>f</code> as a new task. <code>channel(T)</code> makes a channel carrying values of type <code>T</code>; <code>send</code> puts a value in, <code>receive</code> waits for one, <code>close</code> ends the stream.</p>
+      <pre><code><span class="kw">use</span> task
+
+<span class="kw">func</span> worker(id: int, jobs: Channel&lt;int&gt;, results: Channel&lt;text&gt;)
+    <span class="kw">while</span> <span class="kw">true</span>
+        <span class="kw">let</span> n = jobs.receive()
+        <span class="kw">if</span> n == 0
+            <span class="kw">return</span>
+        <span class="kw">end</span>
+        results.send(<span class="str">"worker {id} squared {n} = {n * n}"</span>)
+        task.yield()
+    <span class="kw">end</span>
+<span class="kw">end</span>
+
+<span class="kw">func</span> main()
+    <span class="kw">let</span> jobs = channel(int)
+    <span class="kw">let</span> results = channel(text)
+    <span class="kw">spawn</span> worker(1, jobs, results)
+    <span class="kw">spawn</span> worker(2, jobs, results)
+    <span class="kw">for</span> i <span class="kw">in</span> 1..5
+        jobs.send(i)
+    <span class="kw">end</span>
+    jobs.send(0)
+    jobs.send(0)
+    <span class="kw">for</span> i <span class="kw">in</span> 0..4
+        print(results.receive())
+    <span class="kw">end</span>
+<span class="kw">end</span></code></pre>
+    </section>
+
+    <section id="rules">
+      <h2>How it behaves</h2>
+      <ul>
+        <li>Tasks run on <strong>one thread</strong> and take turns. A task gives up the processor only when it waits (<code>receive</code>, <code>await</code>), calls <code>task.yield()</code>, or finishes. A task that computes for a long time makes the others wait.</li>
+        <li><code>send</code> never blocks: a channel is an unbounded queue.</li>
+        <li><code>receive</code> waits for a value. On a channel that is closed and empty it returns <code>0</code> (or the empty value of its type). Sending on a closed channel stops the program.</li>
+        <li>If every task is waiting and no timer or file or network operation is in progress, the program stops with <code>fatal: all tasks are asleep - deadlock!</code> and a non-zero exit code.</li>
+        <li>When <code>main</code> returns the program ends, even if tasks are still running.</li>
+        <li>Spawn evaluates the call inside the new task, with the variables it uses captured by value when <code>spawn</code> runs.</li>
+      </ul>
+    </section>
+
+    <section id="limits">
+      <h2>Limits</h2>
+      <ul>
+        <li>No parallelism: there is a single thread, so tasks never run at the same instant.</li>
+        <li>Windows x64 only (tasks are Windows fibers); a bare-metal kernel cannot use them.</li>
+        <li>The <code>ui</code> message loop does not yet run other tasks.</li>
+      </ul>
+      <p>For waiting on time, files and the network, use <a href="async.html">async/await</a>.</p>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    Brasa — a language with a human face. Docs generated from <code>brasa.ebnf</code> and <code>examples/*.br</code>.
+  </footer>
+</body>
+</html>

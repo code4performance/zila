@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Syntax Guide — Brasa</title>
+  <meta name="description" content="A tour of Brasa's syntax: packages, types, functions, control flow, error handling, string interpolation, attributes, and FFI/assembly.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="index.html">brasa<span class="ember-dot">.</span><small>lang docs</small></a>
+    <nav class="site-nav">
+      <a href="index.html">Overview</a>
+      <a href="syntax.html" aria-current="page">Syntax</a>
+      <a href="examples.html">Examples</a>
+      <a href="native.html">Native</a>
+      <a href="concurrency.html">Tasks</a>
+      <a href="async.html">Async</a>
+      <a href="os.html">Brasa OS</a>
+      <a href="getting-started.html">Getting Started</a>
+    </nav>
+  </header>
+
+  <main>
+    <h1>Syntax Guide</h1>
+    <p>Every construct below follows <code>brasa.ebnf</code>, the project's formal grammar. Blocks end with <code>end</code>; a newline ends a statement (there's no <code>;</code>).</p>
+
+    <nav class="toc">
+      <h2>On this page</h2>
+      <ul>
+        <li><a href="#packages">Packages &amp; imports</a></li>
+        <li><a href="#types">Types</a></li>
+        <li><a href="#functions">Functions &amp; generics</a></li>
+        <li><a href="#bindings">Variables (<code>let</code> / <code>var</code>)</a></li>
+        <li><a href="#control-flow">Control flow</a></li>
+        <li><a href="#errors">Error handling</a></li>
+        <li><a href="#interpolation">String interpolation</a></li>
+        <li><a href="#attributes">Attributes</a></li>
+        <li><a href="#ffi">FFI &amp; inline assembly</a></li>
+      </ul>
+    </nav>
+
+    <section id="packages">
+      <h2>Packages &amp; imports</h2>
+      <p>Every file starts with a <code>package</code> declaration, followed by zero or more <code>use</code> declarations naming modules the file depends on.</p>
+      <pre><code><span class="kw">package</span> main
+
+<span class="kw">use</span> http, db, db.postgres, json</code></pre>
+    </section>
+
+    <section id="types">
+      <h2>Types</h2>
+      <p>A <code>type</code> declaration introduces a <code>record</code> (a struct), an <code>enum</code> (a fixed set of names, optionally carrying data), or a structural <code>interface</code>. Any type can be made generic with <code>&lt;T&gt;</code>, and appending <code>?</code> to a type makes it optional (<code>T?</code>).</p>
+
+      <h3>Basic types</h3>
+      <p>Everyday code uses <code>int</code> (64-bit), <code>float</code>, <code>byte</code>, <code>bool</code> and <code>text</code>. Sized integers such as <code>i32</code>, <code>u16</code> or <code>u64</code> exist for low-level and C code. Lists are written <code>[]T</code>, raw pointers <code>*T</code>, and a type followed by <code>?</code> may be <code>nil</code>. <code>float</code> is part of the language but not yet supported by the <a href="native.html#not-yet">native compiler</a>.</p>
+
+      <h3>Records</h3>
+      <pre><code><span class="kw">type</span> Customer = <span class="kw">record</span>
+    id: i32
+    name: text
+    email: text?
+<span class="kw">end</span></code></pre>
+
+      <h3>Enums with data</h3>
+      <p>An <code>enum</code> variant can carry values. <code>match</code> over an enum must cover every variant unless it has a <code>_</code> arm.</p>
+      <pre><code><span class="kw">type</span> Shape = <span class="kw">enum</span>
+    Circle(float)
+    Rect(float, float)
+    Empty
+<span class="kw">end</span></code></pre>
+
+      <h3>Plain enums</h3>
+      <pre><code><span class="kw">type</span> Color = <span class="kw">enum</span>
+    Red, Green, Blue
+<span class="kw">end</span></code></pre>
+
+      <h3>Interfaces</h3>
+      <p>Interfaces are <strong>structural</strong> (Go-style): a type satisfies an interface simply by having methods with matching signatures — there's no explicit <code>implements</code> clause and no inheritance.</p>
+      <pre><code><span class="kw">type</span> Printable = <span class="kw">interface</span>
+    <span class="kw">func</span> to_text(self) -&gt; text
+<span class="kw">end</span></code></pre>
+
+      <h3>Generics</h3>
+      <p>Type parameters go in angle brackets after the type or function name, optionally bounded by an interface (<code>T: Printable</code>). Generics are monomorphized at compile time.</p>
+      <pre><code><span class="kw">type</span> Stack&lt;T&gt; = <span class="kw">record</span>
+    items: []T
+<span class="kw">end</span>
+
+<span class="kw">func</span> first&lt;T&gt;(items: []T) -&gt; T?
+    <span class="kw">if</span> items.len == 0
+        <span class="kw">return</span> <span class="kw">nil</span>
+    <span class="kw">end</span>
+    <span class="kw">return</span> items[0]
+<span class="kw">end</span>
+
+<span class="kw">func</span> show&lt;T: Printable&gt;(x: T)
+    print(x.to_text())
+<span class="kw">end</span></code></pre>
+
+      <h3>Function types &amp; type aliases</h3>
+      <pre><code><span class="kw">type</span> Handler = <span class="kw">func</span>(Request) -&gt; Response or error
+<span class="kw">type</span> Middleware = <span class="kw">func</span>(Request, next: Handler) -&gt; Response or error
+<span class="kw">type</span> Table = Map&lt;text, List&lt;i32&gt;&gt;</code></pre>
+    </section>
+
+    <section id="functions">
+      <h2>Functions &amp; generics</h2>
+      <p>Functions are declared with <code>func</code>. A parameter marked <code>ref</code> is passed by reference (there's no borrow checker); without <code>ref</code>, records and arrays are copied. Parameters can have default values, and a trailing <code>...name: T</code> parameter collects a variadic argument list.</p>
+
+      <h3>Methods (receivers)</h3>
+      <p>A function with a receiver in parentheses before its name becomes a method on that type. There's no class hierarchy — just functions attached to a type.</p>
+      <pre><code><span class="kw">func</span> (c: Customer) greet() -&gt; text
+    <span class="kw">return</span> <span class="str">"Hello, {c.name}"</span>
+<span class="kw">end</span>
+
+<span class="kw">func</span> (<span class="kw">ref</span> s: Server) use(m: Middleware)
+    s.chain.add(m)
+<span class="kw">end</span></code></pre>
+
+      <h3><code>ref</code> parameters, defaults, and varargs</h3>
+      <pre><code><span class="kw">func</span> fill(<span class="kw">ref</span> buf: Buffer, n: i32 = 4)
+    buf.n = n
+<span class="kw">end</span>
+
+<span class="kw">func</span> log(msg: text, args: ...any)
+    print(msg)
+<span class="kw">end</span>
+
+<span class="kw">func</span> main()
+    <span class="kw">var</span> b = Buffer{}
+    fill(<span class="kw">ref</span> b)
+    fill(<span class="kw">ref</span> b, n: 8)
+    <span class="kw">let</span> xs = [1, 2, 3]
+    log(<span class="str">"x"</span>, ...xs)
+<span class="kw">end</span></code></pre>
+      <p>At the call site, <code>ref</code> is repeated before the argument (<code>fill(ref b)</code>) so by-reference passing is visible wherever it happens, not just in the declaration. A leading <code>...</code> on an argument spreads a list into a variadic parameter.</p>
+    </section>
+
+    <section id="bindings">
+      <h2>Variables: <code>let</code> vs <code>var</code></h2>
+      <p><code>let</code> declares an immutable binding; <code>var</code> declares a mutable one. Both can have an explicit type annotation or infer one from the initializer.</p>
+      <pre><code><span class="kw">let</span> VERSION = <span class="str">"1.0"</span>
+<span class="kw">var</span> counter: i32 = 0</code></pre>
+    </section>
+
+    <section id="control-flow">
+      <h2>Control flow</h2>
+      <p><code>if</code> and <code>match</code> are <em>expressions</em> — they produce a value when used as one, and behave as statements otherwise.</p>
+
+      <h3><code>if</code> / <code>else if</code> / <code>else</code></h3>
+      <pre><code><span class="kw">var</span> total = 0
+<span class="kw">while</span> total &lt; 10
+    total += 1
+    <span class="kw">if</span> total == 5
+        <span class="kw">continue</span>
+    <span class="kw">else</span> <span class="kw">if</span> total == 8
+        <span class="kw">break</span>
+    <span class="kw">else</span>
+        print(<span class="str">"n={total}"</span>)
+    <span class="kw">end</span>
+<span class="kw">end</span></code></pre>
+
+      <h3><code>match</code></h3>
+      <p>Patterns can combine alternatives with <code>|</code>; a bare <code>_</code> matches anything. A <code>match</code> over an <code>enum</code> must be exhaustive unless it has a <code>_</code> arm.</p>
+      <pre><code><span class="kw">func</span> area(s: Shape) -&gt; float
+    <span class="kw">match</span> s
+        Circle(r)  -&gt; <span class="kw">return</span> 3.14159 * r * r
+        Rect(w, h) -&gt; <span class="kw">return</span> w * h
+        Empty      -&gt; <span class="kw">return</span> 0.0
+    <span class="kw">end</span>
+<span class="kw">end</span>
+
+<span class="kw">func</span> classify(n: i32) -&gt; text
+    <span class="kw">match</span> n
+        0 -&gt; <span class="kw">return</span> <span class="str">"zero"</span>
+        1 | 2 | 3 -&gt;
+            <span class="kw">let</span> s = <span class="str">"small"</span>
+            <span class="kw">return</span> s
+        -1 -&gt; <span class="kw">return</span> <span class="str">"minus one"</span>
+        _ -&gt; <span class="kw">return</span> <span class="str">"many"</span>
+    <span class="kw">end</span>
+<span class="kw">end</span></code></pre>
+      <p>A multi-line arm body (like the <code>1 | 2 | 3</code> arm above) runs until the next <code>pattern -&gt;</code> or <code>end</code>.</p>
+
+      <h3><code>for</code> and <code>while</code></h3>
+      <pre><code><span class="kw">for</span> i <span class="kw">in</span> 1..5
+    print(<span class="str">"{i}"</span>)
+<span class="kw">end</span>
+
+<span class="kw">let</span> xs = [1, 2, 3]
+<span class="kw">for</span> i, v <span class="kw">in</span> xs
+    print(<span class="str">"{i}: {v}"</span>)
+<span class="kw">end</span></code></pre>
+    </section>
+
+    <section id="errors">
+      <h2>Error handling</h2>
+      <p>Brasa has no exceptions. A function that can fail ends its signature with <code>or error</code> (<code>-&gt; Config or error</code>), or just <code>-&gt; error</code> when it returns nothing. Inside it, writing <code>try</code> in front of a call hands a failure straight to the caller. <code>error("message")</code> creates an error; <code>match</code> reads a result with <code>ok(value)</code> and <code>err(e)</code>, and <code>call() ?? fallback</code> supplies a default. <code>defer</code> schedules an expression to run when the enclosing function returns — commonly used to release a resource right after acquiring it.</p>
+      <pre><code><span class="kw">func</span> load(path: text) -&gt; Config or error
+    <span class="kw">let</span> raw = <span class="kw">try</span> file.read(path)
+    <span class="kw">let</span> f = <span class="kw">try</span> file.open(path)
+    <span class="kw">defer</span> f.close()
+    <span class="kw">return</span> <span class="kw">try</span> json.parse(Config, raw)
+<span class="kw">end</span></code></pre>
+      <p>Optional values (<code>T?</code>) use the same idea for "maybe missing" rather than "maybe failed": <code>??</code> supplies a fallback, and <code>?.</code> safely accesses a field only when the value isn't <code>nil</code>.</p>
+      <pre><code><span class="kw">func</span> main() -&gt; error
+    <span class="kw">let</span> email: text? = c.email
+    <span class="kw">let</span> e = email ?? <span class="str">"no email"</span>
+    <span class="kw">let</span> n = email?.len
+
+    <span class="kw">if</span> email == <span class="kw">nil</span>
+        <span class="kw">return</span>
+    <span class="kw">end</span>
+<span class="kw">end</span></code></pre>
+    </section>
+
+    <section id="keywords">
+      <h2>Reserved words</h2>
+      <p>These words belong to the language and cannot be used as names.</p>
+      <dl class="cli">
+        <dt>Declarations</dt>
+        <dd><code>package</code> <code>use</code> <code>type</code> <code>record</code> <code>enum</code> <code>interface</code> <code>func</code> <code>return</code> <code>var</code> <code>let</code> <code>extern</code> <code>embed</code> <code>end</code></dd>
+
+        <dt>Control flow</dt>
+        <dd><code>if</code> <code>else</code> <code>match</code> <code>for</code> <code>in</code> <code>while</code> <code>break</code> <code>continue</code> <code>defer</code> <code>try</code></dd>
+
+        <dt>Tasks</dt>
+        <dd><code>spawn</code> starts a task (see <a href="concurrency.html">Tasks</a>); <code>async</code> and <code>await</code> work with futures (see <a href="async.html">Async</a>).</dd>
+
+        <dt>Operators written as words</dt>
+        <dd><code>and</code> <code>or</code> <code>not</code> for logic; <code>bitand</code> <code>bitor</code> <code>bitxor</code> <code>bitnot</code> for bits.</dd>
+
+        <dt>Values and low level</dt>
+        <dd><code>true</code> <code>false</code> <code>nil</code> <code>self</code> <code>ref</code> <code>new</code> <code>unsafe</code> <code>asm</code></dd>
+      </dl>
+      <p><code>defer</code> and <code>new</code> are part of the grammar but are not supported by the <a href="native.html#not-yet">native compiler</a> yet. A method or field may be named like a keyword after a dot (<code>app.use(x)</code>).</p>
+    </section>
+
+    <section id="async">
+      <h2>Async</h2>
+      <p>An <code>async func</code> starts as its own task when called and returns a <code>Future&lt;T&gt;</code>; <code>await</code> waits for a future without blocking the other tasks. <code>await</code> is allowed only inside an <code>async func</code> and inside <code>main</code>, and it works with <code>try</code> on futures of <code>T or error</code>. Timers, files and TCP are covered on the <a href="async.html">Async page</a>.</p>
+      <pre><code><span class="kw">async</span> <span class="kw">func</span> double(n: int) -&gt; int
+    <span class="kw">await</span> sleep(100)
+    <span class="kw">return</span> n * 2
+<span class="kw">end</span>
+
+<span class="kw">func</span> main()
+    <span class="kw">let</span> f = double(21)      <span class="cm">// starts running now</span>
+    print(<span class="kw">await</span> f)           <span class="cm">// 42</span>
+<span class="kw">end</span></code></pre>
+    </section>
+
+    <section id="interpolation">
+      <h2>String interpolation</h2>
+      <p>Text literals can embed any expression inside <code>{ }</code>, including nested calls and string literals. A literal brace is escaped as <code>\{</code>, and a literal quote as <code>\"</code>.</p>
+      <pre><code><span class="kw">let</span> msg = <span class="str">"braces \{ and quote \" and {xs[0] + 1} and {fmt(&quot;a&quot;)}"</span></code></pre>
+    </section>
+
+    <section id="attributes">
+      <h2>Attributes</h2>
+      <p>Attributes (<code>#[...]</code>) attach metadata to the declaration that follows — they can stack, and some take arguments.</p>
+      <pre><code><span class="kw">type</span> User = <span class="kw">record</span>
+    id: i32
+    #[json(<span class="str">"full_name"</span>)] name: text
+    #[json(skip)] password: text
+    email: text?
+<span class="kw">end</span>
+
+#[naked]
+#[cfg(<span class="str">"x86_64"</span>)]
+<span class="kw">func</span> halt()
+    <span class="kw">asm</span>
+        <span class="str">"cli"</span>
+        <span class="str">"hlt"</span>
+    <span class="kw">end</span>
+<span class="kw">end</span></code></pre>
+    </section>
+
+    <section id="ffi">
+      <h2>FFI &amp; inline assembly</h2>
+      <p>Calling a foreign function, dereferencing a raw pointer, and running inline assembly are all considered unsafe and must sit inside an <code>unsafe</code> block. <code>extern</code> declares a foreign function (ABI defaults to <code>"C"</code>); trailing <code>...</code> declares a C-variadic parameter list.</p>
+      <pre><code>#[link(<span class="str">"m"</span>)]
+<span class="kw">extern</span> <span class="str">"C"</span> <span class="kw">func</span> sqrt(x: f64) -&gt; f64
+
+<span class="kw">extern</span> <span class="str">"C"</span> <span class="kw">func</span> printf(fmt: *c.char, ...) -&gt; c.int
+
+#[export(<span class="str">"brasa_add"</span>)]
+<span class="kw">func</span> add(a: i32, b: i32) -&gt; i32
+    <span class="kw">return</span> a + b
+<span class="kw">end</span>
+
+<span class="kw">func</span> main()
+    <span class="kw">unsafe</span>
+        printf(c.cstr(<span class="str">"sqrt(2) = %f\n"</span>), sqrt(2.0))
+    <span class="kw">end</span>
+<span class="kw">end</span></code></pre>
+      <p>Inline <code>asm</code> blocks take string instruction templates, then <code>in</code>/<code>out</code>/<code>inout</code> operands (bound to named registers or allocated ones) and an optional <code>clobber</code> list:</p>
+      <pre><code>#[cfg(<span class="str">"x86_64"</span>)]
+<span class="kw">func</span> rdtsc() -&gt; u64
+    <span class="kw">var</span> lo: u32 = 0
+    <span class="kw">var</span> hi: u32 = 0
+    <span class="kw">unsafe</span>
+        <span class="kw">asm</span>
+            <span class="str">"rdtsc"</span>
+            out eax = lo
+            out edx = hi
+        <span class="kw">end</span>
+    <span class="kw">end</span>
+    <span class="kw">return</span> u64(hi) &lt;&lt; 32 bitor u64(lo)
+<span class="kw">end</span></code></pre>
+      <p>See the <a href="examples.html#ffi">FFI &amp; low-level example</a> for a fuller walkthrough, and the project's <code>brasa-ffi.md</code> for the full specification (ABIs, <code>#[c_layout]</code>, <code>#[link]</code>/<code>#[link_src]</code>, <code>#[cfg]</code>, and naked functions).</p>
+    </section>
+
+    <div class="note">
+      <strong>Note:</strong> <code>html ... end</code> templates (a markup-aware syntax extension for <code>use web</code>) and explicit generic arguments at call sites (<code>first&lt;i32&gt;(x)</code>) are described in the grammar but not yet implemented by the parser.
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    Brasa — a language with a human face. Docs generated from <code>brasa.ebnf</code> and <code>examples/*.br</code>.
+  </footer>
+</body>
+</html>

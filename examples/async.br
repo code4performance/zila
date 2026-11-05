@@ -1,0 +1,43 @@
+// async/await: waiting, files and TCP in one program.
+//
+//   brasa-parse examples/async.br -o async.exe
+//
+// An `async func` starts running when it is called and returns a Future.
+// `await` waits for a future without blocking the other tasks.
+
+package main
+
+use fs
+use net
+
+async func fetch_title(id: int) -> text
+    await sleep(100)
+    return "title {id}"
+end
+
+async func echo_server(listener: net.Listener) -> error
+    let conn = try await listener.accept()
+    let message = try await conn.read(64)
+    try await conn.write("echo: {message}")
+    await conn.close()
+    return
+end
+
+func main() -> error
+    // three 100 ms waits overlap: all of it takes about 100 ms, not 300
+    let titles = await all([fetch_title(1), fetch_title(2), fetch_title(3)])
+    print("{titles[0]}, {titles[1]}, {titles[2]}")
+
+    // files
+    try await fs.write("brasa-example.txt", "written by an async function")
+    print(try await fs.read("brasa-example.txt"))
+
+    // a TCP server and a client in the same program
+    let listener = try await net.listen(0)
+    let server = echo_server(listener)
+    let client = try await net.connect("127.0.0.1", listener.port)
+    try await client.write("hello")
+    print(try await client.read(64))
+    try await server
+    return
+end

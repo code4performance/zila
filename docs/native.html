@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Native compilation — Brasa</title>
+  <meta name="description" content="Compile Brasa straight to a native Windows executable: what you can use, how memory is managed with reference counting, and what is not supported yet.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="index.html">brasa<span class="ember-dot">.</span><small>lang docs</small></a>
+    <nav class="site-nav">
+      <a href="index.html">Overview</a>
+      <a href="syntax.html">Syntax</a>
+      <a href="examples.html">Examples</a>
+      <a href="native.html" aria-current="page">Native</a>
+      <a href="concurrency.html">Tasks</a>
+      <a href="async.html">Async</a>
+      <a href="os.html">Brasa OS</a>
+      <a href="getting-started.html">Getting Started</a>
+    </nav>
+  </header>
+
+  <main>
+    <h1>Native compilation</h1>
+    <p>The Brasa compiler turns a program straight into x86-64 machine code. There is no C, no Rust and no virtual machine in between, and the program needs no runtime installed: a console program is a few kilobytes and imports only the Windows libraries it uses.</p>
+
+    <section id="build">
+      <h2>Build a program</h2>
+      <pre><code>brasa-parse examples/hello.br -o hello.exe
+./hello.exe</code></pre>
+      <p>The compiler writes assembly and hands it to <code>ml64</code> and <code>link</code> from the Visual Studio C++ build tools, which it finds on its own. Windows x64 is the only target for programs; <a href="os.html">Brasa OS</a> uses a second, bare-metal target. <code>--asm</code> prints the generated assembly instead of building.</p>
+    </section>
+
+    <section id="supported">
+      <h2>What works</h2>
+      <ul>
+        <li>Integers (<code>int</code>, <code>byte</code>, and sized types such as <code>i32</code> or <code>u16</code> for low-level code), <code>bool</code>, <code>text</code> with <code>{interpolation}</code>, <code>[]T</code> lists and raw pointers.</li>
+        <li><code>record</code> types, methods, default and named arguments, variadic <code>...T</code> parameters.</li>
+        <li><code>enum</code> with or without data and <code>match</code>, which must cover every case.</li>
+        <li>Errors: <code>-&gt; T or error</code>, <code>try</code>, <code>error("message")</code>, <code>match</code> with <code>ok(v)</code> and <code>err(e)</code>, and <code>??</code>.</li>
+        <li>Closures (they capture by value) and top-level functions passed to C as callbacks.</li>
+        <li><code>if</code> as an expression, <code>while</code>, <code>for</code> over ranges and lists, <code>break</code> and <code>continue</code>.</li>
+        <li><code>unsafe</code>, <code>extern "system"</code> calls, <code>asm</code> blocks and <code>#[naked]</code> functions.</li>
+        <li><a href="concurrency.html">Tasks and channels</a>, <a href="async.html">async/await</a>, files and TCP, and the <code>ui</code> library for native windows.</li>
+      </ul>
+    </section>
+
+    <section id="memory">
+      <h2>Memory</h2>
+      <p>Heap values (text, records, lists, closures, enums with data, results, channels, futures) are managed with <strong>reference counting</strong>. A value is freed the moment the last reference to it goes away, including when a function ends early with <code>return</code>, <code>break</code> or <code>try</code>. There is no garbage collector, so there are no pauses.</p>
+      <ul>
+        <li>Records are <strong>copied</strong> when assigned or passed; <code>ref</code> passes the original instead.</li>
+        <li>Lists and closures are shared: assigning a list gives a second name for the same list.</li>
+        <li>A cycle (a record that holds a list that holds the record) is never freed. Avoid building cycles.</li>
+        <li><code>live_objects()</code> returns how many heap objects are alive, which makes leaks easy to see.</li>
+      </ul>
+      <pre><code><span class="kw">type</span> Point = <span class="kw">record</span>
+    x: int
+    y: int
+<span class="kw">end</span>
+
+<span class="kw">func</span> main()
+    <span class="kw">let</span> before = live_objects()
+    <span class="kw">for</span> i <span class="kw">in</span> 0..1000
+        <span class="kw">let</span> p = Point{ x: i, y: 2 }
+        <span class="kw">let</span> s = <span class="str">"point {p.x}"</span>
+        <span class="kw">if</span> s.len == 0
+            print(<span class="str">"never"</span>)
+        <span class="kw">end</span>
+    <span class="kw">end</span>
+    <span class="kw">let</span> left = live_objects() - before
+    print(<span class="str">"objects left: {left}"</span>)        <span class="cm">// 0</span>
+<span class="kw">end</span></code></pre>
+      <h3>Cleaning up: drop</h3>
+      <p>A record can define a <code>drop</code> method. Brasa calls it when the last reference goes away, which is how files and sockets close themselves.</p>
+      <pre><code><span class="kw">type</span> Handle = <span class="kw">record</span>
+    id: int
+<span class="kw">end</span>
+
+<span class="kw">func</span> (<span class="kw">ref</span> h: Handle) drop()
+    print(<span class="str">"closing {h.id}"</span>)
+<span class="kw">end</span>
+
+<span class="kw">func</span> main()
+    <span class="kw">let</span> a = Handle{ id: 1 }
+    print(<span class="str">"working"</span>)
+<span class="kw">end</span>                                   <span class="cm">// prints: working, then closing 1</span></code></pre>
+      <p>A <code>drop</code> method takes nothing and returns nothing. Records marked <code>#[shared]</code> (used by the standard library for files, sockets and futures) are never copied: every name refers to the same object.</p>
+    </section>
+
+    <section id="not-yet">
+      <h2>Not supported yet</h2>
+      <p>These parse, but the native compiler stops with a clear message when it meets them:</p>
+      <ul>
+        <li>Floating point (<code>float</code>, <code>f64</code>) and fixed-size arrays.</li>
+        <li>Generics and interfaces (the grammar has them; there is no code generation for them yet).</li>
+        <li>Maps (<code>{ "a": 1 }</code>), <code>defer</code>, <code>new</code>, spreading a list into arguments (<code>f(...xs)</code>), and <code>html</code> templates.</li>
+      </ul>
+      <p>The tree-walking interpreter behind <code>--run</code> is separate from the compiler and does not know the native-only features (<code>async</code>, <code>await</code>, <code>ui</code>, <code>fs</code>, <code>net</code>).</p>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    Brasa — a language with a human face. Docs generated from <code>brasa.ebnf</code> and <code>examples/*.br</code>.
+  </footer>
+</body>
+</html>

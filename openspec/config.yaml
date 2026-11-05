@@ -1,0 +1,43 @@
+schema: spec-driven
+
+# The documentation site (docs/) must follow the language. tests/docs.rs fails when code
+# samples, CLI flags or keywords drift; this rule makes sure the work gets planned.
+rules:
+  tasks:
+    - >-
+      Every change that alters the language syntax, compiler behavior, standard libraries,
+      command-line interface or shipped examples must include a task that updates the affected
+      page under docs/ (and examples/ when relevant) and states how that update is verified.
+      A change with no user-visible effect must include a task that records that no
+      documentation update is needed, with the reason.
+
+# Project context (optional)
+# This is shown to AI when creating artifacts.
+# Add your tech stack, conventions, style guides, domain knowledge, etc.
+# Example:
+#   context: |
+#     Tech stack: TypeScript, React, Node.js
+#     We use conventional commits
+#     Domain: e-commerce platform
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always include a "Non-goals" section
+#     tasks:
+#       - Break tasks into chunks of max 2 hours
+
+# Per-operation guidance (optional)
+# Add advisory guidance for how apply and archive work should be conducted.
+# This is separate from artifact rules above.
+# Example:
+#   operations:
+#     apply:
+#       guidance:
+#         - Keep test summaries concise
+#     archive:
+#       guidance:
+#         - Summarize the archive outcome before finishing

@@ -1,0 +1,9 @@
+# folders whose name starts with a dot (.claude, .agent, .opencode, .vscode, ...)
+.*/
+
+# Windows executables
+*.exe
+
+# build output and generated disk images
+target/
+*.img

@@ -1,0 +1,24 @@
+package main
+
+use http, db, json
+
+type Customer = record
+    id: i32
+    name: text
+    email: text?
+end
+
+func greet(c: Customer) -> text
+    return "Hello, {c.name}!"
+end
+
+func main()
+    var c = Customer{ id: 1, name: "Ana" }
+    print(greet(c))
+
+    for i in 1..5
+        if i % 2 == 0
+            print("{i} is even")
+        end
+    end
+end

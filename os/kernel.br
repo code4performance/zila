@@ -1,0 +1,436 @@
+// =====================================================================
+// Brasa OS kernel, written in Brasa.
+//
+// A 64-bit long-mode kernel with a text console and a small shell. It
+// runs straight on the hardware (or an emulator): no host operating
+// system, no C. The compiler links it at 0x10000 and the boot sector in
+// os/boot.br loads and starts it.
+//
+// Everything the language offers works here, including text, lists,
+// enums, `match`, `try`, closures and reference counting: the compiler
+// provides a bare-metal runtime with its own heap. Hardware access uses
+// `unsafe` raw pointers (VGA memory) and `asm` (I/O ports).
+//
+// Output goes to the VGA screen and to the serial port COM1, so it also
+// works headless:   qemu-system-x86_64 -drive format=raw,file=brasa-os.img
+//                                      -serial stdio -display none
+// =====================================================================
+
+package main
+
+// ---------------------------------------------------------------------
+// I/O ports
+// ---------------------------------------------------------------------
+
+func outb(port: int, value: int)
+    unsafe
+        asm
+            "out dx, al"
+            in rdx = port
+            in rax = value
+        end
+    end
+end
+
+func inb(port: int) -> int
+    var v = 0
+    unsafe
+        asm
+            "in al, dx"
+            "movzx eax, al"
+            in rdx = port
+            out rax = v
+        end
+    end
+    return v
+end
+
+// ---------------------------------------------------------------------
+// Serial port (COM1)
+// ---------------------------------------------------------------------
+
+let COM1 = 0x3F8
+
+func serial_init()
+    outb(COM1 + 1, 0x00)
+    outb(COM1 + 3, 0x80)
+    outb(COM1 + 0, 0x03)
+    outb(COM1 + 1, 0x00)
+    outb(COM1 + 3, 0x03)
+    outb(COM1 + 2, 0xC7)
+    outb(COM1 + 4, 0x0B)
+end
+
+func serial_put(c: int)
+    var n = 0
+    while (inb(COM1 + 5) bitand 0x20) == 0 and n < 100000
+        n += 1
+    end
+    outb(COM1, c)
+end
+
+func serial_has_byte() -> bool
+    return (inb(COM1 + 5) bitand 1) != 0
+end
+
+// ---------------------------------------------------------------------
+// VGA text console: 80x25 cells of (attribute << 8) | character
+// ---------------------------------------------------------------------
+
+let VGA = 0xB8000
+let COLS = 80
+let ROWS = 25
+
+var cursor = 0
+var attr = 0x07
+
+func vga_cell(ch: int) -> int
+    return (attr << 8) bitor ch
+end
+
+func scroll()
+    let vga: *u16 = VGA
+    unsafe
+        for i in 0..COLS * (ROWS - 1)
+            vga[i] = vga[i + COLS]
+        end
+        for i in COLS * (ROWS - 1)..COLS * ROWS
+            vga[i] = vga_cell(32)
+        end
+    end
+    cursor = COLS * (ROWS - 1)
+end
+
+func update_cursor()
+    outb(0x3D4, 14)
+    outb(0x3D5, (cursor >> 8) bitand 0xFF)
+    outb(0x3D4, 15)
+    outb(0x3D5, cursor bitand 0xFF)
+end
+
+func put_char(c: int)
+    if c == 10
+        cursor = (cursor / COLS + 1) * COLS
+    else if c == 8
+        if cursor > 0
+            cursor -= 1
+        end
+    else
+        let vga: *u16 = VGA
+        unsafe
+            vga[cursor] = vga_cell(c)
+        end
+        cursor += 1
+    end
+    if cursor >= COLS * ROWS
+        scroll()
+    end
+end
+
+func clear_screen()
+    let vga: *u16 = VGA
+    unsafe
+        for i in 0..COLS * ROWS
+            vga[i] = vga_cell(32)
+        end
+    end
+    cursor = 0
+    update_cursor()
+end
+
+// Everything `print` writes arrives here (the compiler requires this function).
+func console_write(s: text)
+    for i in 0..s.len
+        let c = int(s[i])
+        put_char(c)
+        if c == 10
+            serial_put(13)
+        end
+        serial_put(c)
+    end
+    update_cursor()
+end
+
+// ---------------------------------------------------------------------
+// Keyboard: PS/2 scan codes (set 1) and the serial port
+// ---------------------------------------------------------------------
+
+let KEYMAP = "\0\x1b1234567890-=\x08\tqwertyuiop[]\n\0asdfghjkl;'`\0\\zxcvbnm,./\0*\0 "
+let KEYMAP_SHIFT = "\0\x1b!@#$%^&*()_+\x08\tQWERTYUIOP\{\}\n\0ASDFGHJKL:\"~\0|ZXCVBNM<>?\0*\0 "
+
+var shift = false
+
+// The next character typed, or 0 when there is none yet.
+func read_key() -> int
+    if serial_has_byte()
+        return inb(COM1)
+    end
+    if (inb(0x64) bitand 1) == 0
+        return 0
+    end
+    let code = inb(0x60)
+    if code == 0x2A or code == 0x36
+        shift = true
+        return 0
+    end
+    if code == 0xAA or code == 0xB6
+        shift = false
+        return 0
+    end
+    if code >= 0x80 or code >= KEYMAP.len
+        return 0
+    end
+    if shift
+        return int(KEYMAP_SHIFT[code])
+    end
+    return int(KEYMAP[code])
+end
+
+// Reads a line, echoing it and handling backspace.
+func read_line() -> text
+    var line = ""
+    while true
+        let c = read_key()
+        if c == 10 or c == 13
+            console_write("\n")
+            return line
+        end
+        if c == 8 or c == 127
+            if line.len > 0
+                line = line.slice(0, line.len - 1)
+                console_write("\x08 \x08")
+            end
+        else if c >= 32 and c < 127
+            line = line + chr(c)
+            console_write(chr(c))
+        end
+    end
+    return line
+end
+
+// ---------------------------------------------------------------------
+// Shell
+// ---------------------------------------------------------------------
+
+type Command = enum
+    Help
+    Echo(text)
+    Clear
+    Mem
+    Calc(int, text, int)
+    Reboot
+    Halt
+end
+
+func split_words(line: text) -> []text
+    var words: []text = []
+    var start = -1
+    for i in 0..line.len + 1
+        let is_space = i == line.len or line[i] == 32
+        if is_space
+            if start >= 0
+                words.add(line.slice(start, i))
+                start = -1
+            end
+        else if start < 0
+            start = i
+        end
+    end
+    return words
+end
+
+func parse_number(s: text) -> int or error
+    if s.len == 0
+        return error("expected a number")
+    end
+    var n = 0
+    var negative = false
+    var first = 0
+    if s[0] == 45
+        negative = true
+        first = 1
+    end
+    for i in first..s.len
+        let d = int(s[i]) - 48
+        if d < 0 or d > 9
+            return error("'{s}' is not a number")
+        end
+        n = n * 10 + d
+    end
+    if negative
+        n = 0 - n
+    end
+    return n
+end
+
+func parse(line: text) -> Command or error
+    let words = split_words(line)
+    let name = words[0]
+    if name == "help"
+        return Help
+    end
+    if name == "echo"
+        return Echo(line.slice(5, line.len))
+    end
+    if name == "clear"
+        return Clear
+    end
+    if name == "mem"
+        return Mem
+    end
+    if name == "reboot"
+        return Reboot
+    end
+    if name == "halt"
+        return Halt
+    end
+    if name == "calc"
+        if words.len != 4
+            return error("usage: calc <number> <operator> <number>")
+        end
+        let a = try parse_number(words[1])
+        let b = try parse_number(words[3])
+        return Calc(a, words[2], b)
+    end
+    return error("unknown command '{name}' (try: help)")
+end
+
+func show_help()
+    print("Commands:")
+    print("  help                 show this list")
+    print("  echo <text>          print text")
+    print("  calc <a> <op> <b>    integer math: + - * / %")
+    print("  mem                  heap and object counters")
+    print("  clear                clear the screen")
+    print("  reboot               restart the machine")
+    print("  halt                 stop the CPU")
+end
+
+func show_mem()
+    print("heap used    : {heap_bytes()} bytes")
+    print("live objects : {live_objects()}")
+end
+
+func do_calc(a: int, op: text, b: int)
+    var result = 0
+    if op == "+"
+        result = a + b
+    else if op == "-"
+        result = a - b
+    else if op == "*"
+        result = a * b
+    else if op == "/"
+        if b == 0
+            print("division by zero")
+            return
+        end
+        result = a / b
+    else if op == "%"
+        if b == 0
+            print("division by zero")
+            return
+        end
+        result = a % b
+    else
+        print("unknown operator '{op}'")
+        return
+    end
+    print("{a} {op} {b} = {result}")
+end
+
+func halt()
+    print("System halted.")
+    while true
+        unsafe
+            asm
+                "cli"
+                "hlt"
+            end
+        end
+    end
+end
+
+func reboot()
+    outb(0x64, 0xFE)
+    halt()
+end
+
+func run(cmd: Command)
+    match cmd
+        Help -> show_help()
+        Echo(t) -> print(t)
+        Clear -> clear_screen()
+        Mem -> show_mem()
+        Calc(a, op, b) -> do_calc(a, op, b)
+        Reboot -> reboot()
+        Halt -> halt()
+    end
+end
+
+// ---------------------------------------------------------------------
+// CPU exceptions: report and stop instead of silently rebooting
+// ---------------------------------------------------------------------
+
+let IDT_BASE = 0x8000
+let IDT_PTR = 0x9000
+
+func on_exception()
+    console_write("\n*** CPU EXCEPTION ***\n")
+    halt()
+end
+
+#[naked]
+func exception_stub()
+    asm
+        "cli"
+        "call B_main_on_exception"
+    end
+end
+
+func set_gate(vector: int, handler: extern "C" func())
+    let h: int = usize(handler)
+    let gate: *u64 = IDT_BASE + vector * 16
+    unsafe
+        gate[0] = (h bitand 0xFFFF) bitor (0x18 << 16) bitor (0x8E00 << 32) bitor (((h >> 16) bitand 0xFFFF) << 48)
+        gate[1] = h >> 32
+    end
+end
+
+func install_idt()
+    for v in 0..32
+        set_gate(v, exception_stub)
+    end
+    let limit: *u16 = IDT_PTR
+    let base: *u64 = IDT_PTR + 2
+    unsafe
+        limit[0] = 256 * 16 - 1
+        base[0] = IDT_BASE
+        asm
+            "lidt [rax]"
+            in rax = IDT_PTR
+        end
+    end
+end
+
+// ---------------------------------------------------------------------
+// Entry point
+// ---------------------------------------------------------------------
+
+func main()
+    serial_init()
+    clear_screen()
+    install_idt()
+    print("Brasa OS 0.1  (64-bit long mode, written in Brasa)")
+    print("Type 'help' for a list of commands.")
+    print("")
+    while true
+        console_write("brasa> ")
+        let line = read_line()
+        if line.len > 0
+            match parse(line)
+                ok(cmd) -> run(cmd)
+                err(e) -> print("error: {e.message}")
+            end
+        end
+    end
+end

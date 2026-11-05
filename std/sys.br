@@ -1,0 +1,50 @@
+// =====================================================================
+// Brasa standard library: helpers shared by `fs` and `net`
+//
+// Raw memory that frees itself, and Windows error messages.
+// =====================================================================
+
+package sys
+
+use c
+
+#[link("kernel32")]
+extern "system" func FormatMessageA(flags: u32, source: usize, message: u32, language: u32, buffer: *u8, size: u32, args: usize) -> u32
+
+// Owns a block of raw memory; frees it when the last reference goes away.
+#[shared]
+type Buf = record
+    ptr: *u8
+end
+
+func (ref b: Buf) drop()
+    c.free(b.ptr)
+end
+
+// Scratch integers whose addresses are handed to the operating system.
+type Scratch = record
+    a: int
+    b: int
+end
+
+// A zeroed block of `bytes` bytes.
+func buffer(bytes: int) -> Buf
+    return Buf{ ptr: c.alloc(usize(bytes)) }
+end
+
+func trim_end(s: text) -> text
+    var n = s.len
+    while n > 0 and s[n - 1] <= 32
+        n -= 1
+    end
+    return s.slice(0, n)
+end
+
+// "what: reason given by Windows" for an error code.
+func describe(code: int, what: text) -> text
+    let b = buffer(512)
+    unsafe
+        FormatMessageA(0x1200, 0, u32(code), 0, b.ptr, 512, 0)
+    end
+    return "{what}: {trim_end(c.from_cstr(b.ptr))}"
+end

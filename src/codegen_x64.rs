@@ -1,0 +1,4816 @@
+//! Native x86-64 back end for Brasa (Windows, Win64 ABI).
+//!
+//! Brasa source -> x86-64 assembly (MASM syntax) -> `ml64` + `link` -> PE .exe.
+//! No C, no LLVM, no C runtime: the executable only imports from the
+//! Windows DLLs the program uses (kernel32 always; user32/gdi32 via `#[link]`).
+//!
+//! Value model
+//! - Every value is one 64-bit word. Integers are kept sign/zero-extended
+//!   to 64 bits according to their declared type.
+//! - Heap objects (text, records, lists, closures, enums with data, results,
+//!   errors, channels) have a 16-byte header `[refcount][drop fn]` in front
+//!   of the pointer and are freed by reference counting. Literals and
+//!   function values are static and immortal. Cycles leak.
+//! - Ownership: every expression that yields a heap value yields an *owned*
+//!   reference (+1). Variables, fields and list slots own what they hold,
+//!   arguments are handed over to the callee, and scopes release their
+//!   locals when they end (including on `return`, `break`, `continue`, `try`).
+//!   Reading a local that is only inspected (field access, comparisons, ...)
+//!   borrows it without touching the count.
+//! - `text`: `[len: u64][bytes...][0]` (always NUL-terminated, so `c.cstr(t)`
+//!   is just `t + 8`).
+//! - records: C layout (declaration order, natural alignment). Value
+//!   semantics: a record read from a variable/field/list is deep-copied when
+//!   it is stored somewhere else. `ref` parameters and receivers share it.
+//! - `[]T`: `[len][cap][data*][elements_are_heap]`, shared by reference.
+//! - enums: a number when no variant has data, otherwise `[tag][fields...]`.
+//! - `T or error`: a box `[error][value]`; `error` is `[message]`.
+//! - `func(...)` values: `[code][env]` (a closure; captures by value).
+//!   `extern "C" func(...)` values are raw code addresses (C callbacks).
+//!
+//! Every Brasa function uses the Win64 calling convention and only volatile
+//! registers, so any top-level function can be handed to C as a callback.
+
+use crate::ast::*;
+use crate::parser::parse_source;
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+type R<T> = Result<T, String>;
+
+/// Standard library modules written in Brasa and embedded in the compiler.
+fn std_source(name: &str) -> Option<&'static str> {
+    match name {
+        "ui" => Some(include_str!("../std/ui.br")),
+        "task" => Some(include_str!("../std/task.br")),
+        "future" => Some(include_str!("../std/future.br")),
+        "fs" => Some(include_str!("../std/fs.br")),
+        "net" => Some(include_str!("../std/net.br")),
+        "sys" => Some(include_str!("../std/sys.br")),
+        "ws" => Some(include_str!("../std/ws.br")),
+        _ => None,
+    }
+}
+
+const IMMORTAL: &str = "4611686018427387904";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug, PartialEq)]
+enum Ty {
+    Void,
+    Nil,
+    Bool,
+    Int { bits: u8, signed: bool },
+    Text,
+    Rec(String),
+    Enum(String),
+    List(Box<Ty>),
+    Ptr(Box<Ty>),
+    Func { params: Vec<Ty>, ret: Box<Ty>, ext: bool },
+    Err,
+    /// `T or error` (`T` is `Void` for `-> error`).
+    Result(Box<Ty>),
+    Chan(Box<Ty>),
+    /// `Future<T>`: a handle to the result of an `async func` (`T` may be `Void`).
+    Future(Box<Ty>),
+}
+
+impl Ty {
+    fn i64() -> Ty {
+        Ty::Int { bits: 64, signed: true }
+    }
+    fn is_int(&self) -> bool {
+        matches!(self, Ty::Int { .. })
+    }
+    fn is_unsigned(&self) -> bool {
+        matches!(self, Ty::Int { signed: false, .. } | Ty::Ptr(_))
+    }
+    /// Size in memory (record fields, pointer targets).
+    fn size(&self) -> u32 {
+        match self {
+            Ty::Bool => 1,
+            Ty::Int { bits, .. } => *bits as u32 / 8,
+            _ => 8,
+        }
+    }
+    fn nullable(&self) -> bool {
+        matches!(self, Ty::Nil | Ty::Text | Ty::Rec(_) | Ty::List(_) | Ty::Ptr(_) | Ty::Func { .. } | Ty::Chan(_))
+    }
+    fn show(&self) -> String {
+        match self {
+            Ty::Void => "nothing".into(),
+            Ty::Nil => "nil".into(),
+            Ty::Bool => "bool".into(),
+            Ty::Int { bits, signed } => format!("{}{}", if *signed { "i" } else { "u" }, bits),
+            Ty::Text => "text".into(),
+            Ty::Rec(n) | Ty::Enum(n) => n.rsplit('.').next().unwrap_or(n).to_string(),
+            Ty::List(t) => format!("[]{}", t.show()),
+            Ty::Ptr(t) => format!("*{}", t.show()),
+            Ty::Err => "error".into(),
+            Ty::Result(t) => {
+                if **t == Ty::Void {
+                    "error".into()
+                } else {
+                    format!("{} or error", t.show())
+                }
+            }
+            Ty::Chan(t) => format!("Channel<{}>", t.show()),
+            Ty::Future(t) => {
+                if **t == Ty::Void {
+                    "Future<nothing>".into()
+                } else {
+                    format!("Future<{}>", t.show())
+                }
+            }
+            Ty::Func { params, ret, ext } => {
+                let ps: Vec<String> = params.iter().map(|p| p.show()).collect();
+                let r = if **ret == Ty::Void { String::new() } else { format!(" -> {}", ret.show()) };
+                format!("{}func({}){}", if *ext { "extern " } else { "" }, ps.join(", "), r)
+            }
+        }
+    }
+}
+
+/// Can a value of type `got` be stored where `want` is expected?
+fn compatible(want: &Ty, got: &Ty) -> bool {
+    match (want, got) {
+        (a, b) if a == b => true,
+        (Ty::Int { .. }, Ty::Int { .. }) => true,
+        (Ty::Int { .. }, Ty::Bool) | (Ty::Bool, Ty::Int { .. }) => true,
+        (w, Ty::Nil) => w.nullable(),
+        (Ty::Ptr(_), Ty::Ptr(_)) => true,
+        (Ty::Ptr(_), Ty::Int { .. }) | (Ty::Int { .. }, Ty::Ptr(_)) => true,
+        // an `extern` function value is a raw code address (GetProcAddress, WSAIoctl, ...)
+        (Ty::Func { ext: true, .. }, Ty::Int { .. }) | (Ty::Int { .. }, Ty::Func { ext: true, .. }) => true,
+        (Ty::Ptr(a), Ty::Rec(b)) => matches!(&**a, Ty::Rec(x) if x == b),
+        (Ty::List(a), Ty::List(b)) => compatible(a, b),
+        (Ty::Result(a), Ty::Result(b)) => compatible(a, b),
+        (Ty::Future(a), Ty::Future(b)) => compatible(a, b),
+        (Ty::Rec(a), Ty::Future(_)) if a == "future.Future" => true,
+        (Ty::Func { params: p1, ret: r1, ext: e1 }, Ty::Func { params: p2, ret: r2, ext: e2 }) => {
+            e1 == e2 && p1.len() == p2.len() && compatible(r1, r2)
+        }
+        _ => false,
+    }
+}
+
+struct RecInfo {
+    size: u32,
+    fields: Vec<(String, Ty, u32)>,
+}
+
+#[derive(Clone)]
+struct EnumInfo {
+    variants: Vec<(String, Vec<Ty>)>,
+    payload: bool,
+    size: u32,
+}
+
+#[derive(Clone)]
+struct ParamInfo {
+    name: String,
+    ty: Ty,
+    by_ref: bool,
+    default: Option<Expr>,
+}
+
+#[derive(Clone)]
+struct Sig {
+    sym: String,
+    module: String,
+    params: Vec<ParamInfo>,
+    ret: Ty,
+    /// Brasa variadic: last parameter `name: ...T` collects a list.
+    variadic: bool,
+    c_variadic: bool,
+    is_extern: bool,
+    /// Receiver type for methods.
+    receiver: Option<Ty>,
+}
+
+impl Sig {
+    fn func_ty(&self, ext: bool) -> Ty {
+        Ty::Func {
+            params: self.params.iter().map(|p| p.ty.clone()).collect(),
+            ret: Box::new(self.ret.clone()),
+            ext,
+        }
+    }
+}
+
+struct Global {
+    sym: String,
+    ty: Ty,
+    konst: Option<i64>,
+    mutable: bool,
+}
+
+#[derive(Clone)]
+struct Local {
+    off: i32,
+    ty: Ty,
+    mutable: bool,
+    captured: bool,
+}
+
+#[derive(Default)]
+struct Scope {
+    vars: HashMap<String, Local>,
+    /// Slots holding heap values this scope must release when it ends.
+    owned: Vec<(i32, Ty)>,
+}
+
+struct LoopCtx {
+    cont: String,
+    brk: String,
+    /// Scopes with an index >= `depth` are inside the loop body.
+    depth: usize,
+}
+
+struct FnState {
+    code: Vec<String>,
+    scopes: Vec<Scope>,
+    next: i32,
+    free: Vec<i32>,
+    max_args: usize,
+    ret: Ty,
+    ret_label: String,
+    loops: Vec<LoopCtx>,
+    unsafe_depth: u32,
+    /// Slots holding temporaries (`c.cstr`) released at the end of the statement.
+    stmt_temps: Vec<i32>,
+    /// `await` is allowed here: inside an `async func` and inside `main`.
+    allow_await: bool,
+}
+
+impl FnState {
+    fn new(ret: Ty, ret_label: String) -> Self {
+        FnState {
+            code: Vec::new(),
+            scopes: vec![Scope::default()],
+            next: 0,
+            free: Vec::new(),
+            max_args: 4,
+            ret,
+            ret_label,
+            loops: Vec::new(),
+            unsafe_depth: 0,
+            stmt_temps: Vec::new(),
+            allow_await: false,
+        }
+    }
+}
+
+const ARG_REGS: [&str; 4] = ["rcx", "rdx", "r8", "r9"];
+
+fn is_place(e: &Expr) -> bool {
+    matches!(e.kind, ExprKind::Ident(_) | ExprKind::Field { .. } | ExprKind::Index { .. } | ExprKind::Deref(_))
+}
+
+fn int_type(name: &str) -> Option<Ty> {
+    let (bits, signed) = match name {
+        "i8" => (8, true),
+        "i16" => (16, true),
+        "i32" => (32, true),
+        "i64" | "isize" | "int" => (64, true),
+        "u8" | "byte" => (8, false),
+        "u16" => (16, false),
+        "u32" => (32, false),
+        "u64" | "usize" => (64, false),
+        _ => return None,
+    };
+    Some(Ty::Int { bits, signed })
+}
+
+fn c_type(name: &str) -> Option<Ty> {
+    let (bits, signed) = match name {
+        "char" | "schar" => (8, true),
+        "uchar" | "void" => (8, false),
+        "short" => (16, true),
+        "ushort" => (16, false),
+        "int" | "long" => (32, true), // Windows x64: long is 32-bit
+        "uint" | "ulong" => (32, false),
+        "longlong" | "ssize_t" => (64, true),
+        "ulonglong" | "size_t" => (64, false),
+        _ => return None,
+    };
+    Some(Ty::Int { bits, signed })
+}
+
+fn sym_of(q: &str) -> String {
+    q.replace('.', "_")
+}
+
+// ---------------------------------------------------------------------------
+// Compiler
+// ---------------------------------------------------------------------------
+
+struct Module {
+    name: String,
+    file: File,
+}
+
+/// What the generated code runs on.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Target {
+    /// A Windows x64 console or GUI program.
+    Windows,
+    /// A freestanding kernel in 64-bit long mode (no operating system).
+    Bare,
+}
+
+pub struct Compiler {
+    target: Target,
+    modules: Vec<Module>,
+    imports: HashMap<String, HashSet<String>>,
+    rec_decls: HashMap<String, (String, Vec<Field>)>,
+    /// `#[shared]` records have reference semantics: never copied on assignment, capture or iteration.
+    shared_recs: HashSet<String>,
+    enum_decls: HashMap<String, (String, Vec<Variant>)>,
+    enum_payload: HashSet<String>,
+    aliases: HashMap<String, (String, Type)>,
+    records: HashMap<String, RecInfo>,
+    enums: HashMap<String, EnumInfo>,
+    /// (module, variant name) -> (enum, index)
+    variants: HashMap<(String, String), (String, usize)>,
+    enum_statics: BTreeSet<(String, usize)>,
+    funcs: HashMap<(String, String), Sig>,
+    methods: HashMap<(String, String), Sig>,
+    globals: HashMap<(String, String), Global>,
+    libs: BTreeSet<String>,
+    extern_syms: BTreeSet<String>,
+    data: Vec<String>,
+    procs: Vec<String>,
+    strings: HashMap<String, String>,
+    fn_closures: BTreeSet<String>,
+    labels: usize,
+    /// the next `lambda()` is the body of an async function: `await` is allowed in it
+    next_lambda_await: bool,
+    cur_mod: String,
+    line: u32,
+    fs: FnState,
+    uses_ui: bool,
+}
+
+impl Compiler {
+    fn new(target: Target) -> Self {
+        Compiler {
+            target,
+            modules: Vec::new(),
+            imports: HashMap::new(),
+            rec_decls: HashMap::new(),
+            shared_recs: HashSet::new(),
+            enum_decls: HashMap::new(),
+            enum_payload: HashSet::new(),
+            aliases: HashMap::new(),
+            records: HashMap::new(),
+            enums: HashMap::new(),
+            variants: HashMap::new(),
+            enum_statics: BTreeSet::new(),
+            funcs: HashMap::new(),
+            methods: HashMap::new(),
+            globals: HashMap::new(),
+            libs: BTreeSet::new(),
+            extern_syms: BTreeSet::new(),
+            data: Vec::new(),
+            procs: Vec::new(),
+            strings: HashMap::new(),
+            fn_closures: BTreeSet::new(),
+            labels: 0,
+            next_lambda_await: false,
+            cur_mod: String::new(),
+            line: 0,
+            fs: FnState::new(Ty::Void, String::new()),
+            uses_ui: false,
+        }
+    }
+
+    fn err<T>(&self, msg: impl Into<String>) -> R<T> {
+        Err(format!("{}.br:{}: {}", self.cur_mod, self.line, msg.into()))
+    }
+
+    fn lbl(&mut self, p: &str) -> String {
+        self.labels += 1;
+        format!("{}_{}", p, self.labels)
+    }
+
+    fn e(&mut self, s: impl Into<String>) {
+        self.fs.code.push(format!("    {}", s.into()));
+    }
+
+    fn label(&mut self, l: &str) {
+        self.fs.code.push(format!("{}:", l));
+    }
+
+    fn slot(&mut self) -> i32 {
+        self.fs.next += 8;
+        self.fs.next
+    }
+
+    fn temp(&mut self) -> i32 {
+        match self.fs.free.pop() {
+            Some(o) => o,
+            None => self.slot(),
+        }
+    }
+
+    fn free(&mut self, o: i32) {
+        self.fs.free.push(o);
+    }
+
+    fn string_lit(&mut self, s: &str) -> String {
+        if let Some(l) = self.strings.get(s) {
+            return l.clone();
+        }
+        let l = format!("S_{}", self.strings.len());
+        let mut bytes: Vec<String> = s.bytes().map(|b| b.to_string()).collect();
+        bytes.push("0".into());
+        self.data.push(format!("dq {}, 0", IMMORTAL));
+        self.data.push(format!("{} dq {}", l, s.len()));
+        for chunk in bytes.chunks(40) {
+            self.data.push(format!("    db {}", chunk.join(",")));
+        }
+        self.strings.insert(s.to_string(), l.clone());
+        l
+    }
+
+    // ---------------- ownership helpers ----------------
+
+    fn is_rc(&self, t: &Ty) -> bool {
+        match t {
+            Ty::Text | Ty::Rec(_) | Ty::List(_) | Ty::Err | Ty::Result(_) | Ty::Chan(_) | Ty::Future(_) => true,
+            Ty::Func { ext, .. } => !*ext,
+            Ty::Enum(q) => self.enum_payload.contains(q),
+            _ => false,
+        }
+    }
+
+    /// rax keeps its value; the reference count of the object in rax grows.
+    fn retain(&mut self) {
+        self.e("mov rcx, rax");
+        self.e("call rt_retain");
+    }
+
+    fn retain_if(&mut self, t: &Ty) {
+        if self.is_rc(t) {
+            self.retain();
+        }
+    }
+
+    /// Releases the value in rax (rax itself is preserved).
+    fn release_rax(&mut self) {
+        self.e("mov rcx, rax");
+        self.e("call rt_release");
+    }
+
+    /// Releases the object stored in a slot (rax is preserved).
+    fn release_slot(&mut self, off: i32) {
+        self.e(format!("mov rcx, qword ptr [rbp - {}]", off));
+        self.e("call rt_release");
+    }
+
+    /// rax = new zeroed heap object. `drop` is a procedure name or "0".
+    fn alloc(&mut self, size: u32, drop: &str) {
+        self.e(format!("mov ecx, {}", size));
+        if drop == "0" {
+            self.e("xor edx, edx");
+        } else {
+            self.e(format!("lea rdx, {}", drop));
+        }
+        self.e("call rt_alloc");
+    }
+
+    fn new_list(&mut self, el: &Ty) {
+        let flag = self.is_rc(el) as i32;
+        self.e(format!("mov ecx, {}", flag));
+        self.e("call rt_list_new");
+    }
+
+    fn rec_has_rc(&self, q: &str) -> bool {
+        self.records[q].fields.iter().any(|f| self.is_rc(&f.1))
+    }
+
+    /// `func (ref x: T) drop()` runs when the last reference to a `T` goes away.
+    fn drop_hook(&self, q: &str) -> Option<String> {
+        self.methods.get(&(q.to_string(), "drop".to_string())).map(|s| s.sym.clone())
+    }
+
+    fn rec_drop(&self, q: &str) -> String {
+        if self.rec_has_rc(q) || self.drop_hook(q).is_some() {
+            format!("B_drop_{}", sym_of(q))
+        } else {
+            "0".into()
+        }
+    }
+
+    fn enum_drop(&self, q: &str) -> String {
+        let info = &self.enums[q];
+        if info.variants.iter().any(|v| v.1.iter().any(|t| self.is_rc(t))) {
+            format!("B_edrop_{}", sym_of(q))
+        } else {
+            "0".into()
+        }
+    }
+
+    fn box_drop(&self, inner: &Ty) -> &'static str {
+        if self.is_rc(inner) {
+            "rt_drop_result_rc"
+        } else {
+            "rt_drop_result_plain"
+        }
+    }
+
+    fn declare_local(&mut self, name: &str, ty: Ty, mutable: bool) -> i32 {
+        let off = self.slot();
+        let rc = self.is_rc(&ty);
+        let sc = self.fs.scopes.last_mut().unwrap();
+        sc.vars.insert(name.to_string(), Local { off, ty: ty.clone(), mutable, captured: false });
+        if rc {
+            sc.owned.push((off, ty));
+        }
+        off
+    }
+
+    /// An unnamed slot that owns a heap value until the scope ends.
+    fn hidden_local(&mut self, ty: Ty) -> i32 {
+        let off = self.slot();
+        if self.is_rc(&ty) {
+            self.fs.scopes.last_mut().unwrap().owned.push((off, ty));
+        }
+        off
+    }
+
+    /// Emits releases for the locals of scopes `down_to..` (innermost first).
+    fn emit_unwind(&mut self, down_to: usize) {
+        let mut offs = Vec::new();
+        for i in (down_to..self.fs.scopes.len()).rev() {
+            for (off, _) in self.fs.scopes[i].owned.iter().rev() {
+                offs.push(*off);
+            }
+        }
+        for o in offs {
+            self.release_slot(o);
+        }
+    }
+
+    fn push_scope(&mut self) {
+        self.fs.scopes.push(Scope::default());
+    }
+
+    fn pop_scope(&mut self) {
+        let top = self.fs.scopes.len() - 1;
+        self.emit_unwind(top);
+        self.fs.scopes.pop();
+    }
+
+    /// Releases the statement temporaries registered after `mark`.
+    fn flush_temps(&mut self, mark: usize) {
+        while self.fs.stmt_temps.len() > mark {
+            let s = self.fs.stmt_temps.pop().unwrap();
+            self.release_slot(s);
+            self.e(format!("mov qword ptr [rbp - {}], 0", s));
+        }
+    }
+
+    /// Releases every pending temporary without forgetting it (for early exits).
+    fn flush_all_temps_emit(&mut self) {
+        let all: Vec<i32> = self.fs.stmt_temps.clone();
+        for s in all.into_iter().rev() {
+            self.release_slot(s);
+        }
+    }
+
+    // ---------------- loading & declarations ----------------
+
+    fn load(&mut self, main: &File) -> R<()> {
+        let mut queue = vec![(main.package.clone(), main.clone())];
+        let mut seen = HashSet::new();
+        seen.insert(main.package.clone());
+        while let Some((name, file)) = queue.pop() {
+            let mut imps = HashSet::new();
+            let mut wanted: Vec<String> = file.uses.iter().map(|u| u[0].clone()).collect();
+            if file_uses_concurrency(&file) {
+                if self.target == Target::Bare {
+                    return Err("'spawn', 'channel', 'async' and 'await' need the task library, which needs Windows".into());
+                }
+                wanted.push("task".into());
+                wanted.push("future".into());
+            }
+            for m in wanted {
+                if self.target == Target::Bare && (matches!(m.as_str(), "ui" | "task" | "future" | "fs" | "net" | "sys" | "ws")) {
+                    return Err(format!("'{}' needs Windows and cannot be used in a bare-metal kernel", m));
+                }
+                imps.insert(m.clone());
+                if m == "ui" {
+                    self.uses_ui = true;
+                }
+                if !seen.contains(&m) {
+                    if let Some(src) = std_source(&m) {
+                        seen.insert(m.clone());
+                        let f = parse_source(src).map_err(|d| format!("std/{}.br:{}:{}: {}", m, d.line, d.col, d.msg))?;
+                        queue.push((m.clone(), f));
+                    }
+                }
+            }
+            self.imports.insert(name.clone(), imps);
+            self.modules.push(Module { name, file });
+        }
+        Ok(())
+    }
+
+    fn declare(&mut self) -> R<()> {
+        // Type names first, so records can refer to each other.
+        let mods: Vec<(String, File)> = self.modules.iter().map(|m| (m.name.clone(), m.file.clone())).collect();
+        for (mname, file) in &mods {
+            self.cur_mod = mname.clone();
+            for d in &file.decls {
+                self.line = d.line;
+                if let DeclKind::Type(td) = &d.kind {
+                    let q = format!("{}.{}", mname, td.name);
+                    match &td.body {
+                        TypeBody::Record(fields) => {
+                            if d.attrs.iter().any(|a| a.name == "shared") {
+                                self.shared_recs.insert(q.clone());
+                            }
+                            self.rec_decls.insert(q, (mname.clone(), fields.clone()));
+                        }
+                        TypeBody::Enum(vs) => {
+                            if vs.iter().any(|v| !v.fields.is_empty()) {
+                                self.enum_payload.insert(q.clone());
+                            }
+                            for (i, v) in vs.iter().enumerate() {
+                                let key = (mname.clone(), v.name.clone());
+                                if self.variants.contains_key(&key) {
+                                    return self.err(format!("variant name '{}' is used by two enums in this module", v.name));
+                                }
+                                self.variants.insert(key, (q.clone(), i));
+                            }
+                            self.enum_decls.insert(q, (mname.clone(), vs.clone()));
+                        }
+                        TypeBody::Alias(t) => {
+                            self.aliases.insert(q, (mname.clone(), t.clone()));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        // Record layouts.
+        let decls: Vec<(String, String, Vec<Field>)> =
+            self.rec_decls.iter().map(|(q, (m, f))| (q.clone(), m.clone(), f.clone())).collect();
+        for (q, m, fields) in decls {
+            self.cur_mod = m.clone();
+            let mut off = 0u32;
+            let mut align = 1u32;
+            let mut out = Vec::new();
+            for f in &fields {
+                let ty = self.resolve(&f.ty, &m)?;
+                let sz = ty.size();
+                off = (off + sz - 1) / sz * sz;
+                align = align.max(sz);
+                out.push((f.name.clone(), ty, off));
+                off += sz;
+            }
+            let size = ((off + align - 1) / align * align).max(8);
+            self.records.insert(q, RecInfo { size, fields: out });
+        }
+        // Enum layouts.
+        let edecls: Vec<(String, String, Vec<Variant>)> =
+            self.enum_decls.iter().map(|(q, (m, v))| (q.clone(), m.clone(), v.clone())).collect();
+        for (q, m, vs) in edecls {
+            self.cur_mod = m.clone();
+            let mut variants = Vec::new();
+            let mut maxf = 0;
+            for v in &vs {
+                let mut tys = Vec::new();
+                for f in &v.fields {
+                    tys.push(self.resolve(f, &m)?);
+                }
+                maxf = maxf.max(tys.len());
+                variants.push((v.name.clone(), tys));
+            }
+            let payload = self.enum_payload.contains(&q);
+            self.enums.insert(q, EnumInfo { variants, payload, size: 8 + 8 * maxf as u32 });
+        }
+        // Functions, methods, externs, globals.
+        let mods: Vec<(String, Vec<Decl>)> = self.modules.iter().map(|m| (m.name.clone(), m.file.decls.clone())).collect();
+        for (m, decls) in &mods {
+            self.cur_mod = m.clone();
+            for d in decls {
+                self.line = d.line;
+                match &d.kind {
+                    DeclKind::Func(fd) => {
+                        if !fd.generics.is_empty() {
+                            continue;
+                        }
+                        let sig = self.func_sig(m, fd)?;
+                        if fd.name == "drop" && sig.receiver.is_some() && (!sig.params.is_empty() || sig.ret != Ty::Void) {
+                            return self.err("a `drop` method takes no parameters and returns nothing");
+                        }
+                        if let Some(Ty::Rec(r)) = &sig.receiver {
+                            self.methods.insert((r.clone(), fd.name.clone()), sig);
+                        } else if sig.receiver.is_some() {
+                            return self.err("methods are only supported on record types");
+                        } else {
+                            self.funcs.insert((m.clone(), fd.name.clone()), sig);
+                        }
+                    }
+                    DeclKind::Extern(ed) => {
+                        for a in &d.attrs {
+                            if a.name == "link" {
+                                if let Some(Expr { kind: ExprKind::Text(parts), .. }) = a.args.first() {
+                                    if let Some(TextPart::Lit(l)) = parts.first() {
+                                        self.libs.insert(l.clone());
+                                    }
+                                }
+                            }
+                        }
+                        let mut params = Vec::new();
+                        for p in &ed.params {
+                            let ty = match &p.ty {
+                                Some(t) => self.resolve(t, m)?,
+                                None => return self.err("extern parameters need a type"),
+                            };
+                            params.push(ParamInfo { name: p.name.clone(), ty, by_ref: false, default: None });
+                        }
+                        let ret = match &ed.ret {
+                            Some(t) => self.resolve(t, m)?,
+                            None => Ty::Void,
+                        };
+                        self.funcs.insert(
+                            (m.clone(), ed.name.clone()),
+                            Sig {
+                                sym: ed.name.clone(),
+                                module: m.clone(),
+                                params,
+                                ret,
+                                variadic: false,
+                                c_variadic: ed.c_variadic,
+                                is_extern: true,
+                                receiver: None,
+                            },
+                        );
+                    }
+                    DeclKind::Var(vd) => {
+                        let konst = if vd.mutable { None } else { vd.value.as_ref().and_then(|e| self.const_eval(e, m)) };
+                        let ty = match (&vd.ty, &konst) {
+                            (Some(t), _) => self.resolve(t, m)?,
+                            (None, Some(_)) => Ty::i64(),
+                            (None, None) => self.infer_global(vd.value.as_ref(), m)?,
+                        };
+                        self.globals.insert(
+                            (m.clone(), vd.name.clone()),
+                            Global { sym: format!("G_{}_{}", m, vd.name), ty, konst, mutable: vd.mutable },
+                        );
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn func_sig(&mut self, m: &str, fd: &FuncDecl) -> R<Sig> {
+        if fd.is_async {
+            if fd.params.iter().any(|p| p.by_ref) || fd.receiver.as_ref().map_or(false, |r| r.by_ref) {
+                return self.err(format!(
+                    "async func '{}' cannot take `ref` parameters: the task works on copies; pass a value or a channel",
+                    fd.name
+                ));
+            }
+            if !fd.generics.is_empty() {
+                return self.err("async generic functions are not supported");
+            }
+        }
+        let mut params = Vec::new();
+        let mut variadic = false;
+        for p in &fd.params {
+            let mut ty = match &p.ty {
+                Some(t) => self.resolve(t, m)?,
+                None => return self.err(format!("parameter '{}' needs a type", p.name)),
+            };
+            if p.variadic {
+                variadic = true;
+                ty = Ty::List(Box::new(ty));
+            }
+            params.push(ParamInfo { name: p.name.clone(), ty, by_ref: p.by_ref, default: p.default.clone() });
+        }
+        let ret = match &fd.ret {
+            Some(r) => {
+                let inner = match &r.ty {
+                    Some(t) => self.resolve(t, m)?,
+                    None => Ty::Void,
+                };
+                if r.fallible {
+                    Ty::Result(Box::new(inner))
+                } else {
+                    inner
+                }
+            }
+            None => Ty::Void,
+        };
+        let ret = if fd.is_async { Ty::Future(Box::new(ret)) } else { ret };
+        let receiver = match &fd.receiver {
+            Some(r) => Some(self.resolve(&r.ty, m)?),
+            None => None,
+        };
+        let sym = match &receiver {
+            Some(Ty::Rec(r)) => format!("B_{}_{}", sym_of(r), fd.name),
+            _ => format!("B_{}_{}", m, fd.name),
+        };
+        Ok(Sig { sym, module: m.to_string(), params, ret, variadic, c_variadic: false, is_extern: false, receiver })
+    }
+
+    fn infer_global(&self, e: Option<&Expr>, m: &str) -> R<Ty> {
+        let Some(e) = e else { return self.err("global variable needs a type or a value") };
+        Ok(match &e.kind {
+            ExprKind::Bool(_) => Ty::Bool,
+            ExprKind::Text(_) => Ty::Text,
+            ExprKind::Int(_) | ExprKind::Char(_) => Ty::i64(),
+            ExprKind::Record { path, .. } => Ty::Rec(self.record_name(path, m)?),
+            ExprKind::Call { callee, .. } => match &callee.kind {
+                ExprKind::Ident(f) => match self.funcs.get(&(m.to_string(), f.clone())) {
+                    Some(s) => s.ret.clone(),
+                    None => return self.err("cannot infer the type of this global; add a type annotation"),
+                },
+                _ => return self.err("cannot infer the type of this global; add a type annotation"),
+            },
+            _ => return self.err("cannot infer the type of this global; add a type annotation"),
+        })
+    }
+
+    fn const_eval(&self, e: &Expr, m: &str) -> Option<i64> {
+        match &e.kind {
+            ExprKind::Int(n) => Some(*n as i64),
+            ExprKind::Char(c) => Some(*c as i64),
+            ExprKind::Ident(n) => self.globals.get(&(m.to_string(), n.clone())).and_then(|g| g.konst),
+            ExprKind::Unary { op: "-", expr } => self.const_eval(expr, m).map(|v| v.wrapping_neg()),
+            ExprKind::Unary { op: "bitnot", expr } => self.const_eval(expr, m).map(|v| !v),
+            ExprKind::Binary { op, lhs, rhs } => {
+                let (a, b) = (self.const_eval(lhs, m)?, self.const_eval(rhs, m)?);
+                Some(match *op {
+                    "+" => a.wrapping_add(b),
+                    "-" => a.wrapping_sub(b),
+                    "*" => a.wrapping_mul(b),
+                    "/" if b != 0 => a / b,
+                    "%" if b != 0 => a % b,
+                    "bitor" => a | b,
+                    "bitand" => a & b,
+                    "bitxor" => a ^ b,
+                    "<<" => a << b,
+                    ">>" => a >> b,
+                    _ => return None,
+                })
+            }
+            _ => None,
+        }
+    }
+
+    fn record_name(&self, path: &[String], m: &str) -> R<String> {
+        let q = if path.len() == 1 { format!("{}.{}", m, path[0]) } else { path.join(".") };
+        if self.rec_decls.contains_key(&q) {
+            return Ok(q);
+        }
+        if let Some((am, t)) = self.aliases.get(&q) {
+            if let Ty::Rec(r) = self.resolve(t, am)? {
+                return Ok(r);
+            }
+        }
+        self.err(format!("unknown record type '{}'", path.join(".")))
+    }
+
+    fn resolve(&self, t: &Type, m: &str) -> R<Ty> {
+        match t {
+            Type::Named { path, args } => {
+                if path.len() == 1 {
+                    let n = path[0].as_str();
+                    if let Some(i) = int_type(n) {
+                        return Ok(i);
+                    }
+                    match n {
+                        "bool" => return Ok(Ty::Bool),
+                        "text" => return Ok(Ty::Text),
+                        "error" => return Ok(Ty::Err),
+                        "float" | "f32" | "f64" => {
+                            return self.err("floating point is not supported by the native backend yet");
+                        }
+                        "List" if args.len() == 1 => return Ok(Ty::List(Box::new(self.resolve(&args[0], m)?))),
+                        "Channel" if args.len() == 1 => return Ok(Ty::Chan(Box::new(self.resolve(&args[0], m)?))),
+                        "Future" if args.len() == 1 => return Ok(Ty::Future(Box::new(self.resolve(&args[0], m)?))),
+                        _ => {}
+                    }
+                }
+                if path.len() == 2 && path[0] == "c" {
+                    if let Some(t) = c_type(&path[1]) {
+                        return Ok(t);
+                    }
+                }
+                let q = if path.len() == 1 { format!("{}.{}", m, path[0]) } else { path.join(".") };
+                if self.rec_decls.contains_key(&q) {
+                    return Ok(Ty::Rec(q));
+                }
+                if self.enum_decls.contains_key(&q) {
+                    return Ok(Ty::Enum(q));
+                }
+                if let Some((am, at)) = self.aliases.get(&q) {
+                    return self.resolve(at, am);
+                }
+                self.err(format!("type '{}' is not supported by the native backend", path.join(".")))
+            }
+            Type::Optional(inner) => {
+                let t = self.resolve(inner, m)?;
+                if t.nullable() {
+                    Ok(t)
+                } else {
+                    self.err(format!("optional '{}?' is only supported for reference types", t.show()))
+                }
+            }
+            Type::Pointer(inner) => Ok(Ty::Ptr(Box::new(self.resolve(inner, m)?))),
+            Type::Slice(inner) => Ok(Ty::List(Box::new(self.resolve(inner, m)?))),
+            Type::Array(..) => self.err("fixed arrays are not supported by the native backend yet"),
+            Type::Func { abi, params, ret } => {
+                let mut ps = Vec::new();
+                for p in params {
+                    ps.push(self.resolve(p, m)?);
+                }
+                let r = match ret.as_deref() {
+                    Some(rt) => {
+                        let inner = match &rt.ty {
+                            Some(t) => self.resolve(t, m)?,
+                            None => Ty::Void,
+                        };
+                        if rt.fallible {
+                            Ty::Result(Box::new(inner))
+                        } else {
+                            inner
+                        }
+                    }
+                    None => Ty::Void,
+                };
+                Ok(Ty::Func { params: ps, ret: Box::new(r), ext: abi.is_some() })
+            }
+        }
+    }
+
+    // ---------------- code generation driver ----------------
+
+    fn generate(&mut self) -> R<String> {
+        let mods: Vec<(String, Vec<Decl>)> = self.modules.iter().map(|m| (m.name.clone(), m.file.decls.clone())).collect();
+        let main_mod = mods[0].0.clone();
+        let main_ret = match self.funcs.get(&(main_mod.clone(), "main".to_string())) {
+            Some(s) => s.ret.clone(),
+            None => return Err(format!("{}.br: no 'main' function found", main_mod)),
+        };
+        let mut inits = Vec::new();
+        for (m, decls) in mods.iter().rev() {
+            self.cur_mod = m.clone();
+            inits.push(self.gen_init(m, decls)?);
+            for d in decls {
+                self.line = d.line;
+                if let DeclKind::Func(fd) = &d.kind {
+                    if fd.generics.is_empty() {
+                        self.gen_func(m, fd, d.attrs.iter().any(|a| a.name == "naked"))?;
+                    }
+                }
+            }
+        }
+        let recs: Vec<String> = self.records.keys().cloned().collect();
+        for q in recs {
+            self.gen_record_helpers(&q);
+        }
+        let enums: Vec<String> = self.enums.keys().cloned().collect();
+        for q in enums {
+            self.gen_enum_drop(&q);
+        }
+
+        let bare = self.target == Target::Bare;
+        let mut out = String::new();
+        out.push_str("; Generated by the Brasa compiler. Do not edit.
+option casemap:none
+
+");
+        if !bare {
+            for s in ["ExitProcess", "GetProcessHeap", "HeapAlloc", "HeapFree", "GetStdHandle", "WriteFile", "SetConsoleOutputCP"] {
+                self.extern_syms.insert(s.to_string());
+            }
+            for s in &self.extern_syms {
+                out.push_str(&format!("extern {}:proc
+", s));
+            }
+        }
+        out.push_str("
+.code
+");
+        let main_error = if matches!(main_ret, Ty::Result(_)) {
+            "    mov rax, qword ptr [rax]
+    test rax, rax
+    jz brasa_main_ok
+    mov rax, qword ptr [rax]
+    mov qword ptr [rsp + 32], rax
+    lea rcx, rt_msg_error
+    call rt_write_out
+    mov rcx, qword ptr [rsp + 32]
+    call rt_write_out
+    lea rcx, rt_msg_nl
+    call rt_write_out
+    mov ecx, 1
+    call rt_exit
+brasa_main_ok:
+"
+        } else {
+            ""
+        };
+        let mut start = String::new();
+        if bare {
+            // The loader jumps here in long mode with a flat identity map.
+            start.push_str("brasa_start proc
+    cli
+    cld
+    mov rsp, 651272
+    sub rsp, 40
+");
+        } else {
+            start.push_str("brasa_start proc
+    sub rsp, 40
+    mov ecx, 65001
+    call SetConsoleOutputCP
+");
+        }
+        for i in &inits {
+            start.push_str(&format!("    call {}
+", i));
+        }
+        start.push_str(&format!("    call B_{}_main
+", main_mod));
+        start.push_str(main_error);
+        start.push_str("    xor ecx, ecx
+    call rt_exit
+brasa_start endp
+
+");
+        if bare {
+            // the entry point is the first byte of the image
+            out.push_str(&start);
+            out.push_str(RUNTIME_COMMON);
+            out.push_str(&RUNTIME_BARE.replace("B_CONSOLE_WRITE", &format!("B_{}_console_write", main_mod)));
+        } else {
+            out.push_str(RUNTIME_COMMON);
+            out.push_str(RUNTIME_WIN);
+            out.push('\n');
+            out.push_str(&start);
+        }
+        for p in &self.procs {
+            out.push_str(p);
+            out.push('\n');
+        }
+        out.push_str(".data
+");
+        out.push_str(RUNTIME_DATA_COMMON);
+        out.push_str(if bare { RUNTIME_DATA_BARE } else { RUNTIME_DATA_WIN });
+        let mut globals: Vec<&Global> = self.globals.values().filter(|g| g.konst.is_none()).collect();
+        globals.sort_by(|a, b| a.sym.cmp(&b.sym));
+        for g in globals {
+            out.push_str(&format!("{} dq 0
+", g.sym));
+        }
+        for f in &self.fn_closures {
+            out.push_str(&format!("dq {}, 0
+C_{} dq {}, 0
+", IMMORTAL, f, f));
+        }
+        for (q, i) in &self.enum_statics {
+            out.push_str(&format!("dq {}, 0
+E_{}_{} dq {}
+", IMMORTAL, sym_of(q), i, i));
+        }
+        for d in &self.data {
+            out.push_str(d);
+            out.push('\n');
+        }
+        out.push_str("
+end
+");
+        Ok(out)
+    }
+
+    fn finish_proc(&mut self, sym: &str, prologue: Vec<String>, naked: bool) -> String {
+        let mut s = format!("{} proc\n", sym);
+        if naked {
+            for l in &self.fs.code {
+                s.push_str(l);
+                s.push('\n');
+            }
+            s.push_str(&format!("{} endp\n", sym));
+            return s;
+        }
+        let out_area = 32 + 8 * (self.fs.max_args.max(4) - 4) as i32;
+        let frame = (self.fs.next + out_area + 15) / 16 * 16;
+        s.push_str("    push rbp\n    mov rbp, rsp\n");
+        // Touch each page of large frames (Windows grows the stack one guard page at a time).
+        let mut left = frame;
+        while left > 4096 {
+            s.push_str("    sub rsp, 4096\n    test qword ptr [rsp], rsp\n");
+            left -= 4096;
+        }
+        s.push_str(&format!("    sub rsp, {}\n", left));
+        // Zero every local slot: scope exits release whatever the slots hold.
+        if self.fs.next > 0 {
+            s.push_str(&format!(
+                "    lea r11, [rbp - {n}]\n    xor eax, eax\nZ_{sym}:\n    mov qword ptr [r11], rax\n    add r11, 8\n    cmp r11, rbp\n    jb Z_{sym}\n",
+                n = self.fs.next,
+                sym = sym
+            ));
+        }
+        for l in prologue {
+            s.push_str(&l);
+            s.push('\n');
+        }
+        for l in &self.fs.code {
+            s.push_str(l);
+            s.push('\n');
+        }
+        s.push_str(&format!("{}:\n    mov rsp, rbp\n    pop rbp\n    ret\n{} endp\n", self.fs.ret_label, sym));
+        s
+    }
+
+    fn gen_init(&mut self, m: &str, decls: &[Decl]) -> R<String> {
+        let sym = format!("B_init_{}", m);
+        let rl = self.lbl("ret");
+        self.fs = FnState::new(Ty::Void, rl);
+        for d in decls {
+            self.line = d.line;
+            if let DeclKind::Var(vd) = &d.kind {
+                let g = &self.globals[&(m.to_string(), vd.name.clone())];
+                if g.konst.is_some() {
+                    continue;
+                }
+                let (gsym, gty) = (g.sym.clone(), g.ty.clone());
+                match &vd.value {
+                    Some(e) => {
+                        let t = self.value(e, Some(&gty))?;
+                        self.check(&gty, &t, "global initializer")?;
+                    }
+                    None => self.zero_value(&gty)?,
+                }
+                self.norm(&gty);
+                self.e(format!("mov qword ptr {}, rax", gsym));
+                self.flush_temps(0);
+            }
+        }
+        let p = self.finish_proc(&sym, Vec::new(), false);
+        self.procs.push(p);
+        Ok(sym)
+    }
+
+    fn gen_func(&mut self, m: &str, fd: &FuncDecl, naked: bool) -> R<()> {
+        let sig = match &fd.receiver {
+            Some(_) => {
+                let rt = self.resolve(&fd.receiver.as_ref().unwrap().ty, m)?;
+                let Ty::Rec(r) = rt else { unreachable!() };
+                self.methods[&(r, fd.name.clone())].clone()
+            }
+            None => self.funcs[&(m.to_string(), fd.name.clone())].clone(),
+        };
+        let rl = self.lbl("ret");
+        self.fs = FnState::new(sig.ret.clone(), rl);
+        let main_mod = self.modules[0].name.clone();
+        self.fs.allow_await = fd.is_async || (fd.name == "main" && m == main_mod);
+        let mut incoming: Vec<(String, Ty, bool)> = Vec::new();
+        if let (Some(r), Some(rt)) = (&fd.receiver, &sig.receiver) {
+            incoming.push((r.name.clone(), rt.clone(), r.by_ref));
+        }
+        for p in &sig.params {
+            incoming.push((p.name.clone(), p.ty.clone(), true));
+        }
+        let prologue = self.bind_params(&incoming, None);
+        if fd.is_async {
+            self.gen_async_body(&sig, &fd.body)?;
+            self.emit_unwind(0);
+            let p = self.finish_proc(&sig.sym, prologue, false);
+            self.procs.push(p);
+            return Ok(());
+        }
+        for s in &fd.body {
+            self.stmt(s)?;
+        }
+        if !naked {
+            if let Ty::Result(inner) = sig.ret.clone() {
+                self.e("xor eax, eax");
+                self.mk_ok(&inner);
+            }
+            self.emit_unwind(0);
+        }
+        let p = self.finish_proc(&sig.sym, prologue, naked);
+        self.procs.push(p);
+        Ok(())
+    }
+
+    /// Moves incoming arguments into local slots (normalizing small ints).
+    /// The callee owns its parameters and releases them when it returns.
+    fn bind_params(&mut self, params: &[(String, Ty, bool)], env_slot: Option<i32>) -> Vec<String> {
+        let mut pro = Vec::new();
+        if let Some(es) = env_slot {
+            pro.push(format!("    mov qword ptr [rbp - {}], r10", es));
+        }
+        for (i, (name, ty, _)) in params.iter().enumerate() {
+            let off = self.slot();
+            if i < 4 {
+                pro.push(format!("    mov qword ptr [rbp - {}], {}", off, ARG_REGS[i]));
+            } else {
+                pro.push(format!("    mov rax, qword ptr [rbp + {}]", 16 + 8 * i));
+                pro.push(format!("    mov qword ptr [rbp - {}], rax", off));
+            }
+            if let Some(n) = norm_insn(ty) {
+                pro.push(format!("    mov rax, qword ptr [rbp - {}]", off));
+                pro.push(format!("    {}", n));
+                pro.push(format!("    mov qword ptr [rbp - {}], rax", off));
+            }
+            let rc = self.is_rc(ty);
+            let sc = &mut self.fs.scopes[0];
+            sc.vars.insert(name.clone(), Local { off, ty: ty.clone(), mutable: true, captured: false });
+            if rc {
+                sc.owned.push((off, ty.clone()));
+            }
+        }
+        pro
+    }
+
+    /// Per-record `B_drop_*` (releases heap fields) and `B_copy_*` (deep copy).
+    fn gen_record_helpers(&mut self, q: &str) {
+        let info = &self.records[q];
+        let size = info.size;
+        let rc_fields: Vec<(Ty, u32)> =
+            info.fields.iter().filter(|f| self.is_rc(&f.1)).map(|f| (f.1.clone(), f.2)).collect();
+        let s = sym_of(q);
+        let drop = self.rec_drop(q);
+        if drop != "0" {
+            let mut d = format!("B_drop_{s} proc\n    push rbp\n    mov rbp, rsp\n    sub rsp, 48\n    mov qword ptr [rbp - 8], rcx\n");
+            if let Some(hook) = self.drop_hook(q) {
+                // the object is being destroyed: give the hook's receiver a reference of its own
+                d.push_str(&format!("    mov qword ptr [rcx - 16], 2\n    call {}\n", hook));
+            }
+            for (_, off) in &rc_fields {
+                d.push_str(&format!(
+                    "    mov rcx, qword ptr [rbp - 8]\n    mov rcx, qword ptr [rcx + {off}]\n    call rt_release\n"
+                ));
+            }
+            d.push_str(&format!("    mov rsp, rbp\n    pop rbp\n    ret\nB_drop_{s} endp\n"));
+            self.procs.push(d);
+        }
+        let drop_arg = if drop == "0" { "xor edx, edx".to_string() } else { format!("lea rdx, {}", drop) };
+        let mut c = format!(
+            "B_copy_{s} proc\n    push rbp\n    mov rbp, rsp\n    sub rsp, 48\n    test rcx, rcx\n    jnz Lgo_{s}\n    xor eax, eax\n    jmp Lend_{s}\nLgo_{s}:\n    mov qword ptr [rbp - 8], rcx\n    mov ecx, {size}\n    {drop_arg}\n    call rt_alloc\n    mov qword ptr [rbp - 16], rax\n    mov rcx, rax\n    mov rdx, qword ptr [rbp - 8]\n    mov r8d, {size}\n    call rt_memcpy\n"
+        );
+        for (ty, off) in &rc_fields {
+            if matches!(ty, Ty::Rec(f) if !self.shared_recs.contains(f)) {
+                let Ty::Rec(f) = ty else { unreachable!() };
+                c.push_str(&format!(
+                    "    mov rcx, qword ptr [rbp - 16]\n    mov rcx, qword ptr [rcx + {off}]\n    call B_copy_{f}\n    mov rcx, qword ptr [rbp - 16]\n    mov qword ptr [rcx + {off}], rax\n",
+                    f = sym_of(f)
+                ));
+            } else {
+                c.push_str(&format!(
+                    "    mov rcx, qword ptr [rbp - 16]\n    mov rcx, qword ptr [rcx + {off}]\n    call rt_retain\n"
+                ));
+            }
+        }
+        c.push_str(&format!(
+            "    mov rax, qword ptr [rbp - 16]\nLend_{s}:\n    mov rsp, rbp\n    pop rbp\n    ret\nB_copy_{s} endp\n"
+        ));
+        self.procs.push(c);
+    }
+
+    /// Per-enum `B_edrop_*`: releases the heap fields of the active variant.
+    fn gen_enum_drop(&mut self, q: &str) {
+        if self.enum_drop(q) == "0" {
+            return;
+        }
+        let info = self.enums[q].clone();
+        let s = sym_of(q);
+        let mut d = format!(
+            "B_edrop_{s} proc\n    push rbp\n    mov rbp, rsp\n    sub rsp, 48\n    mov qword ptr [rbp - 8], rcx\n    mov rax, qword ptr [rcx]\n    mov qword ptr [rbp - 16], rax\n"
+        );
+        for (idx, (_, tys)) in info.variants.iter().enumerate() {
+            if !tys.iter().any(|t| self.is_rc(t)) {
+                continue;
+            }
+            d.push_str(&format!("    cmp qword ptr [rbp - 16], {idx}\n    jne Lnx_{s}_{idx}\n"));
+            for (i, t) in tys.iter().enumerate() {
+                if self.is_rc(t) {
+                    d.push_str(&format!(
+                        "    mov rcx, qword ptr [rbp - 8]\n    mov rcx, qword ptr [rcx + {}]\n    call rt_release\n",
+                        8 + 8 * i
+                    ));
+                }
+            }
+            d.push_str(&format!("Lnx_{s}_{idx}:\n"));
+        }
+        d.push_str(&format!("    mov rsp, rbp\n    pop rbp\n    ret\nB_edrop_{s} endp\n"));
+        self.procs.push(d);
+    }
+
+    // ---------------- helpers ----------------
+
+    fn norm(&mut self, t: &Ty) {
+        if let Some(n) = norm_insn(t) {
+            self.e(n);
+        }
+    }
+
+    fn load_mem(&mut self, t: &Ty, addr: &str) {
+        let s = match (t.size(), t) {
+            (1, Ty::Int { signed: true, .. }) => format!("movsx rax, byte ptr [{}]", addr),
+            (1, _) => format!("movzx eax, byte ptr [{}]", addr),
+            (2, Ty::Int { signed: true, .. }) => format!("movsx rax, word ptr [{}]", addr),
+            (2, _) => format!("movzx eax, word ptr [{}]", addr),
+            (4, Ty::Int { signed: true, .. }) => format!("movsxd rax, dword ptr [{}]", addr),
+            (4, _) => format!("mov eax, dword ptr [{}]", addr),
+            _ => format!("mov rax, qword ptr [{}]", addr),
+        };
+        self.e(s);
+    }
+
+    fn store_mem(&mut self, t: &Ty, addr: &str) {
+        let s = match t.size() {
+            1 => format!("mov byte ptr [{}], al", addr),
+            2 => format!("mov word ptr [{}], ax", addr),
+            4 => format!("mov dword ptr [{}], eax", addr),
+            _ => format!("mov qword ptr [{}], rax", addr),
+        };
+        self.e(s);
+    }
+
+    fn check(&self, want: &Ty, got: &Ty, what: &str) -> R<()> {
+        if compatible(want, got) {
+            Ok(())
+        } else {
+            self.err(format!("{}: expected {}, found {}", what, want.show(), got.show()))
+        }
+    }
+
+    fn rec_size(&self, r: &str) -> u32 {
+        self.records[r].size
+    }
+
+    fn field_of(&self, r: &str, name: &str) -> Option<(Ty, u32)> {
+        self.records.get(r)?.fields.iter().find(|f| f.0 == name).map(|f| (f.1.clone(), f.2))
+    }
+
+    fn lookup(&self, name: &str) -> Option<Local> {
+        for s in self.fs.scopes.iter().rev() {
+            if let Some(l) = s.vars.get(name) {
+                return Some(l.clone());
+            }
+        }
+        None
+    }
+
+    fn is_module(&self, name: &str) -> bool {
+        self.lookup(name).is_none()
+            && !self.globals.contains_key(&(self.cur_mod.clone(), name.to_string()))
+            && self.imports.get(&self.cur_mod).map_or(false, |i| i.contains(name))
+    }
+
+    /// Qualified name of the enum called `name` in the current module.
+    fn enum_type_named(&self, name: &str) -> Option<String> {
+        if self.lookup(name).is_some() {
+            return None;
+        }
+        let q = format!("{}.{}", self.cur_mod, name);
+        self.enum_decls.contains_key(&q).then_some(q)
+    }
+
+    fn zero_value(&mut self, t: &Ty) -> R<()> {
+        match t {
+            Ty::List(el) => self.new_list(&el.clone()),
+            Ty::Rec(r) => self.record_literal(&r.clone(), &[])?,
+            Ty::Text => {
+                let l = self.string_lit("");
+                self.e(format!("lea rax, {}", l));
+            }
+            Ty::Chan(_) | Ty::Err | Ty::Result(_) => return self.err(format!("a {} needs an explicit value", t.show())),
+            _ => self.e("xor eax, eax"),
+        }
+        Ok(())
+    }
+
+    /// Evaluates `e` to a value that is going to be stored: an owned
+    /// reference, with records read from a place deep-copied.
+    fn value(&mut self, e: &Expr, want: Option<&Ty>) -> R<Ty> {
+        if is_place(e) {
+            let (t, own) = self.operand(e, want)?;
+            if matches!(&t, Ty::Rec(r) if !self.shared_recs.contains(r)) {
+                let Ty::Rec(r) = &t else { unreachable!() };
+                let s = self.temp();
+                self.e(format!("mov qword ptr [rbp - {}], rax", s));
+                self.e("mov rcx, rax");
+                self.e(format!("call B_copy_{}", sym_of(r)));
+                if own {
+                    self.release_slot(s);
+                }
+                self.free(s);
+            } else if !own {
+                self.retain_if(&t);
+            }
+            return Ok(t);
+        }
+        self.expr(e, want)
+    }
+
+    /// Evaluates `e` for inspection. Locals are borrowed (`false`); anything
+    /// else is an owned reference the caller must release (`true`).
+    fn operand(&mut self, e: &Expr, want: Option<&Ty>) -> R<(Ty, bool)> {
+        if let ExprKind::Ident(n) = &e.kind {
+            if let Some(l) = self.lookup(n) {
+                self.e(format!("mov rax, qword ptr [rbp - {}]", l.off));
+                return Ok((l.ty, false));
+            }
+        }
+        let t = self.expr(e, want)?;
+        // only heap values carry a reference to give back; a raw pointer or a number does not
+        let owned = self.is_rc(&t);
+        Ok((t, owned))
+    }
+
+    /// Converts the owned value in rax to an owned text.
+    fn to_text(&mut self, t: &Ty) -> R<()> {
+        match t {
+            Ty::Text => {}
+            Ty::Int { .. } => {
+                self.e("mov rcx, rax");
+                self.e("call rt_text_from_int");
+            }
+            Ty::Bool => {
+                let (lt, lf) = (self.string_lit("true"), self.string_lit("false"));
+                self.e("test rax, rax");
+                self.e(format!("lea rax, {}", lf));
+                self.e(format!("lea rcx, {}", lt));
+                self.e("cmovnz rax, rcx");
+            }
+            Ty::Nil => {
+                let l = self.string_lit("nil");
+                self.e(format!("lea rax, {}", l));
+            }
+            Ty::Err => {
+                let s = self.temp();
+                self.e(format!("mov qword ptr [rbp - {}], rax", s));
+                self.e("mov rax, qword ptr [rax]");
+                self.retain();
+                self.release_slot(s);
+                self.free(s);
+            }
+            other => return self.err(format!("cannot convert {} to text", other.show())),
+        }
+        Ok(())
+    }
+
+    /// `T` -> `T or error` (success): rax = value in, box out.
+    fn mk_ok(&mut self, inner: &Ty) {
+        let drop = self.box_drop(inner);
+        let t = self.temp();
+        self.e(format!("mov qword ptr [rbp - {}], rax", t));
+        self.alloc(16, drop);
+        if *inner != Ty::Void {
+            self.e(format!("mov rcx, qword ptr [rbp - {}]", t));
+            self.e("mov qword ptr [rax + 8], rcx");
+        }
+        self.free(t);
+    }
+
+    /// error in rax -> failed `T or error` box.
+    fn mk_err(&mut self, inner: &Ty) {
+        let drop = self.box_drop(inner);
+        let t = self.temp();
+        self.e(format!("mov qword ptr [rbp - {}], rax", t));
+        self.alloc(16, drop);
+        self.e(format!("mov rcx, qword ptr [rbp - {}]", t));
+        self.e("mov qword ptr [rax], rcx");
+        self.free(t);
+    }
+
+    // ---------------- statements ----------------
+
+    fn block(&mut self, b: &[Stmt]) -> R<()> {
+        self.push_scope();
+        for s in b {
+            self.stmt(s)?;
+        }
+        self.pop_scope();
+        Ok(())
+    }
+
+    fn stmt(&mut self, s: &Stmt) -> R<()> {
+        self.line = s.line;
+        let mark = self.fs.stmt_temps.len();
+        self.stmt_inner(s)?;
+        self.flush_temps(mark);
+        Ok(())
+    }
+
+    fn stmt_inner(&mut self, s: &Stmt) -> R<()> {
+        match &s.kind {
+            StmtKind::Var(vd) => {
+                let ann = match &vd.ty {
+                    Some(t) => Some(self.resolve(t, &self.cur_mod.clone())?),
+                    None => None,
+                };
+                let ty = match &vd.value {
+                    Some(e) => {
+                        let t = self.value(e, ann.as_ref())?;
+                        if let Some(a) = &ann {
+                            self.check(a, &t, &format!("'{}'", vd.name))?;
+                            a.clone()
+                        } else if t == Ty::Nil || t == Ty::Void {
+                            return self.err(format!("cannot infer the type of '{}'", vd.name));
+                        } else {
+                            t
+                        }
+                    }
+                    None => {
+                        let a = ann.clone().unwrap();
+                        self.zero_value(&a)?;
+                        a
+                    }
+                };
+                self.norm(&ty);
+                let off = self.declare_local(&vd.name, ty, vd.mutable);
+                self.e(format!("mov qword ptr [rbp - {}], rax", off));
+            }
+            StmtKind::Assign { target, op, value } => self.assign(target, op, value)?,
+            StmtKind::Return(v) => {
+                let ret = self.fs.ret.clone();
+                match (&ret, v) {
+                    (Ty::Result(inner), Some(e)) => {
+                        if **inner == Ty::Void && !matches!(e.kind, ExprKind::Call { .. }) && false {
+                            unreachable!();
+                        }
+                        let t = self.value(e, Some(inner))?;
+                        match &t {
+                            Ty::Err => self.mk_err(inner),
+                            Ty::Result(u) => {
+                                if !compatible(inner, u) {
+                                    return self.err(format!("return value: expected {}, found {}", ret.show(), t.show()));
+                                }
+                            }
+                            _ => {
+                                if **inner == Ty::Void {
+                                    return self.err("this function returns no value; write `return` or `return error(\"...\")`");
+                                }
+                                self.check(inner, &t, "return value")?;
+                                self.norm(inner);
+                                self.mk_ok(inner);
+                            }
+                        }
+                    }
+                    (Ty::Result(inner), None) => {
+                        self.e("xor eax, eax");
+                        self.mk_ok(inner);
+                    }
+                    (Ty::Void, Some(_)) => return self.err("this function does not return a value"),
+                    (_, Some(e)) => {
+                        let t = self.value(e, Some(&ret))?;
+                        self.check(&ret, &t, "return value")?;
+                        self.norm(&ret);
+                    }
+                    (_, None) => {}
+                }
+                self.flush_all_temps_emit();
+                self.emit_unwind(0);
+                let l = self.fs.ret_label.clone();
+                self.e(format!("jmp {}", l));
+            }
+            StmtKind::Break | StmtKind::Continue => {
+                let Some((cont, brk, depth)) = self.fs.loops.last().map(|l| (l.cont.clone(), l.brk.clone(), l.depth)) else {
+                    return self.err("'break'/'continue' outside a loop");
+                };
+                self.emit_unwind(depth);
+                let target = if matches!(s.kind, StmtKind::Break) { brk } else { cont };
+                self.e(format!("jmp {}", target));
+            }
+            StmtKind::While { cond, body } => {
+                let (start, end) = (self.lbl("while"), self.lbl("wend"));
+                self.label(&start);
+                let m = self.fs.stmt_temps.len();
+                self.expr(cond, Some(&Ty::Bool))?;
+                self.flush_temps(m);
+                self.e("test rax, rax");
+                self.e(format!("jz {}", end));
+                let depth = self.fs.scopes.len();
+                self.fs.loops.push(LoopCtx { cont: start.clone(), brk: end.clone(), depth });
+                self.block(body)?;
+                self.fs.loops.pop();
+                self.e(format!("jmp {}", start));
+                self.label(&end);
+            }
+            StmtKind::For { vars, iter, body } => self.for_loop(vars, iter, body)?,
+            StmtKind::Unsafe(b) => {
+                self.fs.unsafe_depth += 1;
+                self.block(b)?;
+                self.fs.unsafe_depth -= 1;
+            }
+            StmtKind::Asm(a) => self.asm_block(a)?,
+            StmtKind::Expr(e) => match &e.kind {
+                ExprKind::If { branches, else_body } => {
+                    self.if_chain(branches, else_body.as_ref(), None, false)?;
+                }
+                ExprKind::Match { scrutinee, arms } => {
+                    self.match_expr(scrutinee, arms, None, false)?;
+                }
+                _ => {
+                    let t = self.expr(e, None)?;
+                    if matches!(t, Ty::Result(_)) {
+                        return self.err("this call can fail and its result is ignored; use `try`, `match` or `??`");
+                    }
+                    if self.is_rc(&t) {
+                        self.release_rax();
+                    }
+                }
+            },
+            StmtKind::Defer(_) => return self.err("'defer' is not supported by the native backend yet"),
+            StmtKind::Spawn(call) => {
+                let task_spawn = self.funcs.get(&("task".to_string(), "start".to_string())).cloned();
+                let Some(sig) = task_spawn else { return self.err("'spawn' needs the task library") };
+                if !matches!(call.kind, ExprKind::Call { .. }) {
+                    return self.err("'spawn' needs a function call, like `spawn work(x)`");
+                }
+                let body = vec![Stmt { kind: StmtKind::Expr(call.clone()), line: s.line }];
+                let want = Ty::Func { params: vec![], ret: Box::new(Ty::Void), ext: false };
+                self.lambda(&[], &body, Some(&want))?;
+                let t = self.temp();
+                self.e(format!("mov qword ptr [rbp - {}], rax", t));
+                self.emit_call(&[t], &format!("call {}", sig.sym), None);
+                self.free(t);
+            }
+        }
+        Ok(())
+    }
+
+    fn assign(&mut self, target: &Expr, op: &str, value: &Expr) -> R<()> {
+        // `a op= b` is compiled as `a = a op b`.
+        let rhs_owned;
+        let rhs = if op == "=" {
+            value
+        } else {
+            rhs_owned = Expr {
+                kind: ExprKind::Binary { op: binop_static(&op[..op.len() - 1]), lhs: Box::new(target.clone()), rhs: Box::new(value.clone()) },
+                line: value.line,
+            };
+            &rhs_owned
+        };
+        match &target.kind {
+            ExprKind::Ident(name) => {
+                if let Some(l) = self.lookup(name) {
+                    if l.captured {
+                        return self.err(format!("cannot assign to '{}': closures capture variables by value", name));
+                    }
+                    if !l.mutable {
+                        return self.err(format!("cannot assign to '{}': declared with 'let'", name));
+                    }
+                    let t = self.value(rhs, Some(&l.ty))?;
+                    self.check(&l.ty, &t, &format!("'{}'", name))?;
+                    self.norm(&l.ty);
+                    if self.is_rc(&l.ty) {
+                        self.e(format!("mov rcx, qword ptr [rbp - {}]", l.off));
+                        self.e(format!("mov qword ptr [rbp - {}], rax", l.off));
+                        self.e("call rt_release");
+                    } else {
+                        self.e(format!("mov qword ptr [rbp - {}], rax", l.off));
+                    }
+                    return Ok(());
+                }
+                let key = (self.cur_mod.clone(), name.clone());
+                let Some(g) = self.globals.get(&key) else { return self.err(format!("undefined variable '{}'", name)) };
+                if !g.mutable {
+                    return self.err(format!("cannot assign to '{}': declared with 'let'", name));
+                }
+                let (sym, ty) = (g.sym.clone(), g.ty.clone());
+                let t = self.value(rhs, Some(&ty))?;
+                self.check(&ty, &t, &format!("'{}'", name))?;
+                self.norm(&ty);
+                if self.is_rc(&ty) {
+                    self.e(format!("mov rcx, qword ptr {}", sym));
+                    self.e(format!("mov qword ptr {}, rax", sym));
+                    self.e("call rt_release");
+                } else {
+                    self.e(format!("mov qword ptr {}, rax", sym));
+                }
+            }
+            ExprKind::Field { expr: obj, name, .. } => {
+                let (ot, own) = self.operand(obj, None)?;
+                let r = match &ot {
+                    Ty::Rec(r) => r.clone(),
+                    Ty::Ptr(p) => match &**p {
+                        Ty::Rec(r) => r.clone(),
+                        _ => return self.err(format!("cannot assign field '{}' on {}", name, ot.show())),
+                    },
+                    _ => return self.err(format!("cannot assign field '{}' on {}", name, ot.show())),
+                };
+                let t = self.temp();
+                self.e(format!("mov qword ptr [rbp - {}], rax", t));
+                if let Some((fty, off)) = self.field_of(&r, name) {
+                    let vt = self.value(rhs, Some(&fty))?;
+                    self.check(&fty, &vt, &format!("field '{}'", name))?;
+                    self.norm(&fty);
+                    self.e(format!("mov rcx, qword ptr [rbp - {}]", t));
+                    if self.is_rc(&fty) {
+                        let old = self.temp();
+                        self.e(format!("mov rdx, qword ptr [rcx + {}]", off));
+                        self.e(format!("mov qword ptr [rbp - {}], rdx", old));
+                        self.store_mem(&fty, &format!("rcx + {}", off));
+                        self.release_slot(old);
+                        self.free(old);
+                    } else {
+                        self.store_mem(&fty, &format!("rcx + {}", off));
+                    }
+                } else if let Some(sig) = self.methods.get(&(r.clone(), format!("set_{}", name))).cloned() {
+                    // property setter: `w.text = v` -> `w.set_text(v)`
+                    let Some(p) = sig.params.first().cloned() else {
+                        return self.err(format!("'set_{}' must take one parameter", name));
+                    };
+                    let vt = self.value(rhs, Some(&p.ty))?;
+                    self.check(&p.ty, &vt, &format!("'{}'", name))?;
+                    self.norm(&p.ty);
+                    let vtmp = self.temp();
+                    self.e(format!("mov qword ptr [rbp - {}], rax", vtmp));
+                    // the method takes ownership of its receiver
+                    self.e(format!("mov rax, qword ptr [rbp - {}]", t));
+                    if !own {
+                        self.retain();
+                    }
+                    self.e(format!("mov qword ptr [rbp - {}], rax", t));
+                    self.emit_call(&[t, vtmp], &format!("call {}", sig.sym), None);
+                    self.free(vtmp);
+                    self.free(t);
+                    return Ok(());
+                } else {
+                    return self.err(format!("{} has no field '{}'", r, name));
+                }
+                if own {
+                    self.release_slot(t);
+                }
+                self.free(t);
+            }
+            ExprKind::Index { expr: obj, index } => {
+                let (ot, own) = self.operand(obj, None)?;
+                let t = self.temp();
+                self.e(format!("mov qword ptr [rbp - {}], rax", t));
+                self.expr(index, None)?;
+                let it = self.temp();
+                self.e(format!("mov qword ptr [rbp - {}], rax", it));
+                match &ot {
+                    Ty::List(el) => {
+                        let vt = self.value(rhs, Some(el))?;
+                        self.check(el, &vt, "list element")?;
+                        self.e("mov r8, rax");
+                        self.e(format!("mov rcx, qword ptr [rbp - {}]", t));
+                        self.e(format!("mov rdx, qword ptr [rbp - {}]", it));
+                        self.e("call rt_list_set");
+                    }
+                    Ty::Ptr(el) => {
+                        self.require_unsafe("writing through a raw pointer")?;
+                        let el = (**el).clone();
+                        let vt = self.value(rhs, Some(&el))?;
+                        self.check(&el, &vt, "pointer element")?;
+                        self.e(format!("mov rcx, qword ptr [rbp - {}]", t));
+                        self.e(format!("mov rdx, qword ptr [rbp - {}]", it));
+                        self.e(format!("imul rdx, rdx, {}", el.size()));
+                        self.e("add rcx, rdx");
+                        self.store_mem(&el, "rcx");
+                    }
+                    _ => return self.err(format!("cannot assign into {}", ot.show())),
+                }
+                if own {
+                    self.release_slot(t);
+                }
+                self.free(it);
+                self.free(t);
+            }
+            ExprKind::Deref(p) => {
+                self.require_unsafe("writing through a raw pointer")?;
+                let (pt, _) = self.operand(p, None)?;
+                let Ty::Ptr(el) = pt else { return self.err("'^' needs a pointer") };
+                let t = self.temp();
+                self.e(format!("mov qword ptr [rbp - {}], rax", t));
+                let vt = self.value(rhs, Some(&el))?;
+                self.check(&el, &vt, "pointer target")?;
+                self.e(format!("mov rcx, qword ptr [rbp - {}]", t));
+                self.store_mem(&el, "rcx");
+                self.free(t);
+            }
+            _ => return self.err("invalid assignment target"),
+        }
+        Ok(())
+    }
+
+    fn for_loop(&mut self, vars: &[String], iter: &Expr, body: &[Stmt]) -> R<()> {
+        let (start, cont, end) = (self.lbl("for"), self.lbl("fnext"), self.lbl("fend"));
+        self.push_scope();
+        if let ExprKind::Binary { op: "..", lhs, rhs } = &iter.kind {
+            let lt = self.expr(lhs, None)?;
+            let ty = if lt.is_int() { lt } else { return self.err("range bounds must be integers") };
+            let var = self.declare_local(&vars[0], ty.clone(), false);
+            self.e(format!("mov qword ptr [rbp - {}], rax", var));
+            self.expr(rhs, Some(&ty))?;
+            let hi = self.slot();
+            self.e(format!("mov qword ptr [rbp - {}], rax", hi));
+            self.label(&start);
+            self.e(format!("mov rax, qword ptr [rbp - {}]", var));
+            self.e(format!("cmp rax, qword ptr [rbp - {}]", hi));
+            self.e(format!("jge {}", end));
+            let depth = self.fs.scopes.len();
+            self.fs.loops.push(LoopCtx { cont: cont.clone(), brk: end.clone(), depth });
+            self.block(body)?;
+            self.fs.loops.pop();
+            self.label(&cont);
+            self.e(format!("inc qword ptr [rbp - {}]", var));
+            self.e(format!("jmp {}", start));
+            self.label(&end);
+        } else {
+            let lt = self.expr(iter, None)?;
+            let Ty::List(el) = lt.clone() else { return self.err(format!("cannot iterate over {}", lt.show())) };
+            let list = self.hidden_local(lt);
+            self.e(format!("mov qword ptr [rbp - {}], rax", list));
+            let idx = self.slot();
+            self.e(format!("mov qword ptr [rbp - {}], 0", idx));
+            let (iv, vv) = if vars.len() >= 2 {
+                (Some(self.declare_local(&vars[0], Ty::i64(), false)), self.declare_local(&vars[1], (*el).clone(), false))
+            } else {
+                (None, self.declare_local(&vars[0], (*el).clone(), false))
+            };
+            // the slots may hold values from a previous run of this loop
+            self.e(format!("mov qword ptr [rbp - {}], 0", vv));
+            self.label(&start);
+            self.e(format!("mov rdx, qword ptr [rbp - {}]", idx));
+            self.e(format!("mov rcx, qword ptr [rbp - {}]", list));
+            self.e("cmp rdx, qword ptr [rcx]");
+            self.e(format!("jge {}", end));
+            self.e("call rt_list_get");
+            if matches!(&*el, Ty::Rec(r) if !self.shared_recs.contains(r)) {
+                let Ty::Rec(r) = &*el else { unreachable!() };
+                self.e("mov rcx, rax");
+                self.e(format!("call B_copy_{}", sym_of(r)));
+            } else {
+                self.retain_if(&el);
+            }
+            if self.is_rc(&el) {
+                self.e(format!("mov rcx, qword ptr [rbp - {}]", vv));
+                self.e(format!("mov qword ptr [rbp - {}], rax", vv));
+                self.e("call rt_release");
+            } else {
+                self.e(format!("mov qword ptr [rbp - {}], rax", vv));
+            }
+            if let Some(iv) = iv {
+                self.e(format!("mov rax, qword ptr [rbp - {}]", idx));
+                self.e(format!("mov qword ptr [rbp - {}], rax", iv));
+            }
+            let depth = self.fs.scopes.len();
+            self.fs.loops.push(LoopCtx { cont: cont.clone(), brk: end.clone(), depth });
+            self.block(body)?;
+            self.fs.loops.pop();
+            self.label(&cont);
+            self.e(format!("inc qword ptr [rbp - {}]", idx));
+            self.e(format!("jmp {}", start));
+            self.label(&end);
+        }
+        self.pop_scope();
+        Ok(())
+    }
+
+    fn require_unsafe(&self, what: &str) -> R<()> {
+        if self.fs.unsafe_depth == 0 {
+            self.err(format!("{} requires an 'unsafe' block", what))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn asm_block(&mut self, a: &AsmBlock) -> R<()> {
+        if self.fs.unsafe_depth == 0 && !self.fs.code.is_empty() {
+            self.require_unsafe("inline 'asm'")?;
+        }
+        const POOL: [&str; 4] = ["r10", "r11", "r8", "r9"];
+        let mut regs: HashMap<String, String> = HashMap::new();
+        let mut next = 0;
+        for o in &a.operands {
+            let r = if is_register(&o.name) {
+                o.name.clone()
+            } else {
+                if next >= POOL.len() {
+                    return self.err("too many asm operands");
+                }
+                next += 1;
+                POOL[next - 1].to_string()
+            };
+            regs.insert(o.name.clone(), r);
+        }
+        // Inputs: evaluate all, then load registers.
+        let mut loads = Vec::new();
+        for o in &a.operands {
+            if o.dir != AsmDir::Out {
+                self.expr(&o.value, None)?;
+                let t = self.temp();
+                self.e(format!("mov qword ptr [rbp - {}], rax", t));
+                loads.push((t, reg64(&regs[&o.name])));
+            }
+        }
+        for (t, r) in &loads {
+            self.e(format!("mov {}, qword ptr [rbp - {}]", r, t));
+        }
+        for (t, _) in loads {
+            self.free(t);
+        }
+        for line in &a.lines {
+            let mut l = line.clone();
+            let mut names: Vec<&String> = regs.keys().collect();
+            names.sort_by_key(|n| std::cmp::Reverse(n.len()));
+            for n in names {
+                l = l.replace(&format!("@{}", n), &regs[n]);
+            }
+            self.e(l);
+        }
+        // Outputs: copy registers back into variables.
+        for o in &a.operands {
+            if o.dir != AsmDir::In {
+                let ExprKind::Ident(v) = &o.value.kind else { return self.err("asm output must be a variable") };
+                let Some(l) = self.lookup(v) else { return self.err(format!("unknown variable '{}'", v)) };
+                self.e(format!("mov rax, {}", reg64(&regs[&o.name])));
+                self.norm(&l.ty);
+                self.e(format!("mov qword ptr [rbp - {}], rax", l.off));
+            }
+        }
+        Ok(())
+    }
+
+    // ---------------- expressions ----------------
+
+    /// Evaluates `e`. The result is in rax; heap values are owned (+1).
+    fn expr(&mut self, e: &Expr, want: Option<&Ty>) -> R<Ty> {
+        self.line = e.line;
+        match &e.kind {
+            ExprKind::Int(n) => {
+                self.e(format!("mov rax, {}", n));
+                Ok(match want {
+                    Some(t) if t.is_int() => t.clone(),
+                    _ => Ty::i64(),
+                })
+            }
+            ExprKind::Char(c) => {
+                self.e(format!("mov eax, {}", *c as u32));
+                Ok(Ty::Int { bits: 32, signed: false })
+            }
+            ExprKind::Bool(b) => {
+                self.e(format!("mov eax, {}", *b as i32));
+                Ok(Ty::Bool)
+            }
+            ExprKind::Nil => {
+                self.e("xor eax, eax");
+                Ok(Ty::Nil)
+            }
+            ExprKind::Float(_) => self.err("floating point is not supported by the native backend yet"),
+            ExprKind::Text(parts) => self.text(parts),
+            ExprKind::Ident(name) => self.ident(name, want),
+            ExprKind::List(items) => {
+                let mut el_ty = match want {
+                    Some(Ty::List(t)) => Some((**t).clone()),
+                    _ => None,
+                };
+                let lt = self.temp();
+                let mut created = false;
+                for it in items {
+                    let t = self.value(it, el_ty.as_ref())?;
+                    match &el_ty {
+                        Some(w) => self.check(w, &t, "list element")?,
+                        None => el_ty = Some(t),
+                    }
+                    let first = self.temp();
+                    self.e(format!("mov qword ptr [rbp - {}], rax", first));
+                    if !created {
+                        let el = el_ty.clone().unwrap();
+                        self.new_list(&el);
+                        self.e(format!("mov qword ptr [rbp - {}], rax", lt));
+                        created = true;
+                    }
+                    self.e(format!("mov rdx, qword ptr [rbp - {}]", first));
+                    self.e(format!("mov rcx, qword ptr [rbp - {}]", lt));
+                    self.e("call rt_list_push");
+                    self.free(first);
+                }
+                let Some(el) = el_ty else {
+                    return self.err("cannot infer the element type of an empty list; add a type annotation");
+                };
+                if !created {
+                    self.new_list(&el);
+                    self.e(format!("mov qword ptr [rbp - {}], rax", lt));
+                }
+                self.e(format!("mov rax, qword ptr [rbp - {}]", lt));
+                self.free(lt);
+                Ok(Ty::List(Box::new(el)))
+            }
+            ExprKind::Map(_) => self.err("map literals are not supported by the native backend yet"),
+            ExprKind::Record { path, fields } => {
+                let r = self.record_name(path, &self.cur_mod.clone())?;
+                self.record_literal(&r, fields)?;
+                Ok(Ty::Rec(r))
+            }
+            ExprKind::Lambda { params, body } => self.lambda(params, body, want),
+            ExprKind::If { branches, else_body } => self.if_chain(branches, else_body.as_ref(), want, true),
+            ExprKind::Match { scrutinee, arms } => self.match_expr(scrutinee, arms, want, true),
+            ExprKind::New(_) => self.err("'new' is not supported by the native backend yet"),
+            ExprKind::Propagate(inner) => self.try_expr(inner),
+            ExprKind::Await(inner) => {
+                if !self.fs.allow_await {
+                    return self.err("`await` can only be used inside an `async func` or inside `main`");
+                }
+                if let ExprKind::Call { callee, args } = &inner.kind {
+                    if let ExprKind::Ident(n) = &callee.kind {
+                        if (n == "all" || n == "race")
+                            && args.len() == 1
+                            && self.lookup(n).is_none()
+                            && !self.funcs.contains_key(&(self.cur_mod.clone(), n.clone()))
+                        {
+                            return self.await_combinator(n, &args[0].value);
+                        }
+                    }
+                }
+                let t = self.expr(inner, None)?;
+                let Ty::Future(v) = t.clone() else {
+                    return self.err(format!("`await` needs a Future, found {}", t.show()));
+                };
+                let s = self.temp();
+                self.e(format!("mov qword ptr [rbp - {}], rax", s));
+                let sig = self.future_fn("wait")?;
+                self.emit_call(&[s], &format!("call {}", sig.sym), None);
+                self.free(s);
+                self.norm(&v);
+                Ok(*v)
+            }
+            ExprKind::Unary { op, expr: inner } => match *op {
+                "not" => {
+                    self.expr(inner, Some(&Ty::Bool))?;
+                    self.e("test rax, rax");
+                    self.e("sete al");
+                    self.e("movzx eax, al");
+                    Ok(Ty::Bool)
+                }
+                "-" => {
+                    let t = self.expr(inner, want)?;
+                    if !t.is_int() {
+                        return self.err(format!("unary '-' needs an integer, found {}", t.show()));
+                    }
+                    self.e("neg rax");
+                    self.norm(&t);
+                    Ok(t)
+                }
+                "bitnot" => {
+                    let t = self.expr(inner, want)?;
+                    self.e("not rax");
+                    self.norm(&t);
+                    Ok(t)
+                }
+                "&" => self.address_of(inner),
+                "*" => self.deref(inner),
+                _ => self.err(format!("unknown operator '{}'", op)),
+            },
+            ExprKind::Deref(inner) => self.deref(inner),
+            ExprKind::Binary { op, lhs, rhs } => self.binary(op, lhs, rhs, want),
+            ExprKind::Field { expr: obj, name, safe } => self.field(obj, name, *safe),
+            ExprKind::Index { expr: obj, index } => {
+                let (ot, own) = self.operand(obj, None)?;
+                let t = self.temp();
+                self.e(format!("mov qword ptr [rbp - {}], rax", t));
+                self.expr(index, None)?;
+                let res = match &ot {
+                    Ty::List(el) => {
+                        self.e("mov rdx, rax");
+                        self.e(format!("mov rcx, qword ptr [rbp - {}]", t));
+                        self.e("call rt_list_get");
+                        self.retain_if(el);
+                        (**el).clone()
+                    }
+                    Ty::Text => {
+                        self.e("mov rdx, rax");
+                        self.e(format!("mov rcx, qword ptr [rbp - {}]", t));
+                        self.e("call rt_text_byte");
+                        Ty::Int { bits: 8, signed: false }
+                    }
+                    Ty::Ptr(el) => {
+                        self.require_unsafe("reading through a raw pointer")?;
+                        let el = (**el).clone();
+                        self.e(format!("imul rax, rax, {}", el.size()));
+                        self.e(format!("add rax, qword ptr [rbp - {}]", t));
+                        self.load_mem(&el, "rax");
+                        self.retain_if(&el);
+                        el
+                    }
+                    _ => return self.err(format!("cannot index {}", ot.show())),
+                };
+                if own {
+                    self.release_slot(t);
+                }
+                self.free(t);
+                Ok(res)
+            }
+            ExprKind::Call { callee, args } => self.call(callee, args, want),
+        }
+    }
+
+    fn text(&mut self, parts: &[TextPart]) -> R<Ty> {
+        if parts.iter().all(|p| matches!(p, TextPart::Lit(_))) {
+            let s: String = parts.iter().map(|p| if let TextPart::Lit(l) = p { l.as_str() } else { "" }).collect();
+            let l = self.string_lit(&s);
+            self.e(format!("lea rax, {}", l));
+            return Ok(Ty::Text);
+        }
+        let acc = self.temp();
+        let part = self.temp();
+        let nw = self.temp();
+        for (i, p) in parts.iter().enumerate() {
+            match p {
+                TextPart::Lit(l) => {
+                    let lb = self.string_lit(l);
+                    self.e(format!("lea rax, {}", lb));
+                }
+                TextPart::Expr(x) => {
+                    let t = self.expr(x, None)?;
+                    self.to_text(&t)?;
+                }
+            }
+            if i == 0 {
+                self.e(format!("mov qword ptr [rbp - {}], rax", acc));
+            } else {
+                self.e(format!("mov qword ptr [rbp - {}], rax", part));
+                self.e(format!("mov rcx, qword ptr [rbp - {}]", acc));
+                self.e("mov rdx, rax");
+                self.e("call rt_concat");
+                self.e(format!("mov qword ptr [rbp - {}], rax", nw));
+                self.release_slot(acc);
+                self.release_slot(part);
+                self.e(format!("mov rax, qword ptr [rbp - {}]", nw));
+                self.e(format!("mov qword ptr [rbp - {}], rax", acc));
+            }
+        }
+        self.e(format!("mov rax, qword ptr [rbp - {}]", acc));
+        self.free(nw);
+        self.free(part);
+        self.free(acc);
+        Ok(Ty::Text)
+    }
+
+    fn ident(&mut self, name: &str, want: Option<&Ty>) -> R<Ty> {
+        if let Some(l) = self.lookup(name) {
+            self.e(format!("mov rax, qword ptr [rbp - {}]", l.off));
+            self.retain_if(&l.ty);
+            return Ok(l.ty);
+        }
+        let m = self.cur_mod.clone();
+        self.member(&m, name, want)
+    }
+
+    /// A global, constant, enum variant or function of module `m`, used as a value.
+    fn member(&mut self, m: &str, name: &str, want: Option<&Ty>) -> R<Ty> {
+        let key = (m.to_string(), name.to_string());
+        if let Some(g) = self.globals.get(&key) {
+            let ty = g.ty.clone();
+            match g.konst {
+                Some(k) => {
+                    self.e(format!("mov rax, {}", k));
+                    return Ok(match want {
+                        Some(t) if t.is_int() => t.clone(),
+                        _ => ty,
+                    });
+                }
+                None => {
+                    let s = g.sym.clone();
+                    self.e(format!("mov rax, qword ptr {}", s));
+                    self.retain_if(&ty);
+                    return Ok(ty);
+                }
+            }
+        }
+        if let Some(sig) = self.funcs.get(&key).cloned() {
+            if sig.is_extern {
+                return self.err(format!("extern function '{}' cannot be used as a value", name));
+            }
+            let ext = matches!(want, Some(Ty::Func { ext: true, .. }));
+            if ext {
+                self.e(format!("lea rax, {}", sig.sym));
+            } else {
+                self.fn_closures.insert(sig.sym.clone());
+                self.e(format!("lea rax, C_{}", sig.sym));
+            }
+            return Ok(sig.func_ty(ext));
+        }
+        if let Some((q, idx)) = self.variants.get(&key).cloned() {
+            return self.enum_construct(&q, idx, &[]);
+        }
+        if self.imports.get(&self.cur_mod).map_or(false, |i| i.contains(name)) {
+            return self.err(format!("module '{}' cannot be used as a value", name));
+        }
+        if m != self.cur_mod {
+            return self.err(format!("module '{}' has no member '{}'", m, name));
+        }
+        self.err(format!("undefined identifier '{}'", name))
+    }
+
+    /// Builds a value of enum `q`, variant `idx`, from call arguments.
+    fn enum_construct(&mut self, q: &str, idx: usize, args: &[Arg]) -> R<Ty> {
+        let info = self.enums[q].clone();
+        let (vname, tys) = info.variants[idx].clone();
+        if args.len() != tys.len() {
+            return self.err(format!("'{}' takes {} value(s), found {}", vname, tys.len(), args.len()));
+        }
+        if !info.payload {
+            self.e(format!("mov eax, {}", idx));
+        } else if tys.is_empty() {
+            self.enum_statics.insert((q.to_string(), idx));
+            self.e(format!("lea rax, E_{}_{}", sym_of(q), idx));
+        } else {
+            let drop = self.enum_drop(q);
+            self.alloc(info.size, &drop);
+            let t = self.temp();
+            self.e(format!("mov qword ptr [rbp - {}], rax", t));
+            self.e(format!("mov qword ptr [rax], {}", idx));
+            for (i, (a, ty)) in args.iter().zip(&tys).enumerate() {
+                let vt = self.value(&a.value, Some(ty))?;
+                self.check(ty, &vt, &format!("value {} of '{}'", i + 1, vname))?;
+                self.norm(ty);
+                self.e(format!("mov rcx, qword ptr [rbp - {}]", t));
+                self.e(format!("mov qword ptr [rcx + {}], rax", 8 + 8 * i));
+            }
+            self.e(format!("mov rax, qword ptr [rbp - {}]", t));
+            self.free(t);
+        }
+        Ok(Ty::Enum(q.to_string()))
+    }
+
+    fn address_of(&mut self, inner: &Expr) -> R<Ty> {
+        match &inner.kind {
+            ExprKind::Ident(name) => {
+                if let Some(l) = self.lookup(name) {
+                    if let Ty::Rec(_) = &l.ty {
+                        self.e(format!("mov rax, qword ptr [rbp - {}]", l.off));
+                    } else {
+                        if l.ty.size() < 8 {
+                            return self.err(format!("'&{}': address of a {} variable is not supported; use a record field", name, l.ty.show()));
+                        }
+                        self.e(format!("lea rax, [rbp - {}]", l.off));
+                    }
+                    return Ok(Ty::Ptr(Box::new(l.ty)));
+                }
+                let key = (self.cur_mod.clone(), name.clone());
+                if let Some(g) = self.globals.get(&key) {
+                    if g.konst.is_none() {
+                        let (s, t) = (g.sym.clone(), g.ty.clone());
+                        if let Ty::Rec(_) = &t {
+                            self.e(format!("mov rax, qword ptr {}", s));
+                        } else {
+                            self.e(format!("lea rax, {}", s));
+                        }
+                        return Ok(Ty::Ptr(Box::new(t)));
+                    }
+                }
+                self.err(format!("cannot take the address of '{}'", name))
+            }
+            ExprKind::Field { expr: obj, name, .. } => {
+                let (ot, _) = self.operand(obj, None)?;
+                let r = match &ot {
+                    Ty::Rec(r) => r.clone(),
+                    Ty::Ptr(p) if matches!(&**p, Ty::Rec(_)) => match &**p {
+                        Ty::Rec(r) => r.clone(),
+                        _ => unreachable!(),
+                    },
+                    _ => return self.err("'&' needs a variable or record field"),
+                };
+                let Some((fty, off)) = self.field_of(&r, name) else { return self.err(format!("{} has no field '{}'", r, name)) };
+                if let Ty::Rec(_) = &fty {
+                    self.e(format!("mov rax, qword ptr [rax + {}]", off));
+                } else {
+                    self.e(format!("lea rax, [rax + {}]", off));
+                }
+                Ok(Ty::Ptr(Box::new(fty)))
+            }
+            _ => self.err("'&' needs a variable or record field"),
+        }
+    }
+
+    fn deref(&mut self, inner: &Expr) -> R<Ty> {
+        let (t, _) = self.operand(inner, None)?;
+        let Ty::Ptr(el) = t else { return self.err(format!("'^' needs a pointer, found {}", t.show())) };
+        if let Ty::Rec(_) = &*el {
+            self.retain();
+            return Ok(*el);
+        }
+        self.require_unsafe("dereferencing a raw pointer")?;
+        self.load_mem(&el, "rax");
+        self.retain_if(&el);
+        Ok(*el)
+    }
+
+    fn binary(&mut self, op: &str, lhs: &Expr, rhs: &Expr, want: Option<&Ty>) -> R<Ty> {
+        match op {
+            "and" | "or" => {
+                let (skip, end) = (self.lbl("sc"), self.lbl("scend"));
+                self.expr(lhs, Some(&Ty::Bool))?;
+                self.e("test rax, rax");
+                self.e(format!("{} {}", if op == "and" { "jz" } else { "jnz" }, skip));
+                self.expr(rhs, Some(&Ty::Bool))?;
+                self.e("test rax, rax");
+                self.e(format!("{} {}", if op == "and" { "jz" } else { "jnz" }, skip));
+                self.e(format!("mov eax, {}", if op == "and" { 1 } else { 0 }));
+                self.e(format!("jmp {}", end));
+                self.label(&skip);
+                self.e(format!("mov eax, {}", if op == "and" { 0 } else { 1 }));
+                self.label(&end);
+                return Ok(Ty::Bool);
+            }
+            "??" => return self.coalesce(lhs, rhs, want),
+            ".." => return self.err("ranges are only supported in 'for' loops"),
+            _ => {}
+        }
+        let is_cmp = matches!(op, "==" | "!=" | "<" | "<=" | ">" | ">=");
+        let (lt, lown) = self.operand(lhs, if is_cmp { None } else { want })?;
+        let t1 = self.temp();
+        self.e(format!("mov qword ptr [rbp - {}], rax", t1));
+        let (rt, rown) = self.operand(rhs, Some(&lt))?;
+        let t2 = self.temp();
+        self.e(format!("mov qword ptr [rbp - {}], rax", t2));
+        self.e("mov rcx, rax");
+        self.e(format!("mov rax, qword ptr [rbp - {}]", t1));
+        let res = self.binary_core(op, &lt, &rt, is_cmp)?;
+        if lown && self.is_rc(&lt) {
+            self.release_slot(t1);
+        }
+        if rown && self.is_rc(&rt) {
+            self.release_slot(t2);
+        }
+        self.free(t2);
+        self.free(t1);
+        Ok(res)
+    }
+
+    /// rax = lhs, rcx = rhs. Leaves the result in rax.
+    fn binary_core(&mut self, op: &str, lt: &Ty, rt: &Ty, is_cmp: bool) -> R<Ty> {
+        if *lt == Ty::Text && *rt == Ty::Text {
+            match op {
+                "+" => {
+                    self.e("mov rdx, rcx");
+                    self.e("mov rcx, rax");
+                    self.e("call rt_concat");
+                    return Ok(Ty::Text);
+                }
+                "==" | "!=" => {
+                    self.e("mov rdx, rcx");
+                    self.e("mov rcx, rax");
+                    self.e("call rt_text_eq");
+                    if op == "!=" {
+                        self.e("xor eax, 1");
+                    }
+                    return Ok(Ty::Bool);
+                }
+                _ => return self.err(format!("operator '{}' is not defined for text", op)),
+            }
+        }
+        if is_cmp {
+            if !(compatible(lt, rt) || compatible(rt, lt)) {
+                return self.err(format!("cannot compare {} with {}", lt.show(), rt.show()));
+            }
+            if let (Ty::Enum(a), Ty::Enum(_)) = (lt, rt) {
+                if self.enum_payload.contains(a) {
+                    return self.err("enums with data cannot be compared with '=='; use `match`");
+                }
+            }
+            if matches!(lt, Ty::Result(_) | Ty::Err) || matches!(rt, Ty::Result(_) | Ty::Err) {
+                return self.err("a result cannot be compared; use `match`, `try` or `??`");
+            }
+            let unsigned = lt.is_unsigned() || rt.is_unsigned();
+            let cc = match (op, unsigned) {
+                ("==", _) => "e",
+                ("!=", _) => "ne",
+                ("<", false) => "l",
+                ("<=", false) => "le",
+                (">", false) => "g",
+                (">=", false) => "ge",
+                ("<", true) => "b",
+                ("<=", true) => "be",
+                (">", true) => "a",
+                (">=", true) => "ae",
+                _ => unreachable!(),
+            };
+            self.e("cmp rax, rcx");
+            self.e(format!("set{} al", cc));
+            self.e("movzx eax, al");
+            return Ok(Ty::Bool);
+        }
+        let ty = match (lt, rt) {
+            (Ty::Int { .. }, Ty::Int { .. }) => lt.clone(),
+            (Ty::Ptr(_), Ty::Int { .. }) if op == "+" || op == "-" => lt.clone(),
+            _ => return self.err(format!("operator '{}' is not defined for {} and {}", op, lt.show(), rt.show())),
+        };
+        let unsigned = ty.is_unsigned();
+        match op {
+            "+" => {
+                if let Ty::Ptr(el) = &ty {
+                    self.e(format!("imul rcx, rcx, {}", el.size()));
+                }
+                self.e("add rax, rcx")
+            }
+            "-" => {
+                if let Ty::Ptr(el) = &ty {
+                    self.e(format!("imul rcx, rcx, {}", el.size()));
+                }
+                self.e("sub rax, rcx")
+            }
+            "*" => self.e("imul rax, rcx"),
+            "/" | "%" => {
+                if unsigned {
+                    self.e("xor edx, edx");
+                    self.e("div rcx");
+                } else {
+                    self.e("cqo");
+                    self.e("idiv rcx");
+                }
+                if op == "%" {
+                    self.e("mov rax, rdx");
+                }
+            }
+            "bitand" => self.e("and rax, rcx"),
+            "bitor" => self.e("or rax, rcx"),
+            "bitxor" => self.e("xor rax, rcx"),
+            "<<" => self.e("shl rax, cl"),
+            ">>" => self.e(if unsigned { "shr rax, cl" } else { "sar rax, cl" }),
+            _ => return self.err(format!("unknown operator '{}'", op)),
+        }
+        self.norm(&ty);
+        Ok(ty)
+    }
+
+    /// `a ?? b`: a default for an optional value or for a failed call.
+    fn coalesce(&mut self, lhs: &Expr, rhs: &Expr, want: Option<&Ty>) -> R<Ty> {
+        let (lt, own) = self.operand(lhs, want)?;
+        if let Ty::Result(inner) = &lt {
+            let inner = (**inner).clone();
+            if inner == Ty::Void {
+                return self.err("'??' needs a call that returns a value");
+            }
+            let (other, end) = (self.lbl("coalt"), self.lbl("coalend"));
+            let s = self.temp();
+            self.e(format!("mov qword ptr [rbp - {}], rax", s));
+            self.e("mov rax, qword ptr [rax]");
+            self.e("test rax, rax");
+            self.e(format!("jnz {}", other));
+            self.e(format!("mov rax, qword ptr [rbp - {}]", s));
+            self.e("mov rax, qword ptr [rax + 8]");
+            self.retain_if(&inner);
+            if own {
+                self.release_slot(s);
+            }
+            self.e(format!("jmp {}", end));
+            self.label(&other);
+            if own {
+                self.release_slot(s);
+            }
+            let rt = self.value(rhs, Some(&inner))?;
+            self.check(&inner, &rt, "'??'")?;
+            self.label(&end);
+            self.free(s);
+            return Ok(inner);
+        }
+        if !lt.nullable() {
+            return self.err(format!("'??' needs an optional value, found {}", lt.show()));
+        }
+        if !own {
+            self.retain_if(&lt);
+        }
+        let end = self.lbl("coal");
+        self.e("test rax, rax");
+        self.e(format!("jnz {}", end));
+        let rt = self.value(rhs, Some(&lt))?;
+        self.check(&lt, &rt, "'??'")?;
+        self.label(&end);
+        Ok(lt)
+    }
+
+    fn field(&mut self, obj: &Expr, name: &str, safe: bool) -> R<Ty> {
+        if let ExprKind::Ident(m) = &obj.kind {
+            if self.is_module(m) {
+                if m == "c" {
+                    return self.err(format!("'c.{}' must be called", name));
+                }
+                return self.member(&m.clone(), name, None);
+            }
+            if let Some(q) = self.enum_type_named(m) {
+                let Some(idx) = self.enums[&q].variants.iter().position(|v| v.0 == name) else {
+                    return self.err(format!("enum {} has no variant '{}'", m, name));
+                };
+                return self.enum_construct(&q, idx, &[]);
+            }
+        }
+        let (ot, own) = self.operand(obj, None)?;
+        let s = self.temp();
+        self.e(format!("mov qword ptr [rbp - {}], rax", s));
+        let end = self.lbl("safe");
+        if safe {
+            self.e("test rax, rax");
+            self.e(format!("jz {}", end));
+        }
+        let res = match &ot {
+            Ty::Rec(r) => self.rec_field(&r.clone(), name, own)?,
+            Ty::Ptr(p) if matches!(&**p, Ty::Rec(_)) => {
+                let Ty::Rec(r) = &**p else { unreachable!() };
+                let f = self.field_of(r, name);
+                match f {
+                    Some((fty, off)) => {
+                        self.load_mem(&fty, &format!("rax + {}", off));
+                        self.retain_if(&fty);
+                        fty
+                    }
+                    None => return self.err(format!("{} has no field '{}'", r, name)),
+                }
+            }
+            Ty::List(_) | Ty::Text if name == "len" => {
+                self.e("mov rax, qword ptr [rax]");
+                Ty::i64()
+            }
+            Ty::Err if name == "message" => {
+                self.e("mov rax, qword ptr [rax]");
+                self.retain();
+                Ty::Text
+            }
+            _ => return self.err(format!("{} has no field '{}'", ot.show(), name)),
+        };
+        // property getters consume their receiver themselves
+        let consumed = matches!(&ot, Ty::Rec(r) if self.field_of(r, name).is_none());
+        if own && self.is_rc(&ot) && !consumed {
+            let keep = self.temp();
+            self.e(format!("mov qword ptr [rbp - {}], rax", keep));
+            self.release_slot(s);
+            self.e(format!("mov rax, qword ptr [rbp - {}]", keep));
+            self.free(keep);
+        }
+        if safe {
+            self.label(&end);
+        }
+        self.free(s);
+        Ok(res)
+    }
+
+    /// Field of the record in rax, or a property getter (a method without
+    /// parameters). `own`: the receiver is an owned reference.
+    fn rec_field(&mut self, r: &str, name: &str, own: bool) -> R<Ty> {
+        if let Some((fty, off)) = self.field_of(r, name) {
+            self.load_mem(&fty, &format!("rax + {}", off));
+            self.retain_if(&fty);
+            return Ok(fty);
+        }
+        if let Some(sig) = self.methods.get(&(r.to_string(), name.to_string())).cloned() {
+            if sig.params.is_empty() && sig.ret != Ty::Void {
+                if !own {
+                    self.retain();
+                }
+                let t = self.temp();
+                self.e(format!("mov qword ptr [rbp - {}], rax", t));
+                self.emit_call(&[t], &format!("call {}", sig.sym), None);
+                self.free(t);
+                return Ok(sig.ret);
+            }
+        }
+        self.err(format!("{} has no field '{}'", r, name))
+    }
+
+    /// Allocates a record and initializes it from `fields`.
+    fn record_literal(&mut self, r: &str, fields: &[(String, Expr)]) -> R<()> {
+        let size = self.rec_size(r);
+        let drop = self.rec_drop(r);
+        self.alloc(size, &drop);
+        let t = self.temp();
+        self.e(format!("mov qword ptr [rbp - {}], rax", t));
+        let decl: Vec<(String, Ty, u32)> = self.records[r].fields.clone();
+        for (fname, _) in fields {
+            if !decl.iter().any(|d| &d.0 == fname) {
+                return self.err(format!("{} has no field '{}'", r, fname));
+            }
+        }
+        for (fname, fty, off) in decl {
+            match fields.iter().find(|f| f.0 == fname) {
+                Some((_, fe)) => {
+                    let vt = self.value(fe, Some(&fty))?;
+                    self.check(&fty, &vt, &format!("field '{}'", fname))?;
+                    self.norm(&fty);
+                }
+                None => match &fty {
+                    Ty::List(el) => self.new_list(&el.clone()),
+                    Ty::Text => {
+                        let l = self.string_lit("");
+                        self.e(format!("lea rax, {}", l));
+                    }
+                    _ => continue,
+                },
+            }
+            self.e(format!("mov rcx, qword ptr [rbp - {}]", t));
+            self.store_mem(&fty, &format!("rcx + {}", off));
+        }
+        self.e(format!("mov rax, qword ptr [rbp - {}]", t));
+        self.free(t);
+        Ok(())
+    }
+
+    fn if_chain(&mut self, branches: &[(Expr, Block)], else_body: Option<&Block>, want: Option<&Ty>, as_value: bool) -> R<Ty> {
+        let end = self.lbl("ifend");
+        let mut ty: Option<Ty> = None;
+        for (cond, body) in branches {
+            let next = self.lbl("ifnext");
+            let m = self.fs.stmt_temps.len();
+            self.expr(cond, Some(&Ty::Bool))?;
+            self.flush_temps(m);
+            self.e("test rax, rax");
+            self.e(format!("jz {}", next));
+            let t = self.block_value(body, want, as_value)?;
+            if ty.is_none() {
+                ty = Some(t);
+            }
+            self.e(format!("jmp {}", end));
+            self.label(&next);
+        }
+        match else_body {
+            Some(b) => {
+                self.block_value(b, want, as_value)?;
+            }
+            None if as_value => self.e("xor eax, eax"),
+            None => {}
+        }
+        self.label(&end);
+        Ok(if as_value { ty.unwrap_or(Ty::Void) } else { Ty::Void })
+    }
+
+    /// Runs a block; with `as_value`, a trailing expression is its value (in rax).
+    fn block_value(&mut self, b: &[Stmt], want: Option<&Ty>, as_value: bool) -> R<Ty> {
+        self.push_scope();
+        let mut ty = Ty::Void;
+        for (i, s) in b.iter().enumerate() {
+            if as_value && i + 1 == b.len() {
+                if let StmtKind::Expr(e) = &s.kind {
+                    self.line = s.line;
+                    let mark = self.fs.stmt_temps.len();
+                    ty = self.value(e, want)?;
+                    self.flush_temps(mark);
+                    continue;
+                }
+            }
+            self.stmt(s)?;
+        }
+        self.pop_scope();
+        Ok(ty)
+    }
+
+    // ---------------- match ----------------
+
+    fn match_expr(&mut self, scrut: &Expr, arms: &[MatchArm], want: Option<&Ty>, as_value: bool) -> R<Ty> {
+        self.push_scope();
+        let (st, own) = self.operand(scrut, None)?;
+        let s = if own {
+            let h = self.hidden_local(st.clone());
+            h
+        } else {
+            self.slot()
+        };
+        self.e(format!("mov qword ptr [rbp - {}], rax", s));
+        let end = self.lbl("mend");
+        let mut result = Ty::Void;
+        let mut got_result = false;
+        let mut covered: Vec<String> = Vec::new();
+        let mut catch_all = false;
+
+        for arm in arms {
+            let body_l = self.lbl("mbody");
+            let next_l = self.lbl("mnext");
+            let mut binds: Option<(String, Vec<String>)> = None;
+            let mut catch_name: Option<String> = None;
+            for atom in &arm.pattern {
+                match atom {
+                    PatAtom::Wildcard => {
+                        catch_all = true;
+                        self.e(format!("jmp {}", body_l));
+                    }
+                    PatAtom::Literal(lit) => {
+                        self.pattern_literal(&st, s, lit, &body_l)?;
+                    }
+                    PatAtom::Name { name, bindings } => match &st {
+                        Ty::Enum(q) => {
+                            let info = self.enums[q].clone();
+                            if let Some(idx) = info.variants.iter().position(|v| &v.0 == name) {
+                                let want_n = info.variants[idx].1.len();
+                                let got_n = bindings.as_ref().map_or(0, |b| b.len());
+                                if got_n != want_n {
+                                    return self.err(format!("'{}' has {} value(s), the pattern names {}", name, want_n, got_n));
+                                }
+                                covered.push(name.clone());
+                                self.e(format!("mov rax, qword ptr [rbp - {}]", s));
+                                if info.payload {
+                                    self.e("mov rax, qword ptr [rax]");
+                                }
+                                self.e(format!("cmp rax, {}", idx));
+                                self.e(format!("je {}", body_l));
+                                if let Some(b) = bindings {
+                                    binds = Some((name.clone(), b.clone()));
+                                }
+                            } else if bindings.is_none() {
+                                catch_all = true;
+                                catch_name = Some(name.clone());
+                                self.e(format!("jmp {}", body_l));
+                            } else {
+                                return self.err(format!("enum {} has no variant '{}'", st.show(), name));
+                            }
+                        }
+                        Ty::Result(inner) => {
+                            let n = bindings.as_ref().map_or(0, |b| b.len());
+                            match name.as_str() {
+                                "ok" => {
+                                    if n > 1 || (n == 1 && **inner == Ty::Void) {
+                                        return self.err("'ok' binds the value of the call (none for `-> error`)");
+                                    }
+                                    covered.push("ok".into());
+                                    self.e(format!("mov rax, qword ptr [rbp - {}]", s));
+                                    self.e("mov rax, qword ptr [rax]");
+                                    self.e("test rax, rax");
+                                    self.e(format!("jz {}", body_l));
+                                }
+                                "err" => {
+                                    if n > 1 {
+                                        return self.err("'err' binds one value: the error");
+                                    }
+                                    covered.push("err".into());
+                                    self.e(format!("mov rax, qword ptr [rbp - {}]", s));
+                                    self.e("mov rax, qword ptr [rax]");
+                                    self.e("test rax, rax");
+                                    self.e(format!("jnz {}", body_l));
+                                }
+                                _ => return self.err("a result is matched with `ok(value)` and `err(e)`"),
+                            }
+                            if let Some(b) = bindings {
+                                binds = Some((name.clone(), b.clone()));
+                            }
+                        }
+                        _ => {
+                            if bindings.is_some() {
+                                return self.err(format!("cannot match {} against '{}(...)'", st.show(), name));
+                            }
+                            catch_all = true;
+                            catch_name = Some(name.clone());
+                            self.e(format!("jmp {}", body_l));
+                        }
+                    },
+                }
+            }
+            self.e(format!("jmp {}", next_l));
+            self.label(&body_l);
+            self.push_scope();
+            if let Some(n) = catch_name {
+                if n != "_" {
+                    self.e(format!("mov rax, qword ptr [rbp - {}]", s));
+                    self.retain_if(&st);
+                    let off = self.declare_local(&n, st.clone(), false);
+                    self.e(format!("mov qword ptr [rbp - {}], rax", off));
+                }
+            }
+            if let Some((vname, names)) = binds {
+                let tys: Vec<Ty> = match &st {
+                    Ty::Enum(q) => self.enums[q].variants.iter().find(|v| v.0 == vname).map(|v| v.1.clone()).unwrap_or_default(),
+                    Ty::Result(inner) => {
+                        if vname == "ok" {
+                            vec![(**inner).clone()]
+                        } else {
+                            vec![Ty::Err]
+                        }
+                    }
+                    _ => vec![],
+                };
+                for (i, n) in names.iter().enumerate() {
+                    if n == "_" {
+                        continue;
+                    }
+                    let ty = tys[i].clone();
+                    self.e(format!("mov rax, qword ptr [rbp - {}]", s));
+                    match &st {
+                        Ty::Enum(_) => self.e(format!("mov rax, qword ptr [rax + {}]", 8 + 8 * i)),
+                        Ty::Result(_) if vname == "ok" => self.e("mov rax, qword ptr [rax + 8]"),
+                        _ => self.e("mov rax, qword ptr [rax]"),
+                    }
+                    self.retain_if(&ty);
+                    let off = self.declare_local(n, ty, false);
+                    self.e(format!("mov qword ptr [rbp - {}], rax", off));
+                }
+            }
+            let t = self.block_value(&arm.body, want, as_value)?;
+            self.pop_scope();
+            if !got_result && t != Ty::Void {
+                result = t;
+                got_result = true;
+            }
+            self.e(format!("jmp {}", end));
+            self.label(&next_l);
+        }
+
+        // exhaustiveness
+        if !catch_all {
+            let missing: Vec<String> = match &st {
+                Ty::Enum(q) => self.enums[q].variants.iter().map(|v| v.0.clone()).filter(|n| !covered.contains(n)).collect(),
+                Ty::Result(_) => ["ok", "err"].iter().map(|s| s.to_string()).filter(|n| !covered.contains(n)).collect(),
+                _ => vec![],
+            };
+            if !missing.is_empty() {
+                return self.err(format!("'match' is not exhaustive: missing {}; add the cases or `_ ->`", missing.join(", ")));
+            }
+        }
+        if as_value {
+            self.e("xor eax, eax");
+        }
+        self.label(&end);
+        self.pop_scope();
+        Ok(if as_value { result } else { Ty::Void })
+    }
+
+    fn pattern_literal(&mut self, st: &Ty, s: i32, lit: &Expr, body: &str) -> R<()> {
+        match &lit.kind {
+            ExprKind::Text(parts) if *st == Ty::Text => {
+                let txt: String = parts.iter().map(|p| if let TextPart::Lit(l) = p { l.as_str() } else { "" }).collect();
+                let l = self.string_lit(&txt);
+                self.e(format!("mov rcx, qword ptr [rbp - {}]", s));
+                self.e(format!("lea rdx, {}", l));
+                self.e("call rt_text_eq");
+                self.e("test rax, rax");
+                self.e(format!("jnz {}", body));
+            }
+            ExprKind::Nil if st.nullable() => {
+                self.e(format!("cmp qword ptr [rbp - {}], 0", s));
+                self.e(format!("je {}", body));
+            }
+            _ => {
+                let v = match &lit.kind {
+                    ExprKind::Bool(b) => Some(*b as i64),
+                    _ => self.const_eval(lit, &self.cur_mod.clone()),
+                };
+                let Some(v) = v else { return self.err(format!("this pattern cannot be matched against {}", st.show())) };
+                if !(st.is_int() || *st == Ty::Bool) {
+                    return self.err(format!("a number pattern cannot match {}", st.show()));
+                }
+                self.e(format!("mov rax, qword ptr [rbp - {}]", s));
+                self.e(format!("mov rcx, {}", v));
+                self.e("cmp rax, rcx");
+                self.e(format!("je {}", body));
+            }
+        }
+        Ok(())
+    }
+
+    // ---------------- try ----------------
+
+    fn try_expr(&mut self, inner: &Expr) -> R<Ty> {
+        let Ty::Result(ret_inner) = self.fs.ret.clone() else {
+            return self.err("'try' can only be used inside a function that ends with `or error`");
+        };
+        let (t, own) = self.operand(inner, None)?;
+        let Ty::Result(v) = t.clone() else {
+            return self.err(format!("'try' needs a call that can fail, found {}", t.show()));
+        };
+        let s = self.temp();
+        let (ok_l,) = (self.lbl("tryok"),);
+        self.e(format!("mov qword ptr [rbp - {}], rax", s));
+        self.e("mov rcx, qword ptr [rax]");
+        self.e("test rcx, rcx");
+        self.e(format!("jz {}", ok_l));
+        // failure: hand the same error to our caller
+        self.e("mov rax, rcx");
+        self.retain();
+        let e2 = self.temp();
+        self.e(format!("mov qword ptr [rbp - {}], rax", e2));
+        if own {
+            self.release_slot(s);
+        }
+        self.e(format!("mov rax, qword ptr [rbp - {}]", e2));
+        self.mk_err(&ret_inner);
+        self.flush_all_temps_emit();
+        self.emit_unwind(0);
+        let rl = self.fs.ret_label.clone();
+        self.e(format!("jmp {}", rl));
+        self.free(e2);
+        self.label(&ok_l);
+        if *v != Ty::Void {
+            self.e(format!("mov rax, qword ptr [rbp - {}]", s));
+            self.e("mov rax, qword ptr [rax + 8]");
+            self.retain_if(&v);
+            if own {
+                let keep = self.temp();
+                self.e(format!("mov qword ptr [rbp - {}], rax", keep));
+                self.release_slot(s);
+                self.e(format!("mov rax, qword ptr [rbp - {}]", keep));
+                self.free(keep);
+            }
+        } else if own {
+            self.release_slot(s);
+        }
+        self.free(s);
+        Ok(*v)
+    }
+
+    // ---------------- closures ----------------
+
+    fn lambda(&mut self, params: &[Param], body: &[Stmt], want: Option<&Ty>) -> R<Ty> {
+        let allow_await = std::mem::take(&mut self.next_lambda_await);
+        let infer_ret = !matches!(want, Some(Ty::Func { .. }));
+        let (wparams, wret) = match want {
+            Some(Ty::Func { params, ret, ext: false }) => (Some(params.clone()), (**ret).clone()),
+            Some(Ty::Func { ext: true, .. }) => return self.err("a closure cannot be used as an extern callback; pass a top-level function"),
+            _ => (None, Ty::Void),
+        };
+        let mut ptys = Vec::new();
+        for (i, p) in params.iter().enumerate() {
+            let t = match (&p.ty, &wparams) {
+                (Some(t), _) => self.resolve(t, &self.cur_mod.clone())?,
+                (None, Some(wp)) if i < wp.len() => wp[i].clone(),
+                _ => return self.err(format!("cannot infer the type of lambda parameter '{}'", p.name)),
+            };
+            ptys.push((p.name.clone(), t, true));
+        }
+        if let Some(wp) = &wparams {
+            if wp.len() != params.len() {
+                return self.err(format!("expected a function with {} parameter(s), found {}", wp.len(), params.len()));
+            }
+        }
+        // Free variables that are locals of the enclosing function.
+        let mut used = Vec::new();
+        collect_block(body, &mut used);
+        let pnames: HashSet<&String> = params.iter().map(|p| &p.name).collect();
+        let mut caps: Vec<(String, Local)> = Vec::new();
+        for n in used {
+            if pnames.contains(&n) || caps.iter().any(|c| c.0 == n) {
+                continue;
+            }
+            if let Some(l) = self.lookup(&n) {
+                caps.push((n, l));
+            }
+        }
+        let env_rc = caps.iter().any(|c| self.is_rc(&c.1.ty));
+        let sym = self.lbl("L");
+        let env_drop = if env_rc { format!("{}_env", sym) } else { "0".to_string() };
+        // Environment block with captured values (records are copied).
+        let env = self.temp();
+        if caps.is_empty() {
+            self.e(format!("mov qword ptr [rbp - {}], 0", env));
+        } else {
+            self.alloc(8 * caps.len() as u32, &env_drop);
+            self.e(format!("mov qword ptr [rbp - {}], rax", env));
+            for (i, (_, l)) in caps.iter().enumerate() {
+                self.e(format!("mov rax, qword ptr [rbp - {}]", l.off));
+                if matches!(&l.ty, Ty::Rec(r) if !self.shared_recs.contains(r)) {
+                    let Ty::Rec(r) = &l.ty else { unreachable!() };
+                    self.e("mov rcx, rax");
+                    self.e(format!("call B_copy_{}", sym_of(r)));
+                } else {
+                    self.retain_if(&l.ty);
+                }
+                self.e(format!("mov rcx, qword ptr [rbp - {}]", env));
+                self.e(format!("mov qword ptr [rcx + {}], rax", 8 * i));
+            }
+        }
+        // Compile the body as its own procedure.
+        let rl = self.lbl("ret");
+        let saved = std::mem::replace(&mut self.fs, FnState::new(wret.clone(), rl));
+        self.fs.unsafe_depth = saved.unsafe_depth;
+        self.fs.allow_await = allow_await;
+        let env_slot = self.slot();
+        let mut pro = self.bind_params(&ptys, Some(env_slot));
+        for (i, (n, l)) in caps.iter().enumerate() {
+            let off = self.slot();
+            pro.push(format!("    mov rax, qword ptr [rbp - {}]", env_slot));
+            pro.push(format!("    mov rax, qword ptr [rax + {}]", 8 * i));
+            if self.is_rc(&l.ty) {
+                pro.push("    mov rcx, rax".to_string());
+                pro.push("    call rt_retain".to_string());
+            }
+            pro.push(format!("    mov qword ptr [rbp - {}], rax", off));
+            let rc = self.is_rc(&l.ty);
+            let sc = &mut self.fs.scopes[0];
+            sc.vars.insert(n.clone(), Local { off, ty: l.ty.clone(), mutable: false, captured: true });
+            if rc {
+                sc.owned.push((off, l.ty.clone()));
+            }
+        }
+        let mut inferred: Option<Ty> = None;
+        let r = (|| -> R<()> {
+            if infer_ret {
+                let t = self.block_value(body, None, true)?;
+                if t != Ty::Void {
+                    self.norm(&t);
+                    inferred = Some(t);
+                }
+            } else if let Ty::Result(inner) = wret.clone() {
+                self.block_value(body, Some(&wret), false)?;
+                self.e("xor eax, eax");
+                self.mk_ok(&inner);
+            } else {
+                let t = self.block_value(body, Some(&wret), wret != Ty::Void)?;
+                if wret != Ty::Void && t != Ty::Void {
+                    self.check(&wret, &t, "lambda result")?;
+                    self.norm(&wret);
+                }
+            }
+            self.emit_unwind(0);
+            Ok(())
+        })();
+        let proc_text = self.finish_proc(&sym, pro, false);
+        self.fs = saved;
+        r?;
+        self.procs.push(proc_text);
+        if env_rc {
+            let mut d = format!("{}_env proc\n    push rbp\n    mov rbp, rsp\n    sub rsp, 48\n    mov qword ptr [rbp - 8], rcx\n", sym);
+            for (i, (_, l)) in caps.iter().enumerate() {
+                if self.is_rc(&l.ty) {
+                    d.push_str(&format!(
+                        "    mov rcx, qword ptr [rbp - 8]\n    mov rcx, qword ptr [rcx + {}]\n    call rt_release\n",
+                        8 * i
+                    ));
+                }
+            }
+            d.push_str(&format!("    mov rsp, rbp\n    pop rbp\n    ret\n{}_env endp\n", sym));
+            self.procs.push(d);
+        }
+        // Closure object [code, env]; it owns the environment.
+        self.alloc(16, "rt_drop_closure");
+        self.e(format!("lea rcx, {}", sym));
+        self.e("mov qword ptr [rax], rcx");
+        self.e(format!("mov rcx, qword ptr [rbp - {}]", env));
+        self.e("mov qword ptr [rax + 8], rcx");
+        self.free(env);
+        let wret = inferred.unwrap_or(wret);
+        Ok(Ty::Func { params: ptys.into_iter().map(|p| p.1).collect(), ret: Box::new(wret), ext: false })
+    }
+
+    // ---------------- calls ----------------
+
+    /// Loads argument temps into registers / stack and emits the call.
+    fn emit_call(&mut self, temps: &[i32], call: &str, closure: Option<(i32, bool)>) {
+        self.fs.max_args = self.fs.max_args.max(temps.len());
+        for (i, t) in temps.iter().enumerate().skip(4) {
+            self.e(format!("mov rax, qword ptr [rbp - {}]", t));
+            self.e(format!("mov qword ptr [rsp + {}], rax", 32 + 8 * (i - 4)));
+        }
+        for (i, t) in temps.iter().enumerate().take(4) {
+            self.e(format!("mov {}, qword ptr [rbp - {}]", ARG_REGS[i], t));
+        }
+        match closure {
+            Some((c, false)) => {
+                self.e(format!("mov rax, qword ptr [rbp - {}]", c));
+                self.e("mov r10, qword ptr [rax + 8]");
+                self.e("call qword ptr [rax]");
+            }
+            Some((c, true)) => {
+                self.e(format!("mov rax, qword ptr [rbp - {}]", c));
+                self.e("call rax");
+            }
+            None => self.e(call),
+        }
+    }
+
+    fn call(&mut self, callee: &Expr, args: &[Arg], want: Option<&Ty>) -> R<Ty> {
+        match &callee.kind {
+            ExprKind::Ident(name) if self.lookup(name).is_none() => {
+                if let Some(t) = int_type(name).or(if name == "bool" { Some(Ty::Bool) } else { None }) {
+                    if args.len() != 1 {
+                        return self.err(format!("{}() takes one argument", name));
+                    }
+                    let at = self.expr(&args[0].value, None)?;
+                    if !(at.is_int() || matches!(at, Ty::Ptr(_) | Ty::Bool | Ty::Func { ext: true, .. })) {
+                        return self.err(format!("cannot convert {} to {}", at.show(), name));
+                    }
+                    if t == Ty::Bool {
+                        self.e("test rax, rax");
+                        self.e("setnz al");
+                        self.e("movzx eax, al");
+                    }
+                    self.norm(&t);
+                    return Ok(t);
+                }
+                if name == "print" || name == "println" {
+                    let mut first = true;
+                    for a in args {
+                        if !first {
+                            let sp = self.string_lit(" ");
+                            self.e(format!("lea rcx, {}", sp));
+                            self.e("call rt_write_out");
+                        }
+                        first = false;
+                        let t = self.expr(&a.value, None)?;
+                        self.to_text(&t)?;
+                        let keep = self.temp();
+                        self.e(format!("mov qword ptr [rbp - {}], rax", keep));
+                        self.e("mov rcx, rax");
+                        self.e("call rt_write_out");
+                        self.release_slot(keep);
+                        self.free(keep);
+                    }
+                    let nl = self.string_lit("\n");
+                    self.e(format!("lea rcx, {}", nl));
+                    self.e("call rt_write_out");
+                    return Ok(Ty::Void);
+                }
+                if name == "error" && args.len() == 1 {
+                    let t = self.expr(&args[0].value, Some(&Ty::Text))?;
+                    self.check(&Ty::Text, &t, "error message")?;
+                    let tmp = self.temp();
+                    self.e(format!("mov qword ptr [rbp - {}], rax", tmp));
+                    self.alloc(8, "rt_drop_error");
+                    self.e(format!("mov rcx, qword ptr [rbp - {}]", tmp));
+                    self.e("mov qword ptr [rax], rcx");
+                    self.free(tmp);
+                    return Ok(Ty::Err);
+                }
+                if name == "chr" && args.len() == 1 {
+                    let t = self.expr(&args[0].value, None)?;
+                    if !t.is_int() {
+                        return self.err(format!("chr() needs a number, found {}", t.show()));
+                    }
+                    self.e("mov rcx, rax");
+                    self.e("call rt_text_chr");
+                    return Ok(Ty::Text);
+                }
+                if name == "heap_bytes" && args.is_empty() {
+                    if self.target != Target::Bare {
+                        return self.err("heap_bytes() is only available in a bare-metal kernel");
+                    }
+                    self.e("mov rax, qword ptr rt_brk");
+                    self.e("sub rax, 2097152");
+                    return Ok(Ty::i64());
+                }
+                if name == "live_objects" && args.is_empty() {
+                    self.e("mov rax, qword ptr rt_live");
+                    return Ok(Ty::i64());
+                }
+                if name == "channel" {
+                    return self.channel_new(args);
+                }
+                if name == "timeout" && args.len() == 2 && !self.funcs.contains_key(&(self.cur_mod.clone(), name.clone())) {
+                    return self.timeout_future(&args[0].value, &args[1].value);
+                }
+                if name == "sleep" && args.len() == 1 && !self.funcs.contains_key(&(self.cur_mod.clone(), name.clone())) {
+                    let t = self.expr(&args[0].value, Some(&Ty::i64()))?;
+                    if !t.is_int() {
+                        return self.err(format!("sleep() needs a number of milliseconds, found {}", t.show()));
+                    }
+                    let s = self.temp();
+                    self.e(format!("mov qword ptr [rbp - {}], rax", s));
+                    let sig = self.future_fn("sleep_future")?;
+                    self.emit_call(&[s], &format!("call {}", sig.sym), None);
+                    self.free(s);
+                    return Ok(Ty::Future(Box::new(Ty::Void)));
+                }
+                let key = (self.cur_mod.clone(), name.clone());
+                if let Some(sig) = self.funcs.get(&key).cloned() {
+                    return self.call_sig(&sig, None, args);
+                }
+                if let Some((q, idx)) = self.variants.get(&key).cloned() {
+                    return self.enum_construct(&q, idx, args);
+                }
+                if self.globals.contains_key(&key) {
+                    let t = self.expr(callee, None)?;
+                    return self.call_value(t, args);
+                }
+                self.err(format!("undefined function '{}'", name))
+            }
+            ExprKind::Field { expr: obj, name, .. } => {
+                if let ExprKind::Ident(m) = &obj.kind {
+                    if self.is_module(m) {
+                        if m == "c" {
+                            return self.c_intrinsic(name, args);
+                        }
+                        let key = (m.clone(), name.clone());
+                        return match self.funcs.get(&key).cloned() {
+                            Some(sig) => self.call_sig(&sig, None, args),
+                            None if self.modules.iter().any(|x| &x.name == m) => {
+                                if let Some((q, idx)) = self.variants.get(&key).cloned() {
+                                    return self.enum_construct(&q, idx, args);
+                                }
+                                if self.globals.contains_key(&key) {
+                                    let t = self.member(&m.clone(), name, None)?;
+                                    return self.call_value(t, args);
+                                }
+                                self.err(format!("module '{}' has no function '{}'", m, name))
+                            }
+                            None => self.err(format!("module '{}' is not available in the native backend", m)),
+                        };
+                    }
+                    if let Some(q) = self.enum_type_named(m) {
+                        let Some(idx) = self.enums[&q].variants.iter().position(|v| &v.0 == name) else {
+                            return self.err(format!("enum {} has no variant '{}'", m, name));
+                        };
+                        return self.enum_construct(&q, idx, args);
+                    }
+                }
+                let ot = self.expr(obj, None)?;
+                let r = match &ot {
+                    Ty::Rec(r) => Some(r.clone()),
+                    _ => None,
+                };
+                if let Some(r) = r {
+                    if let Some(sig) = self.methods.get(&(r.clone(), name.clone())).cloned() {
+                        // the method owns its receiver, which expr() handed over
+                        let t = self.temp();
+                        self.e(format!("mov qword ptr [rbp - {}], rax", t));
+                        let res = self.call_sig(&sig, Some(t), args);
+                        self.free(t);
+                        return res;
+                    }
+                    if let Some((fty @ Ty::Func { .. }, off)) = self.field_of(&r, name) {
+                        // closure stored in a field: keep it alive for the call
+                        let s = self.temp();
+                        self.e(format!("mov qword ptr [rbp - {}], rax", s));
+                        self.e(format!("mov rax, qword ptr [rax + {}]", off));
+                        self.retain_if(&fty);
+                        let res = self.call_value(fty, args);
+                        self.release_slot(s);
+                        self.free(s);
+                        return res;
+                    }
+                    return self.err(format!("{} has no method '{}'", r, name));
+                }
+                if ot == Ty::Text && name == "slice" {
+                    if args.len() != 2 {
+                        return self.err("slice(start, end) takes two numbers");
+                    }
+                    let t = self.temp();
+                    let a = self.temp();
+                    self.e(format!("mov qword ptr [rbp - {}], rax", t));
+                    self.expr(&args[0].value, Some(&Ty::i64()))?;
+                    self.e(format!("mov qword ptr [rbp - {}], rax", a));
+                    self.expr(&args[1].value, Some(&Ty::i64()))?;
+                    self.e("mov r8, rax");
+                    self.e(format!("mov rdx, qword ptr [rbp - {}]", a));
+                    self.e(format!("mov rcx, qword ptr [rbp - {}]", t));
+                    self.e("call rt_text_slice");
+                    let keep = self.temp();
+                    self.e(format!("mov qword ptr [rbp - {}], rax", keep));
+                    self.release_slot(t);
+                    self.e(format!("mov rax, qword ptr [rbp - {}]", keep));
+                    self.free(keep);
+                    self.free(a);
+                    self.free(t);
+                    return Ok(Ty::Text);
+                }
+                if let Ty::Chan(el) = &ot {
+                    return self.chan_method(el, name, args);
+                }
+                if let Ty::List(el) = &ot {
+                    let t = self.temp();
+                    self.e(format!("mov qword ptr [rbp - {}], rax", t));
+                    let res = (|| -> R<Ty> {
+                        if name == "add" || name == "push" {
+                            if args.len() != 1 {
+                                return self.err(format!("'{}' takes one argument", name));
+                            }
+                            let vt = self.value(&args[0].value, Some(el))?;
+                            self.check(el, &vt, "list element")?;
+                            self.e("mov rdx, rax");
+                            self.e(format!("mov rcx, qword ptr [rbp - {}]", t));
+                            self.e("call rt_list_push");
+                            return Ok(Ty::Void);
+                        }
+                        if name == "clear" {
+                            self.e(format!("mov rcx, qword ptr [rbp - {}]", t));
+                            self.e("call rt_list_clear");
+                            return Ok(Ty::Void);
+                        }
+                        if name == "take" {
+                            self.e(format!("mov rcx, qword ptr [rbp - {}]", t));
+                            self.e("call rt_list_take");
+                            return Ok((**el).clone());
+                        }
+                        self.err(format!("{} has no method '{}'", ot.show(), name))
+                    })();
+                    self.release_slot(t);
+                    self.free(t);
+                    return res;
+                }
+                self.err(format!("{} has no method '{}'", ot.show(), name))
+            }
+            _ => {
+                let _ = want;
+                let t = self.expr(callee, None)?;
+                self.call_value(t, args)
+            }
+        }
+    }
+
+    /// Calls the function value in rax (owned); it is released after the call.
+    fn call_value(&mut self, t: Ty, args: &[Arg]) -> R<Ty> {
+        let Ty::Func { params, ret, ext } = t else { return self.err(format!("cannot call a value of type {}", t.show())) };
+        if params.len() != args.len() {
+            return self.err(format!("expected {} argument(s), found {}", params.len(), args.len()));
+        }
+        let f = self.temp();
+        self.e(format!("mov qword ptr [rbp - {}], rax", f));
+        let mut temps = Vec::new();
+        for (a, p) in args.iter().zip(&params) {
+            let at = self.value(&a.value, Some(p))?;
+            self.check(p, &at, "argument")?;
+            self.norm(p);
+            let t = self.temp();
+            self.e(format!("mov qword ptr [rbp - {}], rax", t));
+            temps.push(t);
+        }
+        self.emit_call(&temps, "", Some((f, ext)));
+        if !ext {
+            let keep = self.temp();
+            self.e(format!("mov qword ptr [rbp - {}], rax", keep));
+            self.release_slot(f);
+            self.e(format!("mov rax, qword ptr [rbp - {}]", keep));
+            self.free(keep);
+        }
+        for t in temps {
+            self.free(t);
+        }
+        self.free(f);
+        self.norm(&ret);
+        Ok(*ret)
+    }
+
+    fn call_sig(&mut self, sig: &Sig, receiver: Option<i32>, args: &[Arg]) -> R<Ty> {
+        if sig.is_extern {
+            self.require_unsafe(&format!("calling extern function '{}'", sig.sym))?;
+        }
+        // Bind arguments to parameters.
+        let n = sig.params.len();
+        let mut slots: Vec<Option<&Expr>> = vec![None; n];
+        let mut rest: Vec<&Expr> = Vec::new();
+        let fixed = if sig.variadic { n - 1 } else { n };
+        let mut pos = 0;
+        for a in args {
+            if a.spread {
+                return self.err("spread arguments ('...') are not supported by the native backend yet");
+            }
+            if let Some(name) = &a.name {
+                let Some(i) = sig.params.iter().position(|p| &p.name == name) else {
+                    return self.err(format!("no parameter named '{}'", name));
+                };
+                slots[i] = Some(&a.value);
+            } else if pos < fixed {
+                slots[pos] = Some(&a.value);
+                pos += 1;
+            } else if sig.variadic || sig.c_variadic {
+                rest.push(&a.value);
+            } else {
+                return self.err(format!("too many arguments: expected {}", n));
+            }
+        }
+        let mut temps = Vec::new();
+        if let Some(r) = receiver {
+            temps.push(r);
+        }
+        // (slot, type) of owned heap arguments that extern callees do not take over
+        let mut extern_owned: Vec<i32> = Vec::new();
+        let mut owned = Vec::new();
+        for (i, p) in sig.params.iter().enumerate() {
+            if sig.variadic && i == n - 1 {
+                let Ty::List(el) = &p.ty else { unreachable!() };
+                let lt = self.temp();
+                let mut created = false;
+                for x in &rest {
+                    let vt = self.value(x, Some(el))?;
+                    self.check(el, &vt, &format!("argument '{}'", p.name))?;
+                    let item = self.temp();
+                    self.e(format!("mov qword ptr [rbp - {}], rax", item));
+                    if !created {
+                        self.new_list(&el.clone());
+                        self.e(format!("mov qword ptr [rbp - {}], rax", lt));
+                        created = true;
+                    }
+                    self.e(format!("mov rdx, qword ptr [rbp - {}]", item));
+                    self.e(format!("mov rcx, qword ptr [rbp - {}]", lt));
+                    self.e("call rt_list_push");
+                    self.free(item);
+                }
+                if !created {
+                    self.new_list(&el.clone());
+                    self.e(format!("mov qword ptr [rbp - {}], rax", lt));
+                }
+                temps.push(lt);
+                owned.push(lt);
+                continue;
+            }
+            let at = match (slots[i], &p.default) {
+                (Some(x), _) => {
+                    if p.by_ref {
+                        self.expr(x, Some(&p.ty))?
+                    } else {
+                        self.value(x, Some(&p.ty))?
+                    }
+                }
+                (None, Some(d)) => {
+                    let saved = std::mem::replace(&mut self.cur_mod, sig.module.clone());
+                    let r = self.value(d, Some(&p.ty));
+                    self.cur_mod = saved;
+                    r?
+                }
+                (None, None) => return self.err(format!("missing argument '{}'", p.name)),
+            };
+            self.check(&p.ty, &at, &format!("argument '{}'", p.name))?;
+            self.norm(&p.ty);
+            let t = self.temp();
+            self.e(format!("mov qword ptr [rbp - {}], rax", t));
+            temps.push(t);
+            owned.push(t);
+            if sig.is_extern && self.is_rc(&at) {
+                extern_owned.push(t);
+            }
+        }
+        for x in &rest {
+            if sig.c_variadic {
+                let t0 = self.value(x, None)?;
+                let t = self.temp();
+                if t0 == Ty::Text {
+                    let own = self.temp();
+                    self.e(format!("mov qword ptr [rbp - {}], rax", own));
+                    extern_owned.push(own);
+                    self.e("add rax, 8");
+                }
+                self.e(format!("mov qword ptr [rbp - {}], rax", t));
+                temps.push(t);
+                owned.push(t);
+            }
+        }
+        if sig.is_extern {
+            self.extern_syms.insert(sig.sym.clone());
+        }
+        self.emit_call(&temps, &format!("call {}", sig.sym), None);
+        // C does not release what it is given
+        for o in extern_owned {
+            self.release_slot(o);
+        }
+        for t in owned {
+            self.free(t);
+        }
+        self.norm(&sig.ret);
+        Ok(sig.ret.clone())
+    }
+
+    /// Built-in `c` module: `c.cstr`, `c.from_cstr`, `c.alloc`, `c.free`.
+    fn c_intrinsic(&mut self, name: &str, args: &[Arg]) -> R<Ty> {
+        let one = |s: &Self| -> R<()> {
+            if args.len() == 1 {
+                Ok(())
+            } else {
+                s.err(format!("c.{}() takes one argument", name))
+            }
+        };
+        let u8p = Ty::Ptr(Box::new(Ty::Int { bits: 8, signed: false }));
+        match name {
+            "cstr" => {
+                one(self)?;
+                let t = self.expr(&args[0].value, Some(&Ty::Text))?;
+                self.check(&Ty::Text, &t, "c.cstr")?;
+                // the text must outlive the call it is passed to: it is
+                // released at the end of the statement
+                let keep = self.slot();
+                self.e(format!("mov qword ptr [rbp - {}], rax", keep));
+                self.fs.stmt_temps.push(keep);
+                self.e("add rax, 8");
+                Ok(u8p)
+            }
+            "from_cstr" => {
+                one(self)?;
+                let (t, _) = self.operand(&args[0].value, None)?;
+                self.check(&u8p, &t, "c.from_cstr")?;
+                self.e("mov rcx, rax");
+                self.e("call rt_text_from_cstr");
+                Ok(Ty::Text)
+            }
+            "from_bytes" => {
+                if args.len() != 2 {
+                    return self.err("c.from_bytes(pointer, length) takes two arguments");
+                }
+                let (pt, _) = self.operand(&args[0].value, None)?;
+                self.check(&u8p, &pt, "c.from_bytes")?;
+                let p = self.temp();
+                self.e(format!("mov qword ptr [rbp - {}], rax", p));
+                let lt = self.expr(&args[1].value, Some(&Ty::i64()))?;
+                if !lt.is_int() {
+                    return self.err("c.from_bytes needs a number of bytes");
+                }
+                self.e("mov rdx, rax");
+                self.e(format!("mov rcx, qword ptr [rbp - {}]", p));
+                self.e("call rt_text_from_bytes");
+                self.free(p);
+                Ok(Ty::Text)
+            }
+            "alloc" => {
+                one(self)?;
+                self.expr(&args[0].value, Some(&Ty::Int { bits: 64, signed: false }))?;
+                self.e("mov rcx, rax");
+                self.e("xor edx, edx");
+                self.e("call rt_alloc");
+                Ok(u8p)
+            }
+            "free" => {
+                one(self)?;
+                self.expr(&args[0].value, None)?;
+                self.e("mov rcx, rax");
+                self.e("call rt_release");
+                Ok(Ty::Void)
+            }
+            _ => self.err(format!("unknown function 'c.{}'", name)),
+        }
+    }
+
+    // ---------------- futures ----------------
+
+    fn future_fn(&self, name: &str) -> R<Sig> {
+        match self.funcs.get(&("future".to_string(), name.to_string())) {
+            Some(s) => Ok(s.clone()),
+            None => self.err("async needs the future library"),
+        }
+    }
+
+    /// Body of an `async func`: the original body becomes a task (a closure
+    /// that returns the declared type) and the function returns the future
+    /// that task completes.
+    fn gen_async_body(&mut self, sig: &Sig, body: &[Stmt]) -> R<()> {
+        let Ty::Future(inner) = sig.ret.clone() else { unreachable!() };
+        self.emit_async_launch(&inner, body)
+    }
+
+    /// Runs `body` (which returns `inner`) as a task; leaves its future in rax.
+    fn emit_async_launch(&mut self, inner: &Ty, body: &[Stmt]) -> R<()> {
+        let inner = Box::new(inner.clone());
+        let want = Ty::Func { params: vec![], ret: inner.clone(), ext: false };
+        self.next_lambda_await = true;
+        self.lambda(&[], body, Some(&want))?;
+        let c = self.temp();
+        self.e(format!("mov qword ptr [rbp - {}], rax", c));
+        let new = self.future_fn("future_new")?;
+        self.emit_call(&[], &format!("call {}", new.sym), None);
+        let f = self.temp();
+        self.e(format!("mov qword ptr [rbp - {}], rax", f));
+        if self.is_rc(&inner) {
+            // the result slot must own what it holds: use a list flagged as holding heap values
+            let (_, off) = self.field_of("future.Future", "slot").expect("future library layout");
+            self.e("mov ecx, 1");
+            self.e("call rt_list_new");
+            self.e(format!("mov rcx, qword ptr [rbp - {}]", f));
+            self.e(format!("mov rdx, qword ptr [rcx + {}]", off));
+            self.e(format!("mov qword ptr [rcx + {}], rax", off));
+            self.e("mov rcx, rdx");
+            self.e("call rt_release");
+        }
+        // `launch` takes the closure and one reference; the caller gets the other
+        self.e(format!("mov rax, qword ptr [rbp - {}]", f));
+        self.retain();
+        let launch = self.future_fn("launch")?;
+        self.emit_call(&[c, f], &format!("call {}", launch.sym), None);
+        self.e(format!("mov rax, qword ptr [rbp - {}]", f));
+        self.free(f);
+        self.free(c);
+        Ok(())
+    }
+
+    /// `timeout(ms, future)`: a future of `T or error` that fails when `ms` pass first.
+    fn timeout_future(&mut self, ms_e: &Expr, f_e: &Expr) -> R<Ty> {
+        let t = self.expr(ms_e, Some(&Ty::i64()))?;
+        if !t.is_int() {
+            return self.err(format!("timeout() needs a number of milliseconds, found {}", t.show()));
+        }
+        let tag = self.lbl("tm");
+        let ms_name = format!("__{}_ms", tag);
+        let f_name = format!("__{}_f", tag);
+        let off = self.declare_local(&ms_name, Ty::i64(), false);
+        self.e(format!("mov qword ptr [rbp - {}], rax", off));
+        let ft = self.expr(f_e, None)?;
+        let Ty::Future(inner) = ft.clone() else {
+            return self.err(format!("timeout() needs a Future, found {}", ft.show()));
+        };
+        let off = self.declare_local(&f_name, ft, false);
+        self.e(format!("mov qword ptr [rbp - {}], rax", off));
+        let wait = if *inner == Ty::Void {
+            format!("        await {}\n        return\n", f_name)
+        } else {
+            format!("        return await {}\n", f_name)
+        };
+        let src = format!(
+            "package t\nfunc f()\n    let i = future.timeout_wait({}, {})\n    if i == 1\n{}    end\n    return error(\"timed out\")\nend\n",
+            ms_name, f_name, wait
+        );
+        let file = parse_source(&src).map_err(|d| format!("internal: timeout template: {}", d.msg))?;
+        let DeclKind::Func(fd) = &file.decls[0].kind else { unreachable!() };
+        // a future that can already fail keeps a single `or error`: the failure of
+        // either the operation or the timeout
+        let result = match *inner {
+            Ty::Result(u) => Ty::Result(u),
+            t => Ty::Result(Box::new(t)),
+        };
+        let line = self.line;
+        self.emit_async_launch(&result, &fd.body)?;
+        self.line = line;
+        Ok(Ty::Future(Box::new(result)))
+    }
+
+    /// `await all(xs)` / `await race(xs)` on a list of futures.
+    fn await_combinator(&mut self, which: &str, arg: &Expr) -> R<Ty> {
+        let lt = self.expr(arg, None)?;
+        let Ty::List(el) = lt.clone() else {
+            return self.err(format!("{}() needs a list of futures, found {}", which, lt.show()));
+        };
+        let Ty::Future(v) = *el.clone() else {
+            return self.err(format!("{}() needs a list of futures, found {}", which, lt.show()));
+        };
+        let wait = self.future_fn("wait")?;
+        self.push_scope();
+        let l = self.hidden_local(lt.clone());
+        self.e(format!("mov qword ptr [rbp - {}], rax", l));
+        let res;
+        if which == "all" {
+            if *v == Ty::Void {
+                return self.err("all() needs futures that return a value");
+            }
+            let out = self.slot();
+            let idx = self.slot();
+            self.new_list(&v.clone());
+            self.e(format!("mov qword ptr [rbp - {}], rax", out));
+            self.e(format!("mov qword ptr [rbp - {}], 0", idx));
+            let (start, end) = (self.lbl("all"), self.lbl("allend"));
+            self.label(&start);
+            self.e(format!("mov rdx, qword ptr [rbp - {}]", idx));
+            self.e(format!("mov rcx, qword ptr [rbp - {}]", l));
+            self.e("cmp rdx, qword ptr [rcx]");
+            self.e(format!("jge {}", end));
+            self.e("call rt_list_get");
+            self.retain();
+            let tmp = self.temp();
+            self.e(format!("mov qword ptr [rbp - {}], rax", tmp));
+            self.emit_call(&[tmp], &format!("call {}", wait.sym), None);
+            self.free(tmp);
+            self.e("mov rdx, rax");
+            self.e(format!("mov rcx, qword ptr [rbp - {}]", out));
+            self.e("call rt_list_push");
+            self.e(format!("inc qword ptr [rbp - {}]", idx));
+            self.e(format!("jmp {}", start));
+            self.label(&end);
+            self.e(format!("mov rax, qword ptr [rbp - {}]", out));
+            res = Ty::List(v);
+        } else {
+            let any = self.future_fn("wait_any")?;
+            let arg_t = self.temp();
+            self.e(format!("mov rax, qword ptr [rbp - {}]", l));
+            self.retain();
+            self.e(format!("mov qword ptr [rbp - {}], rax", arg_t));
+            self.emit_call(&[arg_t], &format!("call {}", any.sym), None);
+            self.free(arg_t);
+            self.e("mov rdx, rax");
+            self.e(format!("mov rcx, qword ptr [rbp - {}]", l));
+            self.e("call rt_list_get");
+            self.retain();
+            let tmp = self.temp();
+            self.e(format!("mov qword ptr [rbp - {}], rax", tmp));
+            self.emit_call(&[tmp], &format!("call {}", wait.sym), None);
+            self.free(tmp);
+            self.norm(&v);
+            res = *v;
+        }
+        self.pop_scope();
+        Ok(res)
+    }
+
+    // ---------------- channels ----------------
+
+    fn task_fn(&self, name: &str) -> R<Sig> {
+        match self.funcs.get(&("task".to_string(), name.to_string())) {
+            Some(s) => Ok(s.clone()),
+            None => self.err("channels need the task library"),
+        }
+    }
+
+    /// `channel(T)`
+    fn channel_new(&mut self, args: &[Arg]) -> R<Ty> {
+        if args.len() != 1 {
+            return self.err("channel() takes the element type: `channel(int)`");
+        }
+        let ty = match &args[0].value.kind {
+            ExprKind::Ident(n) => Type::Named { path: vec![n.clone()], args: vec![] },
+            ExprKind::Field { expr, name, .. } => match &expr.kind {
+                ExprKind::Ident(m) => Type::Named { path: vec![m.clone(), name.clone()], args: vec![] },
+                _ => return self.err("channel() takes a type, like `channel(int)`"),
+            },
+            _ => return self.err("channel() takes a type, like `channel(int)`"),
+        };
+        let el = self.resolve(&ty, &self.cur_mod.clone())?;
+        let sig = self.task_fn("chan_new")?;
+        self.emit_call(&[], &format!("call {}", sig.sym), None);
+        Ok(Ty::Chan(Box::new(el)))
+    }
+
+    /// `ch.send(v)`, `ch.receive()`, `ch.close()`; the channel is in rax (owned).
+    fn chan_method(&mut self, el: &Ty, name: &str, args: &[Arg]) -> R<Ty> {
+        let c = self.temp();
+        self.e(format!("mov qword ptr [rbp - {}], rax", c));
+        let res = match name {
+            "send" => {
+                if args.len() != 1 {
+                    return self.err("'send' takes one value");
+                }
+                let vt = self.value(&args[0].value, Some(el))?;
+                self.check(el, &vt, "value sent on the channel")?;
+                self.norm(el);
+                let v = self.temp();
+                self.e(format!("mov qword ptr [rbp - {}], rax", v));
+                let sig = self.task_fn("chan_send")?;
+                self.emit_call(&[c, v], &format!("call {}", sig.sym), None);
+                self.free(v);
+                Ty::Void
+            }
+            "receive" => {
+                let sig = self.task_fn("chan_recv")?;
+                self.emit_call(&[c], &format!("call {}", sig.sym), None);
+                self.norm(el);
+                el.clone()
+            }
+            "close" => {
+                let sig = self.task_fn("chan_close")?;
+                self.emit_call(&[c], &format!("call {}", sig.sym), None);
+                Ty::Void
+            }
+            _ => return self.err(format!("a channel has no method '{}'; use send, receive or close", name)),
+        };
+        self.free(c);
+        Ok(res)
+    }
+}
+
+fn norm_insn(t: &Ty) -> Option<&'static str> {
+    Some(match t {
+        Ty::Bool => "movzx eax, al",
+        Ty::Int { bits: 8, signed: true } => "movsx rax, al",
+        Ty::Int { bits: 8, signed: false } => "movzx eax, al",
+        Ty::Int { bits: 16, signed: true } => "movsx rax, ax",
+        Ty::Int { bits: 16, signed: false } => "movzx eax, ax",
+        Ty::Int { bits: 32, signed: true } => "movsxd rax, eax",
+        Ty::Int { bits: 32, signed: false } => "mov eax, eax",
+        _ => return None,
+    })
+}
+
+fn binop_static(op: &str) -> &'static str {
+    match op {
+        "+" => "+",
+        "-" => "-",
+        "*" => "*",
+        "/" => "/",
+        _ => "%",
+    }
+}
+
+fn is_register(n: &str) -> bool {
+    const R: [&str; 32] = [
+        "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", "eax", "ebx",
+        "ecx", "edx", "esi", "edi", "r8d", "r9d", "r10d", "r11d", "ax", "bx", "cx", "dx", "al", "bl", "cl", "dl",
+    ];
+    R.contains(&n)
+}
+
+fn reg64(r: &str) -> String {
+    match r {
+        "eax" | "ax" | "al" => "rax".into(),
+        "ebx" | "bx" | "bl" => "rbx".into(),
+        "ecx" | "cx" | "cl" => "rcx".into(),
+        "edx" | "dx" | "dl" => "rdx".into(),
+        "esi" => "rsi".into(),
+        "edi" => "rdi".into(),
+        r if r.ends_with('d') && r.starts_with('r') => r[..r.len() - 1].to_string(),
+        r => r.to_string(),
+    }
+}
+
+// ---- free-variable collection for closures ----
+
+fn file_uses_concurrency(f: &File) -> bool {
+    let mut names = Vec::new();
+    for d in &f.decls {
+        if let DeclKind::Func(fd) = &d.kind {
+            if fd.is_async {
+                names.push("$await".to_string());
+            }
+            collect_block(&fd.body, &mut names);
+        }
+    }
+    names.iter().any(|n| n == "$spawn" || n == "$await" || n == "channel" || n == "sleep" || n == "timeout")
+}
+
+fn collect_block(b: &[Stmt], out: &mut Vec<String>) {
+    for s in b {
+        match &s.kind {
+            StmtKind::Var(vd) => {
+                if let Some(e) = &vd.value {
+                    collect_expr(e, out);
+                }
+            }
+            StmtKind::Assign { target, value, .. } => {
+                collect_expr(target, out);
+                collect_expr(value, out);
+            }
+            StmtKind::Spawn(e) => {
+                out.push("$spawn".into());
+                collect_expr(e, out);
+            }
+            StmtKind::Return(Some(e)) | StmtKind::Defer(e) | StmtKind::Expr(e) => collect_expr(e, out),
+            StmtKind::Unsafe(b) => collect_block(b, out),
+            StmtKind::For { iter, body, .. } => {
+                collect_expr(iter, out);
+                collect_block(body, out);
+            }
+            StmtKind::While { cond, body } => {
+                collect_expr(cond, out);
+                collect_block(body, out);
+            }
+            StmtKind::Asm(a) => {
+                for o in &a.operands {
+                    collect_expr(&o.value, out);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_expr(e: &Expr, out: &mut Vec<String>) {
+    match &e.kind {
+        ExprKind::Ident(n) => out.push(n.clone()),
+        ExprKind::Text(parts) => {
+            for p in parts {
+                if let TextPart::Expr(x) = p {
+                    collect_expr(x, out);
+                }
+            }
+        }
+        ExprKind::List(xs) => xs.iter().for_each(|x| collect_expr(x, out)),
+        ExprKind::Map(kv) => kv.iter().for_each(|(k, v)| {
+            collect_expr(k, out);
+            collect_expr(v, out);
+        }),
+        ExprKind::Record { fields, .. } => fields.iter().for_each(|(_, v)| collect_expr(v, out)),
+        ExprKind::Lambda { body, .. } => collect_block(body, out),
+        ExprKind::If { branches, else_body } => {
+            for (c, b) in branches {
+                collect_expr(c, out);
+                collect_block(b, out);
+            }
+            if let Some(b) = else_body {
+                collect_block(b, out);
+            }
+        }
+        ExprKind::Match { scrutinee, arms } => {
+            collect_expr(scrutinee, out);
+            for a in arms {
+                collect_block(&a.body, out);
+            }
+        }
+        ExprKind::Await(expr) => {
+            out.push("$await".into());
+            collect_expr(expr, out)
+        }
+        ExprKind::Unary { expr, .. } | ExprKind::Deref(expr) | ExprKind::Propagate(expr) => collect_expr(expr, out),
+        ExprKind::Field { expr, .. } => collect_expr(expr, out),
+        ExprKind::Binary { lhs, rhs, .. } => {
+            collect_expr(lhs, out);
+            collect_expr(rhs, out);
+        }
+        ExprKind::Index { expr, index } => {
+            collect_expr(expr, out);
+            collect_expr(index, out);
+        }
+        ExprKind::Call { callee, args } => {
+            collect_expr(callee, out);
+            args.iter().for_each(|a| collect_expr(&a.value, out));
+        }
+        _ => {}
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Runtime (hand-written assembly, linked into every program)
+// ---------------------------------------------------------------------------
+
+const RUNTIME_COMMON: &str = r#"
+; ---- Brasa runtime ----
+
+; +1 reference on the object at rcx (null is fine). Preserves all registers.
+rt_retain proc
+    test rcx, rcx
+    jz rt_retain_done
+    inc qword ptr [rcx - 16]
+rt_retain_done:
+    ret
+rt_retain endp
+
+; -1 reference on the object at rcx; frees it (and its contents) at zero.
+; Preserves rax. Clobbers rcx, rdx, r8-r11.
+rt_release proc
+    test rcx, rcx
+    jz rt_rel_ret
+    dec qword ptr [rcx - 16]
+    jnz rt_rel_ret
+    push rbp
+    mov rbp, rsp
+    push rax
+    push rcx
+    sub rsp, 32
+    mov rdx, qword ptr [rcx - 8]
+    test rdx, rdx
+    jz rt_rel_free
+    call rdx
+rt_rel_free:
+    mov rcx, qword ptr [rbp - 16]
+    call rt_free_obj
+    mov rax, qword ptr [rbp - 8]
+    mov rsp, rbp
+    pop rbp
+rt_rel_ret:
+    ret
+rt_release endp
+
+; drop procedures (called by rt_release with the object in rcx)
+rt_drop_closure proc
+    mov rcx, qword ptr [rcx + 8]
+    jmp rt_release
+rt_drop_closure endp
+
+rt_drop_error proc
+    mov rcx, qword ptr [rcx]
+    jmp rt_release
+rt_drop_error endp
+
+rt_drop_result_plain proc
+    mov rcx, qword ptr [rcx]
+    jmp rt_release
+rt_drop_result_plain endp
+
+rt_drop_result_rc proc
+    push rbp
+    mov rbp, rsp
+    sub rsp, 48
+    mov qword ptr [rbp - 8], rcx
+    mov rcx, qword ptr [rcx]
+    call rt_release
+    mov rcx, qword ptr [rbp - 8]
+    mov rcx, qword ptr [rcx + 8]
+    call rt_release
+    mov rsp, rbp
+    pop rbp
+    ret
+rt_drop_result_rc endp
+
+; copy r8 bytes from rdx to rcx
+rt_memcpy proc
+    push rsi
+    push rdi
+    mov rdi, rcx
+    mov rsi, rdx
+    mov rcx, r8
+    rep movsb
+    pop rdi
+    pop rsi
+    ret
+rt_memcpy endp
+
+; print "panic: <text rcx>" and exit with code 101
+rt_panic proc
+    sub rsp, 40
+    mov qword ptr [rsp + 32], rcx
+    lea rcx, rt_msg_panic
+    call rt_write_out
+    mov rcx, qword ptr [rsp + 32]
+    call rt_write_out
+    lea rcx, rt_msg_nl
+    call rt_write_out
+    mov ecx, 101
+    call rt_exit
+rt_panic endp
+
+; rax = new text with room for rcx bytes (zeroed, length set)
+rt_text_alloc proc
+    push rbp
+    mov rbp, rsp
+    sub rsp, 48
+    mov qword ptr [rbp - 8], rcx
+    add rcx, 9
+    xor edx, edx
+    call rt_alloc
+    mov rcx, qword ptr [rbp - 8]
+    mov qword ptr [rax], rcx
+    mov rsp, rbp
+    pop rbp
+    ret
+rt_text_alloc endp
+
+; rax = new text: text rcx + text rdx (operands are not consumed)
+rt_concat proc
+    push rbp
+    mov rbp, rsp
+    push rsi
+    push rdi
+    sub rsp, 48
+    mov qword ptr [rbp - 24], rcx
+    mov qword ptr [rbp - 32], rdx
+    mov rcx, qword ptr [rcx]
+    add rcx, qword ptr [rdx]
+    call rt_text_alloc
+    lea rdi, [rax + 8]
+    mov rsi, qword ptr [rbp - 24]
+    mov rcx, qword ptr [rsi]
+    add rsi, 8
+    rep movsb
+    mov rsi, qword ptr [rbp - 32]
+    mov rcx, qword ptr [rsi]
+    add rsi, 8
+    rep movsb
+    add rsp, 48
+    pop rdi
+    pop rsi
+    pop rbp
+    ret
+rt_concat endp
+
+; rax = 1 if texts rcx and rdx are equal
+rt_text_eq proc
+    push rsi
+    push rdi
+    cmp rcx, rdx
+    je rt_teq_yes
+    test rcx, rcx
+    jz rt_teq_no
+    test rdx, rdx
+    jz rt_teq_no
+    mov rax, qword ptr [rcx]
+    cmp rax, qword ptr [rdx]
+    jne rt_teq_no
+    lea rsi, [rcx + 8]
+    lea rdi, [rdx + 8]
+    mov rcx, rax
+    repe cmpsb
+    jne rt_teq_no
+rt_teq_yes:
+    mov eax, 1
+    jmp rt_teq_done
+rt_teq_no:
+    xor eax, eax
+rt_teq_done:
+    pop rdi
+    pop rsi
+    ret
+rt_text_eq endp
+
+; rax = byte rdx of text rcx
+rt_text_byte proc
+    cmp rdx, qword ptr [rcx]
+    jae rt_index_oob
+    movzx eax, byte ptr [rcx + rdx + 8]
+    ret
+rt_text_byte endp
+
+; rax = new text: bytes [rdx, r8) of text rcx (indexes are clamped)
+rt_text_slice proc
+    push rbp
+    mov rbp, rsp
+    sub rsp, 64
+    mov qword ptr [rbp - 8], rcx
+    mov rax, qword ptr [rcx]
+    cmp r8, rax
+    jle rt_ts_e1
+    mov r8, rax
+rt_ts_e1:
+    test r8, r8
+    jns rt_ts_e2
+    xor r8d, r8d
+rt_ts_e2:
+    test rdx, rdx
+    jns rt_ts_s1
+    xor edx, edx
+rt_ts_s1:
+    cmp rdx, r8
+    jle rt_ts_s2
+    mov rdx, r8
+rt_ts_s2:
+    mov qword ptr [rbp - 16], rdx
+    sub r8, rdx
+    mov qword ptr [rbp - 24], r8
+    mov rcx, r8
+    call rt_text_alloc
+    mov qword ptr [rbp - 32], rax
+    lea rcx, [rax + 8]
+    mov rdx, qword ptr [rbp - 8]
+    add rdx, 8
+    add rdx, qword ptr [rbp - 16]
+    mov r8, qword ptr [rbp - 24]
+    call rt_memcpy
+    mov rax, qword ptr [rbp - 32]
+    mov rsp, rbp
+    pop rbp
+    ret
+rt_text_slice endp
+
+; rax = one-byte text for the byte in rcx
+rt_text_chr proc
+    push rbp
+    mov rbp, rsp
+    sub rsp, 48
+    mov qword ptr [rbp - 8], rcx
+    mov ecx, 1
+    call rt_text_alloc
+    mov rcx, qword ptr [rbp - 8]
+    mov byte ptr [rax + 8], cl
+    mov rsp, rbp
+    pop rbp
+    ret
+rt_text_chr endp
+
+; rax = new text holding the rdx bytes at rcx
+rt_text_from_bytes proc
+    push rbp
+    mov rbp, rsp
+    sub rsp, 64
+    mov qword ptr [rbp - 8], rcx
+    mov qword ptr [rbp - 16], rdx
+    mov rcx, rdx
+    call rt_text_alloc
+    mov qword ptr [rbp - 24], rax
+    lea rcx, [rax + 8]
+    mov rdx, qword ptr [rbp - 8]
+    mov r8, qword ptr [rbp - 16]
+    call rt_memcpy
+    mov rax, qword ptr [rbp - 24]
+    mov rsp, rbp
+    pop rbp
+    ret
+rt_text_from_bytes endp
+
+; rax = decimal text of signed integer rcx
+rt_text_from_int proc
+    push rbp
+    mov rbp, rsp
+    sub rsp, 96
+    mov rax, rcx
+    lea r8, [rbp - 1]
+    xor r9d, r9d
+    test rax, rax
+    jns rt_tfi_pos
+    neg rax
+    mov r9d, 1
+rt_tfi_pos:
+    mov r10, 10
+rt_tfi_loop:
+    xor edx, edx
+    div r10
+    add dl, 48
+    dec r8
+    mov byte ptr [r8], dl
+    test rax, rax
+    jnz rt_tfi_loop
+    test r9d, r9d
+    jz rt_tfi_copy
+    dec r8
+    mov byte ptr [r8], 45
+rt_tfi_copy:
+    lea rcx, [rbp - 1]
+    sub rcx, r8
+    mov qword ptr [rbp - 40], r8
+    mov qword ptr [rbp - 48], rcx
+    call rt_text_alloc
+    mov rcx, qword ptr [rbp - 48]
+    mov r8, qword ptr [rbp - 40]
+    lea r9, [rax + 8]
+rt_tfi_cp:
+    test rcx, rcx
+    jz rt_tfi_done
+    mov dl, byte ptr [r8]
+    mov byte ptr [r9], dl
+    inc r8
+    inc r9
+    dec rcx
+    jmp rt_tfi_cp
+rt_tfi_done:
+    mov rsp, rbp
+    pop rbp
+    ret
+rt_text_from_int endp
+
+; rax = text copied from NUL-terminated bytes at rcx
+rt_text_from_cstr proc
+    push rbp
+    mov rbp, rsp
+    push rsi
+    push rdi
+    sub rsp, 32
+    mov rsi, rcx
+    xor ecx, ecx
+    test rsi, rsi
+    jz rt_tfc_alloc
+rt_tfc_len:
+    cmp byte ptr [rsi + rcx], 0
+    je rt_tfc_alloc
+    inc rcx
+    jmp rt_tfc_len
+rt_tfc_alloc:
+    mov rdi, rcx
+    call rt_text_alloc
+    mov rcx, rdi
+    lea rdi, [rax + 8]
+    rep movsb
+    add rsp, 32
+    pop rdi
+    pop rsi
+    pop rbp
+    ret
+rt_text_from_cstr endp
+
+; rax = new empty list; rcx = 1 when its elements are heap objects
+rt_list_new proc
+    sub rsp, 40
+    mov qword ptr [rsp + 32], rcx
+    mov ecx, 32
+    lea rdx, rt_drop_list_plain
+    cmp qword ptr [rsp + 32], 0
+    je rt_ln_alloc
+    lea rdx, rt_drop_list_rc
+rt_ln_alloc:
+    call rt_alloc
+    mov rcx, qword ptr [rsp + 32]
+    mov qword ptr [rax + 24], rcx
+    add rsp, 40
+    ret
+rt_list_new endp
+
+rt_drop_list_plain proc
+    mov rcx, qword ptr [rcx + 16]
+    jmp rt_release
+rt_drop_list_plain endp
+
+rt_drop_list_rc proc
+    push rbp
+    mov rbp, rsp
+    sub rsp, 48
+    mov qword ptr [rbp - 8], rcx
+    mov qword ptr [rbp - 16], 0
+rt_dlr_loop:
+    mov rcx, qword ptr [rbp - 8]
+    mov rax, qword ptr [rbp - 16]
+    cmp rax, qword ptr [rcx]
+    jae rt_dlr_done
+    mov rdx, qword ptr [rcx + 16]
+    mov rcx, qword ptr [rdx + rax * 8]
+    call rt_release
+    inc qword ptr [rbp - 16]
+    jmp rt_dlr_loop
+rt_dlr_done:
+    mov rcx, qword ptr [rbp - 8]
+    mov rcx, qword ptr [rcx + 16]
+    call rt_release
+    mov rsp, rbp
+    pop rbp
+    ret
+rt_drop_list_rc endp
+
+; append rdx (an owned value) to list rcx
+rt_list_push proc
+    push rbp
+    mov rbp, rsp
+    sub rsp, 96
+    mov qword ptr [rbp - 8], rcx
+    mov qword ptr [rbp - 16], rdx
+    mov rax, qword ptr [rcx]
+    cmp rax, qword ptr [rcx + 8]
+    jb rt_lp_store
+    mov rax, qword ptr [rcx + 8]
+    add rax, rax
+    cmp rax, 4
+    jae rt_lp_cap
+    mov eax, 4
+rt_lp_cap:
+    mov qword ptr [rbp - 24], rax
+    lea rcx, [rax * 8]
+    xor edx, edx
+    call rt_alloc
+    mov qword ptr [rbp - 32], rax
+    mov rcx, qword ptr [rbp - 8]
+    mov r8, qword ptr [rcx + 16]
+    mov qword ptr [rbp - 40], r8
+    mov r9, qword ptr [rcx]
+    xor r10d, r10d
+rt_lp_cp:
+    cmp r10, r9
+    jae rt_lp_cpdone
+    mov r11, qword ptr [r8 + r10 * 8]
+    mov qword ptr [rax + r10 * 8], r11
+    inc r10
+    jmp rt_lp_cp
+rt_lp_cpdone:
+    mov rcx, qword ptr [rbp - 8]
+    mov rax, qword ptr [rbp - 32]
+    mov qword ptr [rcx + 16], rax
+    mov rdx, qword ptr [rbp - 24]
+    mov qword ptr [rcx + 8], rdx
+    mov rcx, qword ptr [rbp - 40]
+    call rt_release
+rt_lp_store:
+    mov rcx, qword ptr [rbp - 8]
+    mov rax, qword ptr [rcx]
+    mov r8, qword ptr [rcx + 16]
+    mov rdx, qword ptr [rbp - 16]
+    mov qword ptr [r8 + rax * 8], rdx
+    inc qword ptr [rcx]
+    mov rsp, rbp
+    pop rbp
+    ret
+rt_list_push endp
+
+; rax = element rdx of list rcx (borrowed)
+rt_list_get proc
+    cmp rdx, qword ptr [rcx]
+    jae rt_index_oob
+    mov rax, qword ptr [rcx + 16]
+    mov rax, qword ptr [rax + rdx * 8]
+    ret
+rt_list_get endp
+
+; list rcx [rdx] = r8 (owned); releases the previous element
+rt_list_set proc
+    push rbp
+    mov rbp, rsp
+    sub rsp, 48
+    cmp rdx, qword ptr [rcx]
+    jae rt_index_oob
+    mov rax, qword ptr [rcx + 16]
+    lea rax, [rax + rdx * 8]
+    mov qword ptr [rbp - 8], rax
+    mov qword ptr [rbp - 16], r8
+    cmp qword ptr [rcx + 24], 0
+    je rt_ls_store
+    mov rcx, qword ptr [rax]
+    call rt_release
+rt_ls_store:
+    mov rax, qword ptr [rbp - 8]
+    mov rcx, qword ptr [rbp - 16]
+    mov qword ptr [rax], rcx
+    mov rsp, rbp
+    pop rbp
+    ret
+rt_list_set endp
+
+; rax = the last element of list rcx, removed WITHOUT releasing it (ownership moves to the caller)
+rt_list_take proc
+    mov rax, qword ptr [rcx]
+    test rax, rax
+    jz rt_take_empty
+    dec rax
+    mov qword ptr [rcx], rax
+    mov rdx, qword ptr [rcx + 16]
+    mov rax, qword ptr [rdx + rax * 8]
+    ret
+rt_take_empty:
+    lea rcx, rt_msg_take
+    jmp rt_panic
+rt_list_take endp
+
+; empties list rcx (releasing its elements)
+rt_list_clear proc
+    push rbp
+    mov rbp, rsp
+    sub rsp, 48
+    mov qword ptr [rbp - 8], rcx
+    mov qword ptr [rbp - 16], 0
+    cmp qword ptr [rcx + 24], 0
+    je rt_lc_done
+rt_lc_loop:
+    mov rcx, qword ptr [rbp - 8]
+    mov rax, qword ptr [rbp - 16]
+    cmp rax, qword ptr [rcx]
+    jae rt_lc_done
+    mov rdx, qword ptr [rcx + 16]
+    mov rcx, qword ptr [rdx + rax * 8]
+    call rt_release
+    inc qword ptr [rbp - 16]
+    jmp rt_lc_loop
+rt_lc_done:
+    mov rcx, qword ptr [rbp - 8]
+    mov qword ptr [rcx], 0
+    mov rsp, rbp
+    pop rbp
+    ret
+rt_list_clear endp
+
+rt_index_oob proc
+    lea rcx, rt_msg_oob
+    jmp rt_panic
+rt_index_oob endp
+"#;
+
+const RUNTIME_WIN: &str = r#"
+; rax = zeroed heap object of rcx bytes; rdx = drop procedure (or 0).
+; Objects have a 16-byte header: [refcount][drop].
+rt_alloc proc
+    push rbp
+    mov rbp, rsp
+    sub rsp, 48
+    mov qword ptr [rbp - 8], rcx
+    mov qword ptr [rbp - 16], rdx
+    mov rax, qword ptr rt_heap
+    test rax, rax
+    jnz rt_alloc_have
+    call GetProcessHeap
+    mov qword ptr rt_heap, rax
+rt_alloc_have:
+    mov rcx, rax
+    mov edx, 8
+    mov r8, qword ptr [rbp - 8]
+    add r8, 16
+    call HeapAlloc
+    test rax, rax
+    jz rt_alloc_fail
+    mov qword ptr [rax], 1
+    mov rcx, qword ptr [rbp - 16]
+    mov qword ptr [rax + 8], rcx
+    add rax, 16
+    inc qword ptr rt_live
+    mov rsp, rbp
+    pop rbp
+    ret
+rt_alloc_fail:
+    lea rcx, rt_msg_oom
+    call rt_panic
+rt_alloc endp
+
+; write rdx bytes at rcx to stdout
+rt_write proc
+    push rbp
+    mov rbp, rsp
+    sub rsp, 64
+    mov qword ptr [rbp - 8], rcx
+    mov qword ptr [rbp - 16], rdx
+    mov ecx, -11
+    call GetStdHandle
+    mov rcx, rax
+    mov rdx, qword ptr [rbp - 8]
+    mov r8, qword ptr [rbp - 16]
+    lea r9, [rbp - 24]
+    mov qword ptr [rsp + 32], 0
+    call WriteFile
+    mov rsp, rbp
+    pop rbp
+    ret
+rt_write endp
+
+; write text rcx to stdout; the text is released afterwards when rdx = 1
+rt_write_out proc
+    sub rsp, 40
+    mov rdx, qword ptr [rcx]
+    add rcx, 8
+    call rt_write
+    add rsp, 40
+    ret
+rt_write_out endp
+
+
+; frees the object whose payload is at rcx
+rt_free_obj proc
+    sub rsp, 40
+    mov r8, rcx
+    sub r8, 16
+    mov rcx, qword ptr rt_heap
+    xor edx, edx
+    call HeapFree
+    dec qword ptr rt_live
+    add rsp, 40
+    ret
+rt_free_obj endp
+
+; exit the process with code ecx
+rt_exit proc
+    sub rsp, 40
+    call ExitProcess
+rt_exit endp
+"#;
+
+const RUNTIME_BARE: &str = r#"
+; ---- bare-metal runtime: a size-class heap and a console hook ----
+
+; rax = zeroed heap object of rcx bytes; rdx = drop procedure (or 0).
+; Block layout: [total size][refcount][drop][payload...]; freed blocks of
+; less than 4096 bytes go on a free list per 16-byte size class.
+rt_alloc proc
+    push rbp
+    mov rbp, rsp
+    sub rsp, 48
+    lea rax, [rcx + 39]
+    and rax, -16
+    mov qword ptr [rbp - 8], rax
+    mov qword ptr [rbp - 16], rdx
+    cmp rax, 4096
+    jae rt_alloc_bump
+    mov rcx, rax
+    shr rcx, 4
+    lea r8, rt_freelists
+    mov r9, qword ptr [r8 + rcx * 8]
+    test r9, r9
+    jz rt_alloc_bump
+    mov r10, qword ptr [r9 + 8]
+    mov qword ptr [r8 + rcx * 8], r10
+    mov rax, r9
+    jmp rt_alloc_init
+rt_alloc_bump:
+    mov rax, qword ptr rt_brk
+    mov rcx, qword ptr [rbp - 8]
+    lea rdx, [rax + rcx]
+    cmp rdx, 67108864
+    ja rt_alloc_fail
+    mov qword ptr rt_brk, rdx
+rt_alloc_init:
+    mov rcx, qword ptr [rbp - 8]
+    lea r9, [rax + 8]
+    lea r10, [rax + rcx]
+rt_alloc_zero:
+    mov qword ptr [r9], 0
+    add r9, 8
+    cmp r9, r10
+    jb rt_alloc_zero
+    mov qword ptr [rax], rcx
+    mov qword ptr [rax + 8], 1
+    mov rcx, qword ptr [rbp - 16]
+    mov qword ptr [rax + 16], rcx
+    add rax, 24
+    inc qword ptr rt_live
+    mov rsp, rbp
+    pop rbp
+    ret
+rt_alloc_fail:
+    lea rcx, rt_msg_oom
+    call rt_panic
+rt_alloc endp
+
+; frees the object whose payload is at rcx
+rt_free_obj proc
+    sub rcx, 24
+    dec qword ptr rt_live
+    mov rax, qword ptr [rcx]
+    cmp rax, 4096
+    jae rt_free_done
+    shr rax, 4
+    lea r8, rt_freelists
+    mov r9, qword ptr [r8 + rax * 8]
+    mov qword ptr [rcx + 8], r9
+    mov qword ptr [r8 + rax * 8], rcx
+rt_free_done:
+    ret
+rt_free_obj endp
+
+; text rcx goes to the kernel's `console_write`, which owns its argument
+rt_write_out proc
+    sub rsp, 40
+    mov qword ptr [rsp + 32], rcx
+    call rt_retain
+    mov rcx, qword ptr [rsp + 32]
+    call B_CONSOLE_WRITE
+    add rsp, 40
+    ret
+rt_write_out endp
+
+; stop the machine
+rt_exit proc
+    cli
+rt_exit_loop:
+    hlt
+    jmp rt_exit_loop
+rt_exit endp
+"#;
+
+const RUNTIME_DATA_WIN: &str = "rt_heap dq 0
+";
+
+const RUNTIME_DATA_BARE: &str = "rt_brk dq 2097152
+rt_freelists:
+    times 256 dq 0
+";
+
+const RUNTIME_DATA_COMMON: &str = r#"rt_live dq 0
+dq 4611686018427387904, 0
+rt_msg_oom dq 13
+    db "out of memory", 0
+dq 4611686018427387904, 0
+rt_msg_oob dq 19
+    db "index out of bounds", 0
+dq 4611686018427387904, 0
+rt_msg_take dq 23
+    db "take from an empty list", 0
+dq 4611686018427387904, 0
+rt_msg_panic dq 7
+    db "panic: ", 0
+dq 4611686018427387904, 0
+rt_msg_error dq 7
+    db "error: ", 0
+dq 4611686018427387904, 0
+rt_msg_nl dq 1
+    db 10, 0
+"#;
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/// Where the kernel is loaded (and linked to run) by the boot sector.
+pub const KERNEL_BASE: u64 = 0x10000;
+/// The boot sector lives where the BIOS puts it.
+pub const BOOT_BASE: u64 = 0x7C00;
+const MAX_KERNEL_SECTORS: usize = 1000;
+
+fn collect_asm(b: &[Stmt], out: &mut Vec<String>) {
+    for s in b {
+        match &s.kind {
+            StmtKind::Asm(a) => out.extend(a.lines.iter().cloned()),
+            StmtKind::Unsafe(inner) => collect_asm(inner, out),
+            _ => {}
+        }
+    }
+}
+
+/// The assembly written in the `#[naked]` functions of a boot file.
+fn boot_source(file: &File) -> Result<String, String> {
+    let mut lines = Vec::new();
+    for d in &file.decls {
+        if let DeclKind::Func(fd) = &d.kind {
+            if d.attrs.iter().any(|a| a.name == "naked") {
+                collect_asm(&fd.body, &mut lines);
+            }
+        }
+    }
+    if lines.is_empty() {
+        return Err(format!("{}.br: the boot file needs a #[naked] function containing `asm` blocks", file.package));
+    }
+    Ok(lines.join("
+"))
+}
+
+/// Builds a bootable disk image: boot sector + kernel.
+///
+/// The boot file is Brasa whose `#[naked]` functions hold the real-mode and
+/// mode-switching code; the kernel is ordinary Brasa compiled for long mode
+/// and linked at `KERNEL_BASE`. It must define `func console_write(s: text)`,
+/// which receives everything `print` writes.
+pub fn build_os(boot: &File, kernel: &File) -> Result<Vec<u8>, String> {
+    let mut c = Compiler::new(Target::Bare);
+    c.load(kernel)?;
+    c.declare()?;
+    let ok = matches!(
+        c.funcs.get(&(kernel.package.clone(), "console_write".to_string())),
+        Some(s) if s.params.len() == 1 && s.params[0].ty == Ty::Text && s.ret == Ty::Void
+    );
+    if !ok {
+        return Err(format!(
+            "{}.br: the kernel must define `func console_write(s: text)`; `print` sends its output there",
+            kernel.package
+        ));
+    }
+    let asm = c.generate()?;
+    let k = crate::asm_x86::assemble(&asm, KERNEL_BASE, 64).map_err(|e| format!("kernel: {}", e))?;
+    let mut kernel_bytes = k.bytes;
+    while kernel_bytes.len() % 512 != 0 {
+        kernel_bytes.push(0);
+    }
+    let sectors = kernel_bytes.len() / 512;
+    if sectors > MAX_KERNEL_SECTORS {
+        return Err(format!("the kernel is {} sectors; the boot sector loads at most {}", sectors, MAX_KERNEL_SECTORS));
+    }
+
+    let b = crate::asm_x86::assemble(&boot_source(boot)?, BOOT_BASE, 16).map_err(|e| format!("boot: {}", e))?;
+    let mut boot_bytes = b.bytes;
+    if boot_bytes.len() != 512 || boot_bytes[510..] != [0x55, 0xAA] {
+        return Err(format!(
+            "boot: the boot sector must be exactly 512 bytes ending in 0x55 0xAA (it is {} bytes)",
+            boot_bytes.len()
+        ));
+    }
+    let Some(&at) = b.symbols.get("kernel_sectors") else {
+        return Err("boot: define `kernel_sectors dw 0`; the builder stores the kernel size there".into());
+    };
+    let off = (at - BOOT_BASE) as usize;
+    boot_bytes[off..off + 2].copy_from_slice(&(sectors as u16).to_le_bytes());
+
+    let mut image = boot_bytes;
+    image.extend_from_slice(&kernel_bytes);
+    Ok(image)
+}
+
+/// Compiles a parsed program (plus the std modules it uses) to MASM assembly.
+pub fn generate_asm(file: &File) -> Result<String, String> {
+    let mut c = Compiler::new(Target::Windows);
+    c.load(file)?;
+    c.declare()?;
+    c.generate()
+}
+
+const MANIFEST: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" processorArchitecture="*" publicKeyToken="6595b64144ccf1df" language="*"/>
+    </dependentAssembly>
+  </dependency>
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
+      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+    </windowsSettings>
+  </application>
+</assembly>
+"#;
+
+/// Visual Studio installations that can run `vcvars64.bat`, newest first.
+fn vcvars_candidates() -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = Vec::new();
+    let vswhere = Path::new(r"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe");
+    if vswhere.exists() {
+        if let Ok(out) = Command::new(vswhere).args(["-all", "-products", "*", "-property", "installationPath"]).output() {
+            for l in String::from_utf8_lossy(&out.stdout).lines() {
+                if !l.trim().is_empty() {
+                    roots.push(PathBuf::from(l.trim()));
+                }
+            }
+        }
+    }
+    for base in [r"C:\Program Files\Microsoft Visual Studio", r"C:\Program Files (x86)\Microsoft Visual Studio"] {
+        for ver in ["18", "2022", "2019"] {
+            for ed in ["Community", "Professional", "Enterprise", "BuildTools"] {
+                roots.push(Path::new(base).join(ver).join(ed));
+            }
+        }
+    }
+    let mut seen = HashSet::new();
+    roots
+        .into_iter()
+        .map(|r| r.join(r"VC\Auxiliary\Build\vcvars64.bat"))
+        .filter(|p| p.exists() && seen.insert(p.clone()))
+        .collect()
+}
+
+/// Compiles to a native Windows x86-64 executable using `ml64` and `link`.
+pub fn compile_to_native(file: &File, output_exe: &str) -> Result<(), String> {
+    let mut c = Compiler::new(Target::Windows);
+    c.load(file)?;
+    c.declare()?;
+    let asm = c.generate()?;
+    let gui = c.uses_ui;
+    let mut libs: Vec<String> = vec!["kernel32".into()];
+    libs.extend(c.libs.iter().filter(|l| *l != "kernel32").cloned());
+
+    let out_abs = std::env::current_dir().map_err(|e| e.to_string())?.join(output_exe);
+    // unique per build: several builds may run at once in one process
+    static BUILD_ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let work = std::env::temp_dir().join(format!(
+        "brasa-build-{}-{}",
+        std::process::id(),
+        BUILD_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+    ));
+    std::fs::create_dir_all(&work).map_err(|e| format!("cannot create {}: {}", work.display(), e))?;
+    std::fs::write(work.join("prog.asm"), &asm).map_err(|e| e.to_string())?;
+    std::fs::write(work.join("prog.manifest"), MANIFEST).map_err(|e| e.to_string())?;
+
+    let candidates = vcvars_candidates();
+    if candidates.is_empty() {
+        return Err("could not find Visual Studio C++ build tools (vcvars64.bat); install the 'Desktop development with C++' workload".into());
+    }
+    let lib_args: Vec<String> = libs.iter().map(|l| format!("{}.lib", l)).collect();
+    let mut last_err = String::new();
+    for vcvars in candidates {
+        let bat = format!(
+            "@echo off\r\ncall \"{}\" >nul 2>&1\r\nml64 /nologo /c /Fo prog.obj prog.asm || exit /b 1\r\nlink /nologo /subsystem:{} /entry:brasa_start /manifest:embed /manifestinput:prog.manifest prog.obj {} /out:\"{}\" || exit /b 1\r\n",
+            vcvars.display(),
+            if gui { "windows" } else { "console" },
+            lib_args.join(" "),
+            out_abs.display()
+        );
+        let bat_path = work.join("build.bat");
+        std::fs::write(&bat_path, bat).map_err(|e| e.to_string())?;
+        let out = Command::new("cmd")
+            .arg("/c")
+            .arg(&bat_path)
+            .current_dir(&work)
+            .output()
+            .map_err(|e| format!("failed to run the assembler/linker: {}", e))?;
+        if out.status.success() {
+            let _ = std::fs::remove_dir_all(&work);
+            return Ok(());
+        }
+        last_err = format!(
+            "assembler/linker failed (using {}):\n{}{}",
+            vcvars.display(),
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    Err(format!("{}\n(intermediate files kept in {})", last_err, work.display()))
+}

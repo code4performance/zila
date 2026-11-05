@@ -1,0 +1,107 @@
+// =====================================================================
+// Brasa standard library: futures (`async func`, `await`)
+//
+// Written in Brasa. The compiler lowers
+//
+//     async func f(a) -> T          to      a function returning Future<T>
+//     await e                       to      future.wait(e)
+//
+// An async function runs as its own task (a fiber, see std/task.br). The
+// value it returns is stored in `slot` as a plain word; `slot` is a list
+// created with the element-ownership flag of T, so a result nobody awaited
+// is released together with the future.
+//
+// A future can be awaited once: `wait` takes the value out of the slot.
+// =====================================================================
+
+package future
+
+use task
+
+// Reference semantics: copying a Future would split its waiters from its result.
+#[shared]
+type Future = record
+    done: bool
+    slot: []int
+    waiters: []int
+end
+
+func future_new() -> Future
+    return Future{}
+end
+
+// Stores the result and wakes every task waiting for it.
+func complete(fut: Future, word: int)
+    fut.slot.add(word)
+    fut.done = true
+    for i in 0..fut.waiters.len
+        task.wake(fut.waiters[i])
+    end
+    fut.waiters.clear()
+end
+
+// Waits for the future without blocking other tasks and takes its value.
+func wait(fut: Future) -> int
+    task.init()
+    while not fut.done
+        fut.waiters.add(task.current)
+        task.park()
+    end
+    if fut.slot.len == 0
+        task.fatal("future already awaited")
+    end
+    return fut.slot.take()
+end
+
+// Waits until at least one of the futures is done; returns its index.
+func wait_any(fs: []Future) -> int
+    task.init()
+    while true
+        for i in 0..fs.len
+            if fs[i].done
+                return i
+            end
+        end
+        for i in 0..fs.len
+            fs[i].waiters.add(task.current)
+        end
+        task.park()
+    end
+    return 0
+end
+
+// Waits until `f` completes or `ms` milliseconds have passed; 1 when `f` completed.
+// A stale wake-up (from an earlier timer) only makes the loop check again.
+func timeout_wait(ms: int, f: Future) -> int
+    task.init()
+    let me = task.current
+    let deadline = task.now() + ms
+    task.add_timer(deadline, func()
+        task.wake(me)
+    end)
+    while not f.done and task.now() < deadline
+        f.waiters.add(me)
+        task.park()
+    end
+    if f.done
+        return 1
+    end
+    return 0
+end
+
+// A future that completes `ms` milliseconds from now (`await sleep(ms)`).
+func sleep_future(ms: int) -> Future
+    task.init()
+    let fut = Future{}
+    task.add_timer(task.now() + ms, func()
+        complete(fut, 0)
+    end)
+    return fut
+end
+
+// Runs `body` as a task and completes `fut` with the word it returns.
+func launch(body: func() -> int, fut: Future)
+    task.start(func()
+        complete(fut, body())
+    end)
+end

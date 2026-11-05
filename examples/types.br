@@ -1,0 +1,84 @@
+package main
+
+type Printable = interface
+    func to_text(self) -> text
+end
+
+type Shape = enum
+    Circle(float)
+    Rect(float, float)
+    Empty
+end
+
+type Color = enum
+    Red, Green, Blue
+end
+
+type Stack<T> = record
+    items: []T
+end
+
+type Handler = func(Request) -> Response or error
+type Middleware = func(Request, next: Handler) -> Response or error
+type Table = Map<text, List<i32>>
+
+type User = record
+    id: i32
+    #[json("full_name")] name: text
+    #[json(skip)] password: text
+    email: text?
+end
+
+func first<T>(items: []T) -> T?
+    if items.len == 0
+        return nil
+    end
+    return items[0]
+end
+
+func show<T: Printable>(x: T)
+    print(x.to_text())
+end
+
+func (c: Customer) greet() -> text
+    return "Hello, {c.name}"
+end
+
+func (ref s: Server) use(m: Middleware)
+    s.chain.add(m)
+end
+
+func area(s: Shape) -> float
+    match s
+        Circle(r)  -> return 3.14159 * r * r
+        Rect(w, h) -> return w * h
+        Empty      -> return 0.0
+    end
+end
+
+func classify(n: i32) -> text
+    match n
+        0 -> return "zero"
+        1 | 2 | 3 ->
+            let s = "small"
+            return s
+        -1 -> return "minus one"
+        _ -> return "many"
+    end
+end
+
+func fill(ref buf: Buffer, n: i32 = 4)
+    buf.n = n
+end
+
+func log(msg: text, args: ...any)
+    print(msg)
+end
+
+func main()
+    var b = Buffer{}
+    fill(ref b)
+    fill(ref b, n: 8)
+    let xs = [1, 2, 3]
+    log("x", ...xs)
+end

@@ -1,0 +1,36 @@
+{
+  "name": "brasa-lang",
+  "displayName": "Brasa Programming Language",
+  "description": "Syntax highlighting and language support for Brasa (.br)",
+  "version": "0.1.0",
+  "publisher": "brasa",
+  "engines": {
+    "vscode": "^1.60.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "brasa",
+        "aliases": [
+          "Brasa",
+          "brasa"
+        ],
+        "extensions": [
+          ".br"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "brasa",
+        "scopeName": "source.brasa",
+        "path": "./syntaxes/brasa.tmLanguage.json"
+      }
+    ]
+  }
+}
+

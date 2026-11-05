@@ -1,0 +1,380 @@
+// =====================================================================
+// Brasa standard library: TCP networking (`use net`)
+//
+// Written in Brasa on Winsock with overlapped sockets and the scheduler's
+// completion port (std/task.br). No call blocks the other tasks.
+//
+//   let listener = try await net.listen(8080)
+//   let conn = try await listener.accept()
+//   let request = try await conn.read(4096)
+//   try await conn.write("hello")
+//
+//   let client = try await net.connect("127.0.0.1", 8080)
+//
+// `read` returns empty text when the peer closed the connection. Sockets
+// close when the last reference to them goes away, or earlier with `close()`.
+// Numeric IPv4 addresses never block; a host name goes through the Windows
+// resolver, which blocks every task until it answers.
+// =====================================================================
+
+package net
+
+use c
+use sys
+use task
+use ws
+
+let AF_INET = 2
+let SOCK_STREAM = 1
+let IPPROTO_TCP = 6
+let WSA_FLAG_OVERLAPPED = 1
+let SOL_SOCKET = 0xFFFF
+let SO_UPDATE_ACCEPT_CONTEXT = 0x700B
+let SO_UPDATE_CONNECT_CONTEXT = 0x7010
+let SIO_GET_EXTENSION_FUNCTION_POINTER = 0xC8000006
+let ERROR_IO_PENDING = 997
+let INVALID_SOCKET = 0xFFFFFFFFFFFFFFFF
+
+type ConnectExFn = extern "system" func(usize, *u8, i32, usize, u32, usize, *task.Op) -> i32
+type AcceptExFn = extern "system" func(usize, usize, *u8, u32, u32, u32, usize, *task.Op) -> i32
+
+var started = false
+var connect_ex: ConnectExFn
+var accept_ex: AcceptExFn
+
+// An open connection. Closes its socket when the last reference goes away.
+#[shared]
+type Conn = record
+    sock: usize
+    open: bool
+end
+
+func (ref conn: Conn) drop()
+    if conn.open
+        unsafe
+            ws.closesocket(conn.sock)
+        end
+        conn.open = false
+    end
+end
+
+// A listening socket and the port it listens on.
+#[shared]
+type Listener = record
+    sock: usize
+    port: int
+    open: bool
+end
+
+func (ref l: Listener) drop()
+    if l.open
+        unsafe
+            ws.closesocket(l.sock)
+        end
+        l.open = false
+    end
+end
+
+func new_socket() -> usize
+    var s: usize = INVALID_SOCKET
+    unsafe
+        s = ws.WSASocketW(AF_INET, SOCK_STREAM, IPPROTO_TCP, 0, 0, WSA_FLAG_OVERLAPPED)
+    end
+    if s != INVALID_SOCKET
+        task.io_attach(s)
+    end
+    return s
+end
+
+// Looks up a Winsock extension function (ConnectEx, AcceptEx) by its GUID.
+func extension(s: usize, guid: sys.Buf) -> int
+    let out = sys.Scratch{}
+    let size = sys.Scratch{}
+    var rc = 0
+    unsafe
+        rc = ws.WSAIoctl(s, SIO_GET_EXTENSION_FUNCTION_POINTER, guid.ptr, 16, &out.a, 8, &size.a, 0, 0)
+    end
+    if rc != 0
+        return 0
+    end
+    return out.a
+end
+
+func put_bytes(p: *u8, b0: int, b1: int, b2: int, b3: int, b4: int, b5: int, b6: int, b7: int)
+    unsafe
+        p[0] = b0
+        p[1] = b1
+        p[2] = b2
+        p[3] = b3
+        p[4] = b4
+        p[5] = b5
+        p[6] = b6
+        p[7] = b7
+    end
+end
+
+// Starts Winsock and finds ConnectEx and AcceptEx, once.
+func net_init() -> error
+    if started
+        return
+    end
+    let data = sys.buffer(512)
+    var rc = 0
+    unsafe
+        rc = ws.WSAStartup(0x0202, data.ptr)
+    end
+    if rc != 0
+        return error("cannot start Winsock (error {rc})")
+    end
+    task.io_init()
+    let s = new_socket()
+    if s == INVALID_SOCKET
+        return error(sys.describe(task.last_error(), "cannot create a socket"))
+    end
+    // {25a207b9-ddf3-4660-8ee9-76e58c74063e}
+    let g1 = sys.buffer(16)
+    put_bytes(g1.ptr, 0xB9, 0x07, 0xA2, 0x25, 0xF3, 0xDD, 0x60, 0x46)
+    put_bytes(g1.ptr + 8, 0x8E, 0xE9, 0x76, 0xE5, 0x8C, 0x74, 0x06, 0x3E)
+    // {b5367df1-cbac-11cf-95ca-00805f48a192}
+    let g2 = sys.buffer(16)
+    put_bytes(g2.ptr, 0xF1, 0x7D, 0x36, 0xB5, 0xAC, 0xCB, 0xCF, 0x11)
+    put_bytes(g2.ptr + 8, 0x95, 0xCA, 0x00, 0x80, 0x5F, 0x48, 0xA1, 0x92)
+    connect_ex = extension(s, g1)
+    accept_ex = extension(s, g2)
+    unsafe
+        ws.closesocket(s)
+    end
+    started = true
+    return
+end
+
+// A sockaddr_in for an IPv4 address given as a 32-bit number and a port.
+func make_addr(ip: int, port: int) -> sys.Buf
+    let b = sys.buffer(16)
+    put_bytes(b.ptr, AF_INET, 0, (port >> 8) bitand 255, port bitand 255, (ip >> 24) bitand 255, (ip >> 16) bitand 255, (ip >> 8) bitand 255, ip bitand 255)
+    return b
+end
+
+// "a.b.c.d" as a number, or -1 when `host` is not a numeric IPv4 address.
+func parse_ip(host: text) -> int
+    var ip = 0
+    var parts = 0
+    var value = 0
+    var digits = 0
+    for i in 0..host.len + 1
+        var ch = 46
+        if i < host.len
+            ch = int(host[i])
+        end
+        if ch == 46
+            if digits == 0 or value > 255
+                return -1
+            end
+            ip = ip * 256 + value
+            parts += 1
+            value = 0
+            digits = 0
+        else if ch >= 48 and ch <= 57
+            value = value * 10 + (ch - 48)
+            digits += 1
+        else
+            return -1
+        end
+    end
+    if parts != 4
+        return -1
+    end
+    return ip
+end
+
+// The IPv4 address of `host`: numeric addresses are parsed, names are resolved
+// with the (blocking) Windows resolver.
+func resolve(host: text) -> int or error
+    let numeric = parse_ip(host)
+    if numeric >= 0
+        return numeric
+    end
+    let hints = sys.buffer(48)
+    unsafe
+        hints.ptr[4] = AF_INET
+        hints.ptr[8] = SOCK_STREAM
+    end
+    let out = sys.Scratch{}
+    var rc = 0
+    unsafe
+        rc = ws.getaddrinfo(c.cstr(host), 0, hints.ptr, &out.a)
+    end
+    if rc != 0
+        return error("cannot resolve '{host}'")
+    end
+    let info = out.a
+    let slot: *int = info + 32
+    var ip = 0
+    unsafe
+        let addr: *u8 = slot[0]
+        ip = (int(addr[4]) << 24) bitor (int(addr[5]) << 16) bitor (int(addr[6]) << 8) bitor int(addr[7])
+        ws.freeaddrinfo(info)
+    end
+    return ip
+end
+
+// Waits for an operation the system accepted (or finished at once) and
+// returns the bytes it moved.
+func await_op(op: task.Op, accepted: bool, err: int, what: text) -> int or error
+    if not accepted and err != ERROR_IO_PENDING
+        task.op_release(op)
+        return error(sys.describe(err, what))
+    end
+    task.op_submit(op)
+    task.op_wait(op)
+    let status = op.status
+    let moved = op.bytes
+    task.op_release(op)
+    if status != 0
+        return error(sys.describe(status, what))
+    end
+    return moved
+end
+
+// Connects to a TCP server.
+async func connect(host: text, port: int) -> Conn or error
+    try net_init()
+    let ip = try resolve(host)
+    let s = new_socket()
+    if s == INVALID_SOCKET
+        return error(sys.describe(task.last_error(), "cannot create a socket"))
+    end
+    let conn = Conn{ sock: s, open: true }
+    // ConnectEx wants the socket bound first
+    let local = make_addr(0, 0)
+    var rc = 0
+    unsafe
+        rc = ws.bind(s, local.ptr, 16)
+    end
+    if rc != 0
+        return error(sys.describe(task.last_error(), "cannot bind a socket"))
+    end
+    let remote = make_addr(ip, port)
+    let op = task.op_new()
+    var ok = 0
+    var err = 0
+    unsafe
+        ok = connect_ex(s, remote.ptr, 16, 0, 0, 0, &op)
+        err = task.last_error()
+    end
+    try await_op(op, ok != 0, err, "connect to {host}:{port}")
+    unsafe
+        ws.setsockopt(s, SOL_SOCKET, SO_UPDATE_CONNECT_CONTEXT, 0, 0)
+    end
+    return conn
+end
+
+// Starts listening on a port (0 picks a free one; see `.port`).
+async func listen(port: int) -> Listener or error
+    try net_init()
+    let s = new_socket()
+    if s == INVALID_SOCKET
+        return error(sys.describe(task.last_error(), "cannot create a socket"))
+    end
+    let l = Listener{ sock: s, port: port, open: true }
+    let addr = make_addr(0, port)
+    var rc = 0
+    unsafe
+        rc = ws.bind(s, addr.ptr, 16)
+    end
+    if rc != 0
+        return error(sys.describe(task.last_error(), "cannot listen on port {port}"))
+    end
+    unsafe
+        rc = ws.listen(s, 128)
+    end
+    if rc != 0
+        return error(sys.describe(task.last_error(), "cannot listen on port {port}"))
+    end
+    let bound = sys.buffer(16)
+    let size = sys.Scratch{ a: 16 }
+    unsafe
+        ws.getsockname(s, bound.ptr, &size.a)
+        l.port = (int(bound.ptr[2]) << 8) bitor int(bound.ptr[3])
+    end
+    return l
+end
+
+// Waits for the next client.
+async func (l: Listener) accept() -> Conn or error
+    let s = new_socket()
+    if s == INVALID_SOCKET
+        return error(sys.describe(task.last_error(), "cannot create a socket"))
+    end
+    let conn = Conn{ sock: s, open: true }
+    let scratch = sys.buffer(64)
+    let op = task.op_new()
+    var ok = 0
+    var err = 0
+    unsafe
+        ok = accept_ex(l.sock, s, scratch.ptr, 0, 32, 32, 0, &op)
+        err = task.last_error()
+    end
+    try await_op(op, ok != 0, err, "accept")
+    unsafe
+        ws.setsockopt(s, SOL_SOCKET, SO_UPDATE_ACCEPT_CONTEXT, &l.sock, 8)
+    end
+    return conn
+end
+
+// Receives up to `max` bytes; empty text means the peer closed the connection.
+async func (conn: Conn) read(max: int) -> text or error
+    let b = sys.buffer(max)
+    let wb = ws.Wsabuf{ len: u32(max), ptr: b.ptr }
+    let flags = sys.Scratch{}
+    let op = task.op_new()
+    var rc = 0
+    var err = 0
+    unsafe
+        rc = ws.WSARecv(conn.sock, &wb, 1, 0, &flags.a, &op, 0)
+        err = task.last_error()
+    end
+    let n = try await_op(op, rc == 0, err, "read")
+    return c.from_bytes(b.ptr, n)
+end
+
+// Sends all of `data`.
+async func (conn: Conn) write(data: text) -> error
+    var done = 0
+    while done < data.len
+        let wb = ws.Wsabuf{ len: u32(data.len - done), ptr: c.cstr(data) + done }
+        let op = task.op_new()
+        var rc = 0
+        var err = 0
+        unsafe
+            rc = ws.WSASend(conn.sock, &wb, 1, 0, 0, &op, 0)
+            err = task.last_error()
+        end
+        let sent = try await_op(op, rc == 0, err, "write")
+        if sent == 0
+            return error("write: the connection is closed")
+        end
+        done += sent
+    end
+    return
+end
+
+// Closes the connection now.
+async func (conn: Conn) close()
+    if conn.open
+        unsafe
+            ws.closesocket(conn.sock)
+        end
+        conn.open = false
+    end
+end
+
+// Stops listening now.
+async func (l: Listener) close()
+    if l.open
+        unsafe
+            ws.closesocket(l.sock)
+        end
+        l.open = false
+    end
+end

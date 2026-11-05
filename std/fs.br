@@ -1,0 +1,163 @@
+// =====================================================================
+// Brasa standard library: files (`use fs`)
+//
+// Written in Brasa on top of Windows overlapped I/O and the scheduler's
+// completion port (std/task.br). Reading and writing never block other
+// tasks: the operating system moves the data while the scheduler runs
+// something else.
+//
+//   let text = try await fs.read("notes.txt")
+//   try await fs.write("copy.txt", text)
+//
+// Large files are transferred in 64 KiB pieces. Errors name the path and
+// the reason Windows gives ("notes.txt: The system cannot find the file
+// specified.").
+// =====================================================================
+
+package fs
+
+use c
+use sys
+use task
+
+#[link("kernel32")]
+extern "system" func CreateFileW(name: *u8, access: u32, share: u32, security: usize, disposition: u32, flags: u32, template: usize) -> usize
+extern "system" func ReadFile(handle: usize, buffer: *u8, count: u32, done: usize, overlapped: *task.Op) -> i32
+extern "system" func WriteFile(handle: usize, buffer: *u8, count: u32, done: usize, overlapped: *task.Op) -> i32
+extern "system" func CloseHandle(handle: usize) -> i32
+extern "system" func GetFileSizeEx(handle: usize, size: *int) -> i32
+extern "system" func MultiByteToWideChar(codepage: u32, flags: u32, source: *u8, source_len: i32, dest: *u8, dest_len: i32) -> i32
+
+let ERROR_IO_PENDING = 997
+let ERROR_HANDLE_EOF = 38
+let CHUNK = 65536
+
+// Owns an open file handle; closes it when the last reference goes away.
+#[shared]
+type File = record
+    handle: usize
+end
+
+func (ref f: File) drop()
+    unsafe
+        CloseHandle(f.handle)
+    end
+end
+
+// The path as a NUL-terminated UTF-16 string.
+func wide(path: text) -> sys.Buf
+    var n = 0
+    unsafe
+        n = MultiByteToWideChar(65001, 0, c.cstr(path), -1, 0, 0)
+    end
+    let b = sys.buffer(n * 2 + 2)
+    unsafe
+        MultiByteToWideChar(65001, 0, c.cstr(path), -1, b.ptr, n)
+    end
+    return b
+end
+
+func open_file(path: text, write: bool) -> File or error
+    let w = wide(path)
+    var access: u32 = 0x80000000
+    var disposition: u32 = 3
+    if write
+        access = 0x40000000
+        disposition = 2
+    end
+    var h: usize = 0
+    unsafe
+        h = CreateFileW(w.ptr, access, 1, 0, disposition, 0x40000000, 0)
+    end
+    if h == 0xFFFFFFFFFFFFFFFF
+        return error(sys.describe(task.last_error(), path))
+    end
+    task.io_attach(h)
+    return File{ handle: h }
+end
+
+func file_size(f: File, path: text) -> int or error
+    let s = sys.Scratch{}
+    var ok = 0
+    unsafe
+        ok = GetFileSizeEx(f.handle, &s.a)
+    end
+    if ok == 0
+        return error(sys.describe(task.last_error(), path))
+    end
+    return s.a
+end
+
+// Moves up to `count` bytes at `offset` between the file and memory and waits
+// for the operating system to finish. Returns the bytes moved (0 at end of file).
+func transfer(f: File, ptr: *u8, count: int, offset: int, write: bool, path: text) -> int or error
+    let op = task.op_new()
+    op.offset = u32(offset bitand 0xFFFFFFFF)
+    op.offset_high = u32(offset >> 32)
+    var ok = 0
+    var err = 0
+    unsafe
+        if write
+            ok = WriteFile(f.handle, ptr, u32(count), 0, &op)
+        else
+            ok = ReadFile(f.handle, ptr, u32(count), 0, &op)
+        end
+    end
+    if ok == 0
+        err = task.last_error()
+        if err != ERROR_IO_PENDING
+            task.op_release(op)
+            return error(sys.describe(err, path))
+        end
+    end
+    task.op_submit(op)
+    task.op_wait(op)
+    let status = op.status
+    let moved = op.bytes
+    task.op_release(op)
+    if status == ERROR_HANDLE_EOF
+        return 0
+    end
+    if status != 0
+        return error(sys.describe(status, path))
+    end
+    return moved
+end
+
+// Reads a whole file.
+async func read(path: text) -> text or error
+    task.io_init()
+    let f = try open_file(path, false)
+    let size = try file_size(f, path)
+    let b = sys.buffer(size + 1)
+    var done = 0
+    while done < size
+        var count = size - done
+        if count > CHUNK
+            count = CHUNK
+        end
+        let got = try transfer(f, b.ptr + done, count, done, false, path)
+        if got == 0
+            break
+        end
+        done += got
+    end
+    return c.from_bytes(b.ptr, done)
+end
+
+// Creates the file (or replaces it) with `data`.
+async func write(path: text, data: text) -> error
+    task.io_init()
+    let f = try open_file(path, true)
+    let bytes = data.len
+    var done = 0
+    while done < bytes
+        var count = bytes - done
+        if count > CHUNK
+            count = CHUNK
+        end
+        let put = try transfer(f, c.cstr(data) + done, count, done, true, path)
+        done += put
+    end
+    return
+end

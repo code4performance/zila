@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Brasa — a language with a human face</title>
+  <meta name="description" content="Brasa is a readable systems-and-application language: explicit error handling, structural interfaces, and zero-cost C interop, with syntax that reads like prose.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="index.html">brasa<span class="ember-dot">.</span><small>lang docs</small></a>
+    <nav class="site-nav">
+      <a href="index.html" aria-current="page">Overview</a>
+      <a href="syntax.html">Syntax</a>
+      <a href="examples.html">Examples</a>
+      <a href="native.html">Native</a>
+      <a href="concurrency.html">Tasks</a>
+      <a href="async.html">Async</a>
+      <a href="os.html">Brasa OS</a>
+      <a href="getting-started.html">Getting Started</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <h1>Brasa</h1>
+      <p class="tagline">A readable systems-and-application language: explicit error handling, structural interfaces, and zero-cost C interop — syntax that reads like prose, power that reaches down to raw pointers and inline assembly.</p>
+    </section>
+
+    <section>
+      <h2>What is Brasa?</h2>
+      <p>Brasa is a general-purpose programming language designed to feel approachable while staying honest about what your code actually does. Programs are organized into <code>package</code>s and blocks that end with <code>end</code> instead of braces, so a function, a type, or an <code>if</code> reads as a plain block of statements rather than a thicket of punctuation.</p>
+      <p>Underneath that readable surface sits a practical, static type system: <code>record</code>s, <code>enum</code>s (with or without data), and structural <code>interface</code>s, with generics for reusable code. Errors are values, not exceptions — a function that can fail returns <code>T or error</code>, and <code>try</code> propagates failure up the call stack explicitly, so you can always see where a program might fail just by reading its signatures.</p>
+      <p>Brasa doesn't stop at the application layer. The same language can drop into <code>unsafe</code> blocks to dereference raw pointers, declare <code>extern "C"</code> functions, and write inline <code>asm</code> — enough to call into existing C libraries, be called from C, or write a naked interrupt handler, without switching languages or reaching for a separate systems-programming toolkit.</p>
+    </section>
+
+    <section>
+      <h2>Design goals</h2>
+      <ul>
+        <li><strong>Readable by default.</strong> Newline-terminated statements, <code>end</code>-delimited blocks, and method chains that read top-to-bottom.</li>
+        <li><strong>Errors you can see.</strong> No hidden exceptions — failure is part of a function's return type (<code>T or error</code>), and propagation (<code>try</code>) is explicit at every call site.</li>
+        <li><strong>Native and tiny.</strong> Programs compile straight to machine code, with memory freed by reference counting and no runtime to install: see <a href="native.html">Native compilation</a>. The same compiler builds native windows with the <code>ui</code> library (see the <a href="examples.html#ui">example</a>) and a bootable kernel: <a href="os.html">Brasa OS</a>.</li>
+        <li><strong>Waiting without freezing.</strong> <code>async</code>/<code>await</code>, timers, files and TCP run on cooperative tasks: see <a href="async.html">Async</a>.</li>
+        <li><strong>A practical type system.</strong> Records, enums (with or without data), and structural interfaces (a type satisfies an interface just by having the right methods — no inheritance, no explicit <code>implements</code>).</li>
+        <li><strong>No surprise costs.</strong> Records are copied on assignment and call unless passed <code>ref</code>; there's no borrow checker and no hidden allocation magic.</li>
+        <li><strong>Systems-capable when you need it.</strong> Raw pointers, <code>unsafe</code> blocks, C FFI, and inline assembly are part of the language, gated behind explicit syntax rather than bolted on.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Who it's for</h2>
+      <p>Brasa is aimed at people who like the explicitness of languages like Go or Rust — typed signatures, errors as values, no hidden control flow — but want a lighter, more conversational syntax day to day. It also targets developers who occasionally need to go low-level: calling a C library, exporting a function for a C caller, or writing a few lines of inline assembly, without leaving the language they write their application code in.</p>
+    </section>
+
+    <section>
+      <h2>A quick taste</h2>
+      <div class="file-label">examples/hello.br</div>
+      <pre><code><span class="kw">package</span> main
+
+<span class="kw">use</span> http, db, json
+
+<span class="kw">type</span> Customer = <span class="kw">record</span>
+    id: i32
+    name: text
+    email: text?
+<span class="kw">end</span>
+
+<span class="kw">func</span> greet(c: Customer) -&gt; text
+    <span class="kw">return</span> <span class="str">"Hello, {c.name}!"</span>
+<span class="kw">end</span>
+
+<span class="kw">func</span> main()
+    <span class="kw">var</span> c = Customer{ id: 1, name: <span class="str">"Ana"</span> }
+    print(greet(c))
+
+    <span class="kw">for</span> i <span class="kw">in</span> 1..5
+        <span class="kw">if</span> i % 2 == 0
+            print(<span class="str">"{i} is even"</span>)
+        <span class="kw">end</span>
+    <span class="kw">end</span>
+<span class="kw">end</span></code></pre>
+      <p>Notice the string interpolation (<code>"{c.name}"</code>), the optional field (<code>email: text?</code>), and that every block closes with <code>end</code> instead of braces.</p>
+    </section>
+
+    <section class="card-row">
+      <div class="card">
+        <h3>Syntax Guide</h3>
+        <p>A tour of Brasa's core constructs: types, functions, control flow, error handling, and FFI.</p>
+        <a class="card-link" href="syntax.html">Read the syntax guide →</a>
+      </div>
+      <div class="card">
+        <h3>Examples</h3>
+        <p>Annotated walkthroughs of real Brasa programs, from "hello world" to a REST API.</p>
+        <a class="card-link" href="examples.html">Browse examples →</a>
+      </div>
+      <div class="card">
+        <h3>Getting Started</h3>
+        <p>Build the parser and run your first <code>.br</code> file.</p>
+        <a class="card-link" href="getting-started.html">Get started →</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    Brasa — a language with a human face. Docs generated from <code>brasa.ebnf</code> and <code>examples/*.br</code>.
+  </footer>
+</body>
+</html>

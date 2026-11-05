@@ -1,0 +1,78 @@
+package main
+
+use c
+
+// ---- calling C ----
+
+#[link("m")]
+extern "C" func sqrt(x: f64) -> f64
+
+extern "C" func printf(fmt: *c.char, ...) -> c.int
+
+extern "C" func qsort(base: *c.void, n: c.size_t, size: c.size_t,
+                      cmp: extern "C" func(*c.void, *c.void) -> c.int)
+
+#[link_src("vendor/crc.c")]
+extern "C" func crc32(data: *u8, len: usize) -> u32
+
+#[stdcall_example]
+extern "stdcall" func MessageBoxA(hwnd: usize, text: *c.char, caption: *c.char, kind: u32) -> c.int
+
+#[c_layout]
+type Point = record
+    x: f64
+    y: f64
+end
+
+// ---- being called from C ----
+
+#[export("brasa_add")]
+func add(a: i32, b: i32) -> i32
+    return a + b
+end
+
+// ---- inline assembly ----
+
+#[cfg("x86_64")]
+func rdtsc() -> u64
+    var lo: u32 = 0
+    var hi: u32 = 0
+    unsafe
+        asm
+            "rdtsc"
+            out eax = lo
+            out edx = hi
+        end
+    end
+    return u64(hi) << 32 bitor u64(lo)
+end
+
+#[cfg("x86_64")]
+func add_asm(a: u64, b: u64) -> u64
+    var r: u64 = a
+    unsafe
+        asm
+            "add @r, @b"
+            inout r = r
+            in b = b
+            clobber "cc"
+        end
+    end
+    return r
+end
+
+#[naked]
+#[cfg("x86_64")]
+func halt()
+    asm
+        "cli"
+        "hlt"
+    end
+end
+
+func main()
+    unsafe
+        printf(c.cstr("sqrt(2) = %f\n"), sqrt(2.0))
+    end
+    print("tsc: {rdtsc()}")
+end

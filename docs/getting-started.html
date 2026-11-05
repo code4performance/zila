@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Getting Started — Brasa</title>
+  <meta name="description" content="Build the Brasa parser and run your first .br file, including the --ast, --tokens, and --run options.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="index.html">brasa<span class="ember-dot">.</span><small>lang docs</small></a>
+    <nav class="site-nav">
+      <a href="index.html">Overview</a>
+      <a href="syntax.html">Syntax</a>
+      <a href="examples.html">Examples</a>
+      <a href="native.html">Native</a>
+      <a href="concurrency.html">Tasks</a>
+      <a href="async.html">Async</a>
+      <a href="os.html">Brasa OS</a>
+      <a href="getting-started.html" aria-current="page">Getting Started</a>
+    </nav>
+  </header>
+
+  <main>
+    <h1>Getting Started</h1>
+    <p>Brasa's reference implementation is a Rust lexer, AST, and recursive-descent parser with a tree-walking interpreter and a native x86-64 compiler — std-only, no external dependencies.</p>
+
+    <section>
+      <h2>Build</h2>
+      <pre><code>cargo build --release
+cargo test</code></pre>
+      <p><code>cargo build --release</code> compiles the <code>brasa-parse</code> command-line tool; <code>cargo test</code> runs the parser's test suite (precedence, newline rules, match arms, generics, and error-position checks).</p>
+    </section>
+
+    <section>
+      <h2>Run a program</h2>
+      <p>Once built, point <code>brasa-parse</code> at any <code>.br</code> file:</p>
+      <pre><code>./target/release/brasa-parse examples/rest_api.br            <span class="cm"># OK + summary</span>
+./target/release/brasa-parse examples/hello.br --ast          <span class="cm"># dump the AST</span>
+./target/release/brasa-parse examples/hello.br --tokens       <span class="cm"># dump tokens</span>
+./target/release/brasa-parse examples/hello.br --run          <span class="cm"># execute with AST interpreter</span>
+./target/release/brasa-parse examples/async.br -o async.exe   <span class="cm"># compile to a native executable</span></code></pre>
+
+      <dl class="cli">
+        <dt>(no flag)</dt>
+        <dd>Parses the file and prints <code>OK &lt;path&gt;: &lt;summary&gt;</code> — a one-line count of packages, uses, functions, types, variables, externs, and embeds. This is the quickest way to check that a file parses without errors.</dd>
+
+        <dt>--tokens</dt>
+        <dd>Runs only the lexer and prints every token with its line and column, one per line. Useful for debugging how the lexer splits up a tricky piece of source (string interpolation, newline collapsing, generics closing with <code>&gt;&gt;</code>, etc.).</dd>
+
+        <dt>--ast</dt>
+        <dd>Parses the file and pretty-prints the full abstract syntax tree (every statement and expression node, each carrying its source line).</dd>
+
+        <dt>--run</dt>
+        <dd>Parses the file and executes it with the built-in AST tree-walking interpreter, calling its <code>main</code> function. The interpreter does not know the native-only features (<code>async</code>, <code>await</code>, the <code>ui</code>, <code>fs</code> and <code>net</code> libraries); use <code>-o</code> for those.</dd>
+
+        <dt>-o output.exe</dt>
+        <dd>Compiles the file to a native Windows x86-64 executable (also written <code>--build</code>). Needs the Visual Studio C++ build tools (<code>ml64</code> and <code>link</code>), which the compiler finds on its own. The resulting program has no runtime to install. See <a href="native.html">Native compilation</a> for what it supports.</dd>
+
+        <dt>--asm</dt>
+        <dd>Prints the x86-64 assembly the native compiler generates for the file.</dd>
+
+        <dt>--docs</dt>
+        <dd>Rewrites the example blocks of this documentation site from <code>examples/*.br</code>. Run it after changing an example; <code>cargo test</code> fails when the pages are out of date.</dd>
+
+        <dt>--os boot.br kernel.br -o disk.img</dt>
+        <dd>Builds a bootable disk image from a boot sector and a kernel, both written in Brasa (see <code>os/</code> in the repository). Run it with QEMU.</dd>
+      </dl>
+    </section>
+
+    <section>
+      <h2>Reading errors</h2>
+      <p>Parse errors report the file, line, and column, with the offending source line and a caret pointing at the problem:</p>
+      <pre><code><span class="cm">error: expected 'end', found end of file
+  --&gt; prog.br:4:1</span></code></pre>
+    </section>
+
+    <section>
+      <h2>Next steps</h2>
+      <ul>
+        <li>Skim the <a href="syntax.html">Syntax Guide</a> for a tour of the language's constructs.</li>
+        <li>Read the <a href="examples.html">annotated examples</a> and try running them yourself with <code>--run</code>.</li>
+        <li>Read about <a href="native.html">native compilation</a> and what it supports, then <a href="concurrency.html">tasks and channels</a> and <a href="async.html">async/await</a>.</li>
+        <li>Boot your own kernel: <a href="os.html">Brasa OS</a>.</li>
+        <li>The project's <code>README.md</code> lists what's not implemented yet (such as <code>html ... end</code> templates and explicit generic call-site arguments) and has a file-by-file map of the parser's source (<code>src/lexer.rs</code>, <code>src/ast.rs</code>, <code>src/parser.rs</code>, <code>src/interp.rs</code>).</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    Brasa — a language with a human face. Docs generated from <code>brasa.ebnf</code> and <code>examples/*.br</code>.
+  </footer>
+</body>
+</html>

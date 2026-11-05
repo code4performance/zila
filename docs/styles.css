@@ -1,0 +1,266 @@
+:root {
+  --bg: #fbf8f5;
+  --bg-alt: #f1ece6;
+  --fg: #2a1d16;
+  --fg-muted: #6b5a4e;
+  --ember: #c4531d;
+  --ember-dark: #9c3f12;
+  --border: #e3d8cc;
+  --code-bg: #2a1d16;
+  --code-fg: #f3e9df;
+  --kw: #ff9d5c;
+  --str: #9fd98b;
+  --cm: #8a7a6c;
+  --card-bg: #ffffff;
+  --max-width: 880px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1c1512;
+    --bg-alt: #241a15;
+    --fg: #f1e6db;
+    --fg-muted: #b8a89a;
+    --ember: #ff8a4c;
+    --ember-dark: #ffab76;
+    --border: #3a2c23;
+    --code-bg: #130d0a;
+    --code-fg: #f3e9df;
+    --kw: #ffab76;
+    --str: #a8e293;
+    --cm: #8a7a6c;
+    --card-bg: #241a15;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+
+a {
+  color: var(--ember-dark);
+}
+
+a:hover {
+  text-decoration: none;
+}
+
+.site-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-alt);
+}
+
+.brand {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-weight: 700;
+  font-size: 1.3rem;
+  text-decoration: none;
+  color: var(--fg);
+}
+
+.brand .ember-dot {
+  color: var(--ember);
+}
+
+.brand small {
+  font-weight: 400;
+  color: var(--fg-muted);
+  font-size: 0.85rem;
+}
+
+nav.site-nav {
+  display: flex;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+}
+
+nav.site-nav a {
+  text-decoration: none;
+  color: var(--fg-muted);
+  font-weight: 600;
+  padding: 0.25rem 0;
+  border-bottom: 2px solid transparent;
+}
+
+nav.site-nav a:hover,
+nav.site-nav a[aria-current="page"] {
+  color: var(--ember-dark);
+  border-bottom-color: var(--ember);
+}
+
+main {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: 2.5rem 1.5rem 4rem;
+}
+
+.hero {
+  padding: 2rem 0 1rem;
+}
+
+.hero h1 {
+  font-size: 2.6rem;
+  margin: 0 0 0.25rem;
+}
+
+.hero .tagline {
+  font-size: 1.2rem;
+  color: var(--fg-muted);
+  max-width: 60ch;
+}
+
+.card-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+  margin: 2rem 0;
+}
+
+.card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.25rem;
+}
+
+.card h3 {
+  margin-top: 0;
+  color: var(--ember-dark);
+}
+
+.card a.card-link {
+  display: inline-block;
+  margin-top: 0.5rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+section {
+  margin: 2.5rem 0;
+}
+
+section h2 {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.4rem;
+}
+
+section h3 {
+  color: var(--ember-dark);
+}
+
+.toc {
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem 1.5rem;
+}
+
+.toc h2 {
+  margin-top: 0;
+  border: none;
+  font-size: 1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-muted);
+}
+
+.toc ul {
+  columns: 2;
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+pre {
+  background: var(--code-bg);
+  color: var(--code-fg);
+  padding: 1rem 1.25rem;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+code {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}
+
+:not(pre) > code {
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+  font-size: 0.9em;
+}
+
+.kw { color: var(--kw); font-weight: 600; }
+.str { color: var(--str); }
+.cm { color: var(--cm); font-style: italic; }
+
+.file-label {
+  font-size: 0.8rem;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.4rem;
+}
+
+dl.cli dt {
+  font-weight: 700;
+  font-family: Consolas, monospace;
+  margin-top: 0.75rem;
+}
+
+dl.cli dd {
+  margin-left: 0;
+  color: var(--fg-muted);
+}
+
+.note {
+  background: var(--bg-alt);
+  border-left: 4px solid var(--ember);
+  padding: 0.75rem 1rem;
+  border-radius: 0 6px 6px 0;
+}
+
+.site-footer {
+  border-top: 1px solid var(--border);
+  padding: 1.5rem;
+  text-align: center;
+  color: var(--fg-muted);
+  font-size: 0.9rem;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+th, td {
+  border: 1px solid var(--border);
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+}
+
+th {
+  background: var(--bg-alt);
+}

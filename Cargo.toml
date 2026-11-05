@@ -1,0 +1,15 @@
+[package]
+name = "brasa"
+version = "0.1.0"
+edition = "2021"
+description = "Lexer and parser for the Brasa programming language"
+
+[lib]
+name = "brasa"
+path = "src/lib.rs"
+
+[[bin]]
+name = "brasa-parse"
+path = "src/main.rs"
+
+[dependencies]

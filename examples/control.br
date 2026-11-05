@@ -1,0 +1,38 @@
+package main
+
+func main()
+    var total = 0
+    while total < 10
+        total += 1
+        if total == 5
+            continue
+        else if total == 8
+            break
+        else
+            print("n={total}")
+        end
+    end
+
+    let xs = [1, 2, 3]
+    let m = { "a": 1, "b": 2 }
+    let r = a + b * c - d / e
+    let ok = x > 1 and not y or z
+    let big = 1_000_000 + 0xFF + 0b101 + 3
+    let f = 1.5e3 + 2.25
+    let msg = "braces \{ and quote \" and {xs[0] + 1} and {fmt("a")}"
+
+    for i, v in xs
+        print("{i}: {v}")
+    end
+
+    let s = xs
+        .map(func(x) x * 2 end)
+        .filter(func(x) x > 2 end)
+
+    let pick = if total > 3 1 else 2 end
+    let list: List<List<i32>> = []
+    let nested = Map.new()
+    /* block
+       comment */
+    print(s) // trailing comment
+end

@@ -1,0 +1,28 @@
+// =====================================================================
+// Brasa standard library: Winsock declarations (used by `net`)
+// =====================================================================
+
+package ws
+
+use task
+
+// WSABUF: a length and a pointer.
+#[c_layout]
+type Wsabuf = record
+    len: u32
+    ptr: *u8
+end
+
+#[link("ws2_32")]
+extern "system" func WSAStartup(version: u16, data: *u8) -> i32
+extern "system" func WSASocketW(family: i32, kind: i32, protocol: i32, info: usize, group: u32, flags: u32) -> usize
+extern "system" func closesocket(s: usize) -> i32
+extern "system" func bind(s: usize, addr: *u8, len: i32) -> i32
+extern "system" func listen(s: usize, backlog: i32) -> i32
+extern "system" func getsockname(s: usize, addr: *u8, len: *int) -> i32
+extern "system" func setsockopt(s: usize, level: i32, name: i32, value: *u8, len: i32) -> i32
+extern "system" func WSAIoctl(s: usize, code: u32, input: *u8, input_len: u32, output: *u8, output_len: u32, returned: *int, overlapped: usize, completion: usize) -> i32
+extern "system" func WSARecv(s: usize, buffers: *Wsabuf, count: u32, received: usize, flags: *int, overlapped: *task.Op, completion: usize) -> i32
+extern "system" func WSASend(s: usize, buffers: *Wsabuf, count: u32, sent: usize, flags: u32, overlapped: *task.Op, completion: usize) -> i32
+extern "system" func getaddrinfo(node: *u8, service: usize, hints: *u8, result: *int) -> i32
+extern "system" func freeaddrinfo(info: usize)

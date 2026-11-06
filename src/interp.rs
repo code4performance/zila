@@ -260,7 +260,13 @@ impl Interpreter {
                 DeclKind::Func(fd) => {
                     if let Some(rec) = &fd.receiver {
                         let type_name = match &rec.ty {
-                            Type::Named { path, .. } => path.last().cloned().unwrap_or_default(),
+                            Type::Named { path, .. } => match path.last().map(|s| s.as_str()) {
+                                Some("i8" | "i16" | "i32" | "i64" | "u8" | "u16" | "u32" | "u64" | "isize" | "usize" | "byte") => "int".to_string(),
+                                Some("f64" | "f32") => "float".to_string(),
+                                Some(n) => n.to_string(),
+                                None => String::new(),
+                            },
+                            Type::Slice(_) => "list".to_string(),
                             _ => "".to_string(),
                         };
                         self.methods.insert((type_name, fd.name.clone()), fd.clone());
@@ -932,6 +938,12 @@ impl Interpreter {
         line: u32,
     ) -> InterpResult<Value> {
         if let Value::List(l) = &target {
+            if method == "take" && args.is_empty() {
+                return match l.borrow_mut().pop() {
+                    Some(v) => Ok(v),
+                    None => Err(format!("line {}: take from an empty list", line)),
+                };
+            }
             if method == "add" || method == "push" {
                 if let Some(item) = args.first() {
                     l.borrow_mut().push(item.clone());
@@ -976,6 +988,24 @@ impl Interpreter {
                     Flow::Return(v) => return Ok(v),
                     _ => return Ok(Value::Nil),
                 }
+            }
+        }
+
+        // methods declared on built-in types: `func (n: int) double() -> int`
+        if !matches!(target, Value::Record { .. }) {
+            if let Some(fd) = self.methods.get(&(target.type_name().to_string(), method.to_string())).cloned() {
+                let env = Rc::new(RefCell::new(Env::with_parent(self.globals.clone())));
+                if let Some(rec) = &fd.receiver {
+                    env.borrow_mut().define(rec.name.clone(), target);
+                }
+                for (i, param) in fd.params.iter().enumerate() {
+                    let val = args.get(i).cloned().unwrap_or(Value::Nil);
+                    env.borrow_mut().define(param.name.clone(), val);
+                }
+                return match self.run_body(&fd.body, &env)? {
+                    Flow::Return(v) => Ok(v),
+                    _ => Ok(Value::Nil),
+                };
             }
         }
 

@@ -83,6 +83,9 @@ enum Ty {
     Chan(Box<Ty>),
     /// `Future<T>`: a handle to the result of an `async func` (`T` may be `Void`).
     Future(Box<Ty>),
+    /// A type parameter while a generic body is checked once: nothing is known about it but its bound
+    /// (the qualified name of an interface).
+    Param { name: String, bound: Option<String> },
 }
 
 impl Ty {
@@ -108,7 +111,7 @@ impl Ty {
         }
     }
     fn nullable(&self) -> bool {
-        matches!(self, Ty::Nil | Ty::Text | Ty::Rec(_) | Ty::List(_) | Ty::Map(..) | Ty::Ptr(_) | Ty::Func { .. } | Ty::Chan(_))
+        matches!(self, Ty::Nil | Ty::Text | Ty::Rec(_) | Ty::List(_) | Ty::Map(..) | Ty::Ptr(_) | Ty::Func { .. } | Ty::Chan(_) | Ty::Param { .. })
     }
     fn show(&self) -> String {
         match self {
@@ -119,7 +122,8 @@ impl Ty {
             Ty::Float { bits: 32 } => "f32".into(),
             Ty::Float { .. } => "float".into(),
             Ty::Text => "text".into(),
-            Ty::Rec(n) | Ty::Enum(n) => n.rsplit('.').next().unwrap_or(n).to_string(),
+            Ty::Rec(n) | Ty::Enum(n) => display_name(n),
+            Ty::Param { name, .. } => name.clone(),
             Ty::List(t) => format!("[]{}", t.show()),
             Ty::Map(k, v) => format!("Map<{}, {}>", k.show(), v.show()),
             Ty::Ptr(t) => format!("*{}", t.show()),
@@ -172,6 +176,7 @@ fn compatible(want: &Ty, got: &Ty) -> bool {
     }
 }
 
+#[derive(Clone)]
 struct RecInfo {
     size: u32,
     fields: Vec<(String, Ty, u32)>,
@@ -231,13 +236,14 @@ struct Local {
     captured: bool,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct Scope {
     vars: HashMap<String, Local>,
     /// Slots holding heap values this scope must release when it ends.
     owned: Vec<(i32, Ty)>,
 }
 
+#[derive(Clone)]
 struct LoopCtx {
     cont: String,
     brk: String,
@@ -245,6 +251,7 @@ struct LoopCtx {
     depth: usize,
 }
 
+#[derive(Clone)]
 struct FnState {
     code: Vec<String>,
     scopes: Vec<Scope>,
@@ -323,8 +330,68 @@ fn c_type(name: &str) -> Option<Ty> {
     Some(Ty::Int { bits, signed })
 }
 
+/// Key under which the methods of a receiver type are stored.
+fn method_key(t: &Ty) -> String {
+    match t {
+        Ty::Rec(r) => r.clone(),
+        other => other.show(),
+    }
+}
+
+/// An identifier-safe spelling of a type name for generated symbols.
+fn mangle(s: &str) -> String {
+    let mut out = String::new();
+    for c in s.chars() {
+        match c {
+            c if c.is_ascii_alphanumeric() => out.push(c),
+            '[' => out.push_str("L"),
+            ']' => out.push_str("R"),
+            '<' => out.push_str("_o_"),
+            '>' => out.push_str("_c_"),
+            ',' => out.push_str("_k_"),
+            '*' => out.push_str("P"),
+            '.' => out.push_str("_d_"),
+            _ => out.push('_'),
+        }
+    }
+    out
+}
+
 fn sym_of(q: &str) -> String {
-    q.replace('.', "_")
+    let mut out = String::new();
+    for c in q.chars() {
+        match c {
+            c if c.is_ascii_alphanumeric() || c == '_' => out.push(c),
+            '.' => out.push('_'),
+            '<' => out.push_str("_o_"),
+            '>' => out.push_str("_c_"),
+            ',' => out.push_str("_k_"),
+            ' ' => {}
+            '[' => out.push('L'),
+            ']' => out.push('R'),
+            '*' => out.push('P'),
+            _ => out.push('_'),
+        }
+    }
+    out
+}
+
+/// A qualified type name as a person writes it: the module prefixes are dropped, also inside
+/// the arguments of a generic instance (`main.Stack<main.Point>` is `Stack<Point>`).
+fn display_name(n: &str) -> String {
+    let mut out = String::new();
+    let mut token = String::new();
+    for c in n.chars() {
+        if c.is_ascii_alphanumeric() || c == '_' || c == '.' {
+            token.push(c);
+        } else {
+            out.push_str(token.rsplit('.').next().unwrap_or(""));
+            token.clear();
+            out.push(c);
+        }
+    }
+    out.push_str(token.rsplit('.').next().unwrap_or(""));
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -380,6 +447,55 @@ pub struct Compiler {
     line: u32,
     fs: FnState,
     uses_ui: bool,
+    // ---- generics and interfaces ----
+    /// Generic functions: (module, name) -> declaration and line.
+    tmpl_funcs: HashMap<(String, String), (FuncDecl, u32)>,
+    /// Generic records: qualified name -> (module, declaration, `#[shared]`).
+    tmpl_recs: HashMap<String, (String, TypeDecl, bool)>,
+    /// Methods of generic records: qualified record name -> (module, declaration, line).
+    tmpl_methods: HashMap<String, Vec<(String, FuncDecl, u32)>>,
+    /// Interfaces: qualified name -> (module, method signatures).
+    interfaces: HashMap<String, (String, Vec<MethodSig>)>,
+    /// Type parameters bound to types while an instance is compiled.
+    bindings: HashMap<String, Ty>,
+    /// Instance of a generic record -> (template, type arguments).
+    inst_args: HashMap<String, (String, Vec<Ty>)>,
+    /// (module, function, type arguments) -> instance name.
+    inst_funcs: HashMap<(String, String, String), String>,
+    /// Instances waiting to be compiled.
+    pending: Vec<Pending>,
+    /// All signatures are known (bounds can be checked).
+    declared: bool,
+    /// Bound checks met before all methods were known: (type, interface, module, line).
+    deferred_bounds: Vec<(Ty, String, u32)>,
+    inst_count: usize,
+}
+
+struct Pending {
+    module: String,
+    decl: FuncDecl,
+    bindings: HashMap<String, Ty>,
+    line: u32,
+}
+
+/// Everything a throw-away compilation (inference, checking a generic body) may change.
+struct Snapshot {
+    fs: FnState,
+    procs: usize,
+    data: usize,
+    strings: HashMap<String, String>,
+    records: HashMap<String, RecInfo>,
+    rec_decls: HashMap<String, (String, Vec<Field>)>,
+    shared_recs: HashSet<String>,
+    methods: HashMap<(String, String), Sig>,
+    funcs: HashMap<(String, String), Sig>,
+    inst_args: HashMap<String, (String, Vec<Ty>)>,
+    inst_funcs: HashMap<(String, String, String), String>,
+    pending: Vec<Pending>,
+    fn_closures: BTreeSet<String>,
+    bindings: HashMap<String, Ty>,
+    cur_mod: String,
+    line: u32,
 }
 
 impl Compiler {
@@ -414,6 +530,17 @@ impl Compiler {
             line: 0,
             fs: FnState::new(Ty::Void, String::new()),
             uses_ui: false,
+            tmpl_funcs: HashMap::new(),
+            tmpl_recs: HashMap::new(),
+            tmpl_methods: HashMap::new(),
+            interfaces: HashMap::new(),
+            bindings: HashMap::new(),
+            inst_args: HashMap::new(),
+            inst_funcs: HashMap::new(),
+            pending: Vec::new(),
+            declared: false,
+            deferred_bounds: Vec::new(),
+            inst_count: 0,
         }
     }
 
@@ -517,7 +644,7 @@ impl Compiler {
         if self.target == Target::Bare {
             return self.err("maps need the Windows runtime and cannot be used in a bare-metal kernel");
         }
-        if !(k == Ty::Text || k.is_int()) {
+        if !(k == Ty::Text || k.is_int() || matches!(k, Ty::Param { .. })) {
             return self.err(format!("{} cannot be a map key; keys are text or integers", k.show()));
         }
         Ok(Ty::Map(Box::new(k), Box::new(v)))
@@ -684,12 +811,33 @@ impl Compiler {
                 self.line = d.line;
                 if let DeclKind::Type(td) = &d.kind {
                     let q = format!("{}.{}", mname, td.name);
+                    if !td.generics.is_empty() {
+                        match &td.body {
+                            TypeBody::Record(_) => {
+                                let shared = d.attrs.iter().any(|a| a.name == "shared");
+                                self.tmpl_recs.insert(q, (mname.clone(), td.clone(), shared));
+                                continue;
+                            }
+                            TypeBody::Enum(_) => return self.err(format!("generic enums are not supported ('{}')", td.name)),
+                            TypeBody::Alias(_) => return self.err(format!("generic type aliases are not supported ('{}')", td.name)),
+                            TypeBody::Interface(_) => return self.err(format!("generic interfaces are not supported ('{}')", td.name)),
+                        }
+                    }
                     match &td.body {
                         TypeBody::Record(fields) => {
                             if d.attrs.iter().any(|a| a.name == "shared") {
                                 self.shared_recs.insert(q.clone());
                             }
                             self.rec_decls.insert(q, (mname.clone(), fields.clone()));
+                        }
+                        TypeBody::Interface(sigs) => {
+                            let mut seen = HashSet::new();
+                            for sg in sigs {
+                                if !seen.insert(sg.name.clone()) {
+                                    return self.err(format!("interface '{}' declares method '{}' twice", td.name, sg.name));
+                                }
+                            }
+                            self.interfaces.insert(q, (mname.clone(), sigs.clone()));
                         }
                         TypeBody::Enum(vs) => {
                             if vs.iter().any(|v| !v.fields.is_empty()) {
@@ -707,8 +855,29 @@ impl Compiler {
                         TypeBody::Alias(t) => {
                             self.aliases.insert(q, (mname.clone(), t.clone()));
                         }
-                        _ => {}
                     }
+                }
+            }
+        }
+        // Generic functions and the methods of generic records are templates.
+        for (mname, file) in &mods {
+            self.cur_mod = mname.clone();
+            for d in &file.decls {
+                let DeclKind::Func(fd) = &d.kind else { continue };
+                self.line = d.line;
+                if let Some(rq) = self.generic_receiver(mname, fd) {
+                    if !fd.generics.is_empty() {
+                        return self.err("methods with their own type parameters are not supported yet");
+                    }
+                    self.tmpl_methods.entry(rq).or_default().push((mname.clone(), fd.clone(), d.line));
+                } else if !fd.generics.is_empty() {
+                    if fd.is_async {
+                        return self.err("async generic functions are not supported");
+                    }
+                    if fd.receiver.is_some() {
+                        return self.err("methods with their own type parameters are not supported yet");
+                    }
+                    self.tmpl_funcs.insert((mname.clone(), fd.name.clone()), (fd.clone(), d.line));
                 }
             }
         }
@@ -717,19 +886,8 @@ impl Compiler {
             self.rec_decls.iter().map(|(q, (m, f))| (q.clone(), m.clone(), f.clone())).collect();
         for (q, m, fields) in decls {
             self.cur_mod = m.clone();
-            let mut off = 0u32;
-            let mut align = 1u32;
-            let mut out = Vec::new();
-            for f in &fields {
-                let ty = self.resolve(&f.ty, &m)?;
-                let sz = ty.size();
-                off = (off + sz - 1) / sz * sz;
-                align = align.max(sz);
-                out.push((f.name.clone(), ty, off));
-                off += sz;
-            }
-            let size = ((off + align - 1) / align * align).max(8);
-            self.records.insert(q, RecInfo { size, fields: out });
+            let info = self.layout(&fields, &m)?;
+            self.records.insert(q, info);
         }
         // Enum layouts.
         let edecls: Vec<(String, String, Vec<Variant>)> =
@@ -757,17 +915,22 @@ impl Compiler {
                 self.line = d.line;
                 match &d.kind {
                     DeclKind::Func(fd) => {
-                        if !fd.generics.is_empty() {
+                        if !fd.generics.is_empty() || self.generic_receiver(m, fd).is_some() {
                             continue;
                         }
                         let sig = self.func_sig(m, fd)?;
                         if fd.name == "drop" && sig.receiver.is_some() && (!sig.params.is_empty() || sig.ret != Ty::Void) {
                             return self.err("a `drop` method takes no parameters and returns nothing");
                         }
-                        if let Some(Ty::Rec(r)) = &sig.receiver {
-                            self.methods.insert((r.clone(), fd.name.clone()), sig);
-                        } else if sig.receiver.is_some() {
-                            return self.err("methods are only supported on record types");
+                        if let Some(rt) = &sig.receiver {
+                            if matches!(rt, Ty::Void | Ty::Nil | Ty::Err) {
+                                return self.err(format!("methods cannot be declared on {}", rt.show()));
+                            }
+                            let key = method_key(rt);
+                            if self.methods.contains_key(&(key.clone(), fd.name.clone())) {
+                                return self.err(format!("{} already has a method '{}'", rt.show(), fd.name));
+                            }
+                            self.methods.insert((key, fd.name.clone()), sig);
                         } else {
                             self.funcs.insert((m.clone(), fd.name.clone()), sig);
                         }
@@ -824,7 +987,24 @@ impl Compiler {
                 }
             }
         }
+        self.declared = true;
         Ok(())
+    }
+
+    fn layout(&mut self, fields: &[Field], m: &str) -> R<RecInfo> {
+        let mut off = 0u32;
+        let mut align = 1u32;
+        let mut out = Vec::new();
+        for f in fields {
+            let ty = self.resolve(&f.ty, m)?;
+            let sz = ty.size();
+            off = (off + sz - 1) / sz * sz;
+            align = align.max(sz);
+            out.push((f.name.clone(), ty, off));
+            off += sz;
+        }
+        let size = ((off + align - 1) / align * align).max(8);
+        Ok(RecInfo { size, fields: out })
     }
 
     fn func_sig(&mut self, m: &str, fd: &FuncDecl) -> R<Sig> {
@@ -873,12 +1053,13 @@ impl Compiler {
         };
         let sym = match &receiver {
             Some(Ty::Rec(r)) => format!("B_{}_{}", sym_of(r), fd.name),
+            Some(t) => format!("B_T{}_{}", mangle(&t.show()), fd.name),
             _ => format!("B_{}_{}", m, fd.name),
         };
         Ok(Sig { sym, module: m.to_string(), params, ret, variadic, c_variadic: false, is_extern: false, receiver })
     }
 
-    fn infer_global(&self, e: Option<&Expr>, m: &str) -> R<Ty> {
+    fn infer_global(&mut self, e: Option<&Expr>, m: &str) -> R<Ty> {
         let Some(e) = e else { return self.err("global variable needs a type or a value") };
         Ok(match &e.kind {
             ExprKind::Bool(_) => Ty::Bool,
@@ -924,24 +1105,29 @@ impl Compiler {
         }
     }
 
-    fn record_name(&self, path: &[String], m: &str) -> R<String> {
+    fn record_name(&mut self, path: &[String], m: &str) -> R<String> {
         let q = if path.len() == 1 { format!("{}.{}", m, path[0]) } else { path.join(".") };
         if self.rec_decls.contains_key(&q) {
             return Ok(q);
         }
-        if let Some((am, t)) = self.aliases.get(&q) {
-            if let Ty::Rec(r) = self.resolve(t, am)? {
+        if let Some((am, t)) = self.aliases.get(&q).cloned() {
+            if let Ty::Rec(r) = self.resolve(&t, &am)? {
                 return Ok(r);
             }
         }
         self.err(format!("unknown record type '{}'", path.join(".")))
     }
 
-    fn resolve(&self, t: &Type, m: &str) -> R<Ty> {
+    fn resolve(&mut self, t: &Type, m: &str) -> R<Ty> {
         match t {
             Type::Named { path, args } => {
                 if path.len() == 1 {
                     let n = path[0].as_str();
+                    if args.is_empty() {
+                        if let Some(t) = self.bindings.get(n) {
+                            return Ok(t.clone());
+                        }
+                    }
                     if let Some(i) = int_type(n) {
                         return Ok(i);
                     }
@@ -968,14 +1154,24 @@ impl Compiler {
                     }
                 }
                 let q = if path.len() == 1 { format!("{}.{}", m, path[0]) } else { path.join(".") };
+                if self.tmpl_recs.contains_key(&q) {
+                    return self.instantiate_record(&q, args, m);
+                }
                 if self.rec_decls.contains_key(&q) {
                     return Ok(Ty::Rec(q));
+                }
+                if self.interfaces.contains_key(&q) {
+                    return self.err(format!(
+                        "'{}' is an interface: interfaces can only bound type parameters; write `<T: {}>` and use `T`",
+                        path.join("."),
+                        path.last().unwrap()
+                    ));
                 }
                 if self.enum_decls.contains_key(&q) {
                     return Ok(Ty::Enum(q));
                 }
-                if let Some((am, at)) = self.aliases.get(&q) {
-                    return self.resolve(at, am);
+                if let Some((am, at)) = self.aliases.get(&q).cloned() {
+                    return self.resolve(&at, &am);
                 }
                 self.err(format!("type '{}' is not supported by the native backend", path.join(".")))
             }
@@ -1023,6 +1219,7 @@ impl Compiler {
             Some(s) => s.ret.clone(),
             None => return Err(format!("{}.br: no 'main' function found", main_mod)),
         };
+        self.check_templates()?;
         let mut inits = Vec::new();
         for (m, decls) in mods.iter().rev() {
             self.cur_mod = m.clone();
@@ -1030,12 +1227,13 @@ impl Compiler {
             for d in decls {
                 self.line = d.line;
                 if let DeclKind::Func(fd) = &d.kind {
-                    if fd.generics.is_empty() {
+                    if fd.generics.is_empty() && self.generic_receiver(m, fd).is_none() {
                         self.gen_func(m, fd, d.attrs.iter().any(|a| a.name == "naked"))?;
                     }
                 }
             }
         }
+        self.drain_pending()?;
         let recs: Vec<String> = self.records.keys().cloned().collect();
         for q in recs {
             self.gen_record_helpers(&q);
@@ -1232,8 +1430,7 @@ end
         let sig = match &fd.receiver {
             Some(_) => {
                 let rt = self.resolve(&fd.receiver.as_ref().unwrap().ty, m)?;
-                let Ty::Rec(r) = rt else { unreachable!() };
-                self.methods[&(r, fd.name.clone())].clone()
+                self.methods[&(method_key(&rt), fd.name.clone())].clone()
             }
             None => self.funcs[&(m.to_string(), fd.name.clone())].clone(),
         };
@@ -1543,6 +1740,8 @@ end
                 self.release_slot(s);
                 self.free(s);
             }
+            // checked again for every instance, where the real type decides
+            Ty::Param { .. } => self.e("xor eax, eax"),
             other => return self.err(format!("cannot convert {} to text", other.show())),
         }
         Ok(())
@@ -2236,7 +2435,10 @@ end
                 Ok(Ty::Map(Box::new(k), Box::new(v)))
             }
             ExprKind::Record { path, fields } => {
-                let r = self.record_name(path, &self.cur_mod.clone())?;
+                let r = match self.generic_literal(path, want)? {
+                    Some(r) => r,
+                    None => self.record_name(path, &self.cur_mod.clone())?,
+                };
                 self.record_literal(&r, fields)?;
                 Ok(Ty::Rec(r))
             }
@@ -2677,6 +2879,15 @@ end
                 }
                 _ => return self.err(format!("operator '{}' is not defined for text", op)),
             }
+        }
+        if matches!(lt, Ty::Param { .. }) || matches!(rt, Ty::Param { .. }) {
+            let (a, b) = (lt.show(), rt.show());
+            return self.err(format!(
+                "operator '{}' is not available for {}: a type parameter only has the methods of its bound{}",
+                op,
+                if matches!(lt, Ty::Param { .. }) { a } else { b },
+                if (matches!(lt, Ty::Param { .. }) && matches!(rt, Ty::Param { .. })) || true { "" } else { "" }
+            ));
         }
         if lt.is_float() || rt.is_float() {
             return self.float_binary(op, lt, rt, is_cmp);
@@ -3577,6 +3788,9 @@ end
                 if let Some(sig) = self.funcs.get(&key).cloned() {
                     return self.call_sig(&sig, None, args);
                 }
+                if let Some((fd, line)) = self.tmpl_funcs.get(&key).cloned() {
+                    return self.call_generic(&key.0, &fd, line, args, want);
+                }
                 if let Some((q, idx)) = self.variants.get(&key).cloned() {
                     return self.enum_construct(&q, idx, args);
                 }
@@ -3593,6 +3807,9 @@ end
                             return self.c_intrinsic(name, args);
                         }
                         let key = (m.clone(), name.clone());
+                        if let Some((fd, line)) = self.tmpl_funcs.get(&key).cloned() {
+                            return self.call_generic(&key.0, &fd, line, args, want);
+                        }
                         return match self.funcs.get(&key).cloned() {
                             Some(sig) => self.call_sig(&sig, None, args),
                             None if self.modules.iter().any(|x| &x.name == m) => {
@@ -3616,6 +3833,18 @@ end
                     }
                 }
                 let ot = self.expr(obj, None)?;
+                if let Ty::Param { name: tname, bound } = &ot {
+                    return self.param_method_call("", bound, tname, name, args);
+                }
+                if !matches!(ot, Ty::Rec(_)) {
+                    if let Some(sig) = self.methods.get(&(method_key(&ot), name.clone())).cloned() {
+                        let t = self.temp();
+                        self.e(format!("mov qword ptr [rbp - {}], rax", t));
+                        let res = self.call_sig(&sig, Some(t), args);
+                        self.free(t);
+                        return res;
+                    }
+                }
                 let r = match &ot {
                     Ty::Rec(r) => Some(r.clone()),
                     _ => None,
@@ -4305,6 +4534,570 @@ end
         };
         self.free(c);
         Ok(res)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Generics and interfaces
+//
+// A generic function or record is a template. Using it with concrete types makes an *instance*:
+// the template's declaration compiled with its type parameters bound to those types
+// (`Compiler::bindings`), under a name that includes the type arguments. Each template is also
+// compiled once with opaque `Ty::Param` types, so mistakes are reported at the definition.
+// ---------------------------------------------------------------------------
+
+/// Full spelling of a type, with module prefixes: the key of an instance.
+fn ty_full(t: &Ty) -> String {
+    match t {
+        Ty::Rec(n) | Ty::Enum(n) => n.clone(),
+        Ty::List(e) => format!("[]{}", ty_full(e)),
+        Ty::Map(k, v) => format!("Map<{},{}>", ty_full(k), ty_full(v)),
+        Ty::Ptr(e) => format!("*{}", ty_full(e)),
+        Ty::Chan(e) => format!("Channel<{}>", ty_full(e)),
+        Ty::Future(e) => format!("Future<{}>", ty_full(e)),
+        Ty::Result(e) => format!("{}!", ty_full(e)),
+        other => other.show(),
+    }
+}
+
+/// Does the type mention one of the type parameters?
+fn mentions_param(t: &Type, names: &[String]) -> bool {
+    match t {
+        Type::Named { path, args } => {
+            (path.len() == 1 && args.is_empty() && names.contains(&path[0])) || args.iter().any(|a| mentions_param(a, names))
+        }
+        Type::Optional(i) | Type::Pointer(i) | Type::Slice(i) | Type::Array(_, i) => mentions_param(i, names),
+        Type::Func { params, ret, .. } => {
+            params.iter().any(|p| mentions_param(p, names))
+                || ret.as_ref().map_or(false, |r| r.ty.as_ref().map_or(false, |t| mentions_param(t, names)))
+        }
+    }
+}
+
+const INSTANCE_LIMIT: usize = 2000;
+
+impl Compiler {
+    /// Qualified name of the generic record whose methods `fd` belongs to.
+    fn generic_receiver(&self, m: &str, fd: &FuncDecl) -> Option<String> {
+        let r = fd.receiver.as_ref()?;
+        let Type::Named { path, args } = &r.ty else { return None };
+        if args.is_empty() {
+            return None;
+        }
+        let q = if path.len() == 1 { format!("{}.{}", m, path[0]) } else { path.join(".") };
+        self.tmpl_recs.contains_key(&q).then_some(q)
+    }
+
+    fn snapshot(&mut self) -> Snapshot {
+        Snapshot {
+            fs: self.fs.clone(),
+            procs: self.procs.len(),
+            data: self.data.len(),
+            strings: self.strings.clone(),
+            records: self.records.clone(),
+            rec_decls: self.rec_decls.clone(),
+            shared_recs: self.shared_recs.clone(),
+            methods: self.methods.clone(),
+            funcs: self.funcs.clone(),
+            inst_args: self.inst_args.clone(),
+            inst_funcs: self.inst_funcs.clone(),
+            pending: std::mem::take(&mut self.pending),
+            fn_closures: self.fn_closures.clone(),
+            bindings: self.bindings.clone(),
+            cur_mod: self.cur_mod.clone(),
+            line: self.line,
+        }
+    }
+
+    fn restore(&mut self, s: Snapshot) {
+        self.fs = s.fs;
+        self.procs.truncate(s.procs);
+        self.data.truncate(s.data);
+        self.strings = s.strings;
+        self.records = s.records;
+        self.rec_decls = s.rec_decls;
+        self.shared_recs = s.shared_recs;
+        self.methods = s.methods;
+        self.funcs = s.funcs;
+        self.inst_args = s.inst_args;
+        self.inst_funcs = s.inst_funcs;
+        self.pending = s.pending;
+        self.fn_closures = s.fn_closures;
+        self.bindings = s.bindings;
+        self.cur_mod = s.cur_mod;
+        self.line = s.line;
+    }
+
+    fn resolve_ret(&mut self, r: &Option<RetType>, m: &str) -> R<Ty> {
+        match r {
+            Some(r) => {
+                let inner = match &r.ty {
+                    Some(t) => self.resolve(t, m)?,
+                    None => Ty::Void,
+                };
+                Ok(if r.fallible { Ty::Result(Box::new(inner)) } else { inner })
+            }
+            None => Ok(Ty::Void),
+        }
+    }
+
+    // ---------------- interfaces ----------------
+
+    /// The qualified interface a bound (`Printable`, `pkg.Printable`) written in module `m` names.
+    fn bound_name(&self, bound: &[String], m: &str) -> R<String> {
+        let q = if bound.len() == 1 { format!("{}.{}", m, bound[0]) } else { bound.join(".") };
+        if self.interfaces.contains_key(&q) {
+            Ok(q)
+        } else if self.rec_decls.contains_key(&q) || self.enum_decls.contains_key(&q) || self.tmpl_recs.contains_key(&q) {
+            self.err(format!("the bound '{}' must be an interface", bound.join(".")))
+        } else {
+            self.err(format!("unknown interface '{}'", bound.join(".")))
+        }
+    }
+
+    /// Parameter and result types of the interface method `sg`.
+    fn interface_method(&mut self, iface_mod: &str, sg: &MethodSig) -> R<(Vec<Ty>, Ty)> {
+        let saved = std::mem::take(&mut self.bindings);
+        let mut ps = Vec::new();
+        let mut result = Ok(());
+        for p in &sg.params {
+            match &p.ty {
+                Some(t) => match self.resolve(t, iface_mod) {
+                    Ok(t) => ps.push(t),
+                    Err(e) => result = Err(e),
+                },
+                None => result = self.err(format!("parameter '{}' of '{}' needs a type", p.name, sg.name)),
+            }
+        }
+        let ret = self.resolve_ret(&sg.ret, iface_mod);
+        self.bindings = saved;
+        result?;
+        Ok((ps, ret?))
+    }
+
+    /// Checks that `ty` has every method of the interface `iface`, with the same signature.
+    fn satisfies(&mut self, ty: &Ty, iface: &str) -> R<()> {
+        let (im, sigs) = self.interfaces[iface].clone();
+        let iname = display_name(iface);
+        for sg in &sigs {
+            let (want_params, want_ret) = self.interface_method(&im, sg)?;
+            let have: Option<(Vec<Ty>, Ty)> = match ty {
+                Ty::Param { bound: Some(b), .. } => {
+                    let (bm, bsigs) = self.interfaces[b].clone();
+                    match bsigs.iter().find(|x| x.name == sg.name) {
+                        Some(x) => Some(self.interface_method(&bm, x)?),
+                        None => None,
+                    }
+                }
+                Ty::Param { .. } => None,
+                _ => self.methods.get(&(method_key(ty), sg.name.clone())).map(|m| (m.params.iter().map(|p| p.ty.clone()).collect(), m.ret.clone())),
+            };
+            let Some((have_params, have_ret)) = have else {
+                return self.err(format!("{} does not satisfy {}: it has no method '{}'", ty.show(), iname, sg.name));
+            };
+            if have_params != want_params {
+                let show = |v: &[Ty]| v.iter().map(|t| t.show()).collect::<Vec<_>>().join(", ");
+                return self.err(format!(
+                    "{} does not satisfy {}: method '{}' takes ({}) where {} needs ({})",
+                    ty.show(),
+                    iname,
+                    sg.name,
+                    show(&have_params),
+                    iname,
+                    show(&want_params)
+                ));
+            }
+            if have_ret != want_ret {
+                let r = |t: &Ty| if *t == Ty::Void { "nothing".to_string() } else { t.show() };
+                return self.err(format!(
+                    "{} does not satisfy {}: method '{}' returns {} where {} needs {}",
+                    ty.show(),
+                    iname,
+                    sg.name,
+                    r(&have_ret),
+                    iname,
+                    r(&want_ret)
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn check_bound(&mut self, ty: &Ty, iface: &str) -> R<()> {
+        if !self.declared {
+            self.deferred_bounds.push((ty.clone(), iface.to_string(), self.line));
+            return Ok(());
+        }
+        self.satisfies(ty, iface)
+    }
+
+    /// A method call on a value whose type is a type parameter: only the bound's methods exist.
+    fn param_method_call(&mut self, name: &str, bound: &Option<String>, tname: &str, mname: &str, args: &[Arg]) -> R<Ty> {
+        let Some(b) = bound else {
+            return self.err(format!("{} has no method '{}': add a bound, for example <{}: Printable>", tname, mname, tname));
+        };
+        let (im, sigs) = self.interfaces[b].clone();
+        let Some(sg) = sigs.iter().find(|s| s.name == mname) else {
+            return self.err(format!("{} has no method '{}': its bound {} does not list it", tname, mname, display_name(b)));
+        };
+        let _ = name;
+        let (ps, ret) = self.interface_method(&im, sg)?;
+        if args.len() != ps.len() {
+            return self.err(format!("'{}' takes {} argument{}", mname, ps.len(), if ps.len() == 1 { "" } else { "s" }));
+        }
+        for (a, pt) in args.iter().zip(&ps) {
+            let at = self.expr(&a.value, Some(pt))?;
+            self.check(pt, &at, &format!("argument of '{}'", mname))?;
+        }
+        self.e("xor eax, eax");
+        Ok(ret)
+    }
+
+    // ---------------- generic records ----------------
+
+    fn instantiate_record(&mut self, q: &str, args: &[Type], m: &str) -> R<Ty> {
+        let (tm, td, shared) = self.tmpl_recs[q].clone();
+        let TypeBody::Record(fields) = &td.body else { unreachable!() };
+        let n = td.generics.len();
+        if args.len() != n {
+            return self.err(format!(
+                "{} takes {} type argument{}, found {}",
+                td.name,
+                n,
+                if n == 1 { "" } else { "s" },
+                args.len()
+            ));
+        }
+        let mut tys = Vec::new();
+        for a in args {
+            tys.push(self.resolve(a, m)?);
+        }
+        for (tp, ty) in td.generics.iter().zip(&tys) {
+            if let Some(b) = &tp.bound {
+                let bq = self.bound_name(b, &tm)?;
+                self.check_bound(ty, &bq)?;
+            }
+        }
+        let full: Vec<String> = tys.iter().map(ty_full).collect();
+        let name = format!("{}<{}>", q, full.join(","));
+        if self.rec_decls.contains_key(&name) {
+            return Ok(Ty::Rec(name));
+        }
+        self.bump_instances()?;
+        // registered before the layout, so a record may mention itself (`next: Node<T>?`)
+        self.rec_decls.insert(name.clone(), (tm.clone(), Vec::new()));
+        self.inst_args.insert(name.clone(), (q.to_string(), tys.clone()));
+        if shared {
+            self.shared_recs.insert(name.clone());
+        }
+        let binds: HashMap<String, Ty> = td.generics.iter().map(|g| g.name.clone()).zip(tys.iter().cloned()).collect();
+        let saved = std::mem::replace(&mut self.bindings, binds);
+        let info = self.layout(fields, &tm);
+        self.bindings = saved;
+        self.records.insert(name.clone(), info?);
+        let methods = self.tmpl_methods.get(q).cloned().unwrap_or_default();
+        for (mm, fd, line) in methods {
+            self.instantiate_method(&name, &mm, &fd, line, &tys)?;
+        }
+        Ok(Ty::Rec(name))
+    }
+
+    fn instantiate_method(&mut self, rec_inst: &str, module: &str, fd: &FuncDecl, line: u32, tys: &[Ty]) -> R<()> {
+        if self.methods.contains_key(&(rec_inst.to_string(), fd.name.clone())) {
+            return Ok(());
+        }
+        let Some(Type::Named { args: rargs, .. }) = fd.receiver.as_ref().map(|r| r.ty.clone()) else { unreachable!() };
+        let mut binds = HashMap::new();
+        for (a, t) in rargs.iter().zip(tys) {
+            match a {
+                Type::Named { path, args } if path.len() == 1 && args.is_empty() => {
+                    binds.insert(path[0].clone(), t.clone());
+                }
+                _ => return self.err("the receiver of a method of a generic record must list its type parameters, like Stack<T>"),
+            }
+        }
+        if rargs.len() != tys.len() {
+            return self.err(format!("the receiver of '{}' must have {} type parameter(s)", fd.name, tys.len()));
+        }
+        let saved = std::mem::replace(&mut self.bindings, binds.clone());
+        let saved_mod = std::mem::replace(&mut self.cur_mod, module.to_string());
+        let saved_line = std::mem::replace(&mut self.line, line);
+        let sig = self.func_sig(module, fd);
+        self.bindings = saved;
+        self.cur_mod = saved_mod;
+        self.line = saved_line;
+        let sig = sig?;
+        self.methods.insert((rec_inst.to_string(), fd.name.clone()), sig);
+        self.pending.push(Pending { module: module.to_string(), decl: fd.clone(), bindings: binds, line });
+        Ok(())
+    }
+
+    fn bump_instances(&mut self) -> R<()> {
+        self.inst_count += 1;
+        if self.inst_count > INSTANCE_LIMIT {
+            return self.err("too many generic instances: does a generic function or record use itself with ever larger types?");
+        }
+        Ok(())
+    }
+
+    /// The generic record a literal `Name { ... }` builds: the expected type decides the arguments.
+    fn generic_literal(&mut self, path: &[String], want: Option<&Ty>) -> R<Option<String>> {
+        let m = self.cur_mod.clone();
+        let q = if path.len() == 1 { format!("{}.{}", m, path[0]) } else { path.join(".") };
+        if !self.tmpl_recs.contains_key(&q) {
+            return Ok(None);
+        }
+        if let Some(Ty::Rec(inst)) = want {
+            if self.inst_args.get(inst).map_or(false, |(tq, _)| *tq == q) {
+                return Ok(Some(inst.clone()));
+            }
+        }
+        let name = path.last().unwrap();
+        let params: Vec<String> = self.tmpl_recs[&q].1.generics.iter().map(|g| g.name.clone()).collect();
+        self.err(format!(
+            "cannot infer the type arguments of {}: give the expected type, for example `let x: {}<{}> = ...`",
+            name,
+            name,
+            params.iter().map(|_| "int").collect::<Vec<_>>().join(", ")
+        ))
+    }
+
+    // ---------------- generic functions ----------------
+
+    fn unify(&mut self, pat: &Type, actual: &Ty, params: &[String], b: &mut HashMap<String, Ty>, m: &str) -> R<()> {
+        match pat {
+            Type::Named { path, args } => {
+                if path.len() == 1 && args.is_empty() && params.contains(&path[0]) {
+                    match b.get(&path[0]) {
+                        Some(prev) if prev != actual && !(prev.is_int() && actual.is_int()) => {
+                            return self.err(format!(
+                                "type parameter {} is both {} and {} in this call",
+                                path[0],
+                                prev.show(),
+                                actual.show()
+                            ));
+                        }
+                        Some(_) => {}
+                        None => {
+                            b.insert(path[0].clone(), actual.clone());
+                        }
+                    }
+                    return Ok(());
+                }
+                if path.len() == 1 {
+                    match (path[0].as_str(), actual) {
+                        ("List", Ty::List(el)) if args.len() == 1 => return self.unify(&args[0], el, params, b, m),
+                        ("Map", Ty::Map(k, v)) if args.len() == 2 => {
+                            self.unify(&args[0], k, params, b, m)?;
+                            return self.unify(&args[1], v, params, b, m);
+                        }
+                        ("Channel", Ty::Chan(el)) if args.len() == 1 => return self.unify(&args[0], el, params, b, m),
+                        ("Future", Ty::Future(el)) if args.len() == 1 => return self.unify(&args[0], el, params, b, m),
+                        _ => {}
+                    }
+                }
+                let q = if path.len() == 1 { format!("{}.{}", m, path[0]) } else { path.join(".") };
+                if self.tmpl_recs.contains_key(&q) {
+                    if let Ty::Rec(inst) = actual {
+                        if let Some((tq, targs)) = self.inst_args.get(inst).cloned() {
+                            if tq == q && targs.len() == args.len() {
+                                for (a, t) in args.iter().zip(&targs) {
+                                    self.unify(a, t, params, b, m)?;
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(())
+            }
+            Type::Optional(i) => self.unify(i, actual, params, b, m),
+            Type::Pointer(i) => match actual {
+                Ty::Ptr(e) => self.unify(i, e, params, b, m),
+                _ => Ok(()),
+            },
+            Type::Slice(i) => match actual {
+                Ty::List(e) => self.unify(i, e, params, b, m),
+                _ => Ok(()),
+            },
+            Type::Func { params: ps, ret, .. } => {
+                if let Ty::Func { params: aps, ret: ar, .. } = actual {
+                    for (p, a) in ps.iter().zip(aps) {
+                        self.unify(p, a, params, b, m)?;
+                    }
+                    if let Some(t) = ret.as_ref().and_then(|r| r.ty.as_ref()) {
+                        self.unify(t, ar, params, b, m)?;
+                    }
+                }
+                Ok(())
+            }
+            Type::Array(..) => Ok(()),
+        }
+    }
+
+    /// A call to a generic function: infer the type arguments, make (or reuse) the instance, call it.
+    fn call_generic(&mut self, module: &str, fd: &FuncDecl, decl_line: u32, args: &[Arg], want: Option<&Ty>) -> R<Ty> {
+        let names: Vec<String> = fd.generics.iter().map(|g| g.name.clone()).collect();
+        let mut b: HashMap<String, Ty> = HashMap::new();
+        let mut next = 0;
+        for a in args {
+            if a.spread {
+                return self.err("spread arguments ('...') are not supported by the native backend yet");
+            }
+            let pi = match &a.name {
+                Some(n) => fd.params.iter().position(|p| &p.name == n),
+                None => {
+                    next += 1;
+                    Some(next - 1)
+                }
+            };
+            let Some(p) = pi.and_then(|i| fd.params.get(i)) else { continue };
+            let Some(pt) = &p.ty else { continue };
+            // a lambda with untyped parameters is typed from the parameter type once that is known
+            if p.variadic || !mentions_param(pt, &names) || matches!(a.value.kind, ExprKind::Lambda { .. }) {
+                continue;
+            }
+            // type the argument by compiling it into a scratch buffer
+            let snap = self.snapshot();
+            let r = self.expr(&a.value, None);
+            self.restore(snap);
+            let aty = r?;
+            self.unify(pt, &aty, &names, &mut b, module)?;
+        }
+        if let (Some(w), Some(t)) = (want, fd.ret.as_ref().and_then(|r| r.ty.as_ref())) {
+            let mut extra = HashMap::new();
+            if self.unify(t, w, &names, &mut extra, module).is_ok() {
+                for (k, v) in extra {
+                    b.entry(k).or_insert(v);
+                }
+            }
+        }
+        for n in &names {
+            if !b.contains_key(n) {
+                return self.err(format!(
+                    "cannot infer the type of {} in the call to '{}': no argument determines it; give the result an annotated type or pass a value of that type",
+                    n, fd.name
+                ));
+            }
+        }
+        for g in &fd.generics {
+            if let Some(bq) = &g.bound {
+                let q = self.bound_name(bq, module)?;
+                let ty = b[&g.name].clone();
+                self.check_bound(&ty, &q)?;
+            }
+        }
+        let argkey = names.iter().map(|n| ty_full(&b[n])).collect::<Vec<_>>().join(",");
+        let key = (module.to_string(), fd.name.clone(), argkey.clone());
+        let inst = match self.inst_funcs.get(&key) {
+            Some(n) => n.clone(),
+            None => {
+                self.bump_instances()?;
+                let inst = format!("{}__{}", fd.name, sym_of(&argkey));
+                let mut decl = fd.clone();
+                decl.generics.clear();
+                decl.name = inst.clone();
+                let saved = std::mem::replace(&mut self.bindings, b.clone());
+                let saved_mod = std::mem::replace(&mut self.cur_mod, module.to_string());
+                let sig = self.func_sig(module, &decl);
+                self.bindings = saved;
+                self.cur_mod = saved_mod;
+                self.funcs.insert((module.to_string(), inst.clone()), sig?);
+                self.inst_funcs.insert(key, inst.clone());
+                self.pending.push(Pending { module: module.to_string(), decl, bindings: b, line: decl_line });
+                inst
+            }
+        };
+        let sig = self.funcs[&(module.to_string(), inst)].clone();
+        self.call_sig(&sig, None, args)
+    }
+
+    // ---------------- driving ----------------
+
+    /// Compiles every instance requested so far (and those they request).
+    fn drain_pending(&mut self) -> R<()> {
+        while let Some(p) = self.pending.pop() {
+            self.cur_mod = p.module.clone();
+            self.line = p.line;
+            self.bindings = p.bindings.clone();
+            let r = self.gen_func(&p.module, &p.decl, false);
+            self.bindings.clear();
+            r?;
+        }
+        Ok(())
+    }
+
+    /// Checks each template once, with its type parameters as opaque types, and runs the bound
+    /// checks that had to wait until every method was known.
+    fn check_templates(&mut self) -> R<()> {
+        let deferred = std::mem::take(&mut self.deferred_bounds);
+        for (ty, iface, line) in deferred {
+            self.line = line;
+            self.satisfies(&ty, &iface)?;
+        }
+        let mut fkeys: Vec<(String, String)> = self.tmpl_funcs.keys().cloned().collect();
+        fkeys.sort();
+        for key in fkeys {
+            let (fd, line) = self.tmpl_funcs[&key].clone();
+            let snap = self.snapshot();
+            let r = self.check_function(&key.0, &fd, line);
+            self.restore(snap);
+            r?;
+        }
+        let mut rkeys: Vec<String> = self.tmpl_recs.keys().cloned().collect();
+        rkeys.sort();
+        for q in rkeys {
+            let snap = self.snapshot();
+            let r = self.check_record(&q);
+            self.restore(snap);
+            r?;
+        }
+        Ok(())
+    }
+
+    fn param_bindings(&self, generics: &[TypeParam], m: &str) -> R<HashMap<String, Ty>> {
+        let mut b = HashMap::new();
+        for g in generics {
+            let bound = match &g.bound {
+                Some(bq) => Some(self.bound_name(bq, m)?),
+                None => None,
+            };
+            b.insert(g.name.clone(), Ty::Param { name: g.name.clone(), bound });
+        }
+        Ok(b)
+    }
+
+    fn check_function(&mut self, m: &str, fd: &FuncDecl, line: u32) -> R<()> {
+        self.cur_mod = m.to_string();
+        self.line = line;
+        self.bindings = self.param_bindings(&fd.generics, m)?;
+        let mut decl = fd.clone();
+        decl.generics.clear();
+        decl.name = format!("__check_{}", fd.name);
+        let sig = self.func_sig(m, &decl)?;
+        self.funcs.insert((m.to_string(), decl.name.clone()), sig);
+        let r = self.gen_func(m, &decl, false);
+        self.bindings.clear();
+        r
+    }
+
+    fn check_record(&mut self, q: &str) -> R<()> {
+        let (tm, td, _) = self.tmpl_recs[q].clone();
+        self.cur_mod = tm.clone();
+        self.line = 0;
+        let binds = self.param_bindings(&td.generics, &tm)?;
+        self.bindings = binds;
+        let args: Vec<Type> = td.generics.iter().map(|g| Type::Named { path: vec![g.name.clone()], args: vec![] }).collect();
+        self.instantiate_record(q, &args, &tm)?;
+        // the methods of this instance are the template's own
+        let todo = std::mem::take(&mut self.pending);
+        for p in todo {
+            self.cur_mod = p.module.clone();
+            self.line = p.line;
+            self.bindings = p.bindings.clone();
+            self.gen_func(&p.module, &p.decl, false)?;
+        }
+        self.bindings.clear();
+        Ok(())
     }
 }
 

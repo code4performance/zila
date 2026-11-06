@@ -282,6 +282,83 @@
       <p><code>count_words</code> builds a <code>Map&lt;text, int&gt;</code> that counts how often each word appears: <code>counts.get(w, 0)</code> is the current count, or <code>0</code> for a word not seen yet. The <code>for word, n in counts</code> loop visits the entries in the order the words were first added (red, green, blue), so the output never changes between runs. The second half shows a literal (<code>{ "apple": 3, "pear": 5 }</code>), adding and removing keys, <code>len</code> and <code>has</code>. See the <a href="syntax.html#maps">syntax guide</a> for the exact rules.</p>
     </section>
 
+    <section id="generics-example">
+      <h2>Generics: one function, many types</h2>
+      <div class="file-label">examples/generics.br</div>
+      <pre><code><span class="cm">// Generics and interfaces: write code once, use it with many types.</span>
+<span class="cm">//</span>
+<span class="cm">//   brasa-parse examples/generics.br -o generics.exe</span>
+<span class="cm">//</span>
+<span class="cm">// &lt;T&gt; is a placeholder for a type. The compiler works out T from the arguments and</span>
+<span class="cm">// makes one copy of the code for each type you use. An interface lists methods, and a</span>
+<span class="cm">// bound (&lt;T: Printable&gt;) says "any type that has these methods".</span>
+
+<span class="kw">package</span> main
+
+<span class="kw">type</span> Printable = <span class="kw">interface</span>
+    <span class="kw">func</span> to_text(<span class="kw">self</span>) -&gt; text
+<span class="kw">end</span>
+
+<span class="kw">type</span> Point = <span class="kw">record</span>
+    x: int
+    y: int
+<span class="kw">end</span>
+
+<span class="kw">type</span> Dog = <span class="kw">record</span>
+    name: text
+<span class="kw">end</span>
+
+<span class="kw">func</span> (p: Point) to_text() -&gt; text
+    <span class="kw">return</span> <span class="str">"({p.x}, {p.y})"</span>
+<span class="kw">end</span>
+
+<span class="kw">func</span> (d: Dog) to_text() -&gt; text
+    <span class="kw">return</span> <span class="str">"dog {d.name}"</span>
+<span class="kw">end</span>
+
+<span class="kw">func</span> (n: int) to_text() -&gt; text
+    <span class="kw">return</span> <span class="str">"the number {n}"</span>
+<span class="kw">end</span>
+
+<span class="kw">type</span> Stack&lt;T&gt; = <span class="kw">record</span>
+    items: []T
+<span class="kw">end</span>
+
+<span class="kw">func</span> (s: Stack&lt;T&gt;) push(x: T)
+    s.items.add(x)
+<span class="kw">end</span>
+
+<span class="kw">func</span> (s: Stack&lt;T&gt;) pop() -&gt; T
+    <span class="kw">return</span> s.items.take()
+<span class="kw">end</span>
+
+<span class="kw">func</span> first&lt;T&gt;(items: []T) -&gt; T
+    <span class="kw">return</span> items[0]
+<span class="kw">end</span>
+
+<span class="kw">func</span> show&lt;T: Printable&gt;(x: T)
+    print(<span class="str">"showing {x.to_text()}"</span>)
+<span class="kw">end</span>
+
+<span class="kw">func</span> main()
+    <span class="kw">let</span> numbers: Stack&lt;int&gt; = Stack { items: [] }
+    numbers.push(3)
+    numbers.push(4)
+    print(<span class="str">"popped {numbers.pop()}"</span>)
+
+    <span class="kw">let</span> names: Stack&lt;text&gt; = Stack { items: [<span class="str">"ada"</span>] }
+    names.push(<span class="str">"alan"</span>)
+    print(<span class="str">"popped {names.pop()}"</span>)
+
+    print(<span class="str">"first of two lists: {first([10, 20])} and {first(["x", "y"])}"</span>)
+
+    show(Point { x: 1, y: 2 })
+    show(Dog { name: <span class="str">"rex"</span> })
+    show(42)
+<span class="kw">end</span></code></pre>
+      <p><code>Stack&lt;T&gt;</code> and <code>first&lt;T&gt;</code> are written once and used with <code>int</code> and <code>text</code>; the compiler works out <code>T</code> from the arguments and the declared type of the variable. <code>Printable</code> lists one method, and <code>show&lt;T: Printable&gt;</code> accepts anything that has it: a record with a <code>to_text</code> method, or even <code>int</code>, because <code>func (n: int) to_text()</code> gives it one. There is no <code>implements</code> keyword. See the <a href="syntax.html#generics">syntax guide</a> for the exact rules.</p>
+    </section>
+
     <section id="floats-example">
       <h2>Floats: fractional numbers</h2>
       <div class="file-label">examples/floats.br</div>

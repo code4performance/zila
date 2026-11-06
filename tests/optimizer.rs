@@ -161,8 +161,14 @@ fn bench(src: &str, options: &CompileOptions) -> Option<Duration> {
     Some(best)
 }
 
-fn benchmarks() -> [(&'static str, &'static str, &'static str); 4] {
-    [("fib", FIB, "B_main_fib"), ("loop", LOOP, "B_main_main"), ("sort", SORT, "B_list_sort_by__i64"), ("join", JOIN, "B_text_join")]
+fn benchmarks() -> [(&'static str, &'static str, &'static str); 5] {
+    [
+        ("fib", FIB, "B_main_fib"),
+        ("loop", LOOP, "B_main_main"),
+        ("sort", SORT, "B_list_sort_by__i64"),
+        ("join", JOIN, "B_text_join"),
+        ("helpers", HELPERS, "B_main_main"),
+    ]
 }
 
 /// Prints the instruction counts and run times of the benchmarks.
@@ -179,6 +185,9 @@ fn benchmark_report() {
         }
         if name == "loop" {
             assert!(t1.as_secs_f64() <= t0.as_secs_f64() * 0.75, "loop {:?} -> {:?}", t0, t1);
+        }
+        if name == "helpers" {
+            assert!(t1.as_secs_f64() <= t0.as_secs_f64() * 0.75, "helpers {:?} -> {:?}", t0, t1);
         }
     }
 }
@@ -333,11 +342,11 @@ func raw() -> int
     var r = 0
     unsafe
         asm
-            "mov rax, 5"
-            "jmp over"
-            "mov rax, 99"
-            "over:"
-            "mov rax, rax"
+            mov rax, 5
+            jmp over
+            mov rax, 99
+            over:
+            mov rax, rax
         end
     end
     return r
@@ -870,3 +879,323 @@ end
         assert!(out.contains("failed seven"), "{}", out);
     }
 }
+
+// ---- inlining ----
+
+/// Whether the procedure `name` of `asm` contains a `call` of a symbol containing `callee`.
+fn calls(asm: &str, name: &str, callee: &str) -> bool {
+    proc_body(asm, name).iter().any(|l| l.starts_with("call ") && l.contains(callee))
+}
+
+const INLINE_PROGRAM: &str = r#"package main
+
+use text
+use math
+
+let factor = 3
+var calls = 0
+
+func square(x: int) -> int
+    return x * x
+end
+
+func scale(n: int) -> int
+    return n * factor
+end
+
+func twice(x: int) -> int
+    return x + x
+end
+
+func second(a: int, b: int) -> int
+    return b
+end
+
+func unused(a: int, b: int, c: int) -> int
+    return a
+end
+
+func small(a: i8, b: u32) -> int
+    return int(a) + int(b)
+end
+
+func widen(a: i8) -> i8
+    return a + 100
+end
+
+func fhalf(x: f32) -> f32
+    return x * 0.5
+end
+
+func quad(x: int) -> int
+    return square(square(x))
+end
+
+func chain(x: int) -> int
+    return quad(x) + twice(square(x))
+end
+
+func is_big(x: int) -> bool
+    return x > 100 or x < -100
+end
+
+func add3(a: int, b: int, c: int) -> int
+    return a * 100 + b * 10 + c
+end
+
+func bump() -> int
+    calls += 1
+    return calls
+end
+
+func tick(label: text) -> int
+    print(label)
+    return 1
+end
+
+func change(ref v: int) -> int
+    v += 10
+    return v
+end
+
+func main()
+    let factor = 100
+    let n = 7
+    let b = 5
+    let x = 2
+    print(square(n))
+    print(scale(n))
+    print(scale(5) + factor)
+    print(twice(tick("a") + tick("b")))
+    print(second(tick("x"), tick("y")))
+    print(unused(tick("p"), tick("q"), tick("r")))
+    print(twice(bump()))
+    print(twice(bump()) + calls)
+    print(add3(n, bump(), n))
+    var m = 1
+    print(add3(m, change(ref m), m))
+    print(small(-5, 4000000000))
+    print(small(127, 4294967295))
+    print(widen(100))
+    print(fhalf(3.0))
+    print(quad(3))
+    print(chain(4))
+    print(is_big(n))
+    print(is_big(0 - 500))
+    print(text.is_space(b))
+    print(text.is_space(32))
+    print(math.sqrt(16.0))
+    print(square(x) + x)
+    let f = square
+    print(f(9))
+    var i = 0
+    var sum = 0
+    while i < 10
+        sum += square(i) + twice(i)
+        if is_big(sum)
+            sum -= 50
+        end
+        i += 1
+    end
+    print(sum)
+end
+"#;
+
+#[test]
+fn inlined_calls_behave_like_calls() {
+    let Some(out) = same(INLINE_PROGRAM) else { return };
+    let lines: Vec<&str> = out.lines().collect();
+    // arguments are evaluated once, left to right, even when the parameter is unused or repeated
+    assert_eq!(&lines[..8], ["49", "21", "115", "a", "b", "4", "x", "y"], "{}", out);
+    assert_eq!(&lines[8..14], ["1", "p", "q", "r", "1", "2"], "{}", out);
+    assert!(out.contains("3999999995\n"), "{}", out);
+}
+
+#[test]
+fn run_time_errors_inside_inlined_bodies_are_unchanged() {
+    let src = r#"package main
+
+func half(a: int, b: int) -> int
+    return a / b
+end
+
+func main()
+    print(half(10, 2))
+    var zero = 0
+    print(half(10, zero))
+    print("not reached")
+end
+"#;
+    let Some((out, code, _)) = run_with(src, &ON) else { return };
+    let (off, off_code, _) = run_with(src, &OFF).unwrap();
+    assert_eq!(out, off);
+    assert_eq!(code, off_code);
+    assert_ne!(code, 0, "{}", out);
+    assert!(out.starts_with("5\n") && !out.contains("not reached"), "{}", out);
+}
+
+const KINDS_PROGRAM: &str = r#"package main
+
+type Counter = record
+    n: int
+end
+
+func (c: Counter) get() -> int
+    return c.n
+end
+
+func square(x: int) -> int
+    return x * x
+end
+
+func down(n: int) -> int
+    return down(n - 1)
+end
+
+func label(n: int) -> text
+    return "x"
+end
+
+func ident<T>(x: T) -> T
+    return x
+end
+
+async func slow(x: int) -> int
+    return x + 1
+end
+
+func raw() -> int
+    var r = 0
+    unsafe
+        asm
+            mov rax, 5
+        end
+    end
+    return r
+end
+
+func main()
+    let c = Counter { n: 4 }
+    print(square(3))
+    print(c.get())
+    print(label(1))
+    print(ident(5))
+    let fut = slow(2)
+    print(raw())
+    print(down(1))
+end
+"#;
+
+#[test]
+fn only_small_ordinary_functions_lose_their_call() {
+    let on = asm(KINDS_PROGRAM, &ON);
+    let off = asm(KINDS_PROGRAM, &OFF);
+    assert!(!calls(&on, "B_main_main", "B_main_square"), "square should be inlined");
+    assert!(calls(&off, "B_main_main", "B_main_square"), "--no-opt must keep the call");
+    for callee in ["_get", "B_main_down", "B_main_label", "B_main_ident", "B_main_slow", "B_main_raw"] {
+        assert!(calls(&on, "B_main_main", callee), "{} must still be called", callee);
+        assert!(calls(&off, "B_main_main", callee), "{} must be called with --no-opt", callee);
+    }
+    // the function itself is still there
+    assert!(!proc_body(&on, "B_main_square").is_empty());
+}
+
+#[test]
+fn an_inlined_function_still_works_as_a_value() {
+    let src = main_of("let f = square\nprint(f(6))\nprint(square(7))\n").replace("func main", "func square(x: int) -> int\n    return x * x\nend\n\nfunc main");
+    let Some(out) = same(&src) else { return };
+    assert_eq!(out, "36\n49\n");
+}
+
+#[test]
+fn library_functions_are_inlined_without_seeing_the_callers_names() {
+    let src = r#"package main
+
+use math
+
+func main()
+    let x = 16.0
+    let n = 2.5
+    var total = 0.0
+    for i in 0..10
+        total += math.sqrt(x) + math.floor(n)
+    end
+    print(total)
+    print(math.sqrt(x))
+end
+"#;
+    let on = asm(src, &ON);
+    assert!(!calls(&on, "B_main_main", "B_math_sqrt"));
+    assert!(!calls(&on, "B_main_main", "B_math_floor"));
+    assert!(calls(&asm(src, &OFF), "B_main_main", "B_math_sqrt"));
+    let Some(out) = same(src) else { return };
+    assert!(out.starts_with("60"), "{}", out);
+}
+
+/// Helper functions with random bodies, called with variables whose names collide with the
+/// parameters' and with literals, nested and in both orders: all must agree with `--no-opt`.
+fn inline_random_case(seed: u64) {
+    let mut r = Rng(seed);
+    let mut src = String::from("package main\n\n");
+    let types = ["int", "i32", "u8", "u32", "u64"];
+    let per_type = 12;
+    for (ti, t) in types.iter().enumerate() {
+        for k in 0..per_type {
+            let depth = 2 + r.below(2) as u32;
+            let e = int_expr(&mut r, depth, t);
+            src.push_str(&format!("func h{}_{}(a: {}, b: {}) -> {}\n    return {}\nend\n\n", ti, k, t, t, t, e));
+        }
+    }
+    let mut mains = String::from("func main()\n");
+    for (ti, t) in types.iter().enumerate() {
+        src.push_str(&format!("func go{}()\n    let a: {} = 5\n    let b: {} = 200\n", ti, t, t));
+        for k in 0..per_type {
+            let j = (k + 1 + r.below(5) as usize) % per_type;
+            src.push_str(&format!("    println(h{ti}_{k}(b, a))\n    println(h{ti}_{k}(a, 3))\n    println(h{ti}_{k}(7, b))\n"));
+            src.push_str(&format!("    println(h{ti}_{k}(h{ti}_{j}(a, b), h{ti}_{j}(b, 1)))\n"));
+        }
+        src.push_str("end\n\n");
+        mains.push_str(&format!("    go{}()\n", ti));
+    }
+    mains.push_str("end\n");
+    src.push_str(&mains);
+    let on = asm(&src, &ON);
+    let off = asm(&src, &OFF);
+    let count = |a: &str| (0..types.len()).map(|ti| proc_body(a, &format!("B_main_go{}", ti)).iter().filter(|l| l.starts_with("call B_main_h")).count()).sum::<usize>();
+    assert!(count(&on) < count(&off) / 2, "calls with optimization {}, without {}", count(&on), count(&off));
+    let Some(out) = same(&src) else { return };
+    assert!(out.lines().count() >= 5 * 12 * 4, "only {} lines", out.lines().count());
+}
+
+#[test]
+fn random_helper_functions_agree() {
+    inline_random_case(0x9E3779B97F4A7C15);
+    inline_random_case(0x1234567887654321);
+}
+
+pub const HELPERS: &str = r#"package main
+
+func square(x: int) -> int
+    return x * x
+end
+
+func is_even(n: int) -> bool
+    return n % 2 == 0
+end
+
+func mix(a: int, b: int) -> int
+    return (a * 31 + b) bitand 1048575
+end
+
+func main()
+    var sum = 0
+    for i in 0..100000000
+        if is_even(i)
+            sum += mix(i, 7)
+        else
+            sum += square(i bitand 255)
+        end
+    end
+    print(sum)
+end
+"#;

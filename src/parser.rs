@@ -732,7 +732,13 @@ impl Parser {
                 Tok::Ident(n) if n == "clobber" => {
                     self.bump();
                     loop {
-                        clobbers.push(self.plain_text("a clobbered register")?);
+                        match self.cur().clone() {
+                            Tok::Ident(name) => {
+                                self.bump();
+                                clobbers.push(name);
+                            }
+                            _ => clobbers.push(self.plain_text("a clobbered register")?),
+                        }
                         if !self.eat_op(",") {
                             break;
                         }

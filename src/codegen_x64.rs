@@ -240,6 +240,9 @@ struct Local {
     captured: bool,
     /// Callee-saved register holding the variable instead of its slot.
     reg: Option<&'static str>,
+    /// A parameter of an inlined call whose argument is a literal: the value read from the
+    /// variable (the raw bits, as `rax` would hold them), with no slot behind it.
+    imm: Option<i64>,
 }
 
 #[derive(Default, Clone)]
@@ -313,6 +316,93 @@ impl FnState {
 }
 
 const ARG_REGS: [&str; 4] = ["rcx", "rdx", "r8", "r9"];
+
+/// Largest body (in expression nodes) and deepest nesting of calls compiled in place.
+const INLINE_NODES: usize = 12;
+const INLINE_DEPTH: usize = 4;
+const INLINE_PARAMS: usize = 4;
+
+fn plain_scalar(t: &Ty) -> bool {
+    matches!(t, Ty::Int { .. } | Ty::Bool | Ty::Float { .. } | Ty::Ptr(_))
+}
+
+/// The expression of a function that calls may be compiled in place of: an ordinary function
+/// of at most a few plain parameters, with a single `return <expression>` of a few operations.
+fn inlinable(fd: &FuncDecl, sig: &Sig) -> Option<Expr> {
+    if fd.is_async
+        || !fd.generics.is_empty()
+        || fd.receiver.is_some()
+        || sig.variadic
+        || sig.is_extern
+        || sig.params.len() > INLINE_PARAMS
+        || sig.params.iter().any(|p| p.by_ref || p.default.is_some() || !plain_scalar(&p.ty))
+        || !plain_scalar(&sig.ret)
+    {
+        return None;
+    }
+    let [Stmt { kind: StmtKind::Return(Some(e)), .. }] = &fd.body[..] else { return None };
+    (inline_size(e, &fd.name)? <= INLINE_NODES).then(|| e.clone())
+}
+
+/// Number of nodes of `e`, or `None` when it contains something that is never compiled in place.
+fn inline_size(e: &Expr, me: &str) -> Option<usize> {
+    Some(
+        1 + match &e.kind {
+            ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Char(_) | ExprKind::Bool(_) | ExprKind::Ident(_) => 0,
+            ExprKind::Unary { op, expr } => {
+                if *op == "&" {
+                    return None;
+                }
+                inline_size(expr, me)?
+            }
+            ExprKind::Binary { lhs, rhs, .. } => inline_size(lhs, me)? + inline_size(rhs, me)?,
+            ExprKind::Call { callee, args } => {
+                let mut n = match &callee.kind {
+                    ExprKind::Ident(f) if f != me => 1,
+                    ExprKind::Field { expr, safe: false, .. } if matches!(expr.kind, ExprKind::Ident(_)) => 2,
+                    _ => return None,
+                };
+                for a in args {
+                    if a.by_ref || a.spread {
+                        return None;
+                    }
+                    n += inline_size(&a.value, me)?;
+                }
+                n
+            }
+            _ => return None,
+        },
+    )
+}
+
+/// Only reads variables: evaluating it cannot change a local of the caller.
+fn reads_only(e: &Expr) -> bool {
+    match &e.kind {
+        ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Char(_) | ExprKind::Bool(_) | ExprKind::Nil | ExprKind::Ident(_) => true,
+        ExprKind::Unary { op, expr } => *op != "&" && reads_only(expr),
+        ExprKind::Binary { lhs, rhs, .. } => reads_only(lhs) && reads_only(rhs),
+        _ => false,
+    }
+}
+
+/// The raw bits a literal argument of type `ty` puts in `rax`, when it fits.
+fn literal_bits(e: &Expr, ty: &Ty) -> Option<i64> {
+    let int = |v: i128, bits: u8, signed: bool| -> Option<i64> {
+        let (lo, hi) = if signed { (-(1i128 << (bits - 1)), (1i128 << (bits - 1)) - 1) } else { (0, (1i128 << bits) - 1) };
+        (lo <= v && v <= hi).then(|| v as i64)
+    };
+    match (&e.kind, ty) {
+        (ExprKind::Int(n), Ty::Int { bits, signed }) => int(*n as i128, *bits, *signed),
+        (ExprKind::Unary { op: "-", expr }, Ty::Int { bits, signed }) => match &expr.kind {
+            ExprKind::Int(n) => int(-(*n as i128), *bits, *signed),
+            _ => None,
+        },
+        (ExprKind::Bool(b), Ty::Bool) => Some(*b as i64),
+        (ExprKind::Float(f), Ty::Float { bits: 64 }) => Some(f.to_bits() as i64),
+        (ExprKind::Float(f), Ty::Float { bits: 32 }) => Some((*f as f32).to_bits() as i64),
+        _ => None,
+    }
+}
 
 fn is_place(e: &Expr) -> bool {
     matches!(e.kind, ExprKind::Ident(_) | ExprKind::Field { .. } | ExprKind::Index { .. } | ExprKind::Deref(_))
@@ -463,6 +553,9 @@ pub struct Compiler {
     enum_statics: BTreeSet<(String, usize)>,
     funcs: HashMap<(String, String), Sig>,
     methods: HashMap<(String, String), Sig>,
+    /// Functions whose calls are compiled in place (with `opt`): symbol -> (body, module).
+    inline_bodies: HashMap<String, (Expr, String)>,
+    inline_depth: usize,
     globals: HashMap<(String, String), Global>,
     libs: BTreeSet<String>,
     extern_syms: BTreeSet<String>,
@@ -550,6 +643,8 @@ impl Compiler {
             enum_statics: BTreeSet::new(),
             funcs: HashMap::new(),
             methods: HashMap::new(),
+            inline_bodies: HashMap::new(),
+            inline_depth: 0,
             globals: HashMap::new(),
             libs: BTreeSet::new(),
             extern_syms: BTreeSet::new(),
@@ -747,9 +842,10 @@ impl Compiler {
 
     /// Loads variable `l` into `dst` (`rax` or `rcx`).
     fn load_local(&mut self, dst: &str, l: &Local) {
-        match l.reg {
-            Some(r) => self.e(format!("mov {}, {}", dst, r)),
-            None => self.e(format!("mov {}, qword ptr [rbp - {}]", dst, l.off)),
+        match (l.reg, l.imm) {
+            (_, Some(v)) => self.e(format!("mov {}, {}", dst, imm64(v))),
+            (Some(r), _) => self.e(format!("mov {}, {}", dst, r)),
+            (None, _) => self.e(format!("mov {}, qword ptr [rbp - {}]", dst, l.off)),
         }
     }
 
@@ -766,7 +862,7 @@ impl Compiler {
         let rc = self.is_rc(&ty);
         let reg = self.reg_for(name, &ty);
         let sc = self.fs.scopes.last_mut().unwrap();
-        sc.vars.insert(name.to_string(), Local { off, ty: ty.clone(), mutable, captured: false, reg });
+        sc.vars.insert(name.to_string(), Local { off, ty: ty.clone(), mutable, captured: false, reg, imm: None });
         if rc {
             sc.owned.push((off, ty));
             self.fs.may_own = true;
@@ -998,6 +1094,11 @@ impl Compiler {
                             }
                             self.methods.insert((key, fd.name.clone()), sig);
                         } else {
+                            if self.opt && !d.attrs.iter().any(|a| a.name == "naked") {
+                                if let Some(body) = inlinable(fd, &sig) {
+                                    self.inline_bodies.insert(sig.sym.clone(), (body, m.clone()));
+                                }
+                            }
                             self.funcs.insert((m.clone(), fd.name.clone()), sig);
                         }
                     }
@@ -1580,7 +1681,7 @@ end
             }
             let rc = self.is_rc(ty);
             let sc = &mut self.fs.scopes[0];
-            sc.vars.insert(name.clone(), Local { off, ty: ty.clone(), mutable: true, captured: false, reg });
+            sc.vars.insert(name.clone(), Local { off, ty: ty.clone(), mutable: true, captured: false, reg, imm: None });
             if rc {
                 sc.owned.push((off, ty.clone()));
                 self.fs.may_own = true;
@@ -3692,7 +3793,7 @@ end
             pro.push(format!("    mov qword ptr [rbp - {}], rax", off));
             let rc = self.is_rc(&l.ty);
             let sc = &mut self.fs.scopes[0];
-            sc.vars.insert(n.clone(), Local { off, ty: l.ty.clone(), mutable: false, captured: true, reg: None });
+            sc.vars.insert(n.clone(), Local { off, ty: l.ty.clone(), mutable: false, captured: true, reg: None, imm: None });
             if rc {
                 sc.owned.push((off, l.ty.clone()));
                 self.fs.may_own = true;
@@ -4260,6 +4361,11 @@ end
                 return self.err(format!("too many arguments: expected {}", n));
             }
         }
+        if self.opt && receiver.is_none() && rest.is_empty() && self.inline_depth < INLINE_DEPTH {
+            if let Some((body, bm)) = self.inline_bodies.get(&sig.sym).cloned() {
+                return self.inline_call(sig, &slots, &body, &bm);
+            }
+        }
         let mut temps = Vec::new();
         if let Some(r) = receiver {
             temps.push(r);
@@ -4380,6 +4486,64 @@ end
             self.free(t);
         }
         self.norm(&sig.ret);
+        Ok(sig.ret.clone())
+    }
+
+    /// A call of a small function compiled in place: the arguments are evaluated once, in order
+    /// (literals and plain local variables are used as they are), then the function's expression
+    /// is compiled in a scope holding only its parameters, in its own module.
+    fn inline_call(&mut self, sig: &Sig, slots: &[Option<&Expr>], body: &Expr, module: &str) -> R<Ty> {
+        let mut scope = Scope::default();
+        let mut temps = Vec::new();
+        for (i, p) in sig.params.iter().enumerate() {
+            let Some(x) = slots[i] else { return self.err(format!("missing argument '{}'", p.name)) };
+            let aliased = if let Some(v) = literal_bits(x, &p.ty) {
+                Some(Local { off: 0, ty: p.ty.clone(), mutable: false, captured: false, reg: None, imm: Some(v) })
+            } else if let ExprKind::Ident(n) = &x.kind {
+                // a later argument that could change the variable forces a copy
+                let later_ok = slots[i + 1..].iter().flatten().all(|y| reads_only(y));
+                match self.lookup(n) {
+                    Some(l) if later_ok && !l.captured && l.ty == p.ty => Some(Local { mutable: false, ..l }),
+                    _ => None,
+                }
+            } else {
+                None
+            };
+            let local = match aliased {
+                Some(l) => l,
+                None => {
+                    let at = self.value(x, Some(&p.ty))?;
+                    self.check(&p.ty, &at, &format!("argument '{}'", p.name))?;
+                    self.norm(&p.ty);
+                    let t = self.temp();
+                    self.e(format!("mov qword ptr [rbp - {}], rax", t));
+                    temps.push(t);
+                    Local { off: t, ty: p.ty.clone(), mutable: false, captured: false, reg: None, imm: None }
+                }
+            };
+            scope.vars.insert(p.name.clone(), local);
+        }
+        let saved_scopes = std::mem::replace(&mut self.fs.scopes, vec![scope]);
+        let saved_mod = std::mem::replace(&mut self.cur_mod, module.to_string());
+        let saved_bindings = std::mem::take(&mut self.bindings);
+        self.inline_depth += 1;
+        let r = self.value(body, Some(&sig.ret)).and_then(|t| {
+            self.check(&sig.ret, &t, "return value")?;
+            self.norm(&sig.ret);
+            Ok(())
+        });
+        self.inline_depth -= 1;
+        self.bindings = saved_bindings;
+        self.cur_mod = saved_mod;
+        // heap values the body's calls left to be released belong to the caller's scope now
+        let inner = std::mem::replace(&mut self.fs.scopes, saved_scopes);
+        if let Some(sc) = self.fs.scopes.last_mut() {
+            sc.owned.extend(inner.into_iter().flat_map(|s| s.owned));
+        }
+        for t in temps {
+            self.free(t);
+        }
+        r?;
         Ok(sig.ret.clone())
     }
 

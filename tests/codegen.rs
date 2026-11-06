@@ -120,3 +120,12 @@ end
     let e = asm(src).unwrap_err();
     assert!(e.contains("cannot take `ref` parameters"), "{}", e);
 }
+
+#[test]
+fn raw_and_quoted_asm_lines_compile_to_the_same_code() {
+    let raw = "package main\n\nfunc port(p: int) -> int\n    var v = 0\n    unsafe\n        asm\n            in al, dx\n            movzx eax, al\n            in rdx = p\n            out rax = v\n            clobber cc\n        end\n    end\n    return v\nend\n\nfunc main()\n    print(port(96))\nend\n";
+    let quoted = "package main\n\nfunc port(p: int) -> int\n    var v = 0\n    unsafe\n        asm\n            \"in al, dx\"\n            \"movzx eax, al\"\n            in rdx = p\n            out rax = v\n            clobber \"cc\"\n        end\n    end\n    return v\nend\n\nfunc main()\n    print(port(96))\nend\n";
+    let (a, b) = (asm(raw).unwrap(), asm(quoted).unwrap());
+    assert!(a.contains("in al, dx") && a.contains("movzx eax, al"), "{}", a);
+    assert_eq!(a, b);
+}

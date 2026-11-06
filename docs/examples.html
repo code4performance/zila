@@ -594,7 +594,7 @@
     <span class="kw">var</span> hi: u32 = 0
     <span class="kw">unsafe</span>
         <span class="kw">asm</span>
-            <span class="str">"rdtsc"</span>
+            rdtsc
             out eax = lo
             out edx = hi
         <span class="kw">end</span>
@@ -607,10 +607,10 @@
     <span class="kw">var</span> r: u64 = a
     <span class="kw">unsafe</span>
         <span class="kw">asm</span>
-            <span class="str">"add @r, @b"</span>
+            add @r, @b
             inout r = r
             <span class="kw">in</span> b = b
-            clobber <span class="str">"cc"</span>
+            clobber cc
         <span class="kw">end</span>
     <span class="kw">end</span>
     <span class="kw">return</span> r
@@ -620,8 +620,8 @@
 #[cfg(<span class="str">"x86_64"</span>)]
 <span class="kw">func</span> halt()
     <span class="kw">asm</span>
-        <span class="str">"cli"</span>
-        <span class="str">"hlt"</span>
+        cli
+        hlt
     <span class="kw">end</span>
 <span class="kw">end</span>
 

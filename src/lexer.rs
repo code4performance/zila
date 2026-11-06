@@ -65,6 +65,8 @@ pub struct Lexer {
     line: u32,
     col: u32,
     out: Vec<Token>,
+    /// Inside an `asm` block: its lines are assembly, read as they are.
+    in_asm: bool,
 }
 
 impl Lexer {
@@ -74,7 +76,7 @@ impl Lexer {
 
     /// Start counting from a given position (used for interpolations).
     pub fn at(src: &str, line: u32, col: u32) -> Self {
-        Lexer { chars: src.chars().collect(), pos: 0, line, col, out: Vec::new() }
+        Lexer { chars: src.chars().collect(), pos: 0, line, col, out: Vec::new(), in_asm: false }
     }
 
     fn peek(&self) -> Option<char> {
@@ -116,6 +118,9 @@ impl Lexer {
                     self.bump();
                     if !matches!(self.out.last().map(|t| &t.tok), None | Some(Tok::Newline)) {
                         self.push(Tok::Newline, line, col);
+                    }
+                    if self.in_asm {
+                        self.asm_line()?;
                     }
                 }
                 '/' if self.peek_at(1) == Some('/') => {
@@ -168,7 +173,11 @@ impl Lexer {
                         Some(k) => Tok::Kw(k),
                         None => Tok::Ident(s),
                     };
+                    let starts_block = matches!(tok, Tok::Kw("asm")) && self.rest_of_line_is_blank();
                     self.push(tok, line, col);
+                    if starts_block {
+                        self.in_asm = true;
+                    }
                 }
                 _ => match self.op() {
                     Some(op) => self.push(Tok::Op(op), line, col),
@@ -182,6 +191,97 @@ impl Lexer {
         }
         self.push(Tok::Eof, line, col);
         Ok(self.out)
+    }
+
+    /// Only blanks or a `//` comment follow on this line.
+    fn rest_of_line_is_blank(&self) -> bool {
+        let mut i = self.pos;
+        while let Some(c) = self.chars.get(i) {
+            match c {
+                ' ' | '\t' | '\r' => i += 1,
+                '\n' => return true,
+                '/' => return self.chars.get(i + 1) == Some(&'/'),
+                _ => return false,
+            }
+        }
+        true
+    }
+
+    /// At the start of a line inside an `asm` block: an assembly line becomes one text token
+    /// holding the line as written; operands, clobbers, quoted lines and the closing `end` are
+    /// left to the normal tokenizer.
+    fn asm_line(&mut self) -> Result<(), Diag> {
+        loop {
+            let mut i = self.pos;
+            while matches!(self.chars.get(i), Some(' ' | '\t' | '\r')) {
+                i += 1;
+            }
+            let start = i;
+            while i < self.chars.len() && self.chars[i] != '\n' {
+                i += 1;
+            }
+            let text: String = self.chars[start..i].iter().collect();
+            let text = text.trim_end().to_string();
+            let skip_line = |lx: &mut Lexer| {
+                while lx.pos < i {
+                    lx.bump();
+                }
+                lx.bump();
+            };
+            if self.pos >= self.chars.len() {
+                return Ok(());
+            }
+            if text.is_empty() || text.starts_with("//") {
+                skip_line(self);
+                if i >= self.chars.len() {
+                    return Ok(());
+                }
+                continue;
+            }
+            let word: String = text.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+            let rest = text[word.len()..].trim_start();
+            if word == "end" && (rest.is_empty() || rest.starts_with("//")) {
+                self.in_asm = false;
+                return Ok(());
+            }
+            let is_operand = matches!(word.as_str(), "in" | "out" | "inout") && {
+                let name: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+                let after = rest[name.len()..].trim_start();
+                !name.is_empty() && after.starts_with('=') && !after.starts_with("==")
+            };
+            let is_clobber = word == "clobber" && (rest.is_empty() || text[word.len()..].starts_with(|c: char| c == ' ' || c == '\t'));
+            if text.starts_with('"') || is_operand || is_clobber {
+                return Ok(());
+            }
+            // an assembly line: drop a trailing `//` comment that is not inside quotes
+            let mut end = text.len();
+            let mut quote: Option<char> = None;
+            let bytes: Vec<(usize, char)> = text.char_indices().collect();
+            for (k, &(pos, c)) in bytes.iter().enumerate() {
+                match quote {
+                    Some(q) => {
+                        if c == q {
+                            quote = None;
+                        }
+                    }
+                    None => {
+                        if c == '"' || c == '\'' {
+                            quote = Some(c);
+                        } else if c == '/' && bytes.get(k + 1).map(|b| b.1) == Some('/') {
+                            end = pos;
+                            break;
+                        }
+                    }
+                }
+            }
+            let line_text = text[..end].trim_end().to_string();
+            let (line, col) = (self.line, self.col + (start - self.pos) as u32);
+            while self.pos < i {
+                self.bump();
+            }
+            self.push(Tok::Text(vec![StrPart::Lit(line_text)]), line, col);
+            return Ok(());
+        }
     }
 
     fn op(&mut self) -> Option<&'static str> {

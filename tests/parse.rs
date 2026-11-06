@@ -279,10 +279,40 @@ fn error_asm_unterminated() {
 }
 
 #[test]
-fn error_asm_bad_line() {
-    let (line, msg) = err_at("package t\nfunc f()\n    asm\n        nop\n    end\nend\n");
-    assert_eq!(line, 4);
-    assert!(msg.contains("assembly line"), "{}", msg);
+fn error_asm_bad_clobber() {
+    let (line, msg) = err_at("package t\nfunc f()\n    asm\n        nop\n        clobber 5\n    end\nend\n");
+    assert_eq!(line, 5);
+    assert!(msg.contains("clobbered register"), "{}", msg);
+}
+
+#[test]
+fn asm_lines_are_written_without_quotes() {
+    let src = "package t\nfunc f()\n    asm\n        // a Brasa comment\n        start:\n            in al, dx\n            out dx, al\n            or al, 2\n            mov ax, [bx] ; load\n\n            msg: db \"http://x\", 13, 0   // trailing\n        end:\n            \"quoted\"\n            in rdx = port\n            out rax = v\n            clobber cc, memory\n    end\nend\n";
+    let file = parse_source(src).unwrap();
+    let DeclKind::Func(f) = &file.decls[0].kind else { panic!() };
+    let StmtKind::Asm(a) = &f.body[0].kind else { panic!() };
+    assert_eq!(
+        a.lines,
+        vec!["start:", "in al, dx", "out dx, al", "or al, 2", "mov ax, [bx] ; load", "msg: db \"http://x\", 13, 0", "end:", "quoted"]
+    );
+    assert_eq!(a.operands.len(), 2);
+    assert_eq!(a.operands[0].dir, AsmDir::In);
+    assert_eq!(a.operands[0].name, "rdx");
+    assert_eq!(a.operands[1].dir, AsmDir::Out);
+    assert_eq!(a.clobbers, vec!["cc", "memory"]);
+    // statements after the block are read normally again
+    let src = "package t\nfunc f()\n    asm\n        cli\n        hlt\n    end\n    let x = 1\nend\n";
+    let file = parse_source(src).unwrap();
+    let DeclKind::Func(f) = &file.decls[0].kind else { panic!() };
+    assert_eq!(f.body.len(), 2);
+    let StmtKind::Asm(a) = &f.body[0].kind else { panic!() };
+    assert_eq!(a.lines, vec!["cli", "hlt"]);
+}
+
+#[test]
+fn error_asm_unterminated_raw_block() {
+    let (_, msg) = err_at("package t\nfunc f()\n    asm\n        nop\n");
+    assert!(msg.contains("asm"), "{}", msg);
 }
 
 #[test]

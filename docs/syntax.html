@@ -368,8 +368,8 @@ ages.remove(<span class="str">"alan"</span>)                      <span class="c
 #[cfg(<span class="str">"x86_64"</span>)]
 <span class="kw">func</span> halt()
     <span class="kw">asm</span>
-        <span class="str">"cli"</span>
-        <span class="str">"hlt"</span>
+        cli
+        hlt
     <span class="kw">end</span>
 <span class="kw">end</span></code></pre>
     </section>
@@ -392,14 +392,14 @@ ages.remove(<span class="str">"alan"</span>)                      <span class="c
         printf(c.cstr(<span class="str">"sqrt(2) = %f\n"</span>), sqrt(2.0))
     <span class="kw">end</span>
 <span class="kw">end</span></code></pre>
-      <p>Inline <code>asm</code> blocks take string instruction templates, then <code>in</code>/<code>out</code>/<code>inout</code> operands (bound to named registers or allocated ones) and an optional <code>clobber</code> list:</p>
+      <p>Inline <code>asm</code> blocks hold assembly written as it is, one instruction per line with no quotes (labels, <code>;</code> comments and memory operands like <code>[rax]</code> work as in any assembler, and so do instructions named like Brasa words, such as <code>in al, dx</code>). A line <code>in</code>/<code>out</code>/<code>inout</code> <em>name</em> <code>=</code> <em>expr</em> binds an operand (to a named register or an allocated one), an optional <code>clobber</code> line lists registers (<code>clobber cc, memory</code>), and the block ends at a line that is just <code>end</code>. Lines written as strings (<code>"cli"</code>) are still accepted.</p>
       <pre><code>#[cfg(<span class="str">"x86_64"</span>)]
 <span class="kw">func</span> rdtsc() -&gt; u64
     <span class="kw">var</span> lo: u32 = 0
     <span class="kw">var</span> hi: u32 = 0
     <span class="kw">unsafe</span>
         <span class="kw">asm</span>
-            <span class="str">"rdtsc"</span>
+            rdtsc
             out eax = lo
             out edx = hi
         <span class="kw">end</span>

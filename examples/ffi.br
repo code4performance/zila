@@ -39,7 +39,7 @@ func rdtsc() -> u64
     var hi: u32 = 0
     unsafe
         asm
-            "rdtsc"
+            rdtsc
             out eax = lo
             out edx = hi
         end
@@ -52,10 +52,10 @@ func add_asm(a: u64, b: u64) -> u64
     var r: u64 = a
     unsafe
         asm
-            "add @r, @b"
+            add @r, @b
             inout r = r
             in b = b
-            clobber "cc"
+            clobber cc
         end
     end
     return r
@@ -65,8 +65,8 @@ end
 #[cfg("x86_64")]
 func halt()
     asm
-        "cli"
-        "hlt"
+        cli
+        hlt
     end
 end
 

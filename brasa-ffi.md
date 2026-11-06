@@ -168,19 +168,20 @@ Brasa supports inline assembly for architecture-specific instructions, hardware 
 ```brasa
 unsafe
     asm
-        "<instruction template 1>"
-        "<instruction template 2>"
+        <instruction template 1>
+        <instruction template 2>
         in operand_name = expr
         out operand_name = var_name
         inout operand_name = var_name
-        clobber "reg1", "reg2"
+        clobber reg1, reg2
     end
 end
 ```
 
 ### 7.2 Instructions and Operand Substitution
 
-- Each instruction line is a plain string literal containing target assembly code.
+- Each instruction line is target assembly code written as it is, without quotes (everything up to a `//` comment is passed to the assembler; `;` comments, labels such as `start:` and quoted data such as `db "text", 0` work as in any assembler, and instructions named like Brasa words, e.g. `in al, dx`, are fine). A line starting with `in`/`out`/`inout`, a name and `=` is an operand instead, and the block ends at a line that is just `end`.
+- Lines written as string literals (`"cli"`) are still accepted.
 - Operands are referenced using the `@name` syntax within instruction templates.
 - When an operand name matches a known hardware register (e.g., `eax`, `edx`, `rax`), the compiler binds that operand to the specified physical register.
 - When an operand name is a general identifier, the compiler allocates an appropriate general-purpose register.
@@ -207,8 +208,8 @@ For interrupt service routines, context-switching routines, and boot code, the `
 #[cfg("x86_64")]
 func halt()
     asm
-        "cli"
-        "hlt"
+        cli
+        hlt
     end
 end
 ```
@@ -249,7 +250,7 @@ func rdtsc() -> u64
     var hi: u32 = 0
     unsafe
         asm
-            "rdtsc"
+            rdtsc
             out eax = lo
             out edx = hi
         end

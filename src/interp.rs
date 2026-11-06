@@ -85,6 +85,8 @@ pub enum Value {
     },
     Func(FuncDecl),
     Builtin(String),
+    /// A failed `T or error` result: `error("message")`.
+    Error(String),
 }
 
 impl PartialEq for Value {
@@ -128,6 +130,7 @@ impl Value {
             Value::Record { .. } => "record",
             Value::Func(_) => "func",
             Value::Builtin(_) => "builtin",
+            Value::Error(_) => "error",
         }
     }
 }
@@ -160,6 +163,7 @@ impl std::fmt::Display for Value {
             }
             Value::Func(fd) => write!(f, "<func {}>", fd.name),
             Value::Builtin(name) => write!(f, "<builtin {}>", name),
+            Value::Error(m) => write!(f, "error: {}", m),
         }
     }
 }
@@ -227,6 +231,10 @@ pub struct Interpreter {
     pub types: HashMap<String, TypeDecl>,
     /// One frame per running function: the `defer`red calls, with the environment they were deferred in.
     defers: Vec<Vec<(Expr, Rc<RefCell<Env>>)>>,
+    /// The standard-library module whose function is running ("" for the program itself).
+    module: String,
+    /// Standard-library modules loaded by `use`; their functions are in `funcs` as "module.name".
+    loaded: std::collections::HashSet<String>,
 }
 
 impl Interpreter {
@@ -238,6 +246,8 @@ impl Interpreter {
             methods: HashMap::new(),
             types: HashMap::new(),
             defers: Vec::new(),
+            module: String::new(),
+            loaded: std::collections::HashSet::new(),
         };
         interp.register_builtins();
         interp
@@ -248,12 +258,38 @@ impl Interpreter {
         g.define("print".to_string(), Value::Builtin("print".to_string()));
         g.define("println".to_string(), Value::Builtin("println".to_string()));
         g.define("len".to_string(), Value::Builtin("len".to_string()));
-        for n in ["float", "f64", "f32", "int", "i64"] {
+        for n in ["float", "f64", "f32", "int", "i64", "error", "panic", "chr", "__from_bits", "__bits", "__sqrt", "__floor", "__ceil", "__trunc"] {
             g.define(n.to_string(), Value::Builtin(n.to_string()));
         }
     }
 
+    /// Loads the standard-library modules a file asks for with `use` (and the ones they use).
+    /// Only the modules written in plain Brasa exist in the interpreter.
+    pub fn load_uses(&mut self, file: &File) -> InterpResult<()> {
+        for u in &file.uses {
+            let name = u[0].clone();
+            if self.loaded.contains(&name) || !matches!(name.as_str(), "text" | "list" | "float" | "math") {
+                continue;
+            }
+            let Some(src) = crate::codegen_x64::std_source(&name) else { continue };
+            self.loaded.insert(name.clone());
+            let f = crate::parser::parse_source(src).map_err(|d| format!("std/{}.br:{}:{}: {}", name, d.line, d.col, d.msg))?;
+            self.load_uses(&f)?;
+            for decl in &f.decls {
+                if let DeclKind::Func(fd) = &decl.kind {
+                    if fd.receiver.is_none() {
+                        let mut fd = fd.clone();
+                        fd.name = format!("{}.{}", name, fd.name);
+                        self.funcs.insert(fd.name.clone(), fd);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn load_file(&mut self, file: &File) -> InterpResult<()> {
+        self.load_uses(file)?;
         let globals_ref = self.globals.clone();
         for decl in &file.decls {
             match &decl.kind {
@@ -554,6 +590,8 @@ impl Interpreter {
             ExprKind::Ident(name) => {
                 if let Some(v) = env.borrow().get(name) {
                     Ok(v)
+                } else if let Some(fd) = (!self.module.is_empty()).then(|| self.funcs.get(&format!("{}.{}", self.module, name))).flatten() {
+                    Ok(Value::Func(fd.clone()))
                 } else if let Some(fd) = self.funcs.get(name) {
                     Ok(Value::Func(fd.clone()))
                 } else {
@@ -607,6 +645,7 @@ impl Interpreter {
                         let val = fields.borrow().get(name).cloned().unwrap_or(Value::Nil);
                         Ok(val)
                     }
+                    Value::Error(m) if name == "message" => Ok(Value::Text(m)),
                     Value::List(l) if name == "len" => Ok(Value::Int(l.borrow().len() as i64)),
                     Value::Text(t) if name == "len" => Ok(Value::Int(t.len() as i64)),
                     Value::Map(m) if name == "len" => Ok(Value::Int(m.borrow().len() as i64)),
@@ -631,10 +670,9 @@ impl Interpreter {
                         found.ok_or_else(|| format!("line {}: map key not found", expr.line))
                     }
                     (Value::Text(s), Value::Int(i)) => {
-                        let chars: Vec<char> = s.chars().collect();
                         let idx = i as usize;
-                        if idx < chars.len() {
-                            Ok(Value::Char(chars[idx]))
+                        if i >= 0 && idx < s.len() {
+                            Ok(Value::Int(s.as_bytes()[idx] as i64))
                         } else {
                             Err(format!("line {}: string index out of bounds", expr.line))
                         }
@@ -676,7 +714,7 @@ impl Interpreter {
                 }
                 if *op == "??" {
                     let left = self.eval_expr(lhs, env)?;
-                    if left != Value::Nil {
+                    if left != Value::Nil && !matches!(left, Value::Error(_)) {
                         return Ok(left);
                     }
                     return self.eval_expr(rhs, env);
@@ -689,6 +727,18 @@ impl Interpreter {
             ExprKind::Call { callee, args } => {
                 // Check if it's a method call: target.method(args)
                 if let ExprKind::Field { expr: target_expr, name: method_name, .. } = &callee.kind {
+                    if let ExprKind::Ident(m) = &target_expr.kind {
+                        let key = format!("{}.{}", m, method_name);
+                        if matches!(env.borrow().get(m), None | Some(Value::Builtin(_))) && self.loaded.contains(m) {
+                            if let Some(fd) = self.funcs.get(&key).cloned() {
+                                let mut eval_args = Vec::new();
+                                for a in args {
+                                    eval_args.push(self.eval_expr(&a.value, env)?);
+                                }
+                                return self.call_func(&fd, eval_args);
+                            }
+                        }
+                    }
                     let target_val = self.eval_expr(target_expr, env)?;
                     let mut eval_args = Vec::new();
                     for a in args {
@@ -739,7 +789,7 @@ impl Interpreter {
             ExprKind::Lambda { params, body } => {
                 let fd = FuncDecl {
                     receiver: None,
-                    name: "<lambda>".to_string(),
+                    name: format!("<lambda@{}>", self.module),
                     generics: Vec::new(),
                     params: params.clone(),
                     ret: None,
@@ -896,6 +946,35 @@ impl Interpreter {
                     Err("len() requires 1 argument".to_string())
                 }
             }
+            "error" => match args.as_slice() {
+                [Value::Text(m)] => Ok(Value::Error(m.clone())),
+                _ => Err("error() takes one text".to_string()),
+            },
+            "panic" => match args.as_slice() {
+                [Value::Text(m)] => Err(format!("panic: {}", m)),
+                _ => Err("panic() takes one text".to_string()),
+            },
+            "chr" => match args.as_slice() {
+                [Value::Int(n)] => Ok(Value::Text(char::from_u32(*n as u32).map(|c| c.to_string()).unwrap_or_default())),
+                _ => Err("chr() takes one number".to_string()),
+            },
+            "__from_bits" => match args.as_slice() {
+                [Value::Int(n)] => Ok(Value::Float(f64::from_bits(*n as u64))),
+                _ => Err("__from_bits() takes one int".to_string()),
+            },
+            "__bits" => match args.as_slice() {
+                [Value::Float(f)] => Ok(Value::Int(f.to_bits() as i64)),
+                _ => Err("__bits() takes one float".to_string()),
+            },
+            "__sqrt" | "__floor" | "__ceil" | "__trunc" => match args.as_slice() {
+                [Value::Float(f)] => Ok(Value::Float(match name {
+                    "__sqrt" => f.sqrt(),
+                    "__floor" => f.floor(),
+                    "__ceil" => f.ceil(),
+                    _ => f.trunc(),
+                })),
+                _ => Err(format!("{}() takes one float", name)),
+            },
             "float" | "f64" | "f32" | "int" | "i64" => {
                 let [a] = args.as_slice() else { return Err(format!("{}() takes one argument", name)) };
                 match (name, a) {
@@ -924,7 +1003,26 @@ impl Interpreter {
             let val = args.get(i).cloned().unwrap_or(Value::Nil);
             env.borrow_mut().define(param.name.clone(), val);
         }
-        match self.run_body(&fd.body, &env)? {
+        // a library function runs in its own module, a lambda in the module that made it
+        let module = match fd.name.strip_prefix("<lambda@") {
+            Some(m) => m.trim_end_matches('>').to_string(),
+            None => fd.name.split_once('.').map(|(m, _)| m.to_string()).unwrap_or_default(),
+        };
+        let saved = std::mem::replace(&mut self.module, module);
+        // a lambda gives the value of its last expression: `func(x) x * 2 end`
+        let r = match (fd.name.starts_with("<lambda@"), fd.body.last()) {
+            (true, Some(Stmt { kind: StmtKind::Expr(last), .. })) => {
+                let (init, _) = fd.body.split_at(fd.body.len() - 1);
+                match self.eval_block(init, &env) {
+                    Ok(Flow::Return(v)) => Ok(Flow::Return(v)),
+                    Ok(_) => self.eval_expr(last, &env).map(Flow::Return),
+                    Err(e) => Err(e),
+                }
+            }
+            _ => self.run_body(&fd.body, &env),
+        };
+        self.module = saved;
+        match r? {
             Flow::Return(v) => Ok(v),
             _ => Ok(Value::Nil),
         }
@@ -948,6 +1046,17 @@ impl Interpreter {
                 if let Some(item) = args.first() {
                     l.borrow_mut().push(item.clone());
                     return Ok(Value::Nil);
+                }
+            }
+        }
+
+        if let Value::Text(t) = &target {
+            if method == "slice" {
+                if let [Value::Int(a), Value::Int(b)] = args.as_slice() {
+                    let n = t.len() as i64;
+                    let b = (*b).clamp(0, n);
+                    let a = (*a).clamp(0, b);
+                    return Ok(Value::Text(String::from_utf8_lossy(&t.as_bytes()[a as usize..b as usize]).into_owned()));
                 }
             }
         }

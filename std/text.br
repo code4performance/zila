@@ -1,0 +1,506 @@
+// =====================================================================
+// Brasa standard library: text
+//
+//     use text
+//     let words = text.split("a,b,c", ",")
+//
+// Text is bytes (UTF-8). Searching, splitting, trimming and replacing compare whole byte
+// sequences, so they are correct for UTF-8. `upper` and `lower` only change ASCII letters,
+// and `reverse` reverses bytes.
+// =====================================================================
+
+package text
+
+use float
+
+// ---- searching ----
+
+// The byte position of the first `part` at or after `from`, or -1.
+func index_from(s: text, part: text, from: int) -> int
+    let n = s.len
+    let m = part.len
+    var i = from
+    if i < 0
+        i = 0
+    end
+    while i + m <= n
+        var j = 0
+        while j < m and s[i + j] == part[j]
+            j += 1
+        end
+        if j == m
+            return i
+        end
+        i += 1
+    end
+    return -1
+end
+
+// The byte position of the first `part` in `s`, or -1.
+func index_of(s: text, part: text) -> int
+    return index_from(s, part, 0)
+end
+
+func contains(s: text, part: text) -> bool
+    return index_from(s, part, 0) >= 0
+end
+
+func starts_with(s: text, prefix: text) -> bool
+    return s.len >= prefix.len and s.slice(0, prefix.len) == prefix
+end
+
+func ends_with(s: text, suffix: text) -> bool
+    return s.len >= suffix.len and s.slice(s.len - suffix.len, s.len) == suffix
+end
+
+// -1, 0 or 1: how `a` orders against `b`, comparing byte by byte (shorter first on a tie).
+func compare(a: text, b: text) -> int
+    var i = 0
+    while i < a.len and i < b.len
+        if a[i] < b[i]
+            return -1
+        end
+        if a[i] > b[i]
+            return 1
+        end
+        i += 1
+    end
+    if a.len < b.len
+        return -1
+    end
+    if a.len > b.len
+        return 1
+    end
+    return 0
+end
+
+// ---- building ----
+
+// All the parts one after another. Joins them in pairs, so the cost stays
+// proportional to (total bytes) * log(parts) however many parts there are.
+func concat_all(parts: []text) -> text
+    if parts.len == 0
+        return ""
+    end
+    var cur = parts
+    while cur.len > 1
+        let next: []text = []
+        var i = 0
+        while i + 1 < cur.len
+            next.add(cur[i] + cur[i + 1])
+            i += 2
+        end
+        if i < cur.len
+            next.add(cur[i])
+        end
+        cur = next
+    end
+    return cur[0]
+end
+
+// The pieces between the occurrences of `sep`, empty pieces included.
+func split(s: text, sep: text) -> []text
+    if sep.len == 0
+        panic("split needs a separator")
+    end
+    let out: []text = []
+    var start = 0
+    var at = index_from(s, sep, 0)
+    while at >= 0
+        out.add(s.slice(start, at))
+        start = at + sep.len
+        at = index_from(s, sep, start)
+    end
+    out.add(s.slice(start, s.len))
+    return out
+end
+
+// The parts with `sep` between them.
+func join(parts: []text, sep: text) -> text
+    let all: []text = []
+    for i in 0..parts.len
+        if i > 0
+            all.add(sep)
+        end
+        all.add(parts[i])
+    end
+    return concat_all(all)
+end
+
+// The lines of `s`: split at a newline, a trailing carriage return removed, no empty last line after a final newline.
+func lines(s: text) -> []text
+    let out: []text = []
+    if s.len == 0
+        return out
+    end
+    let pieces = split(s, "\n")
+    var count = pieces.len
+    if pieces[count - 1].len == 0
+        count -= 1
+    end
+    for i in 0..count
+        let p = pieces[i]
+        if p.len > 0 and p[p.len - 1] == 13
+            out.add(p.slice(0, p.len - 1))
+        else
+            out.add(p)
+        end
+    end
+    return out
+end
+
+// `s` n times.
+func repeat(s: text, n: int) -> text
+    let parts: []text = []
+    for i in 0..n
+        parts.add(s)
+    end
+    return concat_all(parts)
+end
+
+// Every non-overlapping `from` in `s` replaced by `to`, scanning left to right.
+func replace(s: text, from: text, to: text) -> text
+    if from.len == 0
+        return s
+    end
+    let parts: []text = []
+    var start = 0
+    var at = index_from(s, from, 0)
+    while at >= 0
+        parts.add(s.slice(start, at))
+        parts.add(to)
+        start = at + from.len
+        at = index_from(s, from, start)
+    end
+    parts.add(s.slice(start, s.len))
+    return concat_all(parts)
+end
+
+// ---- trimming and padding ----
+
+func is_space(b: int) -> bool
+    return b == 32 or b == 9 or b == 10 or b == 13
+end
+
+func trim_start(s: text) -> text
+    var i = 0
+    while i < s.len and is_space(int(s[i]))
+        i += 1
+    end
+    return s.slice(i, s.len)
+end
+
+func trim_end(s: text) -> text
+    var n = s.len
+    while n > 0 and is_space(int(s[n - 1]))
+        n -= 1
+    end
+    return s.slice(0, n)
+end
+
+// `s` without spaces, tabs, carriage returns and newlines at either end.
+func trim(s: text) -> text
+    return trim_end(trim_start(s))
+end
+
+// `fill` (one byte) added in front until `s` is `width` bytes long.
+func pad_left(s: text, width: int, fill: text) -> text
+    if s.len >= width
+        return s
+    end
+    return repeat(fill, width - s.len) + s
+end
+
+// `fill` (one byte) added at the end until `s` is `width` bytes long.
+func pad_right(s: text, width: int, fill: text) -> text
+    if s.len >= width
+        return s
+    end
+    return s + repeat(fill, width - s.len)
+end
+
+// ---- case and order ----
+
+// Bytes from `lo` to `hi` shifted by `delta`; everything else stays as it is.
+func shift_ascii(s: text, lo: int, hi: int, delta: int) -> text
+    let parts: []text = []
+    var run = 0
+    for i in 0..s.len
+        let b = int(s[i])
+        if b >= lo and b <= hi
+            parts.add(s.slice(run, i))
+            parts.add(chr(b + delta))
+            run = i + 1
+        end
+    end
+    parts.add(s.slice(run, s.len))
+    return concat_all(parts)
+end
+
+// ASCII letters in capitals; other bytes unchanged.
+func upper(s: text) -> text
+    return shift_ascii(s, 97, 122, 0 - 32)
+end
+
+// ASCII letters in lower case; other bytes unchanged.
+func lower(s: text) -> text
+    return shift_ascii(s, 65, 90, 32)
+end
+
+// The bytes in the opposite order.
+func reverse(s: text) -> text
+    let parts: []text = []
+    var i = s.len - 1
+    while i >= 0
+        parts.add(s.slice(i, i + 1))
+        i -= 1
+    end
+    return concat_all(parts)
+end
+
+// ---- parsing ----
+
+// The whole number written in `s`: optional sign, then decimal digits.
+func parse_int(s: text) -> int or error
+    let bad = "not a whole number: \"" + s + "\""
+    var i = 0
+    var neg = false
+    if s.len > 0 and (s[0] == 45 or s[0] == 43)
+        neg = s[0] == 45
+        i = 1
+    end
+    if i >= s.len
+        return error(bad)
+    end
+    let least = 0 - 9223372036854775807 - 1
+    var acc = 0
+    while i < s.len
+        let d = int(s[i]) - 48
+        if d < 0 or d > 9
+            return error(bad)
+        end
+        // acc * 10 - d must not go below the smallest int (acc is kept negative)
+        if acc < (least + d) / 10
+            return error(bad)
+        end
+        acc = acc * 10 - d
+        i += 1
+    end
+    if neg
+        return acc
+    end
+    if acc == least
+        return error(bad)
+    end
+    return 0 - acc
+end
+
+// ---- parsing numbers with a fraction ----
+
+// A copy of a big number (see the float library for the representation).
+func copy_big(a: []int) -> []int
+    let out: []int = []
+    for x in a
+        out.add(x)
+    end
+    return out
+end
+
+// a = a + d, for 0 <= d < 1000000000
+func add_small(a: []int, d: int)
+    var carry = d
+    var i = 0
+    while carry > 0
+        if i >= a.len
+            a.add(0)
+        end
+        let t = a[i] + carry
+        a[i] = t % 1000000000
+        carry = t / 1000000000
+        i += 1
+    end
+end
+
+func big_pow10(n: int) -> []int
+    let a = float.big_from(1)
+    for i in 0..n
+        float.b_mul(a, 10)
+    end
+    return a
+end
+
+// The float written in `s`: an optional sign, digits with an optional fraction and an optional
+// exponent (`1.5`, `-2e3`, `.5`, `5.`), or `inf`, `-inf`, `NaN`. The result is the float nearest
+// to the written value (ties go to the even one), so printing a float and parsing it back
+// gives the same float.
+func parse_float(s: text) -> float or error
+    let bad = "not a number: \"" + s + "\""
+    let least = 0 - 9223372036854775807 - 1
+    var i = 0
+    var neg = false
+    if s.len > 0 and (s[0] == 45 or s[0] == 43)
+        neg = s[0] == 45
+        i = 1
+    end
+    let word = s.slice(i, s.len)
+    if word == "inf"
+        if neg
+            return __from_bits(0 - 4503599627370496)
+        end
+        return __from_bits(9218868437227405312)
+    end
+    if word == "NaN"
+        return __from_bits(9221120237041090560)
+    end
+
+    // digits, with the position of the decimal point
+    let digits: []int = []
+    var seen_dot = false
+    var any = false
+    var frac = 0
+    var j = i
+    var more = true
+    while j < s.len and more
+        let c = int(s[j])
+        if c == 46
+            if seen_dot
+                return error(bad)
+            end
+            seen_dot = true
+            j += 1
+        else if c >= 48 and c <= 57
+            any = true
+            if digits.len > 0 or c != 48
+                digits.add(c - 48)
+            end
+            if seen_dot
+                frac += 1
+            end
+            j += 1
+        else
+            more = false
+        end
+    end
+    if not any
+        return error(bad)
+    end
+    var e10 = 0
+    if j < s.len and (s[j] == 101 or s[j] == 69)
+        j += 1
+        var eneg = false
+        if j < s.len and (s[j] == 45 or s[j] == 43)
+            eneg = s[j] == 45
+            j += 1
+        end
+        if j >= s.len
+            return error(bad)
+        end
+        while j < s.len
+            let c = int(s[j])
+            if c < 48 or c > 57
+                return error(bad)
+            end
+            if e10 < 100000
+                e10 = e10 * 10 + (c - 48)
+            end
+            j += 1
+        end
+        if eneg
+            e10 = 0 - e10
+        end
+    end
+    if j != s.len
+        return error(bad)
+    end
+
+    var signbit = 0
+    if neg
+        signbit = least
+    end
+    if digits.len == 0
+        return __from_bits(signbit)
+    end
+
+    // value = digits * 10^exp10, between 10^(mag-1) and 10^mag
+    let exp10 = e10 - frac
+    let mag = digits.len + exp10
+    if mag > 310
+        return __from_bits(signbit bitor 9218868437227405312)
+    end
+    if mag < 0 - 325
+        return __from_bits(signbit)
+    end
+
+    // value = num / den
+    let num = float.big_from(0)
+    for d in digits
+        float.b_mul(num, 10)
+        add_small(num, d)
+    end
+    var den = float.big_from(1)
+    if exp10 >= 0
+        var k10 = exp10
+        while k10 > 0
+            float.b_mul(num, 10)
+            k10 -= 1
+        end
+    else
+        den = big_pow10(0 - exp10)
+    end
+
+    // find k so that q = floor(value / 2^k) has 53 bits (fewer for the smallest numbers)
+    var k = ((mag - 1) * 33219) / 10000 - 52
+    if k < 0 - 1074
+        k = 0 - 1074
+    end
+    var q = 0
+    var rem = float.big_from(0)
+    var d2 = float.big_from(1)
+    var found = false
+    while not found
+        let n2 = copy_big(num)
+        d2 = copy_big(den)
+        if k < 0
+            float.b_mul_pow2(n2, 0 - k)
+        else
+            float.b_mul_pow2(d2, k)
+        end
+        q = 0
+        var bit = 54
+        while bit >= 0
+            let t = copy_big(d2)
+            float.b_mul_pow2(t, bit)
+            if float.b_cmp(n2, t) >= 0
+                float.b_sub(n2, t)
+                q += 1 << bit
+            end
+            bit -= 1
+        end
+        rem = n2
+        if float.b_cmp(rem, d2) >= 0 or q >= 9007199254740992
+            k += 1
+        else if q < 4503599627370496 and k > 0 - 1074
+            k -= 1
+        else
+            found = true
+        end
+    end
+
+    // round to nearest, ties to even
+    let c = float.b_cmp(float.b_add(rem, rem), d2)
+    if c > 0 or (c == 0 and (q % 2) == 1)
+        q += 1
+        if q == 9007199254740992
+            q = 4503599627370496
+            k += 1
+        end
+    end
+    if q >= 4503599627370496
+        let expf = k + 1075
+        if expf >= 2047
+            return __from_bits(signbit bitor 9218868437227405312)
+        end
+        return __from_bits(signbit bitor (expf << 52) bitor (q - 4503599627370496))
+    end
+    return __from_bits(signbit bitor q)
+end

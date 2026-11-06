@@ -17,6 +17,7 @@
       <a href="native.html">Native</a>
       <a href="concurrency.html">Tasks</a>
       <a href="async.html">Async</a>
+      <a href="stdlib.html">Library</a>
       <a href="os.html">Brasa OS</a>
       <a href="getting-started.html">Getting Started</a>
     </nav>
@@ -194,7 +195,7 @@
 
     <section id="errors">
       <h2>Error handling</h2>
-      <p>Brasa has no exceptions. A function that can fail ends its signature with <code>or error</code> (<code>-&gt; Config or error</code>), or just <code>-&gt; error</code> when it returns nothing. Inside it, writing <code>try</code> in front of a call hands a failure straight to the caller. <code>error("message")</code> creates an error; <code>match</code> reads a result with <code>ok(value)</code> and <code>err(e)</code>, and <code>call() ?? fallback</code> supplies a default. <code>defer</code> schedules an expression to run when the enclosing function returns — commonly used to release a resource right after acquiring it.</p>
+      <p>Brasa has no exceptions. A function that can fail ends its signature with <code>or error</code> (<code>-&gt; Config or error</code>), or just <code>-&gt; error</code> when it returns nothing. Inside it, writing <code>try</code> in front of a call hands a failure straight to the caller. <code>error("message")</code> creates an error; <code>match</code> reads a result with <code>ok(value)</code> and <code>err(e)</code>, and <code>call() ?? fallback</code> supplies a default. For a mistake in the program itself (not bad input), <code>panic("message")</code> stops it with that message and exit code 101, like an index out of bounds. <code>defer</code> schedules an expression to run when the enclosing function returns — commonly used to release a resource right after acquiring it.</p>
       <pre><code><span class="kw">func</span> load(path: text) -&gt; Config or error
     <span class="kw">let</span> raw = <span class="kw">try</span> file.read(path)
     <span class="kw">let</span> f = <span class="kw">try</span> file.open(path)

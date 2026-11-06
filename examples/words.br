@@ -1,0 +1,55 @@
+// Text and list helpers: count the words in a sentence.
+//
+//   brasa-parse examples/words.br -o words.exe
+//
+// `use text` and `use list` are libraries written in Brasa. Their functions are called with
+// the module name in front, like text.split(...) and list.sort_by(...).
+
+package main
+
+use text
+use list
+
+type Entry = record
+    word: text
+    count: int
+end
+
+func main()
+    let sentence = "The quick brown fox jumps over the lazy dog. The dog barks; the fox runs."
+
+    // lower-case it, turn punctuation into spaces and cut it into words
+    var cleaned = text.lower(sentence)
+    cleaned = text.replace(cleaned, ".", " ")
+    cleaned = text.replace(cleaned, ";", " ")
+    let words = list.filter(text.split(cleaned, " "), func(w) w.len > 0 end)
+
+    var counts: Map<text, int> = {}
+    for w in words
+        counts[w] = counts.get(w, 0) + 1
+    end
+
+    let entries: []Entry = []
+    for w, n in counts
+        entries.add(Entry { word: w, count: n })
+    end
+
+    // most frequent first, ties in alphabetical order
+    let ranked = list.sort_by(entries, func(a, b) a.count > b.count or (a.count == b.count and text.compare(a.word, b.word) < 0) end)
+    for i in 0..3
+        let e = ranked[i]
+        print("{text.pad_right(e.word, 6, " ")} {e.count}")
+    end
+
+    let total = list.reduce(list.map(ranked, func(e) e.count end), 0, func(sum, n) sum + n end)
+    print("{words.len} words, {ranked.len} different, {total} counted")
+
+    let first = text.join(list.map(list.slice(ranked, 0, 3), func(e) text.upper(e.word) end), ", ")
+    print("top three: {first}")
+
+    // numbers typed as text
+    let n = text.parse_int("42") ?? 0
+    let bad = text.parse_int("4x2") ?? 0 - 1
+    let price = text.parse_float("19.99") ?? 0.0
+    print("{n} {bad} {price * 2.0}")
+end

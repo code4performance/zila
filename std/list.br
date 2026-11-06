@@ -1,0 +1,177 @@
+// =====================================================================
+// Brasa standard library: lists
+//
+//     use list
+//     let doubled = list.map([1, 2, 3], func(n) n * 2 end)
+//
+// Generic helpers written in Brasa. None of them changes the list it is given:
+// they build and return new lists.
+// =====================================================================
+
+package list
+
+// A new list holding f(x) for every x, in order.
+func map<T, U>(xs: []T, f: func(T) -> U) -> []U
+    let out: []U = []
+    for x in xs
+        out.add(f(x))
+    end
+    return out
+end
+
+// The elements for which keep(x) is true, in order.
+func filter<T>(xs: []T, keep: func(T) -> bool) -> []T
+    let out: []T = []
+    for x in xs
+        if keep(x)
+            out.add(x)
+        end
+    end
+    return out
+end
+
+// f(f(start, x0), x1) ... from left to right.
+func reduce<T, A>(xs: []T, start: A, f: func(A, T) -> A) -> A
+    var acc = start
+    for x in xs
+        acc = f(acc, x)
+    end
+    return acc
+end
+
+// True as soon as one element passes the test (false for an empty list).
+func any<T>(xs: []T, test: func(T) -> bool) -> bool
+    for x in xs
+        if test(x)
+            return true
+        end
+    end
+    return false
+end
+
+// False as soon as one element fails the test (true for an empty list).
+func all<T>(xs: []T, test: func(T) -> bool) -> bool
+    for x in xs
+        if not test(x)
+            return false
+        end
+    end
+    return true
+end
+
+// The index of the first element that passes the test, or -1.
+func find<T>(xs: []T, test: func(T) -> bool) -> int
+    for i in 0..xs.len
+        if test(xs[i])
+            return i
+        end
+    end
+    return -1
+end
+
+// The elements in the opposite order.
+func reverse<T>(xs: []T) -> []T
+    let out: []T = []
+    var i = xs.len - 1
+    while i >= 0
+        out.add(xs[i])
+        i -= 1
+    end
+    return out
+end
+
+// The elements from `from` up to (not including) `to`; both are clamped to the list.
+func slice<T>(xs: []T, from: int, to: int) -> []T
+    let out: []T = []
+    var a = from
+    var b = to
+    if a < 0
+        a = 0
+    end
+    if b > xs.len
+        b = xs.len
+    end
+    while a < b
+        out.add(xs[a])
+        a += 1
+    end
+    return out
+end
+
+// All of `a`, then all of `b`.
+func concat<T>(a: []T, b: []T) -> []T
+    let out: []T = []
+    for x in a
+        out.add(x)
+    end
+    for x in b
+        out.add(x)
+    end
+    return out
+end
+
+// The integers from `a` up to (not including) `b`.
+func range(a: int, b: int) -> []int
+    let out: []int = []
+    var i = a
+    while i < b
+        out.add(i)
+        i += 1
+    end
+    return out
+end
+
+// The elements ordered so that less(next, previous) is false everywhere. A stable merge sort:
+// elements that are neither less than the other keep their order. `xs` is not changed.
+func sort_by<T>(xs: []T, less: func(T, T) -> bool) -> []T
+    var src: []T = []
+    var dst: []T = []
+    for x in xs
+        src.add(x)
+        dst.add(x)
+    end
+    let n = src.len
+    var width = 1
+    while width < n
+        var lo = 0
+        while lo < n
+            var mid = lo + width
+            if mid > n
+                mid = n
+            end
+            var hi = lo + 2 * width
+            if hi > n
+                hi = n
+            end
+            var i = lo
+            var j = mid
+            var k = lo
+            while i < mid and j < hi
+                if less(src[j], src[i])
+                    dst[k] = src[j]
+                    j += 1
+                else
+                    dst[k] = src[i]
+                    i += 1
+                end
+                k += 1
+            end
+            while i < mid
+                dst[k] = src[i]
+                i += 1
+                k += 1
+            end
+            while j < hi
+                dst[k] = src[j]
+                j += 1
+                k += 1
+            end
+            lo += 2 * width
+        end
+        let tmp = src
+        src = dst
+        dst = tmp
+        width = width * 2
+    end
+    return src
+end

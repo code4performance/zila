@@ -40,7 +40,7 @@ use std::process::Command;
 type R<T> = Result<T, String>;
 
 /// Standard library modules written in Brasa and embedded in the compiler.
-fn std_source(name: &str) -> Option<&'static str> {
+pub fn std_source(name: &str) -> Option<&'static str> {
     match name {
         "ui" => Some(include_str!("../std/ui.br")),
         "task" => Some(include_str!("../std/task.br")),
@@ -51,6 +51,8 @@ fn std_source(name: &str) -> Option<&'static str> {
         "ws" => Some(include_str!("../std/ws.br")),
         "float" => Some(include_str!("../std/float.br")),
         "math" => Some(include_str!("../std/math.br")),
+        "text" => Some(include_str!("../std/text.br")),
+        "list" => Some(include_str!("../std/list.br")),
         _ => None,
     }
 }
@@ -3445,12 +3447,15 @@ end
         let allow_await = std::mem::take(&mut self.next_lambda_await);
         let share_records = std::mem::take(&mut self.next_lambda_share);
         let ignore_result = std::mem::take(&mut self.next_lambda_ignore_result);
-        let infer_ret = !matches!(want, Some(Ty::Func { .. }));
         let (wparams, wret) = match want {
             Some(Ty::Func { params, ret, ext: false }) => (Some(params.clone()), (**ret).clone()),
             Some(Ty::Func { ext: true, .. }) => return self.err("a closure cannot be used as an extern callback; pass a top-level function"),
             _ => (None, Ty::Void),
         };
+        // the result type is worked out from the body when nothing is expected, or when only
+        // the parameter types are known (the result is the `?` placeholder of generic inference)
+        let infer_ret = !matches!(want, Some(Ty::Func { .. })) || matches!(&wret, Ty::Param { name, .. } if name == "?");
+        let wret = if infer_ret { Ty::Void } else { wret };
         let mut ptys = Vec::new();
         for (i, p) in params.iter().enumerate() {
             let t = match (&p.ty, &wparams) {
@@ -3605,6 +3610,21 @@ end
 
     fn call(&mut self, callee: &Expr, args: &[Arg], want: Option<&Ty>) -> R<Ty> {
         match &callee.kind {
+            ExprKind::Ident(name) if self.lookup(name).is_none() && matches!(name.as_str(), "__from_bits" | "__bits") => {
+                if args.len() != 1 {
+                    return self.err(format!("{}() takes one argument", name));
+                }
+                // reinterpret the 64 bits: a float and an int share the register
+                if name == "__from_bits" {
+                    let at = self.expr(&args[0].value, Some(&Ty::i64()))?;
+                    self.check(&Ty::i64(), &at, name)?;
+                    Ok(Ty::Float { bits: 64 })
+                } else {
+                    let at = self.expr(&args[0].value, Some(&Ty::Float { bits: 64 }))?;
+                    self.check(&Ty::Float { bits: 64 }, &at, name)?;
+                    Ok(Ty::i64())
+                }
+            }
             ExprKind::Ident(name) if self.lookup(name).is_none() && matches!(name.as_str(), "__sqrt" | "__floor" | "__ceil" | "__trunc") => {
                 if args.len() != 1 {
                     return self.err(format!("{}() takes one argument", name));
@@ -3710,6 +3730,13 @@ end
                     }
                     self.norm(&t);
                     return Ok(t);
+                }
+                if name == "panic" && args.len() == 1 && !self.funcs.contains_key(&(self.cur_mod.clone(), name.clone())) {
+                    let t = self.expr(&args[0].value, Some(&Ty::Text))?;
+                    self.check(&Ty::Text, &t, "panic message")?;
+                    self.e("mov rcx, rax");
+                    self.e("call rt_panic");
+                    return Ok(Ty::Void);
                 }
                 if name == "print" || name == "println" {
                     let mut first = true;
@@ -4939,6 +4966,7 @@ impl Compiler {
         let names: Vec<String> = fd.generics.iter().map(|g| g.name.clone()).collect();
         let mut b: HashMap<String, Ty> = HashMap::new();
         let mut next = 0;
+        let mut lambdas: Vec<(Type, &Expr)> = Vec::new();
         for a in args {
             if a.spread {
                 return self.err("spread arguments ('...') are not supported by the native backend yet");
@@ -4953,7 +4981,13 @@ impl Compiler {
             let Some(p) = pi.and_then(|i| fd.params.get(i)) else { continue };
             let Some(pt) = &p.ty else { continue };
             // a lambda with untyped parameters is typed from the parameter type once that is known
-            if p.variadic || !mentions_param(pt, &names) || matches!(a.value.kind, ExprKind::Lambda { .. }) {
+            if matches!(a.value.kind, ExprKind::Lambda { .. }) {
+                if !p.variadic && mentions_param(pt, &names) {
+                    lambdas.push((pt.clone(), &a.value));
+                }
+                continue;
+            }
+            if p.variadic || !mentions_param(pt, &names) {
                 continue;
             }
             // type the argument by compiling it into a scratch buffer
@@ -4962,6 +4996,37 @@ impl Compiler {
             self.restore(snap);
             let aty = r?;
             self.unify(pt, &aty, &names, &mut b, module)?;
+        }
+        // lambdas: their parameter types come from the bindings so far; their body gives the rest
+        for (pt, lam) in lambdas {
+            let Type::Func { params: fps, ret: fret, .. } = &pt else { continue };
+            let saved = std::mem::replace(&mut self.bindings, b.clone());
+            let mut ptys = Vec::new();
+            let mut open = None;
+            for fp in fps {
+                if mentions_param(fp, &names.iter().filter(|n| !b.contains_key(*n)).cloned().collect::<Vec<_>>()) {
+                    open = Some(fp.clone());
+                    break;
+                }
+                match self.resolve(fp, module) {
+                    Ok(t) => ptys.push(t),
+                    Err(e) => {
+                        self.bindings = saved;
+                        return Err(e);
+                    }
+                }
+            }
+            self.bindings = saved;
+            if open.is_some() {
+                continue;
+            }
+            let _ = fret;
+            let want_fn = Ty::Func { params: ptys, ret: Box::new(Ty::Param { name: "?".into(), bound: None }), ext: false };
+            let snap = self.snapshot();
+            let r = self.expr(lam, Some(&want_fn));
+            self.restore(snap);
+            let lt = r?;
+            self.unify(&pt, &lt, &names, &mut b, module)?;
         }
         if let (Some(w), Some(t)) = (want, fd.ret.as_ref().and_then(|r| r.ty.as_ref())) {
             let mut extra = HashMap::new();
@@ -4975,6 +5040,14 @@ impl Compiler {
             if !b.contains_key(n) {
                 return self.err(format!(
                     "cannot infer the type of {} in the call to '{}': no argument determines it; give the result an annotated type or pass a value of that type",
+                    n, fd.name
+                ));
+            }
+        }
+        for n in &names {
+            if b[n] == Ty::Void {
+                return self.err(format!(
+                    "the type {} in the call to '{}' would be 'nothing': a function argument must return a value here",
                     n, fd.name
                 ));
             }

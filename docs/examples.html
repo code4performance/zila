@@ -17,6 +17,7 @@
       <a href="native.html">Native</a>
       <a href="concurrency.html">Tasks</a>
       <a href="async.html">Async</a>
+      <a href="stdlib.html">Library</a>
       <a href="os.html">Brasa OS</a>
       <a href="getting-started.html">Getting Started</a>
     </nav>
@@ -280,6 +281,67 @@
     print(<span class="str">"kiwi costs {prices.get("kiwi", 0)}"</span>)
 <span class="kw">end</span></code></pre>
       <p><code>count_words</code> builds a <code>Map&lt;text, int&gt;</code> that counts how often each word appears: <code>counts.get(w, 0)</code> is the current count, or <code>0</code> for a word not seen yet. The <code>for word, n in counts</code> loop visits the entries in the order the words were first added (red, green, blue), so the output never changes between runs. The second half shows a literal (<code>{ "apple": 3, "pear": 5 }</code>), adding and removing keys, <code>len</code> and <code>has</code>. See the <a href="syntax.html#maps">syntax guide</a> for the exact rules.</p>
+    </section>
+
+    <section id="words-example">
+      <h2>Text and lists: count the words</h2>
+      <div class="file-label">examples/words.br</div>
+      <pre><code><span class="cm">// Text and list helpers: count the words in a sentence.</span>
+<span class="cm">//</span>
+<span class="cm">//   brasa-parse examples/words.br -o words.exe</span>
+<span class="cm">//</span>
+<span class="cm">// `use text` and `use list` are libraries written in Brasa. Their functions are called with</span>
+<span class="cm">// the module name in front, like text.split(...) and list.sort_by(...).</span>
+
+<span class="kw">package</span> main
+
+<span class="kw">use</span> text
+<span class="kw">use</span> list
+
+<span class="kw">type</span> Entry = <span class="kw">record</span>
+    word: text
+    count: int
+<span class="kw">end</span>
+
+<span class="kw">func</span> main()
+    <span class="kw">let</span> sentence = <span class="str">"The quick brown fox jumps over the lazy dog. The dog barks; the fox runs."</span>
+
+    <span class="cm">// lower-case it, turn punctuation into spaces and cut it into words</span>
+    <span class="kw">var</span> cleaned = text.lower(sentence)
+    cleaned = text.replace(cleaned, <span class="str">"."</span>, <span class="str">" "</span>)
+    cleaned = text.replace(cleaned, <span class="str">";"</span>, <span class="str">" "</span>)
+    <span class="kw">let</span> words = list.filter(text.split(cleaned, <span class="str">" "</span>), <span class="kw">func</span>(w) w.len &gt; 0 <span class="kw">end</span>)
+
+    <span class="kw">var</span> counts: Map&lt;text, int&gt; = {}
+    <span class="kw">for</span> w <span class="kw">in</span> words
+        counts[w] = counts.get(w, 0) + 1
+    <span class="kw">end</span>
+
+    <span class="kw">let</span> entries: []Entry = []
+    <span class="kw">for</span> w, n <span class="kw">in</span> counts
+        entries.add(Entry { word: w, count: n })
+    <span class="kw">end</span>
+
+    <span class="cm">// most frequent first, ties in alphabetical order</span>
+    <span class="kw">let</span> ranked = list.sort_by(entries, <span class="kw">func</span>(a, b) a.count &gt; b.count <span class="kw">or</span> (a.count == b.count <span class="kw">and</span> text.compare(a.word, b.word) &lt; 0) <span class="kw">end</span>)
+    <span class="kw">for</span> i <span class="kw">in</span> 0..3
+        <span class="kw">let</span> e = ranked[i]
+        print(<span class="str">"{text.pad_right(e.word, 6, " ")} {e.count}"</span>)
+    <span class="kw">end</span>
+
+    <span class="kw">let</span> total = list.reduce(list.map(ranked, <span class="kw">func</span>(e) e.count <span class="kw">end</span>), 0, <span class="kw">func</span>(sum, n) sum + n <span class="kw">end</span>)
+    print(<span class="str">"{words.len} words, {ranked.len} different, {total} counted"</span>)
+
+    <span class="kw">let</span> first = text.join(list.map(list.slice(ranked, 0, 3), <span class="kw">func</span>(e) text.upper(e.word) <span class="kw">end</span>), <span class="str">", "</span>)
+    print(<span class="str">"top three: {first}"</span>)
+
+    <span class="cm">// numbers typed as text</span>
+    <span class="kw">let</span> n = text.parse_int(<span class="str">"42"</span>) ?? 0
+    <span class="kw">let</span> bad = text.parse_int(<span class="str">"4x2"</span>) ?? 0 - 1
+    <span class="kw">let</span> price = text.parse_float(<span class="str">"19.99"</span>) ?? 0.0
+    print(<span class="str">"{n} {bad} {price * 2.0}"</span>)
+<span class="kw">end</span></code></pre>
+      <p>This program cuts a sentence into words with <code>text.split</code>, drops the empty pieces with <code>list.filter</code>, counts them in a map, and ranks them with <code>list.sort_by</code>: the function you pass says that a higher count goes first and ties go in alphabetical order (<code>text.compare</code>). The last lines show <code>text.parse_int</code> and <code>text.parse_float</code>, which give a default with <code>??</code> when the text is not a number. The <a href="stdlib.html">Library page</a> lists every function.</p>
     </section>
 
     <section id="generics-example">

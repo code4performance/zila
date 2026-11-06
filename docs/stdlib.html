@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Library — Brasa</title>
+  <meta name="description" content="The Brasa standard library for text and lists: searching, splitting, trimming, parsing numbers, map, filter and sort.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="index.html">brasa<span class="ember-dot">.</span><small>lang docs</small></a>
+    <nav class="site-nav">
+      <a href="index.html">Overview</a>
+      <a href="syntax.html">Syntax</a>
+      <a href="examples.html">Examples</a>
+      <a href="native.html">Native</a>
+      <a href="concurrency.html">Tasks</a>
+      <a href="async.html">Async</a>
+      <a href="stdlib.html" aria-current="page">Library</a>
+      <a href="os.html">Brasa OS</a>
+      <a href="getting-started.html">Getting Started</a>
+    </nav>
+  </header>
+
+  <main>
+    <h1>Library</h1>
+    <p>The everyday operations on text and lists live in two modules, <code>text</code> and <code>list</code>. They are written in Brasa itself (see <code>std/text.br</code> and <code>std/list.br</code>), and you use them by name: <code>use text</code> once at the top of the file, then <code>text.trim(s)</code>. Nothing is added to the types themselves, so the names never clash with your own functions.</p>
+
+    <section id="text">
+      <h2>text</h2>
+      <pre><code><span class="kw">use</span> text
+
+<span class="kw">let</span> words = text.split(<span class="str">"red, green ,blue"</span>, <span class="str">","</span>)         <span class="cm">// ["red", " green ", "blue"]</span>
+<span class="kw">let</span> clean = text.trim(words[1])                    <span class="cm">// "green"</span>
+print(text.join([<span class="str">"a"</span>, <span class="str">"b"</span>, <span class="str">"c"</span>], <span class="str">"-"</span>))                 <span class="cm">// a-b-c</span>
+<span class="kw">let</span> n = text.parse_int(<span class="str">"42"</span>) ?? 0                 <span class="cm">// 42; 0 when the text is not a number</span></code></pre>
+      <p>Text is bytes (UTF-8). Searching, splitting, trimming and replacing compare whole byte sequences, so they work for any UTF-8 text. <code>upper</code> and <code>lower</code> change ASCII letters only, and <code>reverse</code> reverses bytes. Positions and lengths count bytes.</p>
+      <table>
+        <thead><tr><th>Function</th><th>What it gives</th></tr></thead>
+        <tbody>
+          <tr><td><code>index_of(s, part)</code></td><td>The byte position of the first <code>part</code>, or <code>-1</code>. An empty <code>part</code> is found at 0.</td></tr>
+          <tr><td><code>contains(s, part)</code>, <code>starts_with(s, prefix)</code>, <code>ends_with(s, suffix)</code></td><td><code>true</code> or <code>false</code>.</td></tr>
+          <tr><td><code>compare(a, b)</code></td><td><code>-1</code>, <code>0</code> or <code>1</code>, comparing byte by byte. Handy for sorting.</td></tr>
+          <tr><td><code>split(s, sep)</code></td><td>The pieces between the occurrences of <code>sep</code>, empty pieces included. An empty <code>sep</code> stops the program with <code>split needs a separator</code>.</td></tr>
+          <tr><td><code>join(parts, sep)</code></td><td>The parts with <code>sep</code> between them.</td></tr>
+          <tr><td><code>lines(s)</code></td><td>The lines of <code>s</code>: cut at a newline, a trailing carriage return removed, no empty last line after a final newline.</td></tr>
+          <tr><td><code>trim(s)</code>, <code>trim_start(s)</code>, <code>trim_end(s)</code></td><td><code>s</code> without spaces, tabs, carriage returns and newlines at the ends.</td></tr>
+          <tr><td><code>replace(s, from, to)</code></td><td>Every non-overlapping <code>from</code> replaced, left to right. An empty <code>from</code> changes nothing.</td></tr>
+          <tr><td><code>repeat(s, n)</code></td><td><code>s</code> <code>n</code> times (empty for <code>n &lt;= 0</code>).</td></tr>
+          <tr><td><code>pad_left(s, width, fill)</code>, <code>pad_right(s, width, fill)</code></td><td><code>s</code> padded with the one-byte <code>fill</code> up to <code>width</code> bytes. Longer texts are returned unchanged.</td></tr>
+          <tr><td><code>upper(s)</code>, <code>lower(s)</code>, <code>reverse(s)</code></td><td>ASCII capitals, ASCII lower case, and the bytes in the opposite order.</td></tr>
+          <tr><td><code>parse_int(s)</code></td><td>The whole number in <code>s</code> (optional sign, digits) as <code>int or error</code>. Spaces, separators and values outside the <code>int</code> range are errors.</td></tr>
+          <tr><td><code>parse_float(s)</code></td><td>The float in <code>s</code> as <code>float or error</code>: <code>1.5</code>, <code>-2e3</code>, <code>.5</code>, <code>5.</code>, <code>inf</code>, <code>-inf</code>, <code>NaN</code>. The result is the float nearest to the written number, so printing a float and parsing it back gives the same float.</td></tr>
+        </tbody>
+      </table>
+      <p>The parsers return a result, so you choose what a bad input means: <code>text.parse_int(s) ?? 0</code> gives a default, <code>try text.parse_int(s)</code> passes the error on, and <code>match</code> looks at both cases. The message names the text, for example <code>not a whole number: "4x2"</code>.</p>
+    </section>
+
+    <section id="list">
+      <h2>list</h2>
+      <pre><code><span class="kw">use</span> list
+
+<span class="kw">let</span> doubled = list.map([1, 2, 3], <span class="kw">func</span>(n) n * 2 <span class="kw">end</span>)             <span class="cm">// [2, 4, 6]</span>
+<span class="kw">let</span> evens = list.filter([1, 2, 3, 4], <span class="kw">func</span>(n) n % 2 == 0 <span class="kw">end</span>)    <span class="cm">// [2, 4]</span>
+<span class="kw">let</span> sum = list.reduce(doubled, 0, <span class="kw">func</span>(total, n) total + n <span class="kw">end</span>)    <span class="cm">// 12</span>
+<span class="kw">let</span> sorted = list.sort_by([3, 1, 2], <span class="kw">func</span>(a, b) a &lt; b <span class="kw">end</span>)          <span class="cm">// [1, 2, 3]</span></code></pre>
+      <p>These are generic functions (see <a href="syntax.html#generics">Generics</a>): the compiler works out the element type from the list and the result type from what your function returns. They never change the list you give them; they build new lists.</p>
+      <table>
+        <thead><tr><th>Function</th><th>What it gives</th></tr></thead>
+        <tbody>
+          <tr><td><code>map(xs, f)</code></td><td>A new list of <code>f(x)</code> for every element. The element type of the result may differ from the input's.</td></tr>
+          <tr><td><code>filter(xs, keep)</code></td><td>The elements for which <code>keep(x)</code> is true, in order.</td></tr>
+          <tr><td><code>reduce(xs, start, f)</code></td><td>Combines from left to right: <code>f(f(start, x0), x1)</code> and so on.</td></tr>
+          <tr><td><code>any(xs, test)</code>, <code>all(xs, test)</code></td><td>Stop at the first element that decides the answer. <code>any</code> of an empty list is false, <code>all</code> is true.</td></tr>
+          <tr><td><code>find(xs, test)</code></td><td>The index of the first element that passes, or <code>-1</code>.</td></tr>
+          <tr><td><code>reverse(xs)</code>, <code>concat(a, b)</code></td><td>The elements in the opposite order; all of <code>a</code> then all of <code>b</code>.</td></tr>
+          <tr><td><code>slice(xs, from, to)</code></td><td>The elements from <code>from</code> up to (not including) <code>to</code>. Both are clamped to the list.</td></tr>
+          <tr><td><code>range(a, b)</code></td><td>The integers from <code>a</code> up to (not including) <code>b</code>.</td></tr>
+          <tr><td><code>sort_by(xs, less)</code></td><td>A new list in order, where <code>less(a, b)</code> says whether <code>a</code> goes before <code>b</code>. It is a stable merge sort, so equal elements keep their order; sorting 100,000 numbers takes a fraction of a second. For texts use <code>text.compare(a, b) &lt; 0</code>.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="limits">
+      <h2>Good to know</h2>
+      <ul>
+        <li>Both modules are compiled with your program, so only the functions you use add to its size. They need the Windows target (<code>use text</code> also brings in the float printing library, which is why it is not available in a bare-metal kernel).</li>
+        <li>The interpreter behind <code>--run</code> runs them too. It handles errors only through <code>??</code> (it has no <code>match</code> on results), and a lambda in it cannot use variables of the function around it.</li>
+        <li>Not here yet: regular expressions, Unicode case mapping, a <code>format</code> function with placeholders, sets, and sorted maps.</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    Brasa — a language with a human face. Docs generated from <code>brasa.ebnf</code> and <code>examples/*.br</code>.
+  </footer>
+</body>
+</html>

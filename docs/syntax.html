@@ -238,6 +238,31 @@
       <p><code>new</code> is part of the grammar but is not supported by the <a href="native.html#not-yet">native compiler</a> yet. A method or field may be named like a keyword after a dot (<code>app.use(x)</code>).</p>
     </section>
 
+    <section id="maps">
+      <h2>Maps</h2>
+      <p>A <code>Map&lt;K, V&gt;</code> stores values under keys. The key type <code>K</code> is <code>text</code> or an integer type; the value type <code>V</code> can be anything the native compiler supports. A map is built with a literal, read and written with <code>m[key]</code>, and shared like a list: assigning it to another name or passing it to a function does not copy it.</p>
+      <pre><code><span class="kw">let</span> ages = { <span class="str">"ada"</span>: 36, <span class="str">"alan"</span>: 41 }       <span class="cm">// a Map&lt;text, int&gt;</span>
+<span class="kw">var</span> seen: Map&lt;int, text&gt; = {}              <span class="cm">// an empty map needs its type</span>
+
+ages[<span class="str">"grace"</span>] = 45                       <span class="cm">// adds a key (or replaces the value)</span>
+print(ages[<span class="str">"ada"</span>])                       <span class="cm">// 36</span>
+print(ages.len)                           <span class="cm">// 3</span>
+print(ages.has(<span class="str">"alan"</span>))                  <span class="cm">// true</span>
+print(ages.get(<span class="str">"linus"</span>, 0))              <span class="cm">// 0: the default, because there is no such key</span>
+ages.remove(<span class="str">"alan"</span>)                      <span class="cm">// does nothing when the key is not there</span>
+
+<span class="kw">for</span> name, age <span class="kw">in</span> ages                     <span class="cm">// keys and values, in insertion order</span>
+    print(<span class="str">"{name} is {age}"</span>)
+<span class="kw">end</span></code></pre>
+      <ul>
+        <li><strong>Types are inferred</strong> from the expected type or from the first pair of a literal, and every other pair must match them. <code>{}</code> has nothing to infer from, so it needs a type annotation, just like an empty list.</li>
+        <li><strong>A missing key stops the program.</strong> <code>m[key]</code> on a key that was never stored panics with <code>map key not found</code>, like an index out of bounds. Use <code>has</code> or <code>get(key, default)</code> when the key may be missing.</li>
+        <li><strong>Methods:</strong> <code>has(key)</code>, <code>get(key, default)</code>, <code>remove(key)</code> and <code>clear()</code>. The number of entries is the property <code>len</code>, as for lists and text.</li>
+        <li><strong>Iteration order is insertion order.</strong> <code>for key, value in m</code> and <code>for key in m</code> visit the keys in the order they were first added. Replacing a value keeps the key's place; removing a key and adding it again moves it to the end. Do not add or remove keys inside the loop.</li>
+        <li><strong>Only text and integer keys.</strong> A record, enum or other key type is a compile error. Maps work in the native compiler and in the interpreter, but not in the bare-metal target.</li>
+      </ul>
+    </section>
+
     <section id="defer">
       <h2>defer</h2>
       <p><code>defer call(...)</code> runs a call when the <strong>function</strong> ends, however it ends: with <code>return</code>, by running off the end of the body, or because a <code>try</code> failed. It is how you make sure a file is closed or a lock released without repeating the cleanup before every exit.</p>

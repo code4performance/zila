@@ -238,6 +238,50 @@
       <p>Each <code>defer</code> schedules a call for the moment <code>process</code> ends. They run last in, first out, so "cleaning up" comes before "finished". They run whether the function returns normally, returns early, or fails with <code>try</code>: the failed call for <code>-1</code> still prints "finished". See the <a href="syntax.html#defer">syntax guide</a> for the exact rules.</p>
     </section>
 
+    <section id="maps-example">
+      <h2>Maps: look values up by key</h2>
+      <div class="file-label">examples/maps.br</div>
+      <pre><code><span class="cm">// Maps: look values up by key.</span>
+<span class="cm">//</span>
+<span class="cm">//   brasa-parse examples/maps.br -o maps.exe</span>
+<span class="cm">//</span>
+<span class="cm">// A Map&lt;K, V&gt; keeps values under keys (text or integers) and remembers the order</span>
+<span class="cm">// in which the keys were first added.</span>
+
+<span class="kw">package</span> main
+
+<span class="kw">func</span> count_words(words: List&lt;text&gt;) -&gt; Map&lt;text, int&gt;
+    <span class="kw">var</span> counts: Map&lt;text, int&gt; = {}
+    <span class="kw">for</span> w <span class="kw">in</span> words
+        counts[w] = counts.get(w, 0) + 1
+    <span class="kw">end</span>
+    <span class="kw">return</span> counts
+<span class="kw">end</span>
+
+<span class="kw">func</span> main()
+    <span class="kw">let</span> words = [<span class="str">"red"</span>, <span class="str">"green"</span>, <span class="str">"red"</span>, <span class="str">"blue"</span>, <span class="str">"green"</span>, <span class="str">"red"</span>]
+    <span class="kw">let</span> counts = count_words(words)
+
+    <span class="kw">for</span> word, n <span class="kw">in</span> counts
+        print(<span class="str">"{word}: {n}"</span>)
+    <span class="kw">end</span>
+
+    <span class="kw">let</span> prices = { <span class="str">"apple"</span>: 3, <span class="str">"pear"</span>: 5 }
+    prices[<span class="str">"plum"</span>] = 4
+    prices.remove(<span class="str">"pear"</span>)
+    print(<span class="str">"{prices.len} prices, apple costs {prices["apple"]}"</span>)
+
+    <span class="kw">if</span> prices.has(<span class="str">"pear"</span>)
+        print(<span class="str">"pears are back"</span>)
+    <span class="kw">else</span>
+        print(<span class="str">"no pears today"</span>)
+    <span class="kw">end</span>
+
+    print(<span class="str">"kiwi costs {prices.get("kiwi", 0)}"</span>)
+<span class="kw">end</span></code></pre>
+      <p><code>count_words</code> builds a <code>Map&lt;text, int&gt;</code> that counts how often each word appears: <code>counts.get(w, 0)</code> is the current count, or <code>0</code> for a word not seen yet. The <code>for word, n in counts</code> loop visits the entries in the order the words were first added (red, green, blue), so the output never changes between runs. The second half shows a literal (<code>{ "apple": 3, "pear": 5 }</code>), adding and removing keys, <code>len</code> and <code>has</code>. See the <a href="syntax.html#maps">syntax guide</a> for the exact rules.</p>
+    </section>
+
     <section id="ui">
       <h2>Native windows</h2>
       <div class="file-label">examples/ui.br</div>

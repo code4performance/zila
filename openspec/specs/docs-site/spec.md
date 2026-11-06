@@ -1,0 +1,49 @@
+## Purpose
+
+A static documentation website that explains what the Brasa language is, how its syntax works, and how to build and run `.br` programs, so a newcomer can learn the language without reading the grammar file or parser source directly.
+
+## Requirements
+
+### Requirement: Overview page
+The site SHALL provide a landing page that states what Brasa is, its design goals, and who it is for, without requiring the reader to consult `brasa.ebnf` or the Rust source.
+
+#### Scenario: Visitor opens the site
+- **WHEN** a visitor opens the site's home page
+- **THEN** the page shows a plain-language description of Brasa's purpose and design goals, and links to the syntax guide, examples, and getting-started sections
+
+### Requirement: Syntax reference
+The site SHALL document Brasa's core syntax constructs — packages and `use` declarations, `record`/`union`/`enum`/`interface` types, functions (including generics and `ref` parameters), `var`/`let` bindings, control flow (`if`, `match`, `for`, `while`), error handling (`!` return types and `?` propagation), `defer`, string interpolation, attributes (`#[...]`), and `extern`/`asm` FFI blocks — each with at least one short code sample.
+Documented syntax SHALL be consistent with the grammar in `brasa.ebnf` at the time the page is written (no documented construct may contradict the grammar).
+
+#### Scenario: Visitor looks up a language construct
+- **WHEN** a visitor opens the syntax reference and looks for a specific construct (e.g., `match` expressions or error propagation with `?`)
+- **THEN** the page shows a description of that construct and a code sample demonstrating it
+
+#### Scenario: Documented construct matches the grammar
+- **WHEN** a documented syntax construct is compared against `brasa.ebnf`
+- **THEN** the documented form is valid according to the grammar (no documented syntax is contradicted by the grammar)
+
+### Requirement: Annotated examples
+The site SHALL present annotated walkthroughs of the example programs shipped in `examples/` (at minimum `hello.br`, `rest_api.br`, and `types.br`), showing the source code alongside an explanation of what each program demonstrates.
+
+#### Scenario: Visitor reviews an example
+- **WHEN** a visitor opens an example walkthrough
+- **THEN** the page shows the example's Brasa source code and a written explanation of the language features it demonstrates
+
+### Requirement: Getting started guide
+The site SHALL explain how to build the Brasa parser and run a `.br` file, including the `--ast`, `--tokens`, and `--run` command-line options.
+
+#### Scenario: Visitor wants to run a program
+- **WHEN** a visitor opens the getting-started page
+- **THEN** the page shows the commands to build the project and run a `.br` file, including what each of `--ast`, `--tokens`, and `--run` does
+
+### Requirement: Self-contained static site
+The site SHALL be viewable by opening its entry HTML file in a browser directly from the filesystem (no server, build step, or network access required), and all internal navigation links SHALL resolve to pages within the site.
+
+#### Scenario: Visitor opens the site offline
+- **WHEN** a visitor opens the site's entry HTML file from a local folder without an internet connection
+- **THEN** all pages render with their styling and all internal links between pages work
+
+#### Scenario: Visitor follows internal navigation
+- **WHEN** a visitor clicks a navigation link to another section of the site
+- **THEN** the browser loads the corresponding page within the site with no broken link

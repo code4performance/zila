@@ -5,6 +5,69 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+/// An insertion-ordered map. Keys are `text` or integers.
+#[derive(Clone, Debug, Default)]
+pub struct MapVal {
+    entries: Vec<Option<(Value, Value)>>,
+    index: HashMap<MapKey, usize>,
+    live: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum MapKey {
+    Int(i64),
+    Text(String),
+}
+
+impl MapVal {
+    fn key_of(k: &Value) -> Result<MapKey, String> {
+        match k {
+            Value::Int(n) => Ok(MapKey::Int(*n)),
+            Value::Text(t) => Ok(MapKey::Text(t.clone())),
+            other => Err(format!("{} cannot be a map key; keys are text or integers", other.type_name())),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.live
+    }
+
+    pub fn get(&self, k: &Value) -> Result<Option<Value>, String> {
+        Ok(self.index.get(&Self::key_of(k)?).and_then(|i| self.entries[*i].as_ref()).map(|e| e.1.clone()))
+    }
+
+    pub fn set(&mut self, k: Value, v: Value) -> Result<(), String> {
+        let key = Self::key_of(&k)?;
+        if let Some(i) = self.index.get(&key) {
+            self.entries[*i] = Some((k, v));
+        } else {
+            self.index.insert(key, self.entries.len());
+            self.entries.push(Some((k, v)));
+            self.live += 1;
+        }
+        Ok(())
+    }
+
+    pub fn remove(&mut self, k: &Value) -> Result<(), String> {
+        if let Some(i) = self.index.remove(&Self::key_of(k)?) {
+            self.entries[i] = None;
+            self.live -= 1;
+        }
+        Ok(())
+    }
+
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.index.clear();
+        self.live = 0;
+    }
+
+    /// The live entries in insertion order.
+    pub fn pairs(&self) -> Vec<(Value, Value)> {
+        self.entries.iter().flatten().cloned().collect()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Value {
     Nil,
@@ -15,7 +78,7 @@ pub enum Value {
     Text(String),
     Range(i64, i64),
     List(Rc<RefCell<Vec<Value>>>),
-    Map(Rc<RefCell<HashMap<String, Value>>>),
+    Map(Rc<RefCell<MapVal>>),
     Record {
         type_name: String,
         fields: Rc<RefCell<HashMap<String, Value>>>,
@@ -84,11 +147,7 @@ impl std::fmt::Display for Value {
                 write!(f, "[{}]", items.join(", "))
             }
             Value::Map(m) => {
-                let items: Vec<String> = m
-                    .borrow()
-                    .iter()
-                    .map(|(k, v)| format!("{}: {}", k, v))
-                    .collect();
+                let items: Vec<String> = m.borrow().pairs().iter().map(|(k, v)| format!("{}: {}", k, v)).collect();
                 write!(f, "{{{}}}", items.join(", "))
             }
             Value::Record { type_name, fields } => {
@@ -308,11 +367,14 @@ impl Interpreter {
                                 }
                             }
                             Value::Map(m) => {
-                                let key = idx_val.to_string();
-                                let mut map = m.borrow_mut();
-                                let current = map.get(&key).cloned().unwrap_or(Value::Nil);
+                                let current = if *op == "=" {
+                                    Value::Nil
+                                } else {
+                                    let found = m.borrow().get(&idx_val).map_err(|e| format!("line {}: {}", stmt.line, e))?;
+                                    found.ok_or_else(|| format!("line {}: map key not found", stmt.line))?
+                                };
                                 let final_val = self.apply_assign_op(op, current, rhs)?;
-                                map.insert(key, final_val);
+                                m.borrow_mut().set(idx_val, final_val).map_err(|e| format!("line {}: {}", stmt.line, e))?;
                             }
                             _ => return Err(format!("line {}: indexing non-indexable value", stmt.line)),
                         }
@@ -368,6 +430,22 @@ impl Interpreter {
                         for i in start..end {
                             let loop_env = Rc::new(RefCell::new(Env::with_parent(env.clone())));
                             loop_env.borrow_mut().define(var_name.clone(), Value::Int(i));
+                            match self.eval_block(body, &loop_env)? {
+                                Flow::Break => break,
+                                Flow::Continue => continue,
+                                Flow::Return(v) => return Ok(Flow::Return(v)),
+                                Flow::None => {}
+                            }
+                        }
+                    }
+                    Value::Map(m) => {
+                        let pairs = m.borrow().pairs();
+                        for (k, v) in pairs {
+                            let loop_env = Rc::new(RefCell::new(Env::with_parent(env.clone())));
+                            loop_env.borrow_mut().define(vars[0].clone(), k);
+                            if vars.len() >= 2 {
+                                loop_env.borrow_mut().define(vars[1].clone(), v);
+                            }
                             match self.eval_block(body, &loop_env)? {
                                 Flow::Break => break,
                                 Flow::Continue => continue,
@@ -481,11 +559,11 @@ impl Interpreter {
                 Ok(Value::List(Rc::new(RefCell::new(vals))))
             }
             ExprKind::Map(entries) => {
-                let mut map = HashMap::new();
+                let mut map = MapVal::default();
                 for (k, v) in entries {
                     let k_val = self.eval_expr(k, env)?;
                     let v_val = self.eval_expr(v, env)?;
-                    map.insert(k_val.to_string(), v_val);
+                    map.set(k_val, v_val).map_err(|e| format!("line {}: {}", expr.line, e))?;
                 }
                 Ok(Value::Map(Rc::new(RefCell::new(map))))
             }
@@ -522,6 +600,7 @@ impl Interpreter {
                     }
                     Value::List(l) if name == "len" => Ok(Value::Int(l.borrow().len() as i64)),
                     Value::Text(t) if name == "len" => Ok(Value::Int(t.len() as i64)),
+                    Value::Map(m) if name == "len" => Ok(Value::Int(m.borrow().len() as i64)),
                     _ => Err(format!("line {}: cannot access field '{}' on {}", expr.line, name, obj.type_name())),
                 }
             }
@@ -539,8 +618,8 @@ impl Interpreter {
                         }
                     }
                     (Value::Map(m), key) => {
-                        let map = m.borrow();
-                        Ok(map.get(&key.to_string()).cloned().unwrap_or(Value::Nil))
+                        let found = m.borrow().get(&key).map_err(|e| format!("line {}: {}", expr.line, e))?;
+                        found.ok_or_else(|| format!("line {}: map key not found", expr.line))
                     }
                     (Value::Text(s), Value::Int(i)) => {
                         let chars: Vec<char> = s.chars().collect();
@@ -838,6 +917,28 @@ impl Interpreter {
                     return Ok(Value::Nil);
                 }
             }
+        }
+
+        if let Value::Map(m) = &target {
+            let want = match method {
+                "clear" => 0,
+                "get" => 2,
+                "has" | "remove" => 1,
+                _ => return Err(format!("line {}: no method '{}' found on map", line, method)),
+            };
+            if args.len() != want {
+                return Err(format!("line {}: '{}' takes {} argument(s)", line, method, want));
+            }
+            let key_err = |e: String| format!("line {}: {}", line, e);
+            return match method {
+                "has" => Ok(Value::Bool(m.borrow().get(&args[0]).map_err(key_err)?.is_some())),
+                "get" => Ok(m.borrow().get(&args[0]).map_err(key_err)?.unwrap_or_else(|| args[1].clone())),
+                "remove" => m.borrow_mut().remove(&args[0]).map(|_| Value::Nil).map_err(key_err),
+                _ => {
+                    m.borrow_mut().clear();
+                    Ok(Value::Nil)
+                }
+            };
         }
 
         if let Value::Record { type_name, .. } = &target {

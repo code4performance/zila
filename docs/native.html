@@ -41,8 +41,9 @@
         <li><code>enum</code> with or without data and <code>match</code>, which must cover every case.</li>
         <li>Errors: <code>-&gt; T or error</code>, <code>try</code>, <code>error("message")</code>, <code>match</code> with <code>ok(v)</code> and <code>err(e)</code>, and <code>??</code>.</li>
         <li>Closures (they capture by value) and top-level functions passed to C as callbacks.</li>
+        <li><code>Map&lt;K, V&gt;</code>: maps with text or integer keys, literals, <code>m[key]</code>, <code>has</code>, <code>get</code>, <code>remove</code> and <code>for</code> in insertion order (see the <a href="syntax.html#maps">syntax guide</a>).</li>
         <li><code>defer</code>: a call that runs when the function ends, however it ends (see the <a href="syntax.html#defer">syntax guide</a>).</li>
-        <li><code>if</code> as an expression, <code>while</code>, <code>for</code> over ranges and lists, <code>break</code> and <code>continue</code>.</li>
+        <li><code>if</code> as an expression, <code>while</code>, <code>for</code> over ranges, lists and maps, <code>break</code> and <code>continue</code>.</li>
         <li><code>unsafe</code>, <code>extern "system"</code> calls, <code>asm</code> blocks and <code>#[naked]</code> functions.</li>
         <li><a href="concurrency.html">Tasks and channels</a>, <a href="async.html">async/await</a>, files and TCP, and the <code>ui</code> library for native windows.</li>
       </ul>
@@ -97,7 +98,7 @@
       <ul>
         <li>Floating point (<code>float</code>, <code>f64</code>) and fixed-size arrays.</li>
         <li>Generics and interfaces (the grammar has them; there is no code generation for them yet).</li>
-        <li>Maps (<code>{ "a": 1 }</code>), <code>new</code>, spreading a list into arguments (<code>f(...xs)</code>), and <code>html</code> templates.</li>
+        <li><code>new</code>, spreading a list into arguments (<code>f(...xs)</code>), and <code>html</code> templates.</li>
       </ul>
       <p>The tree-walking interpreter behind <code>--run</code> is separate from the compiler and does not know the native-only features (<code>async</code>, <code>await</code>, <code>ui</code>, <code>fs</code>, <code>net</code>).</p>
     </section>

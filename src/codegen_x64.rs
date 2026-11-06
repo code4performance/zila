@@ -69,6 +69,8 @@ enum Ty {
     Rec(String),
     Enum(String),
     List(Box<Ty>),
+    /// `Map<K, V>`: `K` is `text` or an integer type.
+    Map(Box<Ty>, Box<Ty>),
     Ptr(Box<Ty>),
     Func { params: Vec<Ty>, ret: Box<Ty>, ext: bool },
     Err,
@@ -98,7 +100,7 @@ impl Ty {
         }
     }
     fn nullable(&self) -> bool {
-        matches!(self, Ty::Nil | Ty::Text | Ty::Rec(_) | Ty::List(_) | Ty::Ptr(_) | Ty::Func { .. } | Ty::Chan(_))
+        matches!(self, Ty::Nil | Ty::Text | Ty::Rec(_) | Ty::List(_) | Ty::Map(..) | Ty::Ptr(_) | Ty::Func { .. } | Ty::Chan(_))
     }
     fn show(&self) -> String {
         match self {
@@ -109,6 +111,7 @@ impl Ty {
             Ty::Text => "text".into(),
             Ty::Rec(n) | Ty::Enum(n) => n.rsplit('.').next().unwrap_or(n).to_string(),
             Ty::List(t) => format!("[]{}", t.show()),
+            Ty::Map(k, v) => format!("Map<{}, {}>", k.show(), v.show()),
             Ty::Ptr(t) => format!("*{}", t.show()),
             Ty::Err => "error".into(),
             Ty::Result(t) => {
@@ -148,6 +151,7 @@ fn compatible(want: &Ty, got: &Ty) -> bool {
         (Ty::Func { ext: true, .. }, Ty::Int { .. }) | (Ty::Int { .. }, Ty::Func { ext: true, .. }) => true,
         (Ty::Ptr(a), Ty::Rec(b)) => matches!(&**a, Ty::Rec(x) if x == b),
         (Ty::List(a), Ty::List(b)) => compatible(a, b),
+        (Ty::Map(ak, av), Ty::Map(bk, bv)) => ak == bk && compatible(av, bv),
         (Ty::Result(a), Ty::Result(b)) => compatible(a, b),
         (Ty::Future(a), Ty::Future(b)) => compatible(a, b),
         (Ty::Rec(a), Ty::Future(_)) if a == "future.Future" => true,
@@ -456,7 +460,7 @@ impl Compiler {
 
     fn is_rc(&self, t: &Ty) -> bool {
         match t {
-            Ty::Text | Ty::Rec(_) | Ty::List(_) | Ty::Err | Ty::Result(_) | Ty::Chan(_) | Ty::Future(_) => true,
+            Ty::Text | Ty::Rec(_) | Ty::List(_) | Ty::Map(..) | Ty::Err | Ty::Result(_) | Ty::Chan(_) | Ty::Future(_) => true,
             Ty::Func { ext, .. } => !*ext,
             Ty::Enum(q) => self.enum_payload.contains(q),
             _ => false,
@@ -496,6 +500,25 @@ impl Compiler {
             self.e(format!("lea rdx, {}", drop));
         }
         self.e("call rt_alloc");
+    }
+
+    /// Checks the key type of a `Map<K, V>` and builds the type.
+    fn map_type(&self, k: Ty, v: Ty) -> R<Ty> {
+        if self.target == Target::Bare {
+            return self.err("maps need the Windows runtime and cannot be used in a bare-metal kernel");
+        }
+        if !(k == Ty::Text || k.is_int()) {
+            return self.err(format!("{} cannot be a map key; keys are text or integers", k.show()));
+        }
+        Ok(Ty::Map(Box::new(k), Box::new(v)))
+    }
+
+    /// rax = new empty map of type `t`.
+    fn new_map(&mut self, t: &Ty) {
+        let Ty::Map(k, v) = t else { unreachable!() };
+        let flags = (**k == Ty::Text) as i32 | ((self.is_rc(v) as i32) << 1);
+        self.e(format!("mov ecx, {}", flags));
+        self.e("call rt_map_new");
     }
 
     fn new_list(&mut self, el: &Ty) {
@@ -913,6 +936,11 @@ impl Compiler {
                             return self.err("floating point is not supported by the native backend yet");
                         }
                         "List" if args.len() == 1 => return Ok(Ty::List(Box::new(self.resolve(&args[0], m)?))),
+                        "Map" if args.len() == 2 => {
+                            let k = self.resolve(&args[0], m)?;
+                            let v = self.resolve(&args[1], m)?;
+                            return self.map_type(k, v);
+                        }
                         "Channel" if args.len() == 1 => return Ok(Ty::Chan(Box::new(self.resolve(&args[0], m)?))),
                         "Future" if args.len() == 1 => return Ok(Ty::Future(Box::new(self.resolve(&args[0], m)?))),
                         _ => {}
@@ -1075,6 +1103,10 @@ brasa_start endp
             out.push_str(RUNTIME_COMMON);
             out.push_str(RUNTIME_WIN);
             out.push('\n');
+            if self.procs.iter().any(|p| p.contains("rt_map_")) {
+                out.push_str(RUNTIME_MAP);
+                out.push('\n');
+            }
             out.push_str(&start);
         }
         for p in &self.procs {
@@ -1405,6 +1437,7 @@ end
     fn zero_value(&mut self, t: &Ty) -> R<()> {
         match t {
             Ty::List(el) => self.new_list(&el.clone()),
+            Ty::Map(..) => self.new_map(&t.clone()),
             Ty::Rec(r) => self.record_literal(&r.clone(), &[])?,
             Ty::Text => {
                 let l = self.string_lit("");
@@ -1777,10 +1810,23 @@ end
                 let (ot, own) = self.operand(obj, None)?;
                 let t = self.temp();
                 self.e(format!("mov qword ptr [rbp - {}], rax", t));
-                self.expr(index, None)?;
+                let key_want = if let Ty::Map(k, _) = &ot { Some((**k).clone()) } else { None };
+                let ity = self.expr(index, key_want.as_ref())?;
                 let it = self.temp();
                 self.e(format!("mov qword ptr [rbp - {}], rax", it));
                 match &ot {
+                    Ty::Map(k, v) => {
+                        self.check(k, &ity, "map key")?;
+                        let vt = self.value(rhs, Some(v))?;
+                        self.check(v, &vt, "map value")?;
+                        self.e("mov r8, rax");
+                        self.e(format!("mov rcx, qword ptr [rbp - {}]", t));
+                        self.e(format!("mov rdx, qword ptr [rbp - {}]", it));
+                        self.e("call rt_map_set");
+                        if **k == Ty::Text {
+                            self.release_slot(it);
+                        }
+                    }
                     Ty::List(el) => {
                         let vt = self.value(rhs, Some(el))?;
                         self.check(el, &vt, "list element")?;
@@ -1850,6 +1896,46 @@ end
             self.label(&end);
         } else {
             let lt = self.expr(iter, None)?;
+            if let Ty::Map(k, v) = lt.clone() {
+                let map = self.hidden_local(lt);
+                self.e(format!("mov qword ptr [rbp - {}], rax", map));
+                let idx = self.slot();
+                self.e(format!("mov qword ptr [rbp - {}], 0", idx));
+                let ent = self.slot();
+                let kv = self.declare_local(&vars[0], (*k).clone(), false);
+                let vv = if vars.len() >= 2 { Some(self.declare_local(&vars[1], (*v).clone(), false)) } else { None };
+                self.e(format!("mov qword ptr [rbp - {}], 0", kv));
+                if let Some(vv) = vv {
+                    self.e(format!("mov qword ptr [rbp - {}], 0", vv));
+                }
+                self.label(&start);
+                self.e(format!("mov rcx, qword ptr [rbp - {}]", map));
+                self.e(format!("mov rax, qword ptr [rbp - {}]", idx));
+                self.e("cmp rax, qword ptr [rcx]");
+                self.e(format!("jae {}", end));
+                self.e("shl rax, 5");
+                self.e("add rax, qword ptr [rcx + 16]");
+                self.e(format!("mov qword ptr [rbp - {}], rax", ent));
+                self.e("cmp qword ptr [rax], 0");
+                self.e(format!("je {}", cont));
+                self.e("mov rax, qword ptr [rax + 16]");
+                self.bind_loop_var(&k, kv);
+                if let Some(vv) = vv {
+                    self.e(format!("mov rax, qword ptr [rbp - {}]", ent));
+                    self.e("mov rax, qword ptr [rax + 24]");
+                    self.bind_loop_var(&v, vv);
+                }
+                let depth = self.fs.scopes.len();
+                self.fs.loops.push(LoopCtx { cont: cont.clone(), brk: end.clone(), depth });
+                self.block(body)?;
+                self.fs.loops.pop();
+                self.label(&cont);
+                self.e(format!("inc qword ptr [rbp - {}]", idx));
+                self.e(format!("jmp {}", start));
+                self.label(&end);
+                self.pop_scope();
+                return Ok(());
+            }
             let Ty::List(el) = lt.clone() else { return self.err(format!("cannot iterate over {}", lt.show())) };
             let list = self.hidden_local(lt);
             self.e(format!("mov qword ptr [rbp - {}], rax", list));
@@ -1897,6 +1983,25 @@ end
         }
         self.pop_scope();
         Ok(())
+    }
+
+    /// Stores the borrowed element in rax into the loop variable at `slot`: a copy for plain
+    /// records, a retained reference for other heap values; the previous value is released.
+    fn bind_loop_var(&mut self, el: &Ty, slot: i32) {
+        if matches!(el, Ty::Rec(r) if !self.shared_recs.contains(r)) {
+            let Ty::Rec(r) = el else { unreachable!() };
+            self.e("mov rcx, rax");
+            self.e(format!("call B_copy_{}", sym_of(r)));
+        } else {
+            self.retain_if(el);
+        }
+        if self.is_rc(el) {
+            self.e(format!("mov rcx, qword ptr [rbp - {}]", slot));
+            self.e(format!("mov qword ptr [rbp - {}], rax", slot));
+            self.e("call rt_release");
+        } else {
+            self.e(format!("mov qword ptr [rbp - {}], rax", slot));
+        }
     }
 
     fn require_unsafe(&self, what: &str) -> R<()> {
@@ -2029,7 +2134,60 @@ end
                 self.free(lt);
                 Ok(Ty::List(Box::new(el)))
             }
-            ExprKind::Map(_) => self.err("map literals are not supported by the native backend yet"),
+            ExprKind::Map(pairs) => {
+                let (mut kt, mut vt) = match want {
+                    Some(Ty::Map(k, v)) => (Some((**k).clone()), Some((**v).clone())),
+                    _ => (None, None),
+                };
+                let mt = self.temp();
+                let mut created = false;
+                if let (Some(k), Some(v)) = (&kt, &vt) {
+                    let t = self.map_type(k.clone(), v.clone())?;
+                    self.new_map(&t);
+                    self.e(format!("mov qword ptr [rbp - {}], rax", mt));
+                    created = true;
+                }
+                for (ke, ve) in pairs {
+                    let kty = self.value(ke, kt.as_ref())?;
+                    let ks = self.temp();
+                    self.e(format!("mov qword ptr [rbp - {}], rax", ks));
+                    let vty = self.value(ve, vt.as_ref())?;
+                    match (&kt, &vt) {
+                        (Some(k), Some(v)) => {
+                            self.check(k, &kty, "map key")?;
+                            self.check(v, &vty, "map value")?;
+                        }
+                        _ => {
+                            kt = Some(kty);
+                            vt = Some(vty);
+                        }
+                    }
+                    if !created {
+                        let t = self.map_type(kt.clone().unwrap(), vt.clone().unwrap())?;
+                        let vs = self.temp();
+                        self.e(format!("mov qword ptr [rbp - {}], rax", vs));
+                        self.new_map(&t);
+                        self.e(format!("mov qword ptr [rbp - {}], rax", mt));
+                        self.e(format!("mov rax, qword ptr [rbp - {}]", vs));
+                        self.free(vs);
+                        created = true;
+                    }
+                    self.e("mov r8, rax");
+                    self.e(format!("mov rdx, qword ptr [rbp - {}]", ks));
+                    self.e(format!("mov rcx, qword ptr [rbp - {}]", mt));
+                    self.e("call rt_map_set");
+                    if kt == Some(Ty::Text) {
+                        self.release_slot(ks);
+                    }
+                    self.free(ks);
+                }
+                let (Some(k), Some(v)) = (kt, vt) else {
+                    return self.err("cannot infer the key and value types of an empty map; add a type annotation");
+                };
+                self.e(format!("mov rax, qword ptr [rbp - {}]", mt));
+                self.free(mt);
+                Ok(Ty::Map(Box::new(k), Box::new(v)))
+            }
             ExprKind::Record { path, fields } => {
                 let r = self.record_name(path, &self.cur_mod.clone())?;
                 self.record_literal(&r, fields)?;
@@ -2101,8 +2259,23 @@ end
                 let (ot, own) = self.operand(obj, None)?;
                 let t = self.temp();
                 self.e(format!("mov qword ptr [rbp - {}], rax", t));
-                self.expr(index, None)?;
+                let key_want = if let Ty::Map(k, _) = &ot { Some((**k).clone()) } else { None };
+                let ity = self.expr(index, key_want.as_ref())?;
                 let res = match &ot {
+                    Ty::Map(k, v) => {
+                        self.check(k, &ity, "map key")?;
+                        let ks = self.temp();
+                        self.e(format!("mov qword ptr [rbp - {}], rax", ks));
+                        self.e("mov rdx, rax");
+                        self.e(format!("mov rcx, qword ptr [rbp - {}]", t));
+                        self.e("call rt_map_get");
+                        self.retain_if(v);
+                        if **k == Ty::Text {
+                            self.release_slot(ks);
+                        }
+                        self.free(ks);
+                        (**v).clone()
+                    }
                     Ty::List(el) => {
                         self.e("mov rdx, rax");
                         self.e(format!("mov rcx, qword ptr [rbp - {}]", t));
@@ -2552,6 +2725,10 @@ end
             }
             Ty::List(_) | Ty::Text if name == "len" => {
                 self.e("mov rax, qword ptr [rax]");
+                Ty::i64()
+            }
+            Ty::Map(..) if name == "len" => {
+                self.e("mov rax, qword ptr [rax + 48]");
                 Ty::i64()
             }
             Ty::Err if name == "message" => {
@@ -3318,6 +3495,14 @@ end
                     self.free(t);
                     return res;
                 }
+                if let Ty::Map(k, v) = &ot {
+                    let t = self.temp();
+                    self.e(format!("mov qword ptr [rbp - {}], rax", t));
+                    let res = self.map_method(t, k, v, name, args);
+                    self.release_slot(t);
+                    self.free(t);
+                    return res;
+                }
                 self.err(format!("{} has no method '{}'", ot.show(), name))
             }
             _ => {
@@ -3326,6 +3511,64 @@ end
                 self.call_value(t, args)
             }
         }
+    }
+
+    /// `has`, `get`, `remove` and `clear` on the map in slot `t` (borrowed).
+    fn map_method(&mut self, t: i32, k: &Ty, v: &Ty, name: &str, args: &[Arg]) -> R<Ty> {
+        let argc = match name {
+            "has" | "remove" => 1,
+            "get" => 2,
+            "clear" => 0,
+            _ => return self.err(format!("{} has no method '{}'", Ty::Map(Box::new(k.clone()), Box::new(v.clone())).show(), name)),
+        };
+        if args.len() != argc {
+            return self.err(format!("'{}' takes {} argument(s)", name, argc));
+        }
+        if name == "clear" {
+            self.e(format!("mov rcx, qword ptr [rbp - {}]", t));
+            self.e("call rt_map_clear");
+            return Ok(Ty::Void);
+        }
+        let kty = self.value(&args[0].value, Some(k))?;
+        self.check(k, &kty, "map key")?;
+        let ks = self.temp();
+        self.e(format!("mov qword ptr [rbp - {}], rax", ks));
+        let res = match name {
+            "has" | "remove" => {
+                self.e("mov rdx, rax");
+                self.e(format!("mov rcx, qword ptr [rbp - {}]", t));
+                self.e(if name == "has" { "call rt_map_has" } else { "call rt_map_remove" });
+                if name == "has" { Ty::Bool } else { Ty::Void }
+            }
+            _ => {
+                let dty = self.value(&args[1].value, Some(v))?;
+                self.check(v, &dty, "default value")?;
+                let ds = self.temp();
+                self.e(format!("mov qword ptr [rbp - {}], rax", ds));
+                let (miss, end) = (self.lbl("mgmiss"), self.lbl("mgend"));
+                self.e(format!("mov rcx, qword ptr [rbp - {}]", t));
+                self.e(format!("mov rdx, qword ptr [rbp - {}]", ks));
+                self.e("call rt_map_find");
+                self.e("test rax, rax");
+                self.e(format!("jz {}", miss));
+                self.e("mov rax, qword ptr [rax + 24]");
+                self.retain_if(v);
+                if self.is_rc(v) {
+                    self.release_slot(ds);
+                }
+                self.e(format!("jmp {}", end));
+                self.label(&miss);
+                self.e(format!("mov rax, qword ptr [rbp - {}]", ds));
+                self.label(&end);
+                self.free(ds);
+                v.clone()
+            }
+        };
+        if *k == Ty::Text {
+            self.release_slot(ks);
+        }
+        self.free(ks);
+        Ok(res)
     }
 
     /// Calls the function value in rax (owned); it is released after the call.
@@ -4522,6 +4765,8 @@ rt_index_oob proc
 rt_index_oob endp
 "#;
 
+const RUNTIME_MAP: &str = include_str!("runtime_map.asm");
+
 const RUNTIME_WIN: &str = r#"
 ; rax = zeroed heap object of rcx bytes; rdx = drop procedure (or 0).
 ; Objects have a 16-byte header: [refcount][drop].
@@ -4718,6 +4963,9 @@ rt_msg_oob dq 19
 dq 4611686018427387904, 0
 rt_msg_take dq 23
     db "take from an empty list", 0
+dq 4611686018427387904, 0
+rt_msg_nokey dq 17
+    db "map key not found", 0
 dq 4611686018427387904, 0
 rt_msg_panic dq 7
     db "panic: ", 0

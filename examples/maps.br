@@ -1,0 +1,38 @@
+// Maps: look values up by key.
+//
+//   brasa-parse examples/maps.br -o maps.exe
+//
+// A Map<K, V> keeps values under keys (text or integers) and remembers the order
+// in which the keys were first added.
+
+package main
+
+func count_words(words: List<text>) -> Map<text, int>
+    var counts: Map<text, int> = {}
+    for w in words
+        counts[w] = counts.get(w, 0) + 1
+    end
+    return counts
+end
+
+func main()
+    let words = ["red", "green", "red", "blue", "green", "red"]
+    let counts = count_words(words)
+
+    for word, n in counts
+        print("{word}: {n}")
+    end
+
+    let prices = { "apple": 3, "pear": 5 }
+    prices["plum"] = 4
+    prices.remove("pear")
+    print("{prices.len} prices, apple costs {prices["apple"]}")
+
+    if prices.has("pear")
+        print("pears are back")
+    else
+        print("no pears today")
+    end
+
+    print("kiwi costs {prices.get("kiwi", 0)}")
+end

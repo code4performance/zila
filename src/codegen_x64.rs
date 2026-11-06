@@ -236,6 +236,8 @@ struct Local {
     ty: Ty,
     mutable: bool,
     captured: bool,
+    /// Callee-saved register holding the variable instead of its slot.
+    reg: Option<&'static str>,
 }
 
 #[derive(Default, Clone)]
@@ -273,6 +275,14 @@ struct FnState {
     defer_save: Option<i32>,
     /// A statement may ignore the result of a call that can fail (the body of a deferred call).
     allow_ignored_result: bool,
+    /// The function contains an inline `asm` block: its code is left exactly as written.
+    has_asm: bool,
+    /// Some slot of the function can own a heap value (or `defer` runs code at the end): the
+    /// slots are zeroed on entry so that a release never sees garbage.
+    may_own: bool,
+    /// Variables kept in registers (by name) and the registers that ended up used.
+    regs: HashMap<String, &'static str>,
+    used_regs: Vec<&'static str>,
 }
 
 impl FnState {
@@ -292,6 +302,10 @@ impl FnState {
             defer_list: None,
             defer_save: None,
             allow_ignored_result: false,
+            has_asm: false,
+            may_own: false,
+            regs: HashMap::new(),
+            used_regs: Vec::new(),
         }
     }
 }
@@ -414,8 +428,24 @@ pub enum Target {
     Bare,
 }
 
+/// Options of a compilation.
+#[derive(Clone, Copy, Debug)]
+pub struct CompileOptions {
+    /// Constant folding, direct operands, fused compare-and-branch, peephole cleanups and the
+    /// cheaper function entry. `--no-opt` turns it off.
+    pub optimize: bool,
+}
+
+impl Default for CompileOptions {
+    fn default() -> Self {
+        CompileOptions { optimize: true }
+    }
+}
+
 pub struct Compiler {
     target: Target,
+    /// All optimizations are on (see `CompileOptions`).
+    opt: bool,
     modules: Vec<Module>,
     imports: HashMap<String, HashSet<String>>,
     rec_decls: HashMap<String, (String, Vec<Field>)>,
@@ -504,6 +534,7 @@ impl Compiler {
     fn new(target: Target) -> Self {
         Compiler {
             target,
+            opt: true,
             modules: Vec::new(),
             imports: HashMap::new(),
             rec_decls: HashMap::new(),
@@ -700,13 +731,43 @@ impl Compiler {
         }
     }
 
+    /// The register the plan gives to variable `name` when its type fits in one.
+    fn reg_for(&mut self, name: &str, ty: &Ty) -> Option<&'static str> {
+        if !self.opt || !(ty.is_int() || matches!(ty, Ty::Bool | Ty::Ptr(_))) {
+            return None;
+        }
+        let r = *self.fs.regs.get(name)?;
+        if !self.fs.used_regs.contains(&r) {
+            self.fs.used_regs.push(r);
+        }
+        Some(r)
+    }
+
+    /// Loads variable `l` into `dst` (`rax` or `rcx`).
+    fn load_local(&mut self, dst: &str, l: &Local) {
+        match l.reg {
+            Some(r) => self.e(format!("mov {}, {}", dst, r)),
+            None => self.e(format!("mov {}, qword ptr [rbp - {}]", dst, l.off)),
+        }
+    }
+
+    /// Stores `rax` into variable `l`.
+    fn store_local(&mut self, l: &Local) {
+        match l.reg {
+            Some(r) => self.e(format!("mov {}, rax", r)),
+            None => self.e(format!("mov qword ptr [rbp - {}], rax", l.off)),
+        }
+    }
+
     fn declare_local(&mut self, name: &str, ty: Ty, mutable: bool) -> i32 {
         let off = self.slot();
         let rc = self.is_rc(&ty);
+        let reg = self.reg_for(name, &ty);
         let sc = self.fs.scopes.last_mut().unwrap();
-        sc.vars.insert(name.to_string(), Local { off, ty: ty.clone(), mutable, captured: false });
+        sc.vars.insert(name.to_string(), Local { off, ty: ty.clone(), mutable, captured: false, reg });
         if rc {
             sc.owned.push((off, ty));
+            self.fs.may_own = true;
         }
         off
     }
@@ -716,6 +777,7 @@ impl Compiler {
         let off = self.slot();
         if self.is_rc(&ty) {
             self.fs.scopes.last_mut().unwrap().owned.push((off, ty));
+            self.fs.may_own = true;
         }
         off
     }
@@ -1369,6 +1431,11 @@ end
             s.push_str(&format!("{} endp\n", sym));
             return s;
         }
+        let mut saves: Vec<(&'static str, i32)> = Vec::new();
+        for r in self.fs.used_regs.clone() {
+            let off = self.slot();
+            saves.push((r, off));
+        }
         let out_area = 32 + 8 * (self.fs.max_args.max(4) - 4) as i32;
         let frame = (self.fs.next + out_area + 15) / 16 * 16;
         s.push_str("    push rbp\n    mov rbp, rsp\n");
@@ -1380,22 +1447,30 @@ end
         }
         s.push_str(&format!("    sub rsp, {}\n", left));
         // Zero every local slot: scope exits release whatever the slots hold.
-        if self.fs.next > 0 {
+        if self.fs.next > 0 && (!self.opt || self.fs.may_own || self.fs.has_asm) {
             s.push_str(&format!(
                 "    lea r11, [rbp - {n}]\n    xor eax, eax\nZ_{sym}:\n    mov qword ptr [r11], rax\n    add r11, 8\n    cmp r11, rbp\n    jb Z_{sym}\n",
                 n = self.fs.next,
                 sym = sym
             ));
         }
+        for (r, off) in &saves {
+            s.push_str(&format!("    mov qword ptr [rbp - {}], {}\n", off, r));
+        }
         for l in prologue {
             s.push_str(&l);
             s.push('\n');
         }
-        for l in &self.fs.code {
+        let code = if self.opt && !self.fs.has_asm { peephole(&self.fs.code, &self.fs.ret_label) } else { self.fs.code.clone() };
+        for l in &code {
             s.push_str(l);
             s.push('\n');
         }
-        s.push_str(&format!("{}:\n    mov rsp, rbp\n    pop rbp\n    ret\n{} endp\n", self.fs.ret_label, sym));
+        s.push_str(&format!("{}:\n", self.fs.ret_label));
+        for (r, off) in &saves {
+            s.push_str(&format!("    mov {}, qword ptr [rbp - {}]\n", r, off));
+        }
+        s.push_str(&format!("    mov rsp, rbp\n    pop rbp\n    ret\n{} endp\n", sym));
         s
     }
 
@@ -1440,6 +1515,9 @@ end
         self.fs = FnState::new(sig.ret.clone(), rl);
         let main_mod = self.modules[0].name.clone();
         self.fs.allow_await = fd.is_async || (fd.name == "main" && m == main_mod);
+        if self.opt && !naked && self.target != Target::Bare {
+            self.fs.regs = crate::regalloc::plan(fd);
+        }
         let mut incoming: Vec<(String, Ty, bool)> = Vec::new();
         if let (Some(r), Some(rt)) = (&fd.receiver, &sig.receiver) {
             incoming.push((r.name.clone(), rt.clone(), r.by_ref));
@@ -1489,16 +1567,21 @@ end
                 pro.push(format!("    mov rax, qword ptr [rbp + {}]", 16 + 8 * i));
                 pro.push(format!("    mov qword ptr [rbp - {}], rax", off));
             }
+            let reg = self.reg_for(name, ty);
             if let Some(n) = norm_insn(ty) {
                 pro.push(format!("    mov rax, qword ptr [rbp - {}]", off));
                 pro.push(format!("    {}", n));
                 pro.push(format!("    mov qword ptr [rbp - {}], rax", off));
             }
+            if let Some(r) = reg {
+                pro.push(format!("    mov {}, qword ptr [rbp - {}]", r, off));
+            }
             let rc = self.is_rc(ty);
             let sc = &mut self.fs.scopes[0];
-            sc.vars.insert(name.clone(), Local { off, ty: ty.clone(), mutable: true, captured: false });
+            sc.vars.insert(name.clone(), Local { off, ty: ty.clone(), mutable: true, captured: false, reg });
             if rc {
                 sc.owned.push((off, ty.clone()));
+                self.fs.may_own = true;
             }
         }
         pro
@@ -1693,7 +1776,7 @@ end
     fn operand(&mut self, e: &Expr, want: Option<&Ty>) -> R<(Ty, bool)> {
         if let ExprKind::Ident(n) = &e.kind {
             if let Some(l) = self.lookup(n) {
-                self.e(format!("mov rax, qword ptr [rbp - {}]", l.off));
+                self.load_local("rax", &l);
                 return Ok((l.ty, false));
             }
         }
@@ -1819,7 +1902,10 @@ end
                 };
                 self.norm(&ty);
                 let off = self.declare_local(&vd.name, ty, vd.mutable);
-                self.e(format!("mov qword ptr [rbp - {}], rax", off));
+                match self.lookup(&vd.name).and_then(|l| l.reg) {
+                    Some(r) => self.e(format!("mov {}, rax", r)),
+                    None => self.e(format!("mov qword ptr [rbp - {}], rax", off)),
+                }
             }
             StmtKind::Assign { target, op, value } => self.assign(target, op, value)?,
             StmtKind::Return(v) => {
@@ -1876,11 +1962,7 @@ end
             StmtKind::While { cond, body } => {
                 let (start, end) = (self.lbl("while"), self.lbl("wend"));
                 self.label(&start);
-                let m = self.fs.stmt_temps.len();
-                self.expr(cond, Some(&Ty::Bool))?;
-                self.flush_temps(m);
-                self.e("test rax, rax");
-                self.e(format!("jz {}", end));
+                self.cond_jump(cond, &end, false)?;
                 let depth = self.fs.scopes.len();
                 self.fs.loops.push(LoopCtx { cont: start.clone(), brk: end.clone(), depth });
                 self.block(body)?;
@@ -1960,7 +2042,7 @@ end
                         self.e(format!("mov qword ptr [rbp - {}], rax", l.off));
                         self.e("call rt_release");
                     } else {
-                        self.e(format!("mov qword ptr [rbp - {}], rax", l.off));
+                        self.store_local(&l);
                     }
                     return Ok(());
                 }
@@ -2108,20 +2190,32 @@ end
             let lt = self.expr(lhs, None)?;
             let ty = if lt.is_int() { lt } else { return self.err("range bounds must be integers") };
             let var = self.declare_local(&vars[0], ty.clone(), false);
-            self.e(format!("mov qword ptr [rbp - {}], rax", var));
+            let lreg = self.lookup(&vars[0]).and_then(|l| l.reg);
+            match lreg {
+                Some(r) => self.e(format!("mov {}, rax", r)),
+                None => self.e(format!("mov qword ptr [rbp - {}], rax", var)),
+            }
             self.expr(rhs, Some(&ty))?;
             let hi = self.slot();
             self.e(format!("mov qword ptr [rbp - {}], rax", hi));
             self.label(&start);
-            self.e(format!("mov rax, qword ptr [rbp - {}]", var));
-            self.e(format!("cmp rax, qword ptr [rbp - {}]", hi));
+            match lreg {
+                Some(r) => self.e(format!("cmp {}, qword ptr [rbp - {}]", r, hi)),
+                None => {
+                    self.e(format!("mov rax, qword ptr [rbp - {}]", var));
+                    self.e(format!("cmp rax, qword ptr [rbp - {}]", hi));
+                }
+            }
             self.e(format!("jge {}", end));
             let depth = self.fs.scopes.len();
             self.fs.loops.push(LoopCtx { cont: cont.clone(), brk: end.clone(), depth });
             self.block(body)?;
             self.fs.loops.pop();
             self.label(&cont);
-            self.e(format!("inc qword ptr [rbp - {}]", var));
+            match lreg {
+                Some(r) => self.e(format!("inc {}", r)),
+                None => self.e(format!("inc qword ptr [rbp - {}]", var)),
+            }
             self.e(format!("jmp {}", start));
             self.label(&end);
         } else {
@@ -2243,6 +2337,7 @@ end
     }
 
     fn asm_block(&mut self, a: &AsmBlock) -> R<()> {
+        self.fs.has_asm = true;
         if self.fs.unsafe_depth == 0 && !self.fs.code.is_empty() {
             self.require_unsafe("inline 'asm'")?;
         }
@@ -2304,6 +2399,17 @@ end
     /// Evaluates `e`. The result is in rax; heap values are owned (+1).
     fn expr(&mut self, e: &Expr, want: Option<&Ty>) -> R<Ty> {
         self.line = e.line;
+        if self.opt && matches!(e.kind, ExprKind::Binary { .. } | ExprKind::Unary { .. }) {
+            // literals are typed from the expected type, as the code generator would do
+            let t = match want {
+                Some(t) if t.is_int() => t.clone(),
+                _ => Ty::i64(),
+            };
+            let fbits = if matches!(want, Some(Ty::Float { bits: 32 })) { 32 } else { 64 };
+            if let Some(c) = self.fold(e, &t, fbits) {
+                return Ok(self.emit_const(c, &t, fbits));
+            }
+        }
         match &e.kind {
             ExprKind::Int(n) => {
                 self.e(format!("mov rax, {}", n));
@@ -2614,7 +2720,7 @@ end
 
     fn ident(&mut self, name: &str, want: Option<&Ty>) -> R<Ty> {
         if let Some(l) = self.lookup(name) {
-            self.e(format!("mov rax, qword ptr [rbp - {}]", l.off));
+            self.load_local("rax", &l);
             self.retain_if(&l.ty);
             return Ok(l.ty);
         }
@@ -2784,7 +2890,40 @@ end
             _ => {}
         }
         let is_cmp = matches!(op, "==" | "!=" | "<" | "<=" | ">" | ">=");
+        // A plain local on the left cannot change while the right side runs (an expression cannot
+        // assign), so the right side goes first and the local is read last: no temporary.
+        if self.opt {
+            if let ExprKind::Ident(n) = &lhs.kind {
+                if let Some(l) = self.lookup(n) {
+                    if !l.captured && !self.is_rc(&l.ty) && !self.rhs_is_simple(rhs) {
+                        let lt = l.ty.clone();
+                        let (rt, rown) = self.operand(rhs, Some(&lt))?;
+                        let owned = if rown && self.is_rc(&rt) {
+                            let t = self.temp();
+                            self.e(format!("mov qword ptr [rbp - {}], rax", t));
+                            Some(t)
+                        } else {
+                            None
+                        };
+                        self.e("mov rcx, rax");
+                        self.load_local("rax", &l);
+                        let res = self.binary_core(op, &lt, &rt, is_cmp)?;
+                        if let Some(t) = owned {
+                            self.release_slot(t);
+                            self.free(t);
+                        }
+                        return Ok(res);
+                    }
+                }
+            }
+        }
         let (lt, lown) = self.operand(lhs, if is_cmp { None } else { want })?;
+        // a literal or a plain local on the right needs no temporary: load it straight into rcx
+        if self.opt && !(lown && self.is_rc(&lt)) {
+            if let Some(rt) = self.simple_rhs(rhs, &lt) {
+                return self.binary_core(op, &lt, &rt, is_cmp);
+            }
+        }
         let t1 = self.temp();
         self.e(format!("mov qword ptr [rbp - {}], rax", t1));
         let (rt, rown) = self.operand(rhs, Some(&lt))?;
@@ -2858,6 +2997,36 @@ end
         self.e(format!("{}{} xmm0, xmm1", ins, sfx));
         self.e(format!("{} {}, xmm0", mv, a));
         Ok(lt.clone())
+    }
+
+    /// When `e` is a number literal or a plain local variable, loads it into rcx (as `operand`
+    /// would leave it in rax) and returns its type. Nothing else is evaluated, so the left
+    /// operand waiting in rax cannot be disturbed.
+    fn simple_rhs(&mut self, e: &Expr, lt: &Ty) -> Option<Ty> {
+        match &e.kind {
+            ExprKind::Int(n) => {
+                self.e(format!("mov rcx, {}", imm64(*n as i64)));
+                Some(if lt.is_int() { lt.clone() } else { Ty::i64() })
+            }
+            ExprKind::Float(f) => {
+                if matches!(lt, Ty::Float { bits: 32 }) {
+                    self.e(format!("mov ecx, {}", imm64((*f as f32).to_bits() as i64)));
+                    Some(Ty::Float { bits: 32 })
+                } else {
+                    self.e(format!("mov rcx, {}", imm64(f.to_bits() as i64)));
+                    Some(Ty::Float { bits: 64 })
+                }
+            }
+            ExprKind::Ident(n) => {
+                let l = self.lookup(n)?;
+                if l.captured {
+                    return None;
+                }
+                self.load_local("rcx", &l);
+                Some(l.ty)
+            }
+            _ => None,
+        }
     }
 
     /// rax = lhs, rcx = rhs. Leaves the result in rax.
@@ -3147,11 +3316,7 @@ end
         let mut ty: Option<Ty> = None;
         for (cond, body) in branches {
             let next = self.lbl("ifnext");
-            let m = self.fs.stmt_temps.len();
-            self.expr(cond, Some(&Ty::Bool))?;
-            self.flush_temps(m);
-            self.e("test rax, rax");
-            self.e(format!("jz {}", next));
+            self.cond_jump(cond, &next, false)?;
             let t = self.block_value(body, want, as_value)?;
             if ty.is_none() {
                 ty = Some(t);
@@ -3494,7 +3659,7 @@ end
             self.alloc(8 * caps.len() as u32, &env_drop);
             self.e(format!("mov qword ptr [rbp - {}], rax", env));
             for (i, (_, l)) in caps.iter().enumerate() {
-                self.e(format!("mov rax, qword ptr [rbp - {}]", l.off));
+                self.load_local("rax", &l);
                 if !share_records && matches!(&l.ty, Ty::Rec(r) if !self.shared_recs.contains(r)) {
                     let Ty::Rec(r) = &l.ty else { unreachable!() };
                     self.e("mov rcx, rax");
@@ -3525,9 +3690,10 @@ end
             pro.push(format!("    mov qword ptr [rbp - {}], rax", off));
             let rc = self.is_rc(&l.ty);
             let sc = &mut self.fs.scopes[0];
-            sc.vars.insert(n.clone(), Local { off, ty: l.ty.clone(), mutable: false, captured: true });
+            sc.vars.insert(n.clone(), Local { off, ty: l.ty.clone(), mutable: false, captured: true, reg: None });
             if rc {
                 sc.owned.push((off, l.ty.clone()));
+                self.fs.may_own = true;
             }
         }
         let mut inferred: Option<Ty> = None;
@@ -4235,6 +4401,7 @@ end
                 let keep = self.slot();
                 self.e(format!("mov qword ptr [rbp - {}], rax", keep));
                 self.fs.stmt_temps.push(keep);
+                self.fs.may_own = true;
                 self.e("add rax, 8");
                 Ok(u8p)
             }
@@ -4297,6 +4464,7 @@ end
         self.e(format!("mov qword ptr [rbp - {}], rax", list));
         let save = self.slot();
         self.fs.defer_list = Some(list);
+        self.fs.may_own = true;
         self.fs.defer_save = Some(save);
         Ok(())
     }
@@ -5171,6 +5339,443 @@ impl Compiler {
         }
         self.bindings.clear();
         Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Constant folding
+//
+// An expression made only of literals is computed here instead of by the program. The rules are
+// exactly the ones the generated code follows: integers wrap at the width of their type (each
+// operation is normalized, as `binary` does), shifts use the count the processor masks, floats
+// follow IEEE 754, and a division that could fail at run time is never folded.
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Const {
+    Int(i64),
+    Float(f64),
+    Bool(bool),
+}
+
+/// `v` as the register value an integer of type `t` holds after normalization.
+fn norm_val(v: i64, t: &Ty) -> i64 {
+    match t {
+        Ty::Int { bits: 8, signed: true } => v as i8 as i64,
+        Ty::Int { bits: 8, signed: false } => v as u8 as i64,
+        Ty::Int { bits: 16, signed: true } => v as i16 as i64,
+        Ty::Int { bits: 16, signed: false } => v as u16 as i64,
+        Ty::Int { bits: 32, signed: true } => v as i32 as i64,
+        Ty::Int { bits: 32, signed: false } => v as u32 as i64,
+        _ => v,
+    }
+}
+
+/// An assembler spelling of a 64-bit constant that `mov` accepts for any value.
+fn imm64(v: i64) -> String {
+    if v >= i32::MIN as i64 && v <= i32::MAX as i64 {
+        v.to_string()
+    } else {
+        format!("0{:X}h", v as u64)
+    }
+}
+
+impl Compiler {
+    /// The value of `e` when it is made of literals only. `t` is the integer type its literals
+    /// have, `fbits` the float width.
+    fn fold(&self, e: &Expr, t: &Ty, fbits: u8) -> Option<Const> {
+        match &e.kind {
+            ExprKind::Int(n) => Some(Const::Int(*n as i64)),
+            ExprKind::Float(f) => Some(Const::Float(if fbits == 32 { *f as f32 as f64 } else { *f })),
+            ExprKind::Bool(b) => Some(Const::Bool(*b)),
+            ExprKind::Unary { op, expr } => {
+                let v = self.fold(expr, t, fbits)?;
+                match (*op, v) {
+                    ("-", Const::Int(n)) => Some(Const::Int(norm_val(n.wrapping_neg(), t))),
+                    ("-", Const::Float(f)) => Some(Const::Float(-f)),
+                    ("not", Const::Bool(b)) => Some(Const::Bool(!b)),
+                    ("bitnot", Const::Int(n)) => Some(Const::Int(norm_val(!n, t))),
+                    _ => None,
+                }
+            }
+            ExprKind::Binary { op, lhs, rhs } => {
+                let is_cmp = matches!(*op, "==" | "!=" | "<" | "<=" | ">" | ">=");
+                if is_cmp {
+                    // comparison operands are typed on their own: literals are plain `int`s
+                    let i64t = Ty::i64();
+                    let (a, b) = (self.fold(lhs, &i64t, fbits)?, self.fold(rhs, &i64t, fbits)?);
+                    let r = match (a, b) {
+                        (Const::Int(a), Const::Int(b)) => cmp_op(*op, a.cmp(&b)),
+                        (Const::Float(a), Const::Float(b)) => match *op {
+                            "==" => a == b,
+                            "!=" => a != b,
+                            "<" => a < b,
+                            "<=" => a <= b,
+                            ">" => a > b,
+                            _ => a >= b,
+                        },
+                        (Const::Bool(a), Const::Bool(b)) => match *op {
+                            "==" => a == b,
+                            "!=" => a != b,
+                            _ => return None,
+                        },
+                        _ => return None,
+                    };
+                    return Some(Const::Bool(r));
+                }
+                let (a, b) = (self.fold(lhs, t, fbits)?, self.fold(rhs, t, fbits)?);
+                match (a, b) {
+                    (Const::Bool(a), Const::Bool(b)) => match *op {
+                        "and" => Some(Const::Bool(a && b)),
+                        "or" => Some(Const::Bool(a || b)),
+                        _ => None,
+                    },
+                    (Const::Int(a), Const::Int(b)) => {
+                        let unsigned = t.is_unsigned();
+                        let v = match *op {
+                            "+" => a.wrapping_add(b),
+                            "-" => a.wrapping_sub(b),
+                            "*" => a.wrapping_mul(b),
+                            "/" | "%" => {
+                                // a zero divisor (and the one overflowing signed division) must still
+                                // fail at run time
+                                if b == 0 || (!unsigned && a == i64::MIN && b == -1) {
+                                    return None;
+                                }
+                                if unsigned {
+                                    let (x, y) = (a as u64, b as u64);
+                                    (if *op == "/" { x / y } else { x % y }) as i64
+                                } else if *op == "/" {
+                                    a / b
+                                } else {
+                                    a % b
+                                }
+                            }
+                            "bitand" => a & b,
+                            "bitor" => a | b,
+                            "bitxor" => a ^ b,
+                            "<<" => a.wrapping_shl((b & 63) as u32),
+                            ">>" => {
+                                let n = (b & 63) as u32;
+                                if unsigned {
+                                    ((a as u64) >> n) as i64
+                                } else {
+                                    a >> n
+                                }
+                            }
+                            _ => return None,
+                        };
+                        Some(Const::Int(norm_val(v, t)))
+                    }
+                    (Const::Float(a), Const::Float(b)) => {
+                        let v = match *op {
+                            "+" => a + b,
+                            "-" => a - b,
+                            "*" => a * b,
+                            "/" => a / b,
+                            _ => return None,
+                        };
+                        // an f32 operation rounds to f32
+                        Some(Const::Float(if fbits == 32 { v as f32 as f64 } else { v }))
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Emits a folded constant and returns its type.
+    fn emit_const(&mut self, c: Const, t: &Ty, fbits: u8) -> Ty {
+        match c {
+            Const::Int(v) => {
+                self.e(format!("mov rax, {}", imm64(v)));
+                t.clone()
+            }
+            Const::Bool(b) => {
+                self.e(format!("mov eax, {}", b as i32));
+                Ty::Bool
+            }
+            Const::Float(f) => {
+                if fbits == 32 {
+                    let b = (f as f32).to_bits();
+                    if b == 0 {
+                        self.e("xor eax, eax");
+                    } else {
+                        self.e(format!("mov eax, {}", imm64(b as i64)));
+                    }
+                } else {
+                    let b = f.to_bits();
+                    if b == 0 {
+                        self.e("xor eax, eax");
+                    } else {
+                        self.e(format!("mov rax, {}", imm64(b as i64)));
+                    }
+                }
+                Ty::Float { bits: fbits }
+            }
+        }
+    }
+}
+
+fn cmp_op(op: &str, o: std::cmp::Ordering) -> bool {
+    use std::cmp::Ordering::*;
+    match op {
+        "==" => o == Equal,
+        "!=" => o != Equal,
+        "<" => o == Less,
+        "<=" => o != Greater,
+        ">" => o == Greater,
+        _ => o != Less,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Conditions that jump
+//
+// `if` and `while` do not need the 0 or 1 a comparison produces: they jump on the processor
+// flags the comparison sets. `and`, `or` and `not` become jumps as well.
+// ---------------------------------------------------------------------------
+
+fn inverse_cc(cc: &str) -> &'static str {
+    match cc {
+        "e" => "ne",
+        "ne" => "e",
+        "l" => "ge",
+        "ge" => "l",
+        "le" => "g",
+        "g" => "le",
+        "b" => "ae",
+        "ae" => "b",
+        "be" => "a",
+        _ => "be",
+    }
+}
+
+fn is_cmp_op(op: &str) -> bool {
+    matches!(op, "==" | "!=" | "<" | "<=" | ">" | ">=")
+}
+
+impl Compiler {
+    /// A right operand `simple_rhs` can load without evaluating anything.
+    fn rhs_is_simple(&self, e: &Expr) -> bool {
+        match &e.kind {
+            ExprKind::Int(_) | ExprKind::Float(_) => true,
+            ExprKind::Ident(n) => self.lookup(n).map_or(false, |l| !l.captured),
+            _ => false,
+        }
+    }
+
+    /// Jumps to `label` when `cond` is `jump_if`, and falls through otherwise.
+    fn cond_jump(&mut self, cond: &Expr, label: &str, jump_if: bool) -> R<()> {
+        self.line = cond.line;
+        let m = self.fs.stmt_temps.len();
+        if self.opt {
+            match &cond.kind {
+                ExprKind::Unary { op: "not", expr } => return self.cond_jump(expr, label, !jump_if),
+                ExprKind::Binary { op: "and", lhs, rhs } => {
+                    if jump_if {
+                        let skip = self.lbl("andskip");
+                        self.cond_jump(lhs, &skip, false)?;
+                        self.cond_jump(rhs, label, true)?;
+                        self.label(&skip);
+                    } else {
+                        self.cond_jump(lhs, label, false)?;
+                        self.cond_jump(rhs, label, false)?;
+                    }
+                    return Ok(());
+                }
+                ExprKind::Binary { op: "or", lhs, rhs } => {
+                    if jump_if {
+                        self.cond_jump(lhs, label, true)?;
+                        self.cond_jump(rhs, label, true)?;
+                    } else {
+                        let ok = self.lbl("orok");
+                        self.cond_jump(lhs, &ok, true)?;
+                        self.cond_jump(rhs, label, false)?;
+                        self.label(&ok);
+                    }
+                    return Ok(());
+                }
+                ExprKind::Binary { op, lhs, rhs } if is_cmp_op(op) && self.rhs_is_simple(rhs) => {
+                    let (lt, lown) = self.operand(lhs, None)?;
+                    if lown && self.is_rc(&lt) {
+                        // an owned heap value on the left: the general path releases it
+                        let t1 = self.temp();
+                        self.e(format!("mov qword ptr [rbp - {}], rax", t1));
+                        let rt = self.simple_rhs(rhs, &lt).unwrap();
+                        self.binary_core(op, &lt, &rt, true)?;
+                        self.release_slot(t1);
+                        self.free(t1);
+                        self.flush_temps(m);
+                        self.e("test rax, rax");
+                        self.e(format!("{} {}", if jump_if { "jnz" } else { "jz" }, label));
+                        return Ok(());
+                    }
+                    let rt = self.simple_rhs(rhs, &lt).unwrap();
+                    if self.fs.stmt_temps.len() == m && self.fuse_compare(op, &lt, &rt, label, jump_if) {
+                        return Ok(());
+                    }
+                    self.binary_core(op, &lt, &rt, true)?;
+                    self.flush_temps(m);
+                    self.e("test rax, rax");
+                    self.e(format!("{} {}", if jump_if { "jnz" } else { "jz" }, label));
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
+        self.expr(cond, Some(&Ty::Bool))?;
+        self.flush_temps(m);
+        self.e("test rax, rax");
+        self.e(format!("{} {}", if jump_if { "jnz" } else { "jz" }, label));
+        Ok(())
+    }
+
+    /// With the operands in rax and rcx, compares them and jumps. Returns false, having emitted
+    /// nothing, when the types need the general code (text, enums, results, type errors).
+    fn fuse_compare(&mut self, op: &str, lt: &Ty, rt: &Ty, label: &str, jump_if: bool) -> bool {
+        let intlike = |t: &Ty| t.is_int() || matches!(t, Ty::Bool | Ty::Ptr(_));
+        if intlike(lt) && intlike(rt) && (compatible(lt, rt) || compatible(rt, lt)) {
+            let unsigned = lt.is_unsigned() || rt.is_unsigned();
+            let cc = match (op, unsigned) {
+                ("==", _) => "e",
+                ("!=", _) => "ne",
+                ("<", false) => "l",
+                ("<=", false) => "le",
+                (">", false) => "g",
+                (">=", false) => "ge",
+                ("<", true) => "b",
+                ("<=", true) => "be",
+                (">", true) => "a",
+                _ => "ae",
+            };
+            self.e("cmp rax, rcx");
+            let cc = if jump_if { cc } else { inverse_cc(cc) };
+            self.e(format!("j{} {}", cc, label));
+            return true;
+        }
+        if let (Ty::Float { bits: a }, Ty::Float { bits: b }) = (lt, rt) {
+            if a == b {
+                let d = *a == 64;
+                let (mv, uc) = if d { ("movq", "ucomisd") } else { ("movd", "ucomiss") };
+                let (x, y) = if d { ("rax", "rcx") } else { ("eax", "ecx") };
+                self.e(format!("{} xmm0, {}", mv, x));
+                self.e(format!("{} xmm1, {}", mv, y));
+                // unordered (a NaN) sets ZF, PF and CF: only `ne` is true then
+                match op {
+                    ">" | ">=" | "<" | "<=" => {
+                        let swap = op.starts_with('<');
+                        if swap {
+                            self.e(format!("{} xmm1, xmm0", uc));
+                        } else {
+                            self.e(format!("{} xmm0, xmm1", uc));
+                        }
+                        let strict = op == ">" || op == "<";
+                        let cc = match (strict, jump_if) {
+                            (true, true) => "a",
+                            (true, false) => "be",
+                            (false, true) => "ae",
+                            (false, false) => "b",
+                        };
+                        self.e(format!("j{} {}", cc, label));
+                    }
+                    _ => {
+                        self.e(format!("{} xmm0, xmm1", uc));
+                        // `==` is true when equal and ordered; `!=` is its opposite
+                        let jump_when_equal = (op == "==") == jump_if;
+                        if jump_when_equal {
+                            // jump when equal and ordered
+                            let skip = self.lbl("nan");
+                            self.e(format!("jp {}", skip));
+                            self.e(format!("je {}", label));
+                            self.label(&skip);
+                        } else {
+                            // jump when not equal or unordered
+                            self.e(format!("jp {}", label));
+                            self.e(format!("jne {}", label));
+                        }
+                    }
+                }
+                return true;
+            }
+        }
+        false
+    }
+}
+
+/// Local cleanups of one function's code: a reload of a value just stored, a jump to the next
+/// label, code that can never run, and a register moved to itself. Every rule looks at adjacent
+/// lines only and never moves anything across a label.
+fn peephole(code: &[String], ret_label: &str) -> Vec<String> {
+    let mut cur: Vec<String> = code.to_vec();
+    loop {
+        let before = cur.len();
+        let mut out: Vec<String> = Vec::with_capacity(cur.len());
+        let mut dead = false; // after an unconditional jump or ret, up to the next label
+        for line in &cur {
+            let t = line.trim();
+            let is_label = t.ends_with(':') && !line.starts_with(' ');
+            if is_label {
+                dead = false;
+                // a jump to the label that follows it is no jump at all
+                let mut i = out.len();
+                while i > 0 && out[i - 1].ends_with(':') && !out[i - 1].starts_with(' ') {
+                    i -= 1;
+                }
+                if i > 0 && out[i - 1].trim() == format!("jmp {}", &t[..t.len() - 1]) {
+                    out.remove(i - 1);
+                }
+                out.push(line.clone());
+                continue;
+            }
+            if dead {
+                continue;
+            }
+            // `mov [X], r` then `mov r, [X]`: the register already holds the value
+            if let Some(rest) = t.strip_prefix("mov ") {
+                if let Some((dst, src)) = rest.split_once(", ") {
+                    // only a 64-bit register: `mov eax, eax` clears the upper half
+                    if dst == src && dst.starts_with('r') && !dst.contains('[') {
+                        continue;
+                    }
+                    if let Some(prev) = out.last() {
+                        if let Some(pr) = prev.trim().strip_prefix("mov ") {
+                            if let Some((pdst, psrc)) = pr.split_once(", ") {
+                                if pdst.starts_with("qword ptr [") && src == pdst && !psrc.contains('[') && psrc.starts_with('r') {
+                                    if dst == psrc {
+                                        continue;
+                                    }
+                                    // the value is still in the register that was stored
+                                    if dst.starts_with('r') && !dst.contains('[') {
+                                        out.push(format!("    mov {}, {}", dst, psrc));
+                                        continue;
+                                    }
+                                }
+                                // `mov r12, rax` then `mov rax, r12`: both already hold the value
+                                let is_r = |x: &str| x.starts_with('r') && !x.contains(' ') && !x.contains('[');
+                                if is_r(pdst) && is_r(psrc) && dst == psrc && src == pdst {
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            let unconditional = t.starts_with("jmp ") || t == "ret";
+            out.push(line.clone());
+            if unconditional {
+                dead = true;
+            }
+        }
+        // a final jump to the epilogue that follows
+        if out.last().map_or(false, |l| l.trim() == format!("jmp {}", ret_label)) {
+            out.pop();
+        }
+        cur = out;
+        if cur.len() == before {
+            return cur;
+        }
     }
 }
 
@@ -6178,7 +6783,13 @@ pub fn build_os(boot: &File, kernel: &File) -> Result<Vec<u8>, String> {
 
 /// Compiles a parsed program (plus the std modules it uses) to MASM assembly.
 pub fn generate_asm(file: &File) -> Result<String, String> {
+    generate_asm_with(file, &CompileOptions::default())
+}
+
+/// `generate_asm` with explicit options.
+pub fn generate_asm_with(file: &File, options: &CompileOptions) -> Result<String, String> {
     let mut c = Compiler::new(Target::Windows);
+    c.opt = options.optimize;
     c.load(file)?;
     c.declare()?;
     c.generate()
@@ -6230,7 +6841,13 @@ fn vcvars_candidates() -> Vec<PathBuf> {
 
 /// Compiles to a native Windows x86-64 executable using `ml64` and `link`.
 pub fn compile_to_native(file: &File, output_exe: &str) -> Result<(), String> {
+    compile_to_native_with(file, output_exe, &CompileOptions::default())
+}
+
+/// `compile_to_native` with explicit options.
+pub fn compile_to_native_with(file: &File, output_exe: &str, options: &CompileOptions) -> Result<(), String> {
     let mut c = Compiler::new(Target::Windows);
+    c.opt = options.optimize;
     c.load(file)?;
     c.declare()?;
     let asm = c.generate()?;

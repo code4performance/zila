@@ -93,7 +93,7 @@ fn main() {
             if mode == Mode::Ast {
                 println!("{:#?}", file);
             } else if mode == Mode::Asm {
-                match brasa::codegen_x64::generate_asm(&file) {
+                match brasa::codegen_x64::generate_asm_with(&file, &brasa::codegen_x64::CompileOptions { optimize: opts.optimize }) {
                     Ok(asm) => println!("{}", asm),
                     Err(e) => {
                         eprintln!("error: {}", e);
@@ -110,7 +110,7 @@ fn main() {
                 };
                 let target_exe = out_exe.unwrap_or(default_out);
                 println!("Compiling {} to native x86-64 binary: {}...", path, target_exe);
-                match brasa::compile_to_native(&file, &target_exe) {
+                match brasa::codegen_x64::compile_to_native_with(&file, &target_exe, &brasa::codegen_x64::CompileOptions { optimize: opts.optimize }) {
                     Ok(()) => {
                         if let Ok(meta) = std::fs::metadata(&target_exe) {
                             println!("Built {} ({} bytes, native x86-64 PE binary)", target_exe, meta.len());

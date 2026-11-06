@@ -95,6 +95,19 @@
       <p>A <code>drop</code> method takes nothing and returns nothing. Records marked <code>#[shared]</code> (used by the standard library for files, sockets and futures) are never copied: every name refers to the same object.</p>
     </section>
 
+    <section id="optimizer">
+      <h2>The optimizer</h2>
+      <p>The compiler tidies the code it generates. A program must behave exactly the same with and without it, and <code>--no-opt</code> switches all of it off, which is the first thing to try when you suspect a compiler bug.</p>
+      <ul>
+        <li><strong>Constant folding:</strong> <code>2 * 3 + 1</code> becomes <code>7</code> and <code>1.5 + 2.25</code> becomes <code>3.75</code> at compile time, with the same wrapping integers and IEEE floats the running program would use. A division by a constant zero is left alone, so it still stops the program.</li>
+        <li><strong>No temporaries for simple operands:</strong> in <code>n - 1</code> or <code>sum + i</code> a literal or a local variable is used directly instead of being stored and loaded again.</li>
+        <li><strong>Conditions jump on the flags:</strong> <code>if</code>, <code>while</code>, <code>and</code>, <code>or</code> and <code>not</code> compare and branch without first making a true/false number. Comparisons with <code>NaN</code> behave as before.</li>
+        <li><strong>Cleanups:</strong> a value loaded right after it was stored, jumps to the next line, and code that can never run are removed. Functions with an <code>asm</code> block are left exactly as written.</li>
+        <li><strong>Cheaper entry:</strong> a function that holds only numbers and booleans no longer clears its local slots when it starts.</li>
+      </ul>
+      <p><strong>Variables in registers:</strong> the integer, boolean and pointer variables a function uses most, especially inside loops (and the counter of a <code>for a..b</code> loop), are kept in processor registers instead of memory, up to five per function. Floats, text, lists, records, variables whose address is taken and functions with <code>asm</code>, <code>defer</code>, <code>spawn</code> or <code>await</code> keep every variable in memory. A loop that adds to a variable 100 million times runs about three times faster, and recursive code such as <code>fib</code> close to twice as fast. Inlining small functions is the next step.</p>
+    </section>
+
     <section id="not-yet">
       <h2>Not supported yet</h2>
       <p>These parse, but the native compiler stops with a clear message when it meets them:</p>

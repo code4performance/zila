@@ -5,7 +5,7 @@
 //! entry and nothing else.
 
 /// Every option `brasa-parse` accepts.
-pub const FLAGS: &[&str] = &["--ast", "--tokens", "--asm", "--run", "--build", "-o", "--os", "--docs"];
+pub const FLAGS: &[&str] = &["--ast", "--tokens", "--asm", "--run", "--build", "-o", "--os", "--docs", "--no-opt"];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Mode {
@@ -31,10 +31,12 @@ pub struct Options {
     pub extra: Vec<String>,
     /// Value of `-o`.
     pub out: Option<String>,
+    /// Optimizations on (the default); `--no-opt` turns them off.
+    pub optimize: bool,
 }
 
 pub fn parse(args: &[String]) -> Result<Options, String> {
-    let mut o = Options { mode: Mode::Check, path: None, extra: Vec::new(), out: None };
+    let mut o = Options { mode: Mode::Check, path: None, extra: Vec::new(), out: None, optimize: true };
     let mut explicit = false;
     let mut i = 0;
     while i < args.len() {
@@ -46,6 +48,7 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
             "--run" => o.mode = Mode::Run,
             "--os" => o.mode = Mode::Os,
             "--docs" => o.mode = Mode::Docs,
+            "--no-opt" => o.optimize = false,
             "--build" | "build" => o.mode = Mode::Build,
             "-o" => {
                 i += 1;
@@ -67,7 +70,7 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
                 }
             }
         }
-        if FLAGS.contains(&a) && a != "-o" {
+        if FLAGS.contains(&a) && a != "-o" && a != "--no-opt" {
             explicit = true;
         }
         i += 1;
@@ -92,6 +95,9 @@ mod tests {
         let os = p(&["--os", "boot.br", "kernel.br", "-o", "d.img"]).unwrap();
         assert_eq!((os.mode, os.path.as_deref(), os.extra.len()), (Mode::Os, Some("boot.br"), 1));
         assert_eq!(p(&["--docs"]).unwrap().mode, Mode::Docs);
+        assert!(p(&["a.br"]).unwrap().optimize);
+        let n = p(&["a.br", "--no-opt", "-o", "a.exe"]).unwrap();
+        assert!(!n.optimize && n.mode == Mode::Build);
     }
 
     #[test]

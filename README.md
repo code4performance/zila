@@ -177,7 +177,7 @@ Brasa is **pre-alpha**. The design is settling, but breaking changes are still p
 | Generics and interfaces | ✅ Works: generic functions and records, inferred type arguments, structural interfaces as bounds |
 | Maps (`Map<K, V>`) | ✅ Works: text and integer keys, insertion order |
 | Text and list libraries | ✅ `use text` and `use list`: split, trim, parse numbers, map, filter, sort. More collections, I/O and formatting to come |
-| Optimizer | ⏳ Code generation is simple and unoptimized |
+| Optimizer | 🔧 Constant folding, direct operands, compare-and-branch, peephole cleanups and integer variables in registers (`--no-opt` turns them off); no inlining yet |
 | Formatter, test runner, package manager, language server | ⏳ Not started |
 | Linux, macOS, ARM64, Android, iOS | ⏳ Windows x64 and bare-metal x86-64 only |
 
@@ -190,7 +190,7 @@ This is the plan, in roughly the order we intend to do it. **Every item is a pla
 | # | Work | What it involves | Difficulty |
 |---|---|---|---|
 | 1 | Standard library, next steps | Formatting with placeholders, sets and sorted maps, buffered I/O, UDP, TLS, async DNS. Mostly written in Brasa. | ⭐ – ⭐⭐ |
-| 2 | Optimizer | Register allocation, constant folding, inlining. Today every value goes through the stack. | ⭐⭐⭐ |
+| 2 | Inlining | Inline small functions and keep more values in registers. | ⭐⭐ |
 | 3 | Tooling | `brasa fmt`, `brasa test`, a package manager, a language server, a richer VS Code extension. | ⭐⭐ – ⭐⭐⭐ |
 | 4 | More platforms | **Linux x86-64 first** (ELF and the System V ABI), then macOS. Apple Silicon, Android and iOS need an ARM64 backend. WebAssembly later. | ⭐⭐⭐ – ⭐⭐⭐⭐ |
 | 5 | Self-hosting | A Brasa compiler written in Brasa. | long term |

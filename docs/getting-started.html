@@ -62,6 +62,9 @@ cargo test</code></pre>
         <dt>--asm</dt>
         <dd>Prints the x86-64 assembly the native compiler generates for the file.</dd>
 
+        <dt>--no-opt</dt>
+        <dd>Compiles without the optimizer (see <a href="native.html#optimizer">Native compilation</a>). Use it to check whether a problem comes from an optimization: the program must behave the same either way. Combine it with <code>-o</code> or <code>--asm</code>.</dd>
+
         <dt>--docs</dt>
         <dd>Rewrites the example blocks of this documentation site from <code>examples/*.br</code>. Run it after changing an example; <code>cargo test</code> fails when the pages are out of date.</dd>
 

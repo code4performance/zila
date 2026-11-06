@@ -54,7 +54,7 @@
       <p>A <code>type</code> declaration introduces a <code>record</code> (a struct), an <code>enum</code> (a fixed set of names, optionally carrying data), or a structural <code>interface</code>. Any type can be made generic with <code>&lt;T&gt;</code>, and appending <code>?</code> to a type makes it optional (<code>T?</code>).</p>
 
       <h3>Basic types</h3>
-      <p>Everyday code uses <code>int</code> (64-bit), <code>float</code>, <code>byte</code>, <code>bool</code> and <code>text</code>. Sized integers such as <code>i32</code>, <code>u16</code> or <code>u64</code> exist for low-level and C code. Lists are written <code>[]T</code>, raw pointers <code>*T</code>, and a type followed by <code>?</code> may be <code>nil</code>. <code>float</code> is part of the language but not yet supported by the <a href="native.html#not-yet">native compiler</a>.</p>
+      <p>Everyday code uses <code>int</code> (64-bit), <code>float</code>, <code>byte</code>, <code>bool</code> and <code>text</code>. Sized integers such as <code>i32</code>, <code>u16</code> or <code>u64</code> exist for low-level and C code. Lists are written <code>[]T</code>, raw pointers <code>*T</code>, and a type followed by <code>?</code> may be <code>nil</code>. <code>float</code> is a 64-bit number with a fractional part (see <a href="#floats">Floats</a>).</p>
 
       <h3>Records</h3>
       <pre><code><span class="kw">type</span> Customer = <span class="kw">record</span>
@@ -236,6 +236,27 @@
         <dd><code>true</code> <code>false</code> <code>nil</code> <code>self</code> <code>ref</code> <code>new</code> <code>unsafe</code> <code>asm</code></dd>
       </dl>
       <p><code>new</code> is part of the grammar but is not supported by the <a href="native.html#not-yet">native compiler</a> yet. A method or field may be named like a keyword after a dot (<code>app.use(x)</code>).</p>
+    </section>
+
+    <section id="floats">
+      <h2>Floats</h2>
+      <p><code>float</code> (the same as <code>f64</code>) is a 64-bit IEEE 754 number; <code>f32</code> is the 32-bit form, mostly useful for storage and for calling C. A literal with a fraction or an exponent is a float: <code>1.5</code>, <code>2e3</code>, <code>0.25</code>.</p>
+      <pre><code><span class="kw">let</span> radius = 2.5
+<span class="kw">let</span> area = 3.14159 * radius * radius       <span class="cm">// a float</span>
+<span class="kw">let</span> count = 4
+<span class="kw">let</span> share = area / float(count)            <span class="cm">// convert the int on purpose</span>
+print(int(area))                          <span class="cm">// 19: cuts off the fraction</span>
+print(0.1 + 0.2)                          <span class="cm">// 0.30000000000000004</span>
+print(1.0 / 0.0)                          <span class="cm">// inf</span></code></pre>
+      <ul>
+        <li><strong>No silent mixing.</strong> <code>int</code> and <code>float</code> (or <code>f32</code> and <code>f64</code>) never meet in one operation, and <code>let x: float = 3</code> is an error: write <code>3.0</code> or <code>float(3)</code>. <code>%</code> is not defined for floats.</li>
+        <li><strong>Conversions.</strong> <code>float(n)</code> turns an integer into a float. <code>int(x)</code> cuts the fraction off toward zero, and stops the program with <code>float out of range</code> for <code>NaN</code>, infinities and numbers too big for an <code>int</code>. <code>f32(x)</code> and <code>f64(x)</code> change the width.</li>
+        <li><strong>IEEE behavior.</strong> Dividing by zero does not stop the program: it gives <code>inf</code>, <code>-inf</code> or <code>NaN</code>. Every comparison with <code>NaN</code> is false, except <code>!=</code>.</li>
+        <li><strong>Printing</strong> uses the shortest text that reads back as exactly the same number: <code>0.1</code>, <code>3.0</code>, <code>1e21</code>, <code>1.5e-7</code>. Numbers from <code>1e-4</code> up to <code>1e16</code> are written plainly; others use exponent form. <code>NaN</code>, <code>inf</code>, <code>-inf</code> and <code>-0.0</code> print as shown.</li>
+        <li><strong>Math library.</strong> <code>use math</code> gives <code>math.sqrt</code>, <code>math.floor</code>, <code>math.ceil</code>, <code>math.trunc</code>, <code>math.round</code> (halves away from zero), <code>math.abs</code>, <code>math.min</code>, <code>math.max</code>, <code>math.pow(x, n)</code> with a whole-number power, and <code>math.fixed(x, digits)</code>, which writes a float with a fixed number of decimals (<code>math.fixed(3.14159, 2)</code> is <code>3.14</code>).</li>
+        <li><strong>Calling C.</strong> <code>extern</code> functions take and return <code>f64</code> and <code>f32</code> the way Windows x64 expects, in the XMM registers.</li>
+        <li><strong>Not everywhere.</strong> Floats work in the native compiler. The interpreter behind <code>--run</code> handles <code>float</code> values but not <code>f32</code> as a separate type or <code>use math</code>, and the bare-metal target rejects floats. A float cannot be a map key.</li>
+      </ul>
     </section>
 
     <section id="maps">

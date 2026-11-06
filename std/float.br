@@ -1,0 +1,313 @@
+// =====================================================================
+// Brasa standard library: printing floats
+//
+// Written in Brasa, with integers only. The compiler calls `to_text`
+// whenever a `float`, `f64` or `f32` is printed or interpolated.
+//
+// It gives the shortest decimal digits that read back as exactly the same
+// number (Steele & White / Burger & Dybvig free-format printing), using big
+// numbers stored as lists of base-1,000,000,000 limbs, least significant
+// first. Layout rules:
+//
+//   3.0   0.1   123.456        written plainly while 1e-4 <= |x| < 1e16
+//   1e21  1.5e-7               exponent form outside that range
+//   NaN   inf   -inf   -0.0
+// =====================================================================
+
+package float
+
+// ---- big numbers ----
+
+func big_from(n: int) -> []int
+    let a: []int = []
+    var v = n
+    if v == 0
+        a.add(0)
+    end
+    while v > 0
+        a.add(v % 1000000000)
+        v = v / 1000000000
+    end
+    return a
+end
+
+// a = a * k, for 0 <= k <= 2^30
+func b_mul(a: []int, k: int)
+    var carry = 0
+    for i in 0..a.len
+        let t = a[i] * k + carry
+        a[i] = t % 1000000000
+        carry = t / 1000000000
+    end
+    while carry > 0
+        a.add(carry % 1000000000)
+        carry = carry / 1000000000
+    end
+end
+
+func b_mul_pow2(a: []int, n: int)
+    var left = n
+    while left >= 30
+        b_mul(a, 1073741824)
+        left -= 30
+    end
+    b_mul(a, 1 << left)
+end
+
+func b_pow2(n: int) -> []int
+    let a = big_from(1)
+    b_mul_pow2(a, n)
+    return a
+end
+
+// number of limbs without leading zeros
+func b_eff(a: []int) -> int
+    var n = a.len
+    while n > 1 and a[n - 1] == 0
+        n -= 1
+    end
+    return n
+end
+
+// -1, 0 or 1
+func b_cmp(a: []int, b: []int) -> int
+    let na = b_eff(a)
+    let nb = b_eff(b)
+    if na < nb
+        return -1
+    end
+    if na > nb
+        return 1
+    end
+    var i = na - 1
+    while i >= 0
+        if a[i] < b[i]
+            return -1
+        end
+        if a[i] > b[i]
+            return 1
+        end
+        i -= 1
+    end
+    return 0
+end
+
+func b_add(a: []int, b: []int) -> []int
+    let out: []int = []
+    var n = a.len
+    if b.len > n
+        n = b.len
+    end
+    var carry = 0
+    for i in 0..n
+        var t = carry
+        if i < a.len
+            t += a[i]
+        end
+        if i < b.len
+            t += b[i]
+        end
+        if t >= 1000000000
+            t -= 1000000000
+            carry = 1
+        else
+            carry = 0
+        end
+        out.add(t)
+    end
+    if carry > 0
+        out.add(carry)
+    end
+    return out
+end
+
+// a = a - b, requires a >= b
+func b_sub(a: []int, b: []int)
+    var borrow = 0
+    for i in 0..a.len
+        var t = a[i] - borrow
+        if i < b.len
+            t -= b[i]
+        end
+        if t < 0
+            t += 1000000000
+            borrow = 1
+        else
+            borrow = 0
+        end
+        a[i] = t
+    end
+end
+
+// ---- printing ----
+
+func zeros(n: int) -> text
+    var s = ""
+    for i in 0..n
+        s = s + "0"
+    end
+    return s
+end
+
+// `bits` holds the IEEE bits of the number: 64 bits, or the low 32 bits when `single`.
+func to_text(bits: int, single: bool) -> text
+    var neg = false
+    var expf = 0
+    var mant = 0
+    var p = 53
+    var bias = 1075
+    var maxexp = 2047
+    if single
+        neg = ((bits >> 31) bitand 1) == 1
+        expf = (bits >> 23) bitand 255
+        mant = bits bitand 8388607
+        p = 24
+        bias = 150
+        maxexp = 255
+    else
+        neg = bits < 0
+        expf = (bits >> 52) bitand 2047
+        mant = bits bitand 4503599627370495
+    end
+    let sign = if neg "-" else "" end
+    if expf == maxexp
+        if mant != 0
+            return "NaN"
+        end
+        return sign + "inf"
+    end
+
+    var f = mant
+    var e = 1 - bias
+    if expf == 0
+        if f == 0
+            return sign + "0.0"
+        end
+    else
+        f = mant + (1 << (p - 1))
+        e = expf - bias
+    end
+    let unequal = expf > 1 and mant == 0
+    let even = (f % 2) == 0
+
+    // value = r / s, with the rounding interval [r - mm, r + mp] / s
+    let r = big_from(f)
+    var s = big_from(1)
+    var mp = big_from(1)
+    var mm = big_from(1)
+    if e >= 0
+        if unequal
+            b_mul_pow2(r, e + 2)
+            s = big_from(4)
+            mp = b_pow2(e + 1)
+            mm = b_pow2(e)
+        else
+            b_mul_pow2(r, e + 1)
+            s = big_from(2)
+            mp = b_pow2(e)
+            mm = b_pow2(e)
+        end
+    else
+        if unequal
+            b_mul(r, 4)
+            s = b_pow2(2 - e)
+            mp = big_from(2)
+        else
+            b_mul(r, 2)
+            s = b_pow2(1 - e)
+        end
+    end
+
+    // find k so that the value is 0.d1d2d3... * 10^k
+    var k = 0
+    var scaling = true
+    while scaling
+        let c = b_cmp(b_add(r, mp), s)
+        if c > 0 or (c == 0 and even)
+            b_mul(s, 10)
+            k += 1
+        else
+            scaling = false
+        end
+    end
+    scaling = true
+    while scaling
+        let hi = b_add(r, mp)
+        b_mul(hi, 10)
+        let c = b_cmp(hi, s)
+        if c < 0 or (c == 0 and not even)
+            b_mul(r, 10)
+            b_mul(mp, 10)
+            b_mul(mm, 10)
+            k -= 1
+        else
+            scaling = false
+        end
+    end
+
+    // digits
+    let digits: []int = []
+    var more = true
+    while more
+        b_mul(r, 10)
+        b_mul(mp, 10)
+        b_mul(mm, 10)
+        var d = 0
+        while b_cmp(r, s) >= 0
+            b_sub(r, s)
+            d += 1
+        end
+        let c1 = b_cmp(r, mm)
+        let low = c1 < 0 or (c1 == 0 and even)
+        let c2 = b_cmp(b_add(r, mp), s)
+        let high = c2 > 0 or (c2 == 0 and even)
+        if low and high
+            if b_cmp(b_add(r, r), s) < 0
+                digits.add(d)
+            else
+                digits.add(d + 1)
+            end
+            more = false
+        else if low
+            digits.add(d)
+            more = false
+        else if high
+            digits.add(d + 1)
+            more = false
+        else
+            digits.add(d)
+        end
+    end
+
+    // layout: the value is d1.d2d3... * 10^x
+    let x = k - 1
+    let n = digits.len
+    if x >= 16 or x < -4
+        var m = "{digits[0]}"
+        for i in 1..n
+            if i == 1
+                m = m + "."
+            end
+            m = m + "{digits[i]}"
+        end
+        return sign + m + "e{x}"
+    end
+    var out = sign
+    if x < 0
+        out = out + "0." + zeros(0 - x - 1)
+        for i in 0..n
+            out = out + "{digits[i]}"
+        end
+        return out
+    end
+    for i in 0..n
+        if i == x + 1
+            out = out + "."
+        end
+        out = out + "{digits[i]}"
+    end
+    if n <= x + 1
+        out = out + zeros(x + 1 - n) + ".0"
+    end
+    return out
+end

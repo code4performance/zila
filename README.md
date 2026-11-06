@@ -103,6 +103,7 @@ Everything in this list is implemented and covered by tests.
 - Records are copied when assigned (value semantics); `ref` shares. Records can define `drop` to close files and sockets automatically.
 - `live_objects()` reports how many heap objects are alive, so leaks are easy to test for. The test suite uses it to check that thousands of tasks and connections leave nothing behind.
 - Reference cycles are not collected: avoid building them.
+- `float` (`f64`) and `f32`: arithmetic, comparisons that follow IEEE 754, explicit `float(n)` / `int(x)` conversions, shortest-text printing, `use math`, and C calls through the XMM registers.
 - `Map<K, V>` stores values under text or integer keys: `{ "a": 1 }` literals, `m[key]`, `has`, `get(key, default)`, `remove`, and `for key, value in m` in insertion order.
 - `defer call(...)` runs a call when the function ends, however it ends (`return`, the end of the body, or a failed `try`), last in first out.
 
@@ -170,7 +171,7 @@ Brasa is **pre-alpha**. The design is settling, but breaking changes are still p
 | Bare-metal target and Brasa OS | ✅ Boots and runs |
 | `async` / `await`, timers, files, TCP | ✅ Works |
 | Interpreter (`--run`) | 🔧 Runs plain programs; does not know the native-only features |
-| Floating point | ⏳ Parsed, not compiled yet |
+| Floating point | ✅ Works: `float`/`f64`/`f32`, `use math`, C calls; Windows x64 only |
 | Generics and interfaces | ⏳ Parsed, not compiled yet |
 | Maps (`Map<K, V>`) | ✅ Works: text and integer keys, insertion order |
 | Text and collection libraries | ⏳ Only the basics exist |
@@ -186,13 +187,12 @@ This is the plan, in roughly the order we intend to do it. **Every item is a pla
 
 | # | Work | What it involves | Difficulty |
 |---|---|---|---|
-| 1 | Floating point | `float` and `f32`/`f64`: SSE registers, the calling convention, and assembler support. | ⭐⭐⭐ |
-| 2 | Generics and interfaces | Monomorphization, bounds (`<T: Printable>`), structural interface checks. | ⭐⭐⭐ |
-| 3 | Standard library | Text (split, trim, parse, format), collections, buffered I/O, UDP, TLS, async DNS. Mostly written in Brasa. | ⭐ – ⭐⭐ |
-| 4 | Optimizer | Register allocation, constant folding, inlining. Today every value goes through the stack. | ⭐⭐⭐ |
-| 5 | Tooling | `brasa fmt`, `brasa test`, a package manager, a language server, a richer VS Code extension. | ⭐⭐ – ⭐⭐⭐ |
-| 6 | More platforms | **Linux x86-64 first** (ELF and the System V ABI), then macOS. Apple Silicon, Android and iOS need an ARM64 backend. WebAssembly later. | ⭐⭐⭐ – ⭐⭐⭐⭐ |
-| 7 | Self-hosting | A Brasa compiler written in Brasa. | long term |
+| 1 | Generics and interfaces | Monomorphization, bounds (`<T: Printable>`), structural interface checks. | ⭐⭐⭐ |
+| 2 | Standard library | Text (split, trim, parse, format), collections, buffered I/O, UDP, TLS, async DNS. Mostly written in Brasa. | ⭐ – ⭐⭐ |
+| 3 | Optimizer | Register allocation, constant folding, inlining. Today every value goes through the stack. | ⭐⭐⭐ |
+| 4 | Tooling | `brasa fmt`, `brasa test`, a package manager, a language server, a richer VS Code extension. | ⭐⭐ – ⭐⭐⭐ |
+| 5 | More platforms | **Linux x86-64 first** (ELF and the System V ABI), then macOS. Apple Silicon, Android and iOS need an ARM64 backend. WebAssembly later. | ⭐⭐⭐ – ⭐⭐⭐⭐ |
+| 6 | Self-hosting | A Brasa compiler written in Brasa. | long term |
 
 Beyond the compiler, contributions that make a big difference right now:
 **more example programs**, **bug reports with a tiny failing program**, **documentation and tutorials**, and **tests**.

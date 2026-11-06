@@ -41,6 +41,7 @@
         <li><code>enum</code> with or without data and <code>match</code>, which must cover every case.</li>
         <li>Errors: <code>-&gt; T or error</code>, <code>try</code>, <code>error("message")</code>, <code>match</code> with <code>ok(v)</code> and <code>err(e)</code>, and <code>??</code>.</li>
         <li>Closures (they capture by value) and top-level functions passed to C as callbacks.</li>
+        <li><code>float</code>, <code>f64</code> and <code>f32</code>: arithmetic, comparison, conversion, shortest-text printing, <code>use math</code>, and <code>extern</code> calls (see the <a href="syntax.html#floats">syntax guide</a>).</li>
         <li><code>Map&lt;K, V&gt;</code>: maps with text or integer keys, literals, <code>m[key]</code>, <code>has</code>, <code>get</code>, <code>remove</code> and <code>for</code> in insertion order (see the <a href="syntax.html#maps">syntax guide</a>).</li>
         <li><code>defer</code>: a call that runs when the function ends, however it ends (see the <a href="syntax.html#defer">syntax guide</a>).</li>
         <li><code>if</code> as an expression, <code>while</code>, <code>for</code> over ranges, lists and maps, <code>break</code> and <code>continue</code>.</li>
@@ -96,7 +97,7 @@
       <h2>Not supported yet</h2>
       <p>These parse, but the native compiler stops with a clear message when it meets them:</p>
       <ul>
-        <li>Floating point (<code>float</code>, <code>f64</code>) and fixed-size arrays.</li>
+        <li>Fixed-size arrays.</li>
         <li>Generics and interfaces (the grammar has them; there is no code generation for them yet).</li>
         <li><code>new</code>, spreading a list into arguments (<code>f(...xs)</code>), and <code>html</code> templates.</li>
       </ul>

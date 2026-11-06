@@ -1,0 +1,47 @@
+// Floating point: fractional numbers.
+//
+//   brasa-parse examples/floats.br -o floats.exe
+//
+// `float` is a 64-bit number with a fractional part. It never mixes with `int`
+// by accident: convert with float(n) and int(x).
+
+package main
+
+func average(values: List<float>) -> float
+    var total = 0.0
+    for v in values
+        total += v
+    end
+    return total / float(values.len)
+end
+
+func compound(principal: float, rate: float, years: int) -> float
+    var amount = principal
+    for year in 0..years
+        amount = amount * (1.0 + rate)
+    end
+    return amount
+end
+
+func main()
+    let temps = [21.5, 19.0, 23.25, 18.75]
+    print("average {average(temps)}")
+
+    // 0.1 has no exact binary form, and Brasa shows the shortest text that reads back exactly
+    print("0.1 + 0.2 = {0.1 + 0.2}")
+    print("1 / 3 = {1.0 / 3.0}")
+
+    print("savings {compound(1000.0, 0.05, 10)}")
+
+    let whole = 7
+    print("half of {whole} is {float(whole) / 2.0}")
+    print("cut off: {int(3.99)} and {int(-3.99)}")
+
+    // division by zero is not an error for floats
+    let zero = 0.0
+    print("{1.0 / zero} {-1.0 / zero} {zero / zero}")
+
+    // NaN is never equal to anything, itself included
+    let nan = zero / zero
+    print("{nan == nan} {nan != nan} {1.5 < 2.5}")
+end

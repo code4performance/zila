@@ -343,6 +343,11 @@ fn reg_by_name(n: &str) -> Option<Reg> {
     if let Some(i) = H8.iter().position(|x| *x == n) {
         return Some(Reg { code: 4 + i as u8, size: 1, rex: false, high: true });
     }
+    if let Some(k) = n.strip_prefix("xmm").and_then(|d| d.parse::<u8>().ok()) {
+        if k < 16 {
+            return Some(Reg { code: k, size: 16, rex: false, high: false });
+        }
+    }
     match n {
         "spl" => return Some(Reg { code: 4, size: 1, rex: true, high: false }),
         "bpl" => return Some(Reg { code: 5, size: 1, rex: true, high: false }),
@@ -1012,7 +1017,9 @@ impl<'a> Asm<'a> {
                 ins.op.push(0xCF);
                 return Ok(());
             }
-            "movsw" | "movsd" | "movsq" | "stosw" | "stosd" | "stosq" | "lodsw" | "lodsd" | "lodsq" => {
+            "movsw" | "movsd" | "movsq" | "stosw" | "stosd" | "stosq" | "lodsw" | "lodsd" | "lodsq"
+                if !(mn == "movsd" && !ops.is_empty()) =>
+            {
                 let sz = match &mn[4..] {
                     "w" => 2,
                     "d" => 4,
@@ -1159,6 +1166,7 @@ impl<'a> Asm<'a> {
                 ins.op.push(0xCB);
                 Ok(())
             }
+            _ if sse_op(mn).is_some() => self.enc_sse(mn, ops, ins),
             _ => {
                 if let Some(c) = mn.strip_prefix('j').and_then(cond_code) {
                     let Op::Imm(t) = &ops[0] else { return Err("jcc needs a label".into()) };
@@ -1178,6 +1186,126 @@ impl<'a> Asm<'a> {
                     return self.modrm(ins, d.code, &rm);
                 }
                 Err(format!("unknown instruction '{}'", mn))
+            }
+        }
+    }
+
+    /// Scalar SSE/SSE2 instructions (xmm registers are `Reg` with size 16).
+    fn enc_sse(&mut self, mn: &str, ops: &mut Vec<Op>, ins: &mut Ins) -> R<()> {
+        let (pre, op): (Option<u8>, &[u8]) = sse_op(mn).unwrap();
+        let bad = || format!("bad operands for '{}'", mn);
+        let is_x = |o: &Op| matches!(o, Op::Reg(r) if r.size == 16);
+        let push_pre = |ins: &mut Ins| {
+            if let Some(p) = pre {
+                ins.pre.push(p);
+            }
+        };
+        match mn {
+            "movq" | "movd" => {
+                let w = mn == "movq";
+                if ops.len() != 2 {
+                    return Err(bad());
+                }
+                match (&ops[0], &ops[1]) {
+                    (Op::Reg(x), Op::Reg(g)) if x.size == 16 && g.size != 16 => {
+                        if g.size != if w { 8 } else { 4 } {
+                            return Err(bad());
+                        }
+                        ins.pre.push(0x66);
+                        if w {
+                            ins.rex |= 8;
+                        }
+                        ins.op.extend_from_slice(&[0x0F, 0x6E]);
+                        self.modrm(ins, x.code, &Rm::Reg(*g))
+                    }
+                    (Op::Reg(g), Op::Reg(x)) if x.size == 16 && g.size != 16 => {
+                        if g.size != if w { 8 } else { 4 } {
+                            return Err(bad());
+                        }
+                        ins.pre.push(0x66);
+                        if w {
+                            ins.rex |= 8;
+                        }
+                        ins.op.extend_from_slice(&[0x0F, 0x7E]);
+                        self.modrm(ins, x.code, &Rm::Reg(*g))
+                    }
+                    (Op::Reg(x), src) if x.size == 16 && w => {
+                        let (rm, _) = rm_of(src)?;
+                        ins.pre.push(0xF3);
+                        ins.op.extend_from_slice(&[0x0F, 0x7E]);
+                        self.modrm(ins, x.code, &rm)
+                    }
+                    (Op::Mem(m), Op::Reg(x)) if x.size == 16 && w => {
+                        ins.pre.push(0x66);
+                        ins.op.extend_from_slice(&[0x0F, 0xD6]);
+                        self.modrm(ins, x.code, &Rm::Mem(m.clone()))
+                    }
+                    _ => Err(bad()),
+                }
+            }
+            "movsd" | "movss" => {
+                if ops.len() != 2 {
+                    return Err(bad());
+                }
+                push_pre(ins);
+                match (&ops[0], &ops[1]) {
+                    (Op::Reg(x), src) if x.size == 16 => {
+                        let (rm, _) = rm_of(src)?;
+                        ins.op.extend_from_slice(&[0x0F, 0x10]);
+                        self.modrm(ins, x.code, &rm)
+                    }
+                    (Op::Mem(m), Op::Reg(x)) if x.size == 16 => {
+                        ins.op.extend_from_slice(&[0x0F, 0x11]);
+                        self.modrm(ins, x.code, &Rm::Mem(m.clone()))
+                    }
+                    _ => Err(bad()),
+                }
+            }
+            "cvtsi2sd" | "cvtsi2ss" => {
+                let (Op::Reg(x), src) = (&ops[0], &ops[1]) else { return Err(bad()) };
+                let (rm, size) = rm_of(src)?;
+                if x.size != 16 || !(size == 4 || size == 8) {
+                    return Err(bad());
+                }
+                push_pre(ins);
+                if size == 8 {
+                    ins.rex |= 8;
+                }
+                ins.op.extend_from_slice(op);
+                self.modrm(ins, x.code, &rm)
+            }
+            "cvttsd2si" | "cvttss2si" => {
+                let (Op::Reg(g), src) = (&ops[0], &ops[1]) else { return Err(bad()) };
+                let (rm, _) = rm_of(src)?;
+                if g.size != 4 && g.size != 8 {
+                    return Err(bad());
+                }
+                push_pre(ins);
+                if g.size == 8 {
+                    ins.rex |= 8;
+                }
+                ins.op.extend_from_slice(op);
+                self.modrm(ins, g.code, &rm)
+            }
+            "roundsd" | "roundss" => {
+                let (Op::Reg(x), src, Op::Imm(i)) = (&ops[0], &ops[1], &ops[2]) else { return Err(bad()) };
+                let (rm, _) = rm_of(src)?;
+                push_pre(ins);
+                ins.op.extend_from_slice(op);
+                self.modrm(ins, x.code, &rm)?;
+                let v = self.eval(i)?;
+                self.imm_bytes(ins, v, 1);
+                Ok(())
+            }
+            _ => {
+                if ops.len() != 2 || !is_x(&ops[0]) {
+                    return Err(bad());
+                }
+                let Op::Reg(x) = &ops[0] else { unreachable!() };
+                let (rm, _) = rm_of(&ops[1])?;
+                push_pre(ins);
+                ins.op.extend_from_slice(op);
+                self.modrm(ins, x.code, &rm)
             }
         }
     }
@@ -1472,6 +1600,41 @@ impl<'a> Asm<'a> {
     }
 }
 
+/// (mandatory prefix, opcode) for the scalar SSE instructions handled by `enc_sse`.
+fn sse_op(mn: &str) -> Option<(Option<u8>, &'static [u8])> {
+    const SD: Option<u8> = Some(0xF2);
+    const SS: Option<u8> = Some(0xF3);
+    const PD: Option<u8> = Some(0x66);
+    Some(match mn {
+        "movq" | "movd" => (None, &[]),
+        "movsd" => (SD, &[]),
+        "movss" => (SS, &[]),
+        "addsd" => (SD, &[0x0F, 0x58]),
+        "addss" => (SS, &[0x0F, 0x58]),
+        "subsd" => (SD, &[0x0F, 0x5C]),
+        "subss" => (SS, &[0x0F, 0x5C]),
+        "mulsd" => (SD, &[0x0F, 0x59]),
+        "mulss" => (SS, &[0x0F, 0x59]),
+        "divsd" => (SD, &[0x0F, 0x5E]),
+        "divss" => (SS, &[0x0F, 0x5E]),
+        "sqrtsd" => (SD, &[0x0F, 0x51]),
+        "sqrtss" => (SS, &[0x0F, 0x51]),
+        "xorpd" => (PD, &[0x0F, 0x57]),
+        "andpd" => (PD, &[0x0F, 0x54]),
+        "ucomisd" => (PD, &[0x0F, 0x2E]),
+        "ucomiss" => (None, &[0x0F, 0x2E]),
+        "cvtsi2sd" => (SD, &[0x0F, 0x2A]),
+        "cvtsi2ss" => (SS, &[0x0F, 0x2A]),
+        "cvttsd2si" => (SD, &[0x0F, 0x2C]),
+        "cvttss2si" => (SS, &[0x0F, 0x2C]),
+        "cvtsd2ss" => (SD, &[0x0F, 0x5A]),
+        "cvtss2sd" => (SS, &[0x0F, 0x5A]),
+        "roundsd" => (PD, &[0x0F, 0x3A, 0x0B]),
+        "roundss" => (PD, &[0x0F, 0x3A, 0x0A]),
+        _ => return None,
+    })
+}
+
 fn scale_bits(s: u8) -> R<u8> {
     Ok(match s {
         1 => 0,
@@ -1517,6 +1680,55 @@ mod tests {
         assert_eq!(enc("mov r8, r9", 64), [0x4D, 0x89, 0xC8]);
         assert_eq!(enc("pop rbp", 64), [0x5D]);
         assert_eq!(enc("push r12", 64), [0x41, 0x54]);
+    }
+
+    #[test]
+    fn sse_moves() {
+        assert_eq!(enc("movq xmm0, rax", 64), [0x66, 0x48, 0x0F, 0x6E, 0xC0]);
+        assert_eq!(enc("movq rax, xmm0", 64), [0x66, 0x48, 0x0F, 0x7E, 0xC0]);
+        assert_eq!(enc("movq xmm1, rcx", 64), [0x66, 0x48, 0x0F, 0x6E, 0xC9]);
+        assert_eq!(enc("movq xmm9, r8", 64), [0x66, 0x4D, 0x0F, 0x6E, 0xC8]);
+        assert_eq!(enc("movd xmm0, eax", 64), [0x66, 0x0F, 0x6E, 0xC0]);
+        assert_eq!(enc("movd eax, xmm0", 64), [0x66, 0x0F, 0x7E, 0xC0]);
+        assert_eq!(enc("movsd xmm0, xmm1", 64), [0xF2, 0x0F, 0x10, 0xC1]);
+        assert_eq!(enc("movsd xmm0, qword ptr [rbp - 8]", 64), [0xF2, 0x0F, 0x10, 0x45, 0xF8]);
+        assert_eq!(enc("movsd qword ptr [rbp - 8], xmm0", 64), [0xF2, 0x0F, 0x11, 0x45, 0xF8]);
+        assert_eq!(enc("movss xmm2, dword ptr [rcx]", 64), [0xF3, 0x0F, 0x10, 0x11]);
+        assert_eq!(enc("movss dword ptr [rcx], xmm2", 64), [0xF3, 0x0F, 0x11, 0x11]);
+        assert_eq!(enc("movq xmm0, qword ptr [rcx]", 64), [0xF3, 0x0F, 0x7E, 0x01]);
+        assert_eq!(enc("movq qword ptr [rcx], xmm0", 64), [0x66, 0x0F, 0xD6, 0x01]);
+        // string instruction form still works
+        assert_eq!(enc("movsd", 64), [0xA5]);
+    }
+
+    #[test]
+    fn sse_arithmetic() {
+        assert_eq!(enc("addsd xmm0, xmm1", 64), [0xF2, 0x0F, 0x58, 0xC1]);
+        assert_eq!(enc("subsd xmm0, xmm1", 64), [0xF2, 0x0F, 0x5C, 0xC1]);
+        assert_eq!(enc("mulsd xmm0, xmm1", 64), [0xF2, 0x0F, 0x59, 0xC1]);
+        assert_eq!(enc("divsd xmm0, xmm1", 64), [0xF2, 0x0F, 0x5E, 0xC1]);
+        assert_eq!(enc("addss xmm0, xmm1", 64), [0xF3, 0x0F, 0x58, 0xC1]);
+        assert_eq!(enc("divss xmm2, xmm3", 64), [0xF3, 0x0F, 0x5E, 0xD3]);
+        assert_eq!(enc("sqrtsd xmm0, xmm0", 64), [0xF2, 0x0F, 0x51, 0xC0]);
+        assert_eq!(enc("xorpd xmm0, xmm0", 64), [0x66, 0x0F, 0x57, 0xC0]);
+        assert_eq!(enc("andpd xmm0, xmm1", 64), [0x66, 0x0F, 0x54, 0xC1]);
+        assert_eq!(enc("addsd xmm8, xmm1", 64), [0xF2, 0x44, 0x0F, 0x58, 0xC1]);
+    }
+
+    #[test]
+    fn sse_compare_convert_round() {
+        assert_eq!(enc("ucomisd xmm0, xmm1", 64), [0x66, 0x0F, 0x2E, 0xC1]);
+        assert_eq!(enc("ucomiss xmm0, xmm1", 64), [0x0F, 0x2E, 0xC1]);
+        assert_eq!(enc("cvtsi2sd xmm0, rax", 64), [0xF2, 0x48, 0x0F, 0x2A, 0xC0]);
+        assert_eq!(enc("cvtsi2sd xmm0, eax", 64), [0xF2, 0x0F, 0x2A, 0xC0]);
+        assert_eq!(enc("cvtsi2ss xmm0, rax", 64), [0xF3, 0x48, 0x0F, 0x2A, 0xC0]);
+        assert_eq!(enc("cvttsd2si rax, xmm0", 64), [0xF2, 0x48, 0x0F, 0x2C, 0xC0]);
+        assert_eq!(enc("cvttss2si eax, xmm0", 64), [0xF3, 0x0F, 0x2C, 0xC0]);
+        assert_eq!(enc("cvtsd2ss xmm0, xmm0", 64), [0xF2, 0x0F, 0x5A, 0xC0]);
+        assert_eq!(enc("cvtss2sd xmm0, xmm0", 64), [0xF3, 0x0F, 0x5A, 0xC0]);
+        assert_eq!(enc("roundsd xmm0, xmm0, 9", 64), [0x66, 0x0F, 0x3A, 0x0B, 0xC0, 0x09]);
+        assert_eq!(enc("roundss xmm1, xmm2, 10", 64), [0x66, 0x0F, 0x3A, 0x0A, 0xCA, 0x0A]);
+        assert!(assemble("addsd rax, xmm0", 0x1000, 64).is_err());
     }
 
     #[test]

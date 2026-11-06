@@ -11,6 +11,6 @@ pub mod lexer;
 pub mod parser;
 
 pub use codegen_x64::compile_to_native;
-pub use interp::Interpreter;
+pub use interp::{float_text, float_text_f32, Interpreter};
 pub use lexer::Diag;
 pub use parser::parse_source;

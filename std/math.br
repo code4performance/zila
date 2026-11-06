@@ -1,0 +1,113 @@
+// =====================================================================
+// Brasa standard library: math on floats
+//
+//     use math
+//     println(math.sqrt(2.25))        // 1.5
+//
+// `sqrt`, `floor`, `ceil` and `trunc` use the processor's own instructions
+// (through the compiler intrinsics `__sqrt`, `__floor`, `__ceil` and `__trunc`).
+// The rest is written in Brasa.
+// =====================================================================
+
+package math
+
+// Square root. `sqrt(-1.0)` is NaN.
+func sqrt(x: float) -> float
+    return __sqrt(x)
+end
+
+// Largest whole number not above x.
+func floor(x: float) -> float
+    return __floor(x)
+end
+
+// Smallest whole number not below x.
+func ceil(x: float) -> float
+    return __ceil(x)
+end
+
+// x without its fractional part (rounds toward zero).
+func trunc(x: float) -> float
+    return __trunc(x)
+end
+
+func abs(x: float) -> float
+    if x < 0.0 or (x == 0.0 and 1.0 / x < 0.0)
+        return -x
+    end
+    return x
+end
+
+func min(a: float, b: float) -> float
+    if b < a
+        return b
+    end
+    return a
+end
+
+func max(a: float, b: float) -> float
+    if b > a
+        return b
+    end
+    return a
+end
+
+// Nearest whole number; halves round away from zero (`round(2.5)` is 3.0, `round(-2.5)` is -3.0).
+func round(x: float) -> float
+    let t = __trunc(x)
+    let d = abs(x - t)
+    if d >= 0.5
+        if x < 0.0
+            return t - 1.0
+        end
+        return t + 1.0
+    end
+    return t
+end
+
+// x to a whole-number power; negative powers give 1 / x^|n|.
+func pow(x: float, n: int) -> float
+    var e = n
+    if e < 0
+        e = 0 - e
+    end
+    var result = 1.0
+    var base = x
+    while e > 0
+        if (e bitand 1) == 1
+            result = result * base
+        end
+        base = base * base
+        e = e >> 1
+    end
+    if n < 0
+        return 1.0 / result
+    end
+    return result
+end
+
+// x written with exactly `digits` decimals: `fixed(3.14159, 2)` is "3.14".
+// NaN, infinities and numbers too large to scale are written like `print` does.
+func fixed(x: float, digits: int) -> text
+    if x != x or x > 1.0e15 or x < -1.0e15 or digits < 0 or digits > 15
+        return "{x}"
+    end
+    let scaled = round(abs(x) * pow(10.0, digits))
+    if scaled >= 9.0e15
+        return "{x}"
+    end
+    let n = int(scaled)
+    var out = ""
+    if x < 0.0 and n != 0
+        out = "-"
+    end
+    if digits == 0
+        return out + "{n}"
+    end
+    let unit = int(pow(10.0, digits))
+    var frac = "{n % unit}"
+    while frac.len < digits
+        frac = "0" + frac
+    end
+    return out + "{n / unit}." + frac
+end

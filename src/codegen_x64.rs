@@ -49,6 +49,8 @@ fn std_source(name: &str) -> Option<&'static str> {
         "net" => Some(include_str!("../std/net.br")),
         "sys" => Some(include_str!("../std/sys.br")),
         "ws" => Some(include_str!("../std/ws.br")),
+        "float" => Some(include_str!("../std/float.br")),
+        "math" => Some(include_str!("../std/math.br")),
         _ => None,
     }
 }
@@ -65,6 +67,8 @@ enum Ty {
     Nil,
     Bool,
     Int { bits: u8, signed: bool },
+    /// `f32` (bits 32) and `f64`/`float` (bits 64). Held in rax as the raw IEEE bits.
+    Float { bits: u8 },
     Text,
     Rec(String),
     Enum(String),
@@ -88,6 +92,9 @@ impl Ty {
     fn is_int(&self) -> bool {
         matches!(self, Ty::Int { .. })
     }
+    fn is_float(&self) -> bool {
+        matches!(self, Ty::Float { .. })
+    }
     fn is_unsigned(&self) -> bool {
         matches!(self, Ty::Int { signed: false, .. } | Ty::Ptr(_))
     }
@@ -96,6 +103,7 @@ impl Ty {
         match self {
             Ty::Bool => 1,
             Ty::Int { bits, .. } => *bits as u32 / 8,
+            Ty::Float { bits } => *bits as u32 / 8,
             _ => 8,
         }
     }
@@ -108,6 +116,8 @@ impl Ty {
             Ty::Nil => "nil".into(),
             Ty::Bool => "bool".into(),
             Ty::Int { bits, signed } => format!("{}{}", if *signed { "i" } else { "u" }, bits),
+            Ty::Float { bits: 32 } => "f32".into(),
+            Ty::Float { .. } => "float".into(),
             Ty::Text => "text".into(),
             Ty::Rec(n) | Ty::Enum(n) => n.rsplit('.').next().unwrap_or(n).to_string(),
             Ty::List(t) => format!("[]{}", t.show()),
@@ -637,6 +647,12 @@ impl Compiler {
                 wanted.push("task".into());
                 wanted.push("future".into());
             }
+            if name != "float" && file_uses_floats(&file) {
+                if self.target == Target::Bare {
+                    return Err("floating point is not available in a bare-metal kernel".into());
+                }
+                wanted.push("float".into());
+            }
             for m in wanted {
                 if self.target == Target::Bare && (matches!(m.as_str(), "ui" | "task" | "future" | "fs" | "net" | "sys" | "ws")) {
                     return Err(format!("'{}' needs Windows and cannot be used in a bare-metal kernel", m));
@@ -868,6 +884,7 @@ impl Compiler {
             ExprKind::Bool(_) => Ty::Bool,
             ExprKind::Text(_) => Ty::Text,
             ExprKind::Int(_) | ExprKind::Char(_) => Ty::i64(),
+            ExprKind::Float(_) => Ty::Float { bits: 64 },
             ExprKind::Record { path, .. } => Ty::Rec(self.record_name(path, m)?),
             ExprKind::Call { callee, .. } => match &callee.kind {
                 ExprKind::Ident(f) => match self.funcs.get(&(m.to_string(), f.clone())) {
@@ -932,9 +949,8 @@ impl Compiler {
                         "bool" => return Ok(Ty::Bool),
                         "text" => return Ok(Ty::Text),
                         "error" => return Ok(Ty::Err),
-                        "float" | "f32" | "f64" => {
-                            return self.err("floating point is not supported by the native backend yet");
-                        }
+                        "float" | "f64" => return Ok(Ty::Float { bits: 64 }),
+                        "f32" => return Ok(Ty::Float { bits: 32 }),
                         "List" if args.len() == 1 => return Ok(Ty::List(Box::new(self.resolve(&args[0], m)?))),
                         "Map" if args.len() == 2 => {
                             let k = self.resolve(&args[0], m)?;
@@ -1398,7 +1414,8 @@ end
         if compatible(want, got) {
             Ok(())
         } else {
-            self.err(format!("{}: expected {}, found {}", what, want.show(), got.show()))
+            let hint = if want.is_float() && got.is_int() { " (write a float literal such as 3.0, or use float(x))" } else { "" };
+            self.err(format!("{}: expected {}, found {}{}", what, want.show(), got.show(), hint))
         }
     }
 
@@ -1494,6 +1511,18 @@ end
             Ty::Int { .. } => {
                 self.e("mov rcx, rax");
                 self.e("call rt_text_from_int");
+            }
+            Ty::Float { bits } => {
+                let sig = match self.funcs.get(&("float".to_string(), "to_text".to_string())) {
+                    Some(s) => s.clone(),
+                    None => return self.err("printing a float needs the float library"),
+                };
+                let (a, b) = (self.temp(), self.temp());
+                self.e(format!("mov qword ptr [rbp - {}], rax", a));
+                self.e(format!("mov qword ptr [rbp - {}], {}", b, (*bits == 32) as i32));
+                self.emit_call(&[a, b], &format!("call {}", sig.sym), None);
+                self.free(b);
+                self.free(a);
             }
             Ty::Bool => {
                 let (lt, lf) = (self.string_lit("true"), self.string_lit("false"));
@@ -2094,7 +2123,25 @@ end
                 self.e("xor eax, eax");
                 Ok(Ty::Nil)
             }
-            ExprKind::Float(_) => self.err("floating point is not supported by the native backend yet"),
+            ExprKind::Float(f) => {
+                if matches!(want, Some(Ty::Float { bits: 32 })) {
+                    let b = (*f as f32).to_bits();
+                    if b == 0 {
+                        self.e("xor eax, eax");
+                    } else {
+                        self.e(format!("mov eax, {}", b));
+                    }
+                    Ok(Ty::Float { bits: 32 })
+                } else {
+                    let b = f.to_bits();
+                    if b == 0 {
+                        self.e("xor eax, eax");
+                    } else {
+                        self.e(format!("mov rax, {}", b));
+                    }
+                    Ok(Ty::Float { bits: 64 })
+                }
+            }
             ExprKind::Text(parts) => self.text(parts),
             ExprKind::Ident(name) => self.ident(name, want),
             ExprKind::List(items) => {
@@ -2235,8 +2282,17 @@ end
                 }
                 "-" => {
                     let t = self.expr(inner, want)?;
+                    if let Ty::Float { bits } = t {
+                        if bits == 32 {
+                            self.e("xor eax, 80000000h");
+                        } else {
+                            self.e("mov rcx, 8000000000000000h");
+                            self.e("xor rax, rcx");
+                        }
+                        return Ok(t);
+                    }
                     if !t.is_int() {
-                        return self.err(format!("unary '-' needs an integer, found {}", t.show()));
+                        return self.err(format!("unary '-' needs a number, found {}", t.show()));
                     }
                     self.e("neg rax");
                     self.norm(&t);
@@ -2544,6 +2600,62 @@ end
         Ok(res)
     }
 
+    /// Float arithmetic and comparison; rax = lhs bits, rcx = rhs bits.
+    fn float_binary(&mut self, op: &str, lt: &Ty, rt: &Ty, is_cmp: bool) -> R<Ty> {
+        if lt != rt {
+            return if is_cmp {
+                self.err(format!("cannot compare {} with {}", lt.show(), rt.show()))
+            } else {
+                self.err(format!("operator '{}' is not defined for {} and {}; convert one side first", op, lt.show(), rt.show()))
+            };
+        }
+        let Ty::Float { bits } = lt else { unreachable!() };
+        let d = *bits == 64;
+        let (mv, sfx) = if d { ("movq", "sd") } else { ("movd", "ss") };
+        let (a, b) = if d { ("rax", "rcx") } else { ("eax", "ecx") };
+        self.e(format!("{} xmm0, {}", mv, a));
+        self.e(format!("{} xmm1, {}", mv, b));
+        if is_cmp {
+            let uc = format!("ucomi{}", sfx);
+            match op {
+                "==" | "!=" => {
+                    self.e(format!("{} xmm0, xmm1", uc));
+                    if op == "==" {
+                        self.e("sete al");
+                        self.e("setnp cl");
+                        self.e("and al, cl");
+                    } else {
+                        self.e("setne al");
+                        self.e("setp cl");
+                        self.e("or al, cl");
+                    }
+                }
+                ">" | ">=" => {
+                    self.e(format!("{} xmm0, xmm1", uc));
+                    self.e(format!("set{} al", if op == ">" { "a" } else { "ae" }));
+                }
+                _ => {
+                    // a < b is b > a; unordered sets CF, so `above` stays false
+                    self.e(format!("{} xmm1, xmm0", uc));
+                    self.e(format!("set{} al", if op == "<" { "a" } else { "ae" }));
+                }
+            }
+            self.e("movzx eax, al");
+            return Ok(Ty::Bool);
+        }
+        let ins = match op {
+            "+" => "add",
+            "-" => "sub",
+            "*" => "mul",
+            "/" => "div",
+            "%" => return self.err("'%' is not defined for floats"),
+            _ => return self.err(format!("operator '{}' is not defined for {}", op, lt.show())),
+        };
+        self.e(format!("{}{} xmm0, xmm1", ins, sfx));
+        self.e(format!("{} {}, xmm0", mv, a));
+        Ok(lt.clone())
+    }
+
     /// rax = lhs, rcx = rhs. Leaves the result in rax.
     fn binary_core(&mut self, op: &str, lt: &Ty, rt: &Ty, is_cmp: bool) -> R<Ty> {
         if *lt == Ty::Text && *rt == Ty::Text {
@@ -2565,6 +2677,9 @@ end
                 }
                 _ => return self.err(format!("operator '{}' is not defined for text", op)),
             }
+        }
+        if lt.is_float() || rt.is_float() {
+            return self.float_binary(op, lt, rt, is_cmp);
         }
         if is_cmp {
             if !(compatible(lt, rt) || compatible(rt, lt)) {
@@ -3279,12 +3394,101 @@ end
 
     fn call(&mut self, callee: &Expr, args: &[Arg], want: Option<&Ty>) -> R<Ty> {
         match &callee.kind {
+            ExprKind::Ident(name) if self.lookup(name).is_none() && matches!(name.as_str(), "__sqrt" | "__floor" | "__ceil" | "__trunc") => {
+                if args.len() != 1 {
+                    return self.err(format!("{}() takes one argument", name));
+                }
+                let at = self.expr(&args[0].value, Some(&Ty::Float { bits: 64 }))?;
+                self.check(&Ty::Float { bits: 64 }, &at, name)?;
+                self.e("movq xmm0, rax");
+                self.e(match name.as_str() {
+                    "__sqrt" => "sqrtsd xmm0, xmm0",
+                    "__floor" => "roundsd xmm0, xmm0, 9",
+                    "__ceil" => "roundsd xmm0, xmm0, 10",
+                    _ => "roundsd xmm0, xmm0, 11",
+                });
+                self.e("movq rax, xmm0");
+                Ok(Ty::Float { bits: 64 })
+            }
+            ExprKind::Ident(name) if self.lookup(name).is_none() && matches!(name.as_str(), "float" | "f64" | "f32") => {
+                if args.len() != 1 {
+                    return self.err(format!("{}() takes one argument", name));
+                }
+                let t = Ty::Float { bits: if name == "f32" { 32 } else { 64 } };
+                let Ty::Float { bits: tb } = t else { unreachable!() };
+                let at = self.expr(&args[0].value, None)?;
+                match at {
+                    Ty::Int { bits: 64, signed: false } => {
+                        // values above i64::MAX: halve (keeping the low bit), convert, double
+                        let (big, end) = (self.lbl("ubig"), self.lbl("uend"));
+                        let cvt = if tb == 32 { "cvtsi2ss" } else { "cvtsi2sd" };
+                        let mv = if tb == 32 { "movd" } else { "movq" };
+                        let (add, ra) = if tb == 32 { ("addss", "eax") } else { ("addsd", "rax") };
+                        self.e("test rax, rax");
+                        self.e(format!("js {}", big));
+                        self.e(format!("{} xmm0, rax", cvt));
+                        self.e(format!("jmp {}", end));
+                        self.label(&big);
+                        self.e("mov rcx, rax");
+                        self.e("shr rax, 1");
+                        self.e("and ecx, 1");
+                        self.e("or rax, rcx");
+                        self.e(format!("{} xmm0, rax", cvt));
+                        self.e(format!("{} xmm0, xmm0", add));
+                        self.label(&end);
+                        self.e(format!("{} {}, xmm0", mv, ra));
+                    }
+                    Ty::Int { .. } | Ty::Bool => {
+                        self.e(format!("{} xmm0, rax", if tb == 32 { "cvtsi2ss" } else { "cvtsi2sd" }));
+                        self.e(if tb == 32 { "movd eax, xmm0" } else { "movq rax, xmm0" });
+                    }
+                    Ty::Float { bits: sb } if sb == tb => {}
+                    Ty::Float { bits: 64 } => {
+                        self.e("movq xmm0, rax");
+                        self.e("cvtsd2ss xmm0, xmm0");
+                        self.e("movd eax, xmm0");
+                    }
+                    Ty::Float { .. } => {
+                        self.e("movd xmm0, eax");
+                        self.e("cvtss2sd xmm0, xmm0");
+                        self.e("movq rax, xmm0");
+                    }
+                    other => return self.err(format!("cannot convert {} to {}", other.show(), name)),
+                }
+                Ok(t)
+            }
             ExprKind::Ident(name) if self.lookup(name).is_none() => {
                 if let Some(t) = int_type(name).or(if name == "bool" { Some(Ty::Bool) } else { None }) {
                     if args.len() != 1 {
                         return self.err(format!("{}() takes one argument", name));
                     }
                     let at = self.expr(&args[0].value, None)?;
+                    if let Ty::Float { bits } = at {
+                        // truncate toward zero; NaN, infinities and out-of-range values panic
+                        let ok = self.lbl("f2iok");
+                        if bits == 32 {
+                            self.e("movd xmm0, eax");
+                            self.e("cvtss2sd xmm0, xmm0");
+                        } else {
+                            self.e("movq xmm0, rax");
+                        }
+                        self.e("cvttsd2si rax, xmm0");
+                        self.e("mov rcx, 8000000000000000h");
+                        self.e("cmp rax, rcx");
+                        self.e(format!("jne {}", ok));
+                        self.e("movq rdx, xmm0");
+                        self.e("mov rcx, 0C3E0000000000000h");
+                        self.e("cmp rdx, rcx");
+                        self.e(format!("je {}", ok));
+                        self.e("lea rcx, rt_msg_floatrange");
+                        self.e("call rt_panic");
+                        self.label(&ok);
+                        if t == Ty::Bool {
+                            return self.err("cannot convert float to bool");
+                        }
+                        self.norm(&t);
+                        return Ok(t);
+                    }
                     if !(at.is_int() || matches!(at, Ty::Ptr(_) | Ty::Bool | Ty::Func { ext: true, .. })) {
                         return self.err(format!("cannot convert {} to {}", at.show(), name));
                     }
@@ -3639,6 +3843,9 @@ end
         // (slot, type) of owned heap arguments that extern callees do not take over
         let mut extern_owned: Vec<i32> = Vec::new();
         let mut owned = Vec::new();
+        // (argument position, bits) of float arguments of an extern call: Windows x64 also
+        // wants them in XMM<position>
+        let mut float_args: Vec<(usize, u8)> = Vec::new();
         for (i, p) in sig.params.iter().enumerate() {
             if sig.variadic && i == n - 1 {
                 let Ty::List(el) = &p.ty else { unreachable!() };
@@ -3687,6 +3894,9 @@ end
             self.norm(&p.ty);
             let t = self.temp();
             self.e(format!("mov qword ptr [rbp - {}], rax", t));
+            if let Ty::Float { bits } = p.ty {
+                float_args.push((temps.len(), bits));
+            }
             temps.push(t);
             owned.push(t);
             if sig.is_extern && self.is_rc(&at) {
@@ -3695,7 +3905,17 @@ end
         }
         for x in &rest {
             if sig.c_variadic {
-                let t0 = self.value(x, None)?;
+                let mut t0 = self.value(x, None)?;
+                if t0 == (Ty::Float { bits: 32 }) {
+                    // C promotes float to double in variadic calls
+                    self.e("movd xmm0, eax");
+                    self.e("cvtss2sd xmm0, xmm0");
+                    self.e("movq rax, xmm0");
+                    t0 = Ty::Float { bits: 64 };
+                }
+                if t0.is_float() {
+                    float_args.push((temps.len(), 64));
+                }
                 let t = self.temp();
                 if t0 == Ty::Text {
                     let own = self.temp();
@@ -3711,7 +3931,23 @@ end
         if sig.is_extern {
             self.extern_syms.insert(sig.sym.clone());
         }
+        for (idx, bits) in float_args.iter().filter(|(i, _)| *i < 4) {
+            let reg = ARG_REGS[*idx];
+            self.e(format!("mov {}, qword ptr [rbp - {}]", reg, temps[*idx]));
+            if *bits == 32 {
+                self.e(format!("movd xmm{}, {}", idx, ["ecx", "edx", "r8d", "r9d"][*idx]));
+            } else {
+                self.e(format!("movq xmm{}, {}", idx, reg));
+            }
+        }
         self.emit_call(&temps, &format!("call {}", sig.sym), None);
+        if sig.is_extern {
+            match sig.ret {
+                Ty::Float { bits: 32 } => self.e("movd eax, xmm0"),
+                Ty::Float { .. } => self.e("movq rax, xmm0"),
+                _ => {}
+            }
+        }
         // C does not release what it is given
         for o in extern_owned {
             self.release_slot(o);
@@ -4144,6 +4380,13 @@ fn expr_has_defer(e: &Expr) -> bool {
 }
 
 // ---- free-variable collection for closures ----
+
+/// True when the program mentions a float literal or a float type (the printing
+/// library is only linked then). Searching the debug text over-approximates, which is harmless.
+fn file_uses_floats(f: &File) -> bool {
+    let d = format!("{:?}", f.decls);
+    d.contains("Float(") || d.contains("\"float\"") || d.contains("\"f32\"") || d.contains("\"f64\"")
+}
 
 fn file_uses_concurrency(f: &File) -> bool {
     let mut names = Vec::new();
@@ -4966,6 +5209,9 @@ rt_msg_take dq 23
 dq 4611686018427387904, 0
 rt_msg_nokey dq 17
     db "map key not found", 0
+dq 4611686018427387904, 0
+rt_msg_floatrange dq 18
+    db "float out of range", 0
 dq 4611686018427387904, 0
 rt_msg_panic dq 7
     db "panic: ", 0

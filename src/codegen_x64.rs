@@ -245,6 +245,11 @@ struct FnState {
     stmt_temps: Vec<i32>,
     /// `await` is allowed here: inside an `async func` and inside `main`.
     allow_await: bool,
+    /// Slot holding the list of deferred closures, and a slot to keep the return value.
+    defer_list: Option<i32>,
+    defer_save: Option<i32>,
+    /// A statement may ignore the result of a call that can fail (the body of a deferred call).
+    allow_ignored_result: bool,
 }
 
 impl FnState {
@@ -261,6 +266,9 @@ impl FnState {
             unsafe_depth: 0,
             stmt_temps: Vec::new(),
             allow_await: false,
+            defer_list: None,
+            defer_save: None,
+            allow_ignored_result: false,
         }
     }
 }
@@ -350,6 +358,10 @@ pub struct Compiler {
     labels: usize,
     /// the next `lambda()` is the body of an async function: `await` is allowed in it
     next_lambda_await: bool,
+    /// the next `lambda()` shares the records it captures instead of copying them
+    next_lambda_share: bool,
+    /// the next `lambda()` may ignore the result of a call that can fail
+    next_lambda_ignore_result: bool,
     cur_mod: String,
     line: u32,
     fs: FnState,
@@ -382,6 +394,8 @@ impl Compiler {
             fn_closures: BTreeSet::new(),
             labels: 0,
             next_lambda_await: false,
+            next_lambda_share: false,
+            next_lambda_ignore_result: false,
             cur_mod: String::new(),
             line: 0,
             fs: FnState::new(Ty::Void, String::new()),
@@ -1194,6 +1208,9 @@ end
             self.procs.push(p);
             return Ok(());
         }
+        if !naked {
+            self.init_defers(&fd.body)?;
+        }
         for s in &fd.body {
             self.stmt(s)?;
         }
@@ -1202,6 +1219,7 @@ end
                 self.e("xor eax, eax");
                 self.mk_ok(&inner);
             }
+            self.emit_run_defers();
             self.emit_unwind(0);
         }
         let p = self.finish_proc(&sig.sym, prologue, naked);
@@ -1578,6 +1596,7 @@ end
                     }
                     (_, None) => {}
                 }
+                self.emit_run_defers();
                 self.flush_all_temps_emit();
                 self.emit_unwind(0);
                 let l = self.fs.ret_label.clone();
@@ -1622,7 +1641,7 @@ end
                 }
                 _ => {
                     let t = self.expr(e, None)?;
-                    if matches!(t, Ty::Result(_)) {
+                    if matches!(t, Ty::Result(_)) && !self.fs.allow_ignored_result {
                         return self.err("this call can fail and its result is ignored; use `try`, `match` or `??`");
                     }
                     if self.is_rc(&t) {
@@ -1630,7 +1649,7 @@ end
                     }
                 }
             },
-            StmtKind::Defer(_) => return self.err("'defer' is not supported by the native backend yet"),
+            StmtKind::Defer(e) => self.defer_stmt(e, s.line)?,
             StmtKind::Spawn(call) => {
                 let task_spawn = self.funcs.get(&("task".to_string(), "start".to_string())).cloned();
                 let Some(sig) = task_spawn else { return self.err("'spawn' needs the task library") };
@@ -2892,6 +2911,7 @@ end
         }
         self.e(format!("mov rax, qword ptr [rbp - {}]", e2));
         self.mk_err(&ret_inner);
+        self.emit_run_defers();
         self.flush_all_temps_emit();
         self.emit_unwind(0);
         let rl = self.fs.ret_label.clone();
@@ -2920,6 +2940,8 @@ end
 
     fn lambda(&mut self, params: &[Param], body: &[Stmt], want: Option<&Ty>) -> R<Ty> {
         let allow_await = std::mem::take(&mut self.next_lambda_await);
+        let share_records = std::mem::take(&mut self.next_lambda_share);
+        let ignore_result = std::mem::take(&mut self.next_lambda_ignore_result);
         let infer_ret = !matches!(want, Some(Ty::Func { .. }));
         let (wparams, wret) = match want {
             Some(Ty::Func { params, ret, ext: false }) => (Some(params.clone()), (**ret).clone()),
@@ -2965,7 +2987,7 @@ end
             self.e(format!("mov qword ptr [rbp - {}], rax", env));
             for (i, (_, l)) in caps.iter().enumerate() {
                 self.e(format!("mov rax, qword ptr [rbp - {}]", l.off));
-                if matches!(&l.ty, Ty::Rec(r) if !self.shared_recs.contains(r)) {
+                if !share_records && matches!(&l.ty, Ty::Rec(r) if !self.shared_recs.contains(r)) {
                     let Ty::Rec(r) = &l.ty else { unreachable!() };
                     self.e("mov rcx, rax");
                     self.e(format!("call B_copy_{}", sym_of(r)));
@@ -2981,6 +3003,7 @@ end
         let saved = std::mem::replace(&mut self.fs, FnState::new(wret.clone(), rl));
         self.fs.unsafe_depth = saved.unsafe_depth;
         self.fs.allow_await = allow_await;
+        self.fs.allow_ignored_result = ignore_result;
         let env_slot = self.slot();
         let mut pro = self.bind_params(&ptys, Some(env_slot));
         for (i, (n, l)) in caps.iter().enumerate() {
@@ -3001,6 +3024,7 @@ end
         }
         let mut inferred: Option<Ty> = None;
         let r = (|| -> R<()> {
+            self.init_defers(body)?;
             if infer_ret {
                 let t = self.block_value(body, None, true)?;
                 if t != Ty::Void {
@@ -3018,6 +3042,7 @@ end
                     self.norm(&wret);
                 }
             }
+            self.emit_run_defers();
             self.emit_unwind(0);
             Ok(())
         })();
@@ -3523,6 +3548,65 @@ end
         }
     }
 
+    // ---------------- defer ----------------
+
+    /// Creates this function's list of deferred closures when its body has a `defer`.
+    fn init_defers(&mut self, body: &[Stmt]) -> R<()> {
+        if !block_has_defer(body) {
+            return Ok(());
+        }
+        let list_ty = Ty::List(Box::new(Ty::Func { params: vec![], ret: Box::new(Ty::Void), ext: false }));
+        let list = self.hidden_local(list_ty);
+        self.e("mov ecx, 1");
+        self.e("call rt_list_new");
+        self.e(format!("mov qword ptr [rbp - {}], rax", list));
+        let save = self.slot();
+        self.fs.defer_list = Some(list);
+        self.fs.defer_save = Some(save);
+        Ok(())
+    }
+
+    /// `defer call(...)`: builds a closure for the call and adds it to the list.
+    fn defer_stmt(&mut self, e: &Expr, line: u32) -> R<()> {
+        let Some(list) = self.fs.defer_list else {
+            return self.err("`defer` is not allowed here");
+        };
+        if !matches!(e.kind, ExprKind::Call { .. }) {
+            return self.err("`defer` needs a call, like `defer file.close()`");
+        }
+        let body = vec![Stmt { kind: StmtKind::Expr(e.clone()), line }];
+        let want = Ty::Func { params: vec![], ret: Box::new(Ty::Void), ext: false };
+        // records are shared (not copied) so the call sees them as they are at exit;
+        // the result of a call that can fail is discarded
+        self.next_lambda_share = true;
+        self.next_lambda_ignore_result = true;
+        self.lambda(&[], &body, Some(&want))?;
+        self.e("mov rdx, rax");
+        self.e(format!("mov rcx, qword ptr [rbp - {}]", list));
+        self.e("call rt_list_push");
+        Ok(())
+    }
+
+    /// Runs the deferred closures, last in first out, keeping the value in rax.
+    fn emit_run_defers(&mut self) {
+        let (Some(list), Some(save)) = (self.fs.defer_list, self.fs.defer_save) else { return };
+        let (top, done) = (self.lbl("defer"), self.lbl("deferdone"));
+        self.e(format!("mov qword ptr [rbp - {}], rax", save));
+        self.label(&top);
+        self.e(format!("mov rcx, qword ptr [rbp - {}]", list));
+        self.e("cmp qword ptr [rcx], 0");
+        self.e(format!("je {}", done));
+        self.e("call rt_list_take");
+        let c = self.temp();
+        self.e(format!("mov qword ptr [rbp - {}], rax", c));
+        self.emit_call(&[], "", Some((c, false)));
+        self.release_slot(c);
+        self.free(c);
+        self.e(format!("jmp {}", top));
+        self.label(&done);
+        self.e(format!("mov rax, qword ptr [rbp - {}]", save));
+    }
+
     // ---------------- futures ----------------
 
     fn future_fn(&self, name: &str) -> R<Sig> {
@@ -3786,6 +3870,33 @@ fn reg64(r: &str) -> String {
         "edi" => "rdi".into(),
         r if r.ends_with('d') && r.starts_with('r') => r[..r.len() - 1].to_string(),
         r => r.to_string(),
+    }
+}
+
+// ---- defer: does a body contain a `defer` of its own (not inside a nested lambda)? ----
+
+fn block_has_defer(b: &[Stmt]) -> bool {
+    b.iter().any(stmt_has_defer)
+}
+
+fn stmt_has_defer(s: &Stmt) -> bool {
+    match &s.kind {
+        StmtKind::Defer(_) => true,
+        StmtKind::Unsafe(b) => block_has_defer(b),
+        StmtKind::For { body, .. } | StmtKind::While { body, .. } => block_has_defer(body),
+        StmtKind::Expr(e) => expr_has_defer(e),
+        StmtKind::Var(vd) => vd.value.as_ref().map_or(false, expr_has_defer),
+        _ => false,
+    }
+}
+
+fn expr_has_defer(e: &Expr) -> bool {
+    match &e.kind {
+        ExprKind::If { branches, else_body } => {
+            branches.iter().any(|(_, b)| block_has_defer(b)) || else_body.as_ref().map_or(false, |b| block_has_defer(b))
+        }
+        ExprKind::Match { arms, .. } => arms.iter().any(|a| block_has_defer(&a.body)),
+        _ => false,
     }
 }
 

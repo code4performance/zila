@@ -1,0 +1,37 @@
+// defer: run a call when the function ends, however it ends.
+//
+//   brasa-parse examples/defer.br -o defer.exe
+//
+// Deferred calls run last in, first out, on `return`, at the end of the
+// function, and when a `try` fails.
+
+package main
+
+type Log = record
+    name: text
+end
+
+func (l: Log) line(message: text)
+    print("[{l.name}] {message}")
+end
+
+func process(id: int) -> int or error
+    let log = Log{ name: "job {id}" }
+    log.line("start")
+    defer log.line("finished")      // runs when process() ends, however it ends
+
+    if id < 0
+        return error("negative id")
+    end
+    defer log.line("cleaning up")   // runs first: last in, first out
+    return id * 2
+end
+
+func main() -> error
+    print("result: {try process(21)}")
+    match process(-1)
+        ok(v)  -> print("result: {v}")
+        err(e) -> print("failed: {e.message}")
+    end
+    return
+end

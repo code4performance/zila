@@ -195,6 +195,49 @@
       <p>This file is a tour of Brasa's type declarations in one place: a structural <code>interface</code> (<code>Printable</code>), an <code>enum</code> with data (<code>Shape</code>) consumed exhaustively by <code>match</code> in <code>area</code>, an <code>enum</code> (<code>Color</code>), a generic <code>record</code> (<code>Stack&lt;T&gt;</code>), function-type aliases (<code>Handler</code>, <code>Middleware</code>), and a record with field attributes controlling JSON (de)serialization (<code>User</code>). It also demonstrates generic functions with an interface bound (<code>show&lt;T: Printable&gt;</code>), a method with a <code>ref</code> receiver (<code>(ref s: Server) use(...)</code>), multi-way <code>match</code> patterns (<code>1 | 2 | 3</code>), a default parameter (<code>n: i32 = 4</code>), and a variadic parameter spread at the call site (<code>log("x", ...xs)</code>).</p>
     </section>
 
+    <section id="defer-example">
+      <h2>defer: cleanup that cannot be forgotten</h2>
+      <div class="file-label">examples/defer.br</div>
+      <pre><code><span class="cm">// defer: run a call when the function ends, however it ends.</span>
+<span class="cm">//</span>
+<span class="cm">//   brasa-parse examples/defer.br -o defer.exe</span>
+<span class="cm">//</span>
+<span class="cm">// Deferred calls run last in, first out, on `return`, at the end of the</span>
+<span class="cm">// function, and when a `try` fails.</span>
+
+<span class="kw">package</span> main
+
+<span class="kw">type</span> Log = <span class="kw">record</span>
+    name: text
+<span class="kw">end</span>
+
+<span class="kw">func</span> (l: Log) line(message: text)
+    print(<span class="str">"[{l.name}] {message}"</span>)
+<span class="kw">end</span>
+
+<span class="kw">func</span> process(id: int) -&gt; int <span class="kw">or</span> error
+    <span class="kw">let</span> log = Log{ name: <span class="str">"job {id}"</span> }
+    log.line(<span class="str">"start"</span>)
+    <span class="kw">defer</span> log.line(<span class="str">"finished"</span>)      <span class="cm">// runs when process() ends, however it ends</span>
+
+    <span class="kw">if</span> id &lt; 0
+        <span class="kw">return</span> error(<span class="str">"negative id"</span>)
+    <span class="kw">end</span>
+    <span class="kw">defer</span> log.line(<span class="str">"cleaning up"</span>)   <span class="cm">// runs first: last in, first out</span>
+    <span class="kw">return</span> id * 2
+<span class="kw">end</span>
+
+<span class="kw">func</span> main() -&gt; error
+    print(<span class="str">"result: {try process(21)}"</span>)
+    <span class="kw">match</span> process(-1)
+        ok(v)  -&gt; print(<span class="str">"result: {v}"</span>)
+        err(e) -&gt; print(<span class="str">"failed: {e.message}"</span>)
+    <span class="kw">end</span>
+    <span class="kw">return</span>
+<span class="kw">end</span></code></pre>
+      <p>Each <code>defer</code> schedules a call for the moment <code>process</code> ends. They run last in, first out, so "cleaning up" comes before "finished". They run whether the function returns normally, returns early, or fails with <code>try</code>: the failed call for <code>-1</code> still prints "finished". See the <a href="syntax.html#defer">syntax guide</a> for the exact rules.</p>
+    </section>
+
     <section id="ui">
       <h2>Native windows</h2>
       <div class="file-label">examples/ui.br</div>

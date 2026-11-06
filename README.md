@@ -2,609 +2,305 @@
 
 > **A compiled, statically-typed systems programming language that feels like Go, thinks like Rust, and talks to C without ceremony.**
 
-Brasa compiles directly to native x86-64 machine code — no LLVM, no GC, no runtime overhead. It is designed to be **the language you reach for when you need bare-metal control without sacrificing expressiveness**.
+Brasa compiles straight to x86-64 machine code. No LLVM, no virtual machine, no garbage collector, and no runtime to install. The compiler is written from scratch in Rust with **zero dependencies**, it ships with its own x86 assembler, and the same toolchain that builds a 6 KB Windows program also builds a bootable 64-bit operating system.
+
+It is young, it is honest about what it can't do yet, and it is looking for people to help it grow. **If you like compilers, language design, or just want to see what a clean-slate language looks like, come build it with us.**
 
 ### The name
 
 *Brasa* is the Portuguese word for **ember** — a glowing coal that burns hot, long, and clean, without the noise of an open flame. That is exactly what this language aims to be: intense power, controlled heat, no waste.
 
-The name also carries a deliberate pun. Its creator is Brazilian, and in Brazilian Portuguese *"cara, que brasa!"* is slang for *"dude, that's fire!"* — the highest compliment something can get. If Brasa the language ever earns that reaction from systems programmers around the world, the name will have done its job.
+The name hides two deliberate puns, both rooted in its Brazilian origin:
 
-> **Brasa** = *ember* (PT) · *that's fire* (BR slang) · a systems language born in Brazil 🇧🇷
+- **Brasa → Brasil.** The first five letters of *Brasil* are *Brasa*. This is a systems language born in Brazil 🇧🇷, and the name wears that proudly.
+- **"Vamos mandar brasa!"** In Brazilian Portuguese, *mandar brasa* literally means *to send embers* — but as slang it means ***"Let's do it! Let's go all out!"*** That is the spirit behind the language: get things done, full power, no excuses.
+
+> **Brasa** = *ember* (PT) · *Bras**a** → Bras**il*** · *"Vamos mandar brasa!"* = Let's do it! 🚀
 
 ---
 
 ## Why Brasa?
 
-| Pain point | C | Rust | Go | **Brasa** |
-|---|---|---|---|---|
-| Native speed, no GC | ✅ | ✅ | ❌ | ✅ |
-| Memory safety | ❌ | ✅ | ✅ | ✅* |
-| Ergonomic error handling | ❌ | ✅ | partial | ✅ |
-| Bare-metal / no runtime | ✅ | ✅ | ❌ | ✅ |
-| Simple learning curve | ❌ | ❌ | ✅ | ✅ |
-| Zero-cost C FFI | ✅ | ✅ | ❌ | ✅ |
-| Inline assembly | ✅ | ✅ | ❌ | ✅ |
-| No LLVM dependency | ✅ | ❌ | ✅ | ✅ |
+Most languages ask you to choose: simple *or* fast, safe *or* low-level, friendly *or* close to the machine. Brasa's goal is to make that choice smaller.
 
-> *Safety via `T?` / `T!` types, `unsafe` blocks that must be explicit, and no implicit pointer arithmetic. Full memory safety analysis is on the roadmap.
-
-**Brasa's niche:** You want the simplicity of Go, the type safety of Rust, and the raw power of C — all in a single language with a compiler you can read in an afternoon.
+- **Readable first.** Blocks end with `end`. No braces, no semicolons. A beginner can read a program top to bottom.
+- **Honest about failure.** There are no exceptions. A function that can fail says so in its type (`T or error`), and `try` is the one visible place where a failure travels up.
+- **Honest about cost.** Memory is freed by reference counting, the moment the last reference goes away. Unsafe code must say `unsafe`. Nothing allocates behind your back.
+- **One language from app to metal.** The same syntax writes an everyday program, a native window, a C library binding, and a kernel.
+- **A toolchain you can read.** Lexer, parser, code generator, assembler, standard library: all in this repository, all small enough to understand.
+- **Built in the open.** Every language change goes through a written proposal, a spec with testable scenarios, and tests. See [GOVERNANCE.md](GOVERNANCE.md).
 
 ---
 
-## Hello, Brasa
+## A taste of Brasa
 
 ```brasa
 package main
 
-type Customer = record
-    id:    i32
-    name:  text
-    email: text?        -- optional field
-end
-
-func greet(c: Customer) -> text
-    return "Hello, {c.name}!"
-end
-
-func main()
-    var c = Customer{ id: 1, name: "Ana" }
-    print(greet(c))
-
-    for i in 1..5
-        if i % 2 == 0
-            print("{i} is even")
-        end
-    end
-end
-```
-
-```
-$ brasa-parse hello.br --build -o hello
-$ ./hello
-Hello, Ana!
-2 is even
-4 is even
-```
-
----
-
-## Features
-
-### From **Go** — simplicity and structure
-- `package` / `use` module system
-- Structural interfaces (implement implicitly, no `implements` keyword)
-- `defer` for deterministic cleanup
-- `spawn` for concurrent goroutine-style tasks
-- Block syntax with `end` (no braces, no semicolons)
-- Named return parameters
-
-```brasa
-type Writer = interface
-    func write(ref self, data: []u8) -> i32 or error
-end
-
-func copy(src: Reader, dst: Writer)
-    defer dst.flush()
-    for chunk in src.chunks(4096)
-        try dst.write(chunk)
-    end
-end
-```
-
-### From **Rust** — type safety without the ceremony
-- `T?` optionals (instead of `Option<T>`)
-- `T or error` fallible returns (instead of `Result<T, E>`)
-- `try` / `?` error propagation
-- Generics with interface bounds: `func show<T: Printable>(x: T)`
-- `match` with exhaustive patterns and `|` alternation
-- `unsafe` blocks that make unsafety explicit
-
-```brasa
-func parse_int(s: text) -> i32 or error
-    let n = try std.parse_i32(s)   -- propagates error automatically
-    return n
-end
-
-func classify(n: i32) -> text
-    match n
-        0           -> return "zero"
-        1 | 2 | 3   -> return "small"
-        _           -> return "other"
-    end
-end
-```
-
-### From **C / Zig** — zero-cost interop and raw power
-- Zero-overhead `extern "C"` function declarations
-- Variadic C functions (`printf`, `qsort`, etc.)
-- `#[c_layout]` for C-compatible record layouts
-- `#[link("libname")]` for library linking
-- `#[link_src("file.c")]` to compile C files alongside Brasa
-- Inline assembly with named register bindings (`in`, `out`, `inout`, `clobber`)
-- `#[naked]` for hand-written prologue/epilogue
-- Raw pointer types (`*T`, `*c.void`)
-- `#[export("symbol")]` to expose Brasa functions to C
-
-```brasa
-#[link("m")]
-extern "C" func sqrt(x: f64) -> f64
-
-extern "C" func printf(fmt: *c.char, ...) -> c.int
-
-#[c_layout]
-type Point = record
-    x: f64
-    y: f64
-end
-
-#[cfg("x86_64")]
-func rdtsc() -> u64
-    var lo: u32 = 0
-    var hi: u32 = 0
-    unsafe
-        asm
-            "rdtsc"
-            out eax = lo
-            out edx = hi
-        end
-    end
-    return u64(hi) << 32 bitor u64(lo)
-end
-```
-
-### From **Swift / Kotlin** — ergonomic strings
-- String interpolation: `"Hello, {name}! You have {count} messages."`
-- Multi-line strings
-- `text` as a first-class string slice (UTF-8, no null terminator)
-
-### From **functional languages** — expressive types
-- Tagged union types (`enum` with payloads)
-- Structural pattern matching via `match`
-- `|` alternation in patterns
-- Closures / first-class functions
-
-```brasa
 type Shape = enum
-    Circle(float)
-    Rect(float, float)
-    Empty
+    Circle(int)
+    Rect(int, int)
 end
 
-func area(s: Shape) -> float
+func area(s: Shape) -> int
     match s
-        Circle(r)  -> return 3.14159 * r * r
+        Circle(r)  -> return 3 * r * r
         Rect(w, h) -> return w * h
-        Empty      -> return 0.0
     end
+    return 0
+end
+
+func parse(s: text) -> int or error
+    if s == "bad"
+        return error("cannot parse '{s}'")
+    end
+    return s.len
+end
+
+async func double(n: int) -> int
+    await sleep(100)
+    return n * 2
+end
+
+func main() -> error
+    print("areas: {area(Circle(2))} and {area(Rect(3, 4))}")
+    let n = try parse("brasa")
+    let a = double(n)
+    let b = double(n + 1)
+    print("doubled in parallel: {await a} and {await b}")
+    match parse("bad")
+        ok(v)  -> print("parsed {v}")
+        err(e) -> print("failed: {e.message}")
+    end
+    return
 end
 ```
 
-### Original to **Brasa**
-- `bitand` / `bitor` / `bitxor` / `bitnot` as keywords (not symbols) — readable assembly-level code
-- `ref` parameter modifier for pass-by-reference (explicit, like `&mut` but simpler)
-- `text` type — a UTF-8 string slice, the default string type (not a `String` heap object)
-- `nil` for optional absence (not `null`, not `None`)
-- `??` nil-coalescing operator and `?.` optional chaining
+```text
+$ brasa-parse demo.br -o demo.exe
+$ ./demo.exe
+areas: 12 and 12
+doubled in parallel: 10 and 12
+failed: cannot parse 'bad'
+```
+
+A few things to notice: `match` must cover every case of an `enum`; `try` hands a failure to the caller; the two `double` calls run at the same time, so the program waits about 100 ms, not 200; and `await` never blocks the other tasks.
 
 ---
 
-## Quick Start
+## What Brasa can do today
 
-### Prerequisites
+Everything in this list is implemented and covered by tests.
 
-- **Rust toolchain** (stable, 1.70+): https://rustup.rs
-- **MSVC Build Tools** (Windows) — includes `ml64.exe` and `link.exe`
-- Linux/macOS backends are on the roadmap
+**A real native compiler**
 
-### Build from source
+- Compiles to x86-64 machine code for Windows. A hello-world is about **6 KB**; a native window with a text box, a button and a list is about **23 KB**.
+- Needs no runtime on the target machine. The programs import only the Windows libraries they use.
+
+**A predictable memory model**
+
+- Reference counting frees every heap value as soon as it is unreachable, including on early `return`, `break` and `try`. There are no GC pauses.
+- Records are copied when assigned (value semantics); `ref` shares. Records can define `drop` to close files and sockets automatically.
+- `live_objects()` reports how many heap objects are alive, so leaks are easy to test for. The test suite uses it to check that thousands of tasks and connections leave nothing behind.
+- Reference cycles are not collected: avoid building them.
+- `defer call(...)` runs a call when the function ends, however it ends (`return`, the end of the body, or a failed `try`), last in first out.
+
+**Types that help**
+
+- Records, enums that carry data, exhaustive `match`, optionals (`T?`, `??`, `?.`), closures, methods, default and named arguments.
+- Errors as values with `T or error`, `try`, and `match` on `ok(...)` / `err(...)`.
+
+**Concurrency without ceremony**
+
+- Lightweight tasks (`spawn`) and channels, plus `async` / `await` with futures.
+- Timers (`sleep`, `timeout`), `await all(...)`, `await race(...)`, file I/O and TCP networking that never block the other tasks, all on one scheduler written in Brasa.
+- Measured: 2000 tasks at once, and 100 simultaneous TCP clients, each answered correctly.
+- Tasks are cooperative and run on one thread; there is no parallelism yet.
+
+**A standard library written in Brasa**
+
+- `ui` (native Windows controls), `task`, `future`, `fs`, `net`. They talk to the operating system through Brasa's own `extern` declarations. No Rust or C glue.
+
+**Systems programming**
+
+- C interop: `extern` functions, callbacks, `#[link("lib")]`, `#[c_layout]`, raw pointers, `unsafe` blocks.
+- Inline `asm` with named registers, and `#[naked]` functions.
+
+**Brasa OS**
+
+- A **bootable 64-bit operating system** with its boot sector and kernel written in Brasa. The whole disk image is **18 KB**. It boots in QEMU, switches the CPU to long mode, and runs a small shell on the keyboard, the screen and the serial port. The compiler assembles the machine code itself; no NASM, no linker. See [docs/os.html](docs/os.html).
+
+**Engineering you can trust**
+
+- 107 automated tests. The documentation site is checked against the code by tests, so it cannot quietly go stale. Every design decision lives in [`openspec/`](openspec).
+
+---
+
+## Ideas Brasa borrowed
+
+Brasa does not pretend to be new in every way. It takes ideas that proved themselves and tries to combine them with less ceremony.
+
+| From | What Brasa took | How it looks in Brasa |
+|---|---|---|
+| **Go** | Small language, `package` / `use`, goroutine-style tasks and channels, structural interfaces, one self-contained executable | `spawn worker(ch)`, `channel(int)`, no `implements` keyword |
+| **Rust** | Enums with data and exhaustive matching, errors as values, explicit `unsafe`, no tracing garbage collector, a `drop` hook | `match`, `T or error` with `try`, `unsafe ... end`, `func (ref x: T) drop()` |
+| **Elixir** | Pattern matching as the main way to take data apart, lightweight tasks, `ok` / `err` results | `ok(v)` / `err(e)` arms, thousands of tasks |
+| **Swift** | Reference counting for memory, optionals, string interpolation | `T?`, `??`, `?.`, `"hello {name}"` |
+| **C#, JavaScript, Kotlin** | `async` / `await` with futures | `async func`, `await`, `Future<T>` |
+| **Ruby, Lua, Pascal** | Blocks closed by `end` | no braces, no semicolons |
+| **C and Zig** | A first-class neighbour: C interop, freestanding programs, no hidden runtime | `extern`, `#[c_layout]`, kernels with no operating system |
+| **C++** | Operators spelled as words | `bitand`, `bitor`, `bitxor`, `bitnot` |
+
+And a few things that are Brasa's own:
+- `or error` / `try`: the shape of Rust's `Result` and `?`, in words a beginner can read.
+- The whole async scheduler, the networking, the file I/O and the windowing library are **ordinary Brasa code**, so you can read and change them.
+- One compiler that targets both a Windows program and a bare-metal kernel.
+
+---
+
+## Where Brasa stands
+
+Brasa is **pre-alpha**. The design is settling, but breaking changes are still possible before 1.0.
+
+| Area | State |
+|---|---|
+| Lexer and parser | ✅ Complete for the grammar in [`brasa.ebnf`](brasa.ebnf) |
+| Native compiler (Windows x64) | ✅ Works for a large, useful subset |
+| Bare-metal target and Brasa OS | ✅ Boots and runs |
+| `async` / `await`, timers, files, TCP | ✅ Works |
+| Interpreter (`--run`) | 🔧 Runs plain programs; does not know the native-only features |
+| Floating point | ⏳ Parsed, not compiled yet |
+| Generics and interfaces | ⏳ Parsed, not compiled yet |
+| Maps | ⏳ Parsed, not compiled yet |
+| Text and collection libraries | ⏳ Only the basics exist |
+| Optimizer | ⏳ Code generation is simple and unoptimized |
+| Formatter, test runner, package manager, language server | ⏳ Not started |
+| Linux, macOS, ARM64, Android, iOS | ⏳ Windows x64 and bare-metal x86-64 only |
+
+---
+
+## How Brasa will evolve
+
+This is the plan, in roughly the order we intend to do it. **Every item is a place where you can help.** Difficulty is a rough guide: ⭐ is approachable, ⭐⭐⭐ is deep compiler work.
+
+| # | Work | What it involves | Difficulty |
+|---|---|---|---|
+| 1 | Floating point | `float` and `f32`/`f64`: SSE registers, the calling convention, and assembler support. | ⭐⭐⭐ |
+| 2 | Maps | `{ "a": 1 }` literals, lookup, iteration, a hash table in the runtime. | ⭐⭐ |
+| 3 | Generics and interfaces | Monomorphization, bounds (`<T: Printable>`), structural interface checks. | ⭐⭐⭐ |
+| 4 | Standard library | Text (split, trim, parse, format), collections, buffered I/O, UDP, TLS, async DNS. Mostly written in Brasa. | ⭐ – ⭐⭐ |
+| 5 | Optimizer | Register allocation, constant folding, inlining. Today every value goes through the stack. | ⭐⭐⭐ |
+| 6 | Tooling | `brasa fmt`, `brasa test`, a package manager, a language server, a richer VS Code extension. | ⭐⭐ – ⭐⭐⭐ |
+| 7 | More platforms | **Linux x86-64 first** (ELF and the System V ABI), then macOS. Apple Silicon, Android and iOS need an ARM64 backend. WebAssembly later. | ⭐⭐⭐ – ⭐⭐⭐⭐ |
+| 8 | Self-hosting | A Brasa compiler written in Brasa. | long term |
+
+Beyond the compiler, contributions that make a big difference right now:
+**more example programs**, **bug reports with a tiny failing program**, **documentation and tutorials**, and **tests**.
+
+### How a change happens
+
+1. **Propose it.** Open an issue describing *what*, *why* and the alternatives. Small fixes can skip straight to a pull request.
+2. **Discuss and decide.** The community debates it; a maintainer records the decision (accepted, rejected, or deferred) with the reason.
+3. **Specify it.** Accepted language changes become an [OpenSpec](openspec) change: a proposal, a spec with testable scenarios, a design, and a task list.
+4. **Build it.** Implementation comes with tests, and with updates to the documentation site.
+5. **Archive it.** The spec joins the project's living specification in [`openspec/specs/`](openspec/specs).
+
+The full rules are in [GOVERNANCE.md](GOVERNANCE.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
+
+---
+
+## Getting started
+
+**You need**
+
+- A recent **Rust** toolchain (stable): <https://rustup.rs>
+- To compile Brasa programs on Windows: the **Visual Studio C++ Build Tools** (`ml64` and `link`). The compiler finds them on its own.
+- Optional: **QEMU** to run Brasa OS (`winget install SoftwareFreedomConservancy.QEMU`).
+
+**Build the compiler**
 
 ```sh
-git clone https://github.com/brasa-lang/brasa-parser
+git clone https://github.com/code4performance/brasa-parser
 cd brasa-parser
 cargo build --release
-# Binary is at: target/release/brasa-parse
 ```
 
-### Compile a Brasa program
+The tool is called `brasa-parse` (`target/release/brasa-parse`).
+
+**Use it**
 
 ```sh
-# Parse and validate
-brasa-parse hello.br
-
-# Compile to native executable
-brasa-parse hello.br --build -o hello.exe
-
-# Dump x86-64 assembly
-brasa-parse hello.br --asm
-
-# Run via AST interpreter (no compile step)
-brasa-parse hello.br --run
-
-# Inspect the AST
-brasa-parse hello.br --ast
-
-# Inspect tokens
-brasa-parse hello.br --tokens
+brasa-parse program.br                 # check a program and print a summary
+brasa-parse program.br -o program.exe  # compile to a native executable
+brasa-parse program.br --run           # run it with the interpreter (plain programs only)
+brasa-parse program.br --asm           # show the generated assembly
+brasa-parse program.br --ast           # show the syntax tree
+brasa-parse program.br --tokens        # show the tokens
+brasa-parse --os os/boot.br os/kernel.br -o brasa-os.img   # build a bootable disk image
+brasa-parse --docs                     # refresh the examples on the documentation site
 ```
 
-### VS Code / Antigravity syntax highlighting
-
-The `editors/vscode/` directory contains a ready-to-install extension for `.br` files:
+**Try the examples**
 
 ```sh
-# VS Code
-cp -r editors/vscode ~/.vscode/extensions/brasa-lang
+brasa-parse examples/hello.br -o hello.exe && ./hello.exe
+brasa-parse examples/async.br -o async.exe && ./async.exe
+.\os\run.ps1                            # build and boot Brasa OS in QEMU
+```
 
-# Antigravity IDE
-cp -r editors/vscode ~/.antigravity/extensions/brasa-lang
+**Run the tests**
+
+```sh
+cargo test
+```
+
+Tests that need the Windows toolchain or QEMU skip themselves when those are missing, so the suite is designed to run anywhere Rust does.
+
+**Read the docs.** Open [`docs/index.html`](docs/index.html) in a browser. It is a static site, no server needed.
+
+---
+
+## What is in the repository
+
+```text
+src/
+  lexer.rs         tokens, newline rules, text interpolation
+  parser.rs        recursive-descent parser for brasa.ebnf
+  ast.rs           syntax tree
+  interp.rs        tree-walking interpreter (--run)
+  codegen_x64.rs   native compiler: type checks, x86-64 code, runtime, linker driver
+  asm_x86.rs       the x86 assembler (16, 32 and 64-bit) used for bare-metal images
+  cli.rs, docs.rs  command-line options; the documentation generator
+std/               standard library, written in Brasa: ui, task, future, fs, net, sys, ws
+os/                Brasa OS: boot.br (boot sector) and kernel.br
+examples/          example programs
+docs/              the documentation site (static HTML)
+editors/vscode/    syntax highlighting for .br files
+openspec/          proposals, specs and design notes for every language change
+tests/             parser, compiler, async, OS and documentation tests
+brasa.ebnf         the formal grammar
+brasa-ffi.md       C interop and inline assembly specification
 ```
 
 ---
 
-## More Examples
+## Join in
 
-### Error handling and optionals
+Brasa is at the stage where **one contribution can shape the language**. You don't need to be a compiler expert: a clear bug report, a new example, or a better error message all count.
 
-```brasa
-package main
+1. Read [CONTRIBUTING.md](CONTRIBUTING.md) for the practical steps.
+2. Read [GOVERNANCE.md](GOVERNANCE.md) for the rules, the design principles, and how decisions are made.
+3. Everyone in the project follows the [Code of Conduct](CODE_OF_CONDUCT.md).
+4. Pick something from the roadmap above, or open an issue and tell us what you'd like to build.
 
-use file, json
+Everything happens on GitHub, so the record is public and searchable:
+[issues](https://github.com/code4performance/brasa-parser/issues) for bugs and proposals, and
+[pull requests](https://github.com/code4performance/brasa-parser/pulls) for code.
 
-func load(path: text) -> Config or error
-    let raw = try file.read(path)
-    let f   = try file.open(path)
-    defer f.close()
-    return try json.parse(Config, raw)
-end
+### License
 
-func main() -> error
-    let email: text? = c.email
-    let display = email ?? "no email"       -- nil-coalescing
-    let len     = email?.len                -- optional chaining
-
-    match load("config.json")
-        ok(cfg) -> use_config(cfg)
-        err(e)  -> print("failed: {e.message}")
-    end
-end
-```
-
-### REST API server
-
-```brasa
-package main
-
-use http, db, json
-
-type Customer = record
-    id:   i32
-    name: text
-end
-
-func main() -> error
-    let conn = try db.open("postgres://localhost/shop")
-    defer conn.close()
-
-    var app = http.server(port: 8080)
-
-    app.get("/customers", func(req)
-        let rows = try conn.query(Customer, "select id, name from customers")
-        return http.json(rows)
-    end)
-
-    app.post("/customers", func(req)
-        let c = try req.body(Customer)
-        try conn.exec("insert into customers(name) values($1)", c.name)
-        return http.created(c)
-    end)
-
-    app.run()
-end
-```
-
-### Inline assembly and C interop
-
-```brasa
-package main
-
-use c
-
-extern "C" func printf(fmt: *c.char, ...) -> c.int
-
-#[naked]
-#[cfg("x86_64")]
-func halt()
-    asm
-        "cli"
-        "hlt"
-    end
-end
-
-func main()
-    unsafe
-        printf(c.cstr("sqrt(2) = %f\n"), sqrt(2.0))
-    end
-    print("tsc: {rdtsc()}")
-end
-```
+The project is intended to be dual-licensed under **MIT** or **Apache-2.0**, at your choice, and contributions are accepted under the same terms (see [GOVERNANCE.md](GOVERNANCE.md#licensing)). Programs you write *in* Brasa belong entirely to you; the compiler's license does not affect them.
 
 ---
 
-## Architecture
-
-```
-Source (.br)
-     │
-     ▼
-  Lexer         — keywords, operators, interpolated strings, numbers, comments
-     │                 recognises line-breaks as statement terminators
-     ▼
-  Parser         — recursive-descent, full grammar (brasa.ebnf)
-     │                 produces a typed AST
-     ▼
-   AST
-  ╱   ╲
- ▼     ▼
-Interp  Codegen x86-64
-(--run)       │
-              ▼
-         MASM (.asm)
-              │
-         ml64 /nologo
-              │
-         link.exe
-              │
-         Native PE/ELF binary   (~10 KB for hello world)
-```
-
-**Zero external Cargo dependencies.** The entire compiler is `std`-only Rust.  
-**No LLVM.** Code generation emits MASM-syntax x86-64 assembly directly, then invokes `ml64` and `link.exe`. The resulting binary has no GC, no runtime, no libc dependency by default (pure `kernel32.lib` path produces binaries as small as **2.5 KB**).
-
----
-
-## Repository Layout
-
-```
-brasa-parser/
-├── src/
-│   ├── lexer.rs         -- tokeniser (keywords, literals, interpolation)
-│   ├── ast.rs           -- AST node types
-│   ├── parser.rs        -- recursive-descent parser
-│   ├── interp.rs        -- tree-walk interpreter (--run)
-│   ├── codegen_x64.rs   -- x86-64 MASM code generator (--build)
-│   ├── asm_x86.rs       -- low-level assembly emission helpers
-│   ├── cli.rs           -- command-line interface
-│   ├── docs.rs          -- built-in documentation strings
-│   ├── lib.rs           -- library exports
-│   └── main.rs          -- binary entry point
-├── examples/
-│   ├── hello.br         -- greetings and loops
-│   ├── types.br         -- records, enums, generics, pattern matching
-│   ├── errors.br        -- T?, T or error, try, ??, ?., defer, spawn
-│   ├── rest_api.br      -- HTTP server + PostgreSQL
-│   ├── ffi.br           -- extern "C", variadic, inline asm, #[naked]
-│   ├── lowlevel.br      -- raw pointers, unsafe, bit ops
-│   ├── async.br         -- spawn, channels
-│   ├── control.br       -- for, while, match, if-else chains
-│   └── ui.br            -- UI / layout concepts
-├── editors/
-│   └── vscode/          -- VS Code / Antigravity syntax extension
-├── std/                 -- standard library sketches (WIP)
-├── docs/                -- language design documents
-├── tests/               -- integration test suite (29 tests)
-├── brasa.ebnf           -- formal grammar (EBNF)
-├── brasa-ffi.md         -- C/Assembly interop specification
-└── Cargo.toml           -- zero external dependencies
-```
-
----
-
-## Roadmap
-
-### v0.2 — Semantic Analysis
-- [ ] Name resolution and scope tracking
-- [ ] Type inference engine
-- [ ] Exhaustive `match` checking
-- [ ] Duplicate declaration errors
-- [ ] Type-checked generics (monomorphisation)
-
-### v0.3 — Standard Library
-- [ ] `io` — file I/O, stdin/stdout, buffered readers/writers
-- [ ] `collections` — List, Map, Set, Queue, Stack
-- [ ] `text` — string formatting, parsing, regex
-- [ ] `net` / `http` — TCP, HTTP/1.1, HTTP/2
-- [ ] `json` / `yaml` / `toml` — serde-style codecs
-- [ ] `db` — database connection interface + PostgreSQL driver
-
-### v0.4 — Linux / macOS Backends
-- [ ] ELF backend (Linux x86-64 and ARM64)
-- [ ] Mach-O backend (macOS ARM64 / Apple Silicon)
-- [ ] System V AMD64 ABI calling convention
-- [ ] Cross-compilation support
-
-### v0.5 — Language Server & Tooling
-- [ ] LSP server (`brasa-lsp`) for IDE completion, hover, go-to-def
-- [ ] Formatter (`brasa-fmt`)
-- [ ] Package manager (`brasa-pkg`) with central registry
-- [ ] Build system (`brasa.toml` project manifest)
-
-### v0.6 — Advanced Language Features
-- [ ] `html ... end` template blocks (markup-aware lexer mode)
-- [ ] Explicit generic call syntax (`first<i32>(list)`)
-- [ ] Error recovery: collect multiple parse errors before stopping
-- [ ] Compile-time evaluation (`const func`)
-- [ ] `async` / `await` on top of `spawn` primitives
-- [ ] Lifetime annotations (opt-in, for systems code)
-
-### v1.0 — Self-hosting
-- [ ] Brasa compiler written in Brasa
-- [ ] Brasa OS kernel demo (bare-metal boot)
-- [ ] WebAssembly backend
-
-> Items are roughly ordered by priority. Community input shapes what gets done first — open an issue or start a discussion!
-
----
-
-## Contributing
-
-Brasa is at an early, exciting stage where **every contribution has outsized impact**. Whether you're a compiler engineer, a language designer, a documentation writer, or someone who just wants to try writing `.br` files and report what breaks — you are welcome here.
-
-### Areas that need contributors right now
-
-| Area | Skills needed | Difficulty |
-|---|---|---|
-| Semantic analysis (type checker) | Compiler theory, Rust | ⭐⭐⭐ |
-| Linux ELF backend | x86-64 ABI, ELF format, Rust | ⭐⭐⭐ |
-| Standard library modules | Systems programming, Rust | ⭐⭐ |
-| LSP server | LSP protocol, Rust | ⭐⭐⭐ |
-| VS Code extension (richer) | TypeScript, TextMate grammars | ⭐⭐ |
-| More `.br` examples | Brasa language, any domain | ⭐ |
-| Documentation / tutorials | Technical writing | ⭐ |
-| Bug reports & test cases | Using the language | ⭐ |
-| Package manager | CLI tooling, Rust | ⭐⭐⭐ |
-
----
-
-## Contributor Charter
-
-*The rules every participant in the Brasa project agrees to follow.*
-
-### 1. Code of Conduct
-
-Everyone — contributors, maintainers, and community members — is expected to:
-
-- **Be respectful.** Critique ideas, not people. Disagreement is healthy; personal attacks are not.
-- **Be inclusive.** Brasa welcomes contributors regardless of background, experience level, nationality, gender, or identity.
-- **Be constructive.** When something is wrong, explain why and suggest a fix.
-- **Be patient.** Maintainers are volunteers. Response times vary.
-
-Violations may result in warnings, temporary bans, or permanent removal from the community at maintainer discretion.
-
-### 2. How to Propose Changes
-
-#### Bug fixes and small improvements
-Open a Pull Request directly. Fixes, test additions, documentation improvements, and typos do not need a prior issue.
-
-#### New language features
-Brasa follows an **RFC (Request for Comments) process** for language changes:
-
-1. **Open a Discussion** in GitHub Discussions, titled `[RFC] Your Proposal`.
-2. Describe: *what*, *why*, *how it fits the language philosophy*, and *alternatives considered*.
-3. The community debates and refines the proposal for a minimum of **14 days**.
-4. A maintainer closes the RFC as **accepted**, **rejected**, or **deferred**.
-5. Only after acceptance may a PR implementing the feature be opened.
-
-Language changes that bypass the RFC process will not be merged.
-
-#### Compiler and tooling changes
-Changes to the parser, codegen, or stdlib architecture should include a brief design note in the PR description explaining the approach and trade-offs.
-
-### 3. Pull Request Rules
-
-All pull requests must:
-
-- **Pass all existing tests.** Run `cargo test` before submitting. PRs that break tests will not be reviewed until fixed.
-- **Include tests.** New features and bug fixes must come with test cases in `tests/`.
-- **Be written in Rust or Brasa.** The compiler is Rust; stdlib and examples are Brasa. No other languages in the core repository without an RFC.
-- **Follow the zero-dependency rule.** The core compiler (`brasa-parser`) must have zero external Cargo dependencies. Tooling (`brasa-lsp`, `brasa-fmt`) may have dependencies if justified.
-- **Not introduce breaking changes without an RFC.** Backwards-incompatible grammar or semantic changes require RFC approval.
-- **Have clear commit messages.** Format: `component: short description` (e.g., `parser: support explicit generic call syntax`).
-- **Be rebased onto `main`.** No merge commits in feature branches.
-
-### 4. Language Design Principles
-
-These principles guide every design decision. When in doubt, refer to them:
-
-1. **Explicit over implicit.** If something is happening (a copy, a pointer, an unsafe operation), it should be visible in the code.
-2. **Simple over clever.** Prefer straightforward constructs over syntactic magic. If a feature needs a manual chapter to explain, it probably doesn't belong.
-3. **No implicit conversions.** `i32` and `i64` do not coerce. `text` and `*c.char` do not coerce. The programmer decides.
-4. **Errors are values.** Brasa has no exceptions. Errors flow through `T or error` return types and are propagated with `try`.
-5. **Unsafe must be loud.** Code that could invoke undefined behaviour must be inside an `unsafe` block. Unsafe blocks should be small and commented.
-6. **Keep the compiler lean.** The compiler itself must have zero external Cargo dependencies. Speed of compilation matters.
-7. **C is a first-class neighbour.** Brasa must be able to call C with zero overhead and zero friction. The world's C libraries are an asset, not a legacy.
-8. **Batteries optional.** The language is small; the standard library grows incrementally. External packages fill the gaps.
-
-### 5. Governance
-
-Brasa currently operates under a **Benevolent Dictator** model: the project founder holds final say on language design and architectural decisions.
-
-As the project grows, governance will evolve:
-
-- **v0.3+:** A **Language Design Committee** (3–5 members) with RFC voting rights will be formed from active contributors.
-- **v1.0:** Fully open governance with a written constitution, committee elections, and a public roadmap vote.
-
-If you want a seat at the table, the best path is sustained, high-quality contribution.
-
-### 6. Licensing
-
-Brasa is dual-licensed under:
-
-- **MIT License** — [`LICENSE-MIT`](LICENSE-MIT)
-- **Apache License 2.0** — [`LICENSE-APACHE`](LICENSE-APACHE)
-
-You may use Brasa under either license. Contributions are accepted under the same dual license. By submitting a Pull Request you certify that you have the right to submit your contribution under these terms.
-
-Programs written *in* Brasa are entirely yours — the compiler license does not affect the programs it compiles.
-
----
-
-## Language Design at a Glance
-
-Brasa borrows the best ideas from each language and leaves the complexity behind:
-
-| Feature | Inspired by | What Brasa does differently |
-|---|---|---|
-| Package system | Go | Same `package` / `use` model |
-| `defer` | Go | Identical semantics |
-| `spawn` | Go `go` | Same goroutine-style, channels built-in |
-| Structural interfaces | Go | No `implements` keyword needed |
-| `T?` optional | Rust `Option<T>` | Shorter syntax, `nil` for absence |
-| `T or error` fallible | Rust `Result<T,E>` | `try` keyword instead of `?` suffix |
-| Generics with bounds | Rust traits | `<T: Interface>` — simpler bounds |
-| `match` patterns | Rust | `|` alternation, multi-line arms |
-| `unsafe` blocks | Rust / C | Explicit, no implicit unsafety |
-| `extern "C"` FFI | Rust / Zig | Zero overhead, variadic C functions |
-| Inline `asm` | Rust / GCC | Named bindings: `in`, `out`, `inout`, `clobber` |
-| `#[naked]` | Rust | Same attribute, hand-written asm functions |
-| `#[c_layout]` | Zig `extern struct` | C-compatible record layout |
-| String interpolation | Swift / Kotlin | `"Hello, {expr}"` |
-| `bitand/bitor/bitxor` | Ada / SQL | Words, not symbols — readable in systems code |
-| `ref` modifier | C++ `&` / Rust `&mut` | Explicit pass-by-reference, no borrow checker |
-| `text` type | Go `string` | UTF-8 slice, immutable by default |
-| Tagged union `enum` | Rust | With payloads, destructured in `match` |
-
----
-
-## Community
-
-- **GitHub Issues** — bug reports, feature requests
-- **GitHub Discussions** — RFCs, design questions, show & tell
-- **GitHub Pull Requests** — code contributions
-
-There is no Discord or Slack yet. Everything happens on GitHub so the record is permanent and searchable.
-
----
-
-## Status
-
-> Brasa is **pre-alpha** software. The language design is stabilising but breaking changes are expected before v1.0.
-
-| Component | Status |
-|---|---|
-| Lexer | ✅ Complete |
-| Parser | ✅ Complete (29/29 tests) |
-| AST Interpreter (`--run`) | ✅ Working |
-| x86-64 Code Generator | 🔧 Working, partial coverage |
-| Semantic Analysis | ⏳ Not started |
-| Standard Library | 🔧 Sketches only |
-| Linux Backend | ⏳ Not started |
-| Package Manager | ⏳ Not started |
-| LSP Server | ⏳ Not started |
-
----
-
-*Brasa is built in public. If you believe that systems programming deserves better ergonomics — without sacrificing performance or control — come build it with us.*
-
-**[⭐ Star the repo](https://github.com/brasa-lang/brasa-parser) · [🐛 Report a bug](https://github.com/brasa-lang/brasa-parser/issues) · [💡 Start an RFC](https://github.com/brasa-lang/brasa-parser/discussions)**
+*Brasa is built in public. If you believe a programming language can be simple, honest and close to the machine at the same time, come help us prove it.*

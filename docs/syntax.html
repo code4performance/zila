@@ -235,7 +235,30 @@
         <dt>Values and low level</dt>
         <dd><code>true</code> <code>false</code> <code>nil</code> <code>self</code> <code>ref</code> <code>new</code> <code>unsafe</code> <code>asm</code></dd>
       </dl>
-      <p><code>defer</code> and <code>new</code> are part of the grammar but are not supported by the <a href="native.html#not-yet">native compiler</a> yet. A method or field may be named like a keyword after a dot (<code>app.use(x)</code>).</p>
+      <p><code>new</code> is part of the grammar but is not supported by the <a href="native.html#not-yet">native compiler</a> yet. A method or field may be named like a keyword after a dot (<code>app.use(x)</code>).</p>
+    </section>
+
+    <section id="defer">
+      <h2>defer</h2>
+      <p><code>defer call(...)</code> runs a call when the <strong>function</strong> ends, however it ends: with <code>return</code>, by running off the end of the body, or because a <code>try</code> failed. It is how you make sure a file is closed or a lock released without repeating the cleanup before every exit.</p>
+      <pre><code><span class="kw">func</span> process(id: int) -&gt; int <span class="kw">or</span> error
+    print(<span class="str">"start {id}"</span>)
+    <span class="kw">defer</span> print(<span class="str">"finished {id}"</span>)      <span class="cm">// runs however the function ends</span>
+
+    <span class="kw">if</span> id &lt; 0
+        <span class="kw">return</span> error(<span class="str">"negative id"</span>)
+    <span class="kw">end</span>
+    <span class="kw">defer</span> print(<span class="str">"cleaning up {id}"</span>)   <span class="cm">// runs first: last in, first out</span>
+    <span class="kw">return</span> id * 2
+<span class="kw">end</span></code></pre>
+      <ul>
+        <li><strong>Last in, first out.</strong> Deferred calls run in the reverse order of the <code>defer</code> statements that were executed, before the function's local variables are released.</li>
+        <li><strong>Function scope.</strong> A <code>defer</code> inside a loop or an <code>if</code> schedules one call each time it is executed, and all of them run when the function ends, not at the end of the loop. A <code>defer</code> that is never reached schedules nothing.</li>
+        <li><strong>Captured when it runs.</strong> The variables a deferred call uses have the values they had when the <code>defer</code> statement ran (<code>defer print("n = {n}")</code> prints the old <code>n</code> even if it changes later). Records are shared, not copied, so <code>defer c.report()</code> sees the record as it is when the function ends. Because the values are captured, a deferred call cannot assign to a variable.</li>
+        <li><strong>Only calls.</strong> <code>defer</code> needs a call; <code>defer x + 1</code> is a compile error. If the call can fail (<code>or error</code>), its error is ignored and does not change what the function returns.</li>
+        <li><strong>The return value is untouched</strong>, including a <code>T or error</code> result.</li>
+        <li><strong>Where it does not run.</strong> Not on <code>break</code> or <code>continue</code> (they leave a loop, not the function), and not when the program stops abruptly, as with an index out of bounds or <code>fatal</code>. Lambdas and async functions each have their own deferred calls.</li>
+      </ul>
     </section>
 
     <section id="async">

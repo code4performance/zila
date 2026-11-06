@@ -166,6 +166,8 @@ pub struct Interpreter {
     pub funcs: HashMap<String, FuncDecl>,
     pub methods: HashMap<(String, String), FuncDecl>,
     pub types: HashMap<String, TypeDecl>,
+    /// One frame per running function: the `defer`red calls, with the environment they were deferred in.
+    defers: Vec<Vec<(Expr, Rc<RefCell<Env>>)>>,
 }
 
 impl Interpreter {
@@ -176,6 +178,7 @@ impl Interpreter {
             funcs: HashMap::new(),
             methods: HashMap::new(),
             types: HashMap::new(),
+            defers: Vec::new(),
         };
         interp.register_builtins();
         interp
@@ -228,10 +231,22 @@ impl Interpreter {
             .ok_or_else(|| "no 'main' function found".to_string())?;
 
         let env = Rc::new(RefCell::new(Env::with_parent(self.globals.clone())));
-        match self.eval_block(&main_func.body, &env)? {
+        match self.run_body(&main_func.body, &env)? {
             Flow::Return(v) => Ok(v),
             _ => Ok(Value::Nil),
         }
+    }
+
+    /// Runs a function body. Calls deferred in it run when it ends, last in first out.
+    fn run_body(&mut self, body: &[Stmt], env: &Rc<RefCell<Env>>) -> InterpResult<Flow> {
+        self.defers.push(Vec::new());
+        let flow = self.eval_block(body, env);
+        let pending = self.defers.pop().unwrap_or_default();
+        let flow = flow?;
+        for (expr, denv) in pending.into_iter().rev() {
+            self.eval_expr(&expr, &denv)?;
+        }
+        Ok(flow)
     }
 
     pub fn eval_block(&mut self, block: &[Stmt], env: &Rc<RefCell<Env>>) -> InterpResult<Flow> {
@@ -316,7 +331,13 @@ impl Interpreter {
             }
             StmtKind::Break => Ok(Flow::Break),
             StmtKind::Continue => Ok(Flow::Continue),
-            StmtKind::Defer(_expr) => {
+            StmtKind::Defer(expr) => {
+                if !matches!(expr.kind, ExprKind::Call { .. }) {
+                    return Err(format!("line {}: `defer` needs a call, like `defer file.close()`", stmt.line));
+                }
+                if let Some(frame) = self.defers.last_mut() {
+                    frame.push((expr.clone(), env.clone()));
+                }
                 Ok(Flow::None)
             }
             StmtKind::Spawn(call) => {
@@ -377,10 +398,37 @@ impl Interpreter {
                 }
                 Ok(Flow::None)
             }
-            StmtKind::Expr(e) => {
-                self.eval_expr(e, env)?;
-                Ok(Flow::None)
-            }
+            // `if` and `match` used as statements pass `return`, `break` and `continue` on to the
+            // enclosing function or loop (evaluated as values they would swallow them)
+            StmtKind::Expr(e) => match &e.kind {
+                ExprKind::If { branches, else_body } => {
+                    for (cond, body) in branches {
+                        if self.eval_expr(cond, env)?.is_truthy() {
+                            let block_env = Rc::new(RefCell::new(Env::with_parent(env.clone())));
+                            return self.eval_block(body, &block_env);
+                        }
+                    }
+                    if let Some(b) = else_body {
+                        let block_env = Rc::new(RefCell::new(Env::with_parent(env.clone())));
+                        return self.eval_block(b, &block_env);
+                    }
+                    Ok(Flow::None)
+                }
+                ExprKind::Match { scrutinee, arms } => {
+                    let val = self.eval_expr(scrutinee, env)?;
+                    for arm in arms {
+                        if self.match_pattern(&val, &arm.pattern) {
+                            let arm_env = Rc::new(RefCell::new(Env::with_parent(env.clone())));
+                            return self.eval_block(&arm.body, &arm_env);
+                        }
+                    }
+                    Ok(Flow::None)
+                }
+                _ => {
+                    self.eval_expr(e, env)?;
+                    Ok(Flow::None)
+                }
+            },
         }
     }
 
@@ -770,7 +818,7 @@ impl Interpreter {
             let val = args.get(i).cloned().unwrap_or(Value::Nil);
             env.borrow_mut().define(param.name.clone(), val);
         }
-        match self.eval_block(&fd.body, &env)? {
+        match self.run_body(&fd.body, &env)? {
             Flow::Return(v) => Ok(v),
             _ => Ok(Value::Nil),
         }
@@ -802,7 +850,7 @@ impl Interpreter {
                     let val = args.get(i).cloned().unwrap_or(Value::Nil);
                     env.borrow_mut().define(param.name.clone(), val);
                 }
-                match self.eval_block(&fd.body, &env)? {
+                match self.run_body(&fd.body, &env)? {
                     Flow::Return(v) => return Ok(v),
                     _ => return Ok(Value::Nil),
                 }

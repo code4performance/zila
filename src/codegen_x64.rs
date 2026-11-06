@@ -53,6 +53,8 @@ pub fn std_source(name: &str) -> Option<&'static str> {
         "math" => Some(include_str!("../std/math.br")),
         "text" => Some(include_str!("../std/text.br")),
         "list" => Some(include_str!("../std/list.br")),
+        "format" => Some(include_str!("../std/format.br")),
+        "set" => Some(include_str!("../std/set.br")),
         _ => None,
     }
 }

@@ -124,14 +124,26 @@ fn main() {
                     }
                 }
             } else if mode == Mode::Run {
-                let mut interp = brasa::Interpreter::new();
-                if let Err(e) = interp.load_file(&file) {
-                    eprintln!("runtime error: {}", e);
-                    exit(1);
-                }
-                if let Err(e) = interp.run_main() {
-                    eprintln!("runtime error: {}", e);
-                    exit(1);
+                // The interpreter recurses once per nested expression, so it gets a big stack.
+                let worker = std::thread::Builder::new().stack_size(512 * 1024 * 1024).spawn(move || {
+                    let mut interp = brasa::Interpreter::new();
+                    if let Err(e) = interp.load_file(&file) {
+                        eprintln!("runtime error: {}", e);
+                        exit(1);
+                    }
+                    if let Err(e) = interp.run_main() {
+                        eprintln!("runtime error: {}", e);
+                        exit(1);
+                    }
+                });
+                match worker {
+                    Ok(h) => {
+                        let _ = h.join();
+                    }
+                    Err(e) => {
+                        eprintln!("runtime error: cannot start the interpreter: {}", e);
+                        exit(1);
+                    }
                 }
             } else {
                 println!("OK {}: {}", path, summarize(&file));

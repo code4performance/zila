@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Library — Brasa</title>
-  <meta name="description" content="The Brasa standard library for text and lists: searching, splitting, trimming, parsing numbers, map, filter and sort.">
+  <meta name="description" content="The Brasa standard library for text, lists, formatting and sets: searching, splitting, parsing numbers, map, filter, sort, padding, templates and set operations.">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -25,7 +25,7 @@
 
   <main>
     <h1>Library</h1>
-    <p>The everyday operations on text and lists live in two modules, <code>text</code> and <code>list</code>. They are written in Brasa itself (see <code>std/text.br</code> and <code>std/list.br</code>), and you use them by name: <code>use text</code> once at the top of the file, then <code>text.trim(s)</code>. Nothing is added to the types themselves, so the names never clash with your own functions.</p>
+    <p>The everyday operations live in four modules: <code>text</code>, <code>list</code>, <code>format</code> and <code>set</code>. They are written in Brasa itself (see the files in <code>std/</code>), and you use them by name: <code>use text</code> once at the top of the file, then <code>text.trim(s)</code>. Nothing is added to the types themselves, so the names never clash with your own functions.</p>
 
     <section id="text">
       <h2>text</h2>
@@ -82,12 +82,55 @@ print(text.join([<span class="str">"a"</span>, <span class="str">"b"</span>, <sp
       </table>
     </section>
 
+    <section id="format">
+      <h2>format</h2>
+      <pre><code><span class="kw">use</span> format
+
+print(format.text(<span class="str">"%(&lt;8)|%(&gt;8)"</span>, [<span class="str">"apples"</span>, format.thousands(12000)]) ?? <span class="str">""</span>)   <span class="cm">// apples  |  12,000</span>
+print(format.pad_left(<span class="str">"7"</span>, 3, <span class="str">"0"</span>))                                        <span class="cm">// 007</span>
+print(format.float(3.14159, 2))                                           <span class="cm">// 3.14</span></code></pre>
+      <p>A template is a text with <code>%</code> placeholders. <code>%</code> is the next argument, <code>%1</code> the argument at position 1 (counting from 0), and <code>%%</code> is a percent sign. A layout in parentheses sets the width: <code>%(&gt;8)</code> right-aligns in 8 characters, <code>%(&lt;8)</code> left-aligns, <code>%(^8)</code> centers, <code>%(*^9)</code> centers with <code>*</code> as the fill and <code>%(05)</code> pads with zeros. Text longer than the width is never cut, and widths count characters, not bytes. The arguments are texts: placeholders are not braces because a brace in a text literal starts an interpolation, and the helpers below turn numbers into texts.</p>
+      <table>
+        <thead><tr><th>Function</th><th>What it gives</th></tr></thead>
+        <tbody>
+          <tr><td><code>text(template, args)</code></td><td>The template with its placeholders replaced by the list of texts <code>args</code>. It returns a result: a missing argument, an unclosed <code>(</code> or an unknown layout is an error, never partial text.</td></tr>
+          <tr><td><code>pad_left(s, width)</code>, <code>pad_right(s, width)</code>, <code>center(s, width)</code></td><td><code>s</code> filled with spaces to <code>width</code> characters. A third argument gives another fill: <code>pad_left("7", 3, "0")</code>.</td></tr>
+          <tr><td><code>int(n)</code>, <code>hex(n)</code>, <code>bin(n)</code></td><td>The digits of an integer in base 10, 16 (lowercase) or 2, with no prefix. Negative numbers get a leading <code>-</code>.</td></tr>
+          <tr><td><code>thousands(n)</code></td><td>The integer with <code>,</code> between groups of three digits: <code>1,234,567</code>.</td></tr>
+          <tr><td><code>float(x, digits)</code></td><td>The float with exactly <code>digits</code> decimals, halves away from zero.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="set">
+      <h2>set</h2>
+      <pre><code><span class="kw">use</span> set
+
+<span class="kw">let</span> seen: set.Set&lt;text&gt; = set.empty()
+<span class="kw">if</span> seen.add(<span class="str">"ana"</span>)          <span class="cm">// true: it was not there yet</span>
+    print(<span class="str">"first time"</span>)
+<span class="kw">end</span>
+<span class="kw">let</span> ids = set.from_list([3, 1, 3])   <span class="cm">// two elements</span></code></pre>
+      <p>A <code>Set&lt;T&gt;</code> holds text or integers, each at most once, and remembers the order in which they were first added, so a loop over <code>to_list()</code> gives the same order every run. It is a shared reference, like a map. Types from a module are written with the module name: <code>set.Set&lt;text&gt;</code>. (A set is kept as a map, so any other element type fails with the map key error.)</p>
+      <table>
+        <thead><tr><th>Function</th><th>What it gives</th></tr></thead>
+        <tbody>
+          <tr><td><code>set.empty()</code>, <code>set.from_list(xs)</code></td><td>An empty set (its type comes from the variable's type) or a set of the elements of a list.</td></tr>
+          <tr><td><code>s.add(x)</code>, <code>s.remove(x)</code></td><td>Add or remove an element; the result says whether the set changed.</td></tr>
+          <tr><td><code>s.has(x)</code>, <code>s.len</code>, <code>s.clear()</code></td><td>Membership, the number of elements, and emptying the set.</td></tr>
+          <tr><td><code>s.to_list()</code></td><td>The elements as a list, in the order they were added.</td></tr>
+          <tr><td><code>set.union(a, b)</code>, <code>set.intersect(a, b)</code>, <code>set.difference(a, b)</code></td><td>New sets; the arguments do not change. <code>difference</code> keeps the elements of <code>a</code> that are not in <code>b</code>.</td></tr>
+          <tr><td><code>set.is_subset(a, b)</code></td><td>True when every element of <code>a</code> is in <code>b</code>. The empty set is a subset of every set.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
     <section id="limits">
       <h2>Good to know</h2>
       <ul>
-        <li>Both modules are compiled with your program, so only the functions you use add to its size. They need the Windows target (<code>use text</code> also brings in the float printing library, which is why it is not available in a bare-metal kernel).</li>
+        <li>The modules are compiled with your program, so only the functions you use add to its size. They need the Windows target (<code>use text</code> also brings in the float printing library, which is why it is not available in a bare-metal kernel).</li>
         <li>The interpreter behind <code>--run</code> runs them too. It handles errors only through <code>??</code> (it has no <code>match</code> on results), and a lambda in it cannot use variables of the function around it.</li>
-        <li>Not here yet: regular expressions, Unicode case mapping, a <code>format</code> function with placeholders, sets, and sorted maps.</li>
+        <li>Not here yet: regular expressions, Unicode case mapping, placeholders that format values of any type (<code>format.text</code> takes texts), and sorted maps and sets.</li>
       </ul>
     </section>
   </main>

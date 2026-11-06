@@ -103,7 +103,7 @@ Everything in this list is implemented and covered by tests.
 - Records are copied when assigned (value semantics); `ref` shares. Records can define `drop` to close files and sockets automatically.
 - `live_objects()` reports how many heap objects are alive, so leaks are easy to test for. The test suite uses it to check that thousands of tasks and connections leave nothing behind.
 - Reference cycles are not collected: avoid building them.
-- `use text` and `use list`: `split`, `join`, `trim`, `replace`, `parse_int`, `parse_float`, `map`, `filter`, `reduce`, `sort_by` and more, written in Brasa on top of generics.
+- `use text`, `use list`, `use format` and `use set`: `split`, `join`, `trim`, `replace`, `parse_int`, `parse_float`, `map`, `filter`, `reduce`, `sort_by` and more, written in Brasa on top of generics.
 - Generics and interfaces: `func first<T>(items: []T) -> T`, `type Stack<T>`, and `T: Printable` bounds with structural interfaces. The compiler infers the type arguments and makes one copy per type used.
 - `float` (`f64`) and `f32`: arithmetic, comparisons that follow IEEE 754, explicit `float(n)` / `int(x)` conversions, shortest-text printing, `use math`, and C calls through the XMM registers.
 - `Map<K, V>` stores values under text or integer keys: `{ "a": 1 }` literals, `m[key]`, `has`, `get(key, default)`, `remove`, and `for key, value in m` in insertion order.
@@ -176,7 +176,7 @@ Brasa is **pre-alpha**. The design is settling, but breaking changes are still p
 | Floating point | ✅ Works: `float`/`f64`/`f32`, `use math`, C calls; Windows x64 only |
 | Generics and interfaces | ✅ Works: generic functions and records, inferred type arguments, structural interfaces as bounds |
 | Maps (`Map<K, V>`) | ✅ Works: text and integer keys, insertion order |
-| Text and list libraries | ✅ `use text` and `use list`: split, trim, parse numbers, map, filter, sort. More collections, I/O and formatting to come |
+| Text, list, format and set libraries | ✅ `use text`, `use list`, `use format` (`%` templates, padding, hex, thousands) and `use set`. Sorted maps, buffered I/O and more to come |
 | Optimizer | 🔧 Constant folding, direct operands, compare-and-branch, peephole cleanups and integer variables in registers (`--no-opt` turns them off); no inlining yet |
 | Formatter, test runner, package manager, language server | ⏳ Not started |
 | Linux, macOS, ARM64, Android, iOS | ⏳ Windows x64 and bare-metal x86-64 only |
@@ -189,7 +189,7 @@ This is the plan, in roughly the order we intend to do it. **Every item is a pla
 
 | # | Work | What it involves | Difficulty |
 |---|---|---|---|
-| 1 | Standard library, next steps | Formatting with placeholders, sets and sorted maps, buffered I/O, UDP, TLS, async DNS. Mostly written in Brasa. | ⭐ – ⭐⭐ |
+| 1 | Standard library, next steps | Sorted maps and sets, formatting values of any type, buffered I/O, UDP, TLS, async DNS. Mostly written in Brasa. | ⭐ – ⭐⭐ |
 | 2 | Inlining | Inline small functions and keep more values in registers. | ⭐⭐ |
 | 3 | Tooling | `brasa fmt`, `brasa test`, a package manager, a language server, a richer VS Code extension. | ⭐⭐ – ⭐⭐⭐ |
 | 4 | More platforms | **Linux x86-64 first** (ELF and the System V ABI), then macOS. Apple Silicon, Android and iOS need an ARM64 backend. WebAssembly later. | ⭐⭐⭐ – ⭐⭐⭐⭐ |

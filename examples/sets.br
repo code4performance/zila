@@ -1,0 +1,49 @@
+// Sets: which words appear in one text but not in the other.
+//
+//   brasa-parse examples/sets.br -o sets.exe
+//
+// `use set` is a library written in Brasa. A set holds text or integers, each at most once,
+// and remembers the order in which they were first added.
+
+package main
+
+use set
+use text
+
+func words(s: text) -> set.Set<text>
+    let out: set.Set<text> = set.empty()
+    for w in text.split(text.lower(s), " ")
+        if w.len > 0
+            out.add(w)
+        end
+    end
+    return out
+end
+
+func show(title: text, s: set.Set<text>)
+    var line = title + ":"
+    for w in s.to_list()
+        line = line + " " + w
+    end
+    print(line)
+end
+
+func main()
+    let a = words("the quick brown fox jumps over the lazy dog")
+    let b = words("the lazy dog sleeps under the old tree")
+
+    show("a", a)
+    show("b", b)
+    show("in both", set.intersect(a, b))
+    show("only in a", set.difference(a, b))
+    show("in either", set.union(a, b))
+    print("a has {a.len} different words, b has {b.len}")
+    print("is every word of b in a? {set.is_subset(b, a)}")
+
+    let seen: set.Set<int> = set.empty()
+    for n in [3, 1, 3, 2, 1]
+        if seen.add(n)
+            print("new: {n}")
+        end
+    end
+end

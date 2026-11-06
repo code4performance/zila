@@ -1,0 +1,115 @@
+// =====================================================================
+// Brasa standard library: set
+//
+//     use set
+//     let seen: set.Set<text> = set.empty()
+//     if seen.add("a")
+//         print("first time")
+//     end
+//
+// A set of text or integers. Elements are kept in the order they were first added, so
+// `to_list` (and a `for` over it) gives the same order every run.
+// =====================================================================
+
+package set
+
+type Set<T> = record
+    items: Map<T, bool>
+end
+
+// An empty set; the element type comes from the expected type.
+func empty<T>() -> Set<T>
+    return Set { items: {} }
+end
+
+// A set of the elements of `xs`.
+func from_list<T>(xs: []T) -> Set<T>
+    let s: Set<T> = Set { items: {} }
+    for x in xs
+        s.items[x] = true
+    end
+    return s
+end
+
+// Adds `x`; true when it was not in the set yet.
+func (s: Set<T>) add(x: T) -> bool
+    if s.items.has(x)
+        return false
+    end
+    s.items[x] = true
+    return true
+end
+
+// True when `x` is in the set.
+func (s: Set<T>) has(x: T) -> bool
+    return s.items.has(x)
+end
+
+// Removes `x`; true when it was in the set.
+func (s: Set<T>) remove(x: T) -> bool
+    if s.items.has(x)
+        s.items.remove(x)
+        return true
+    end
+    return false
+end
+
+// Removes every element.
+func (s: Set<T>) clear()
+    s.items.clear()
+end
+
+// The number of elements.
+func (s: Set<T>) len() -> int
+    return s.items.len
+end
+
+// The elements, in the order they were added.
+func (s: Set<T>) to_list() -> []T
+    let out: []T = []
+    for k, v in s.items
+        out.add(k)
+    end
+    return out
+end
+
+// The elements of `a` and of `b`.
+func union<T>(a: Set<T>, b: Set<T>) -> Set<T>
+    let out = from_list(a.to_list())
+    for x in b.to_list()
+        out.add(x)
+    end
+    return out
+end
+
+// The elements that are in both `a` and `b`.
+func intersect<T>(a: Set<T>, b: Set<T>) -> Set<T>
+    let out: Set<T> = Set { items: {} }
+    for x in a.to_list()
+        if b.has(x)
+            out.add(x)
+        end
+    end
+    return out
+end
+
+// The elements of `a` that are not in `b`.
+func difference<T>(a: Set<T>, b: Set<T>) -> Set<T>
+    let out: Set<T> = Set { items: {} }
+    for x in a.to_list()
+        if not b.has(x)
+            out.add(x)
+        end
+    end
+    return out
+end
+
+// True when every element of `a` is in `b`.
+func is_subset<T>(a: Set<T>, b: Set<T>) -> bool
+    for x in a.to_list()
+        if not b.has(x)
+            return false
+        end
+    end
+    return true
+end

@@ -268,7 +268,7 @@ impl Interpreter {
     pub fn load_uses(&mut self, file: &File) -> InterpResult<()> {
         for u in &file.uses {
             let name = u[0].clone();
-            if self.loaded.contains(&name) || !matches!(name.as_str(), "text" | "list" | "float" | "math") {
+            if self.loaded.contains(&name) || !matches!(name.as_str(), "text" | "list" | "float" | "math" | "format" | "set") {
                 continue;
             }
             let Some(src) = crate::codegen_x64::std_source(&name) else { continue };
@@ -277,11 +277,23 @@ impl Interpreter {
             self.load_uses(&f)?;
             for decl in &f.decls {
                 if let DeclKind::Func(fd) = &decl.kind {
-                    if fd.receiver.is_none() {
-                        let mut fd = fd.clone();
-                        fd.name = format!("{}.{}", name, fd.name);
-                        self.funcs.insert(fd.name.clone(), fd);
+                    match &fd.receiver {
+                        None => {
+                            let mut fd = fd.clone();
+                            fd.name = format!("{}.{}", name, fd.name);
+                            self.funcs.insert(fd.name.clone(), fd);
+                        }
+                        Some(rec) => {
+                            // a method of a type the module declares (`Set<T>`)
+                            if let Type::Named { path, .. } = &rec.ty {
+                                if let Some(t) = path.last() {
+                                    self.methods.insert((t.clone(), fd.name.clone()), fd.clone());
+                                }
+                            }
+                        }
                     }
+                } else if let DeclKind::Type(td) = &decl.kind {
+                    self.types.insert(td.name.clone(), td.clone());
                 }
             }
         }
@@ -641,9 +653,16 @@ impl Interpreter {
                     return Ok(Value::Nil);
                 }
                 match obj {
-                    Value::Record { fields, .. } => {
-                        let val = fields.borrow().get(name).cloned().unwrap_or(Value::Nil);
-                        Ok(val)
+                    Value::Record { ref type_name, ref fields } => {
+                        let found = fields.borrow().get(name).cloned();
+                        if let Some(v) = found {
+                            return Ok(v);
+                        }
+                        // `s.len` for a method that takes nothing, like a property
+                        if self.methods.get(&(type_name.clone(), name.clone())).map_or(false, |m| m.params.is_empty()) {
+                            return self.call_method(obj.clone(), name, Vec::new(), expr.line);
+                        }
+                        Ok(Value::Nil)
                     }
                     Value::Error(m) if name == "message" => Ok(Value::Text(m)),
                     Value::List(l) if name == "len" => Ok(Value::Int(l.borrow().len() as i64)),
@@ -1000,7 +1019,11 @@ impl Interpreter {
     fn call_func(&mut self, fd: &FuncDecl, args: Vec<Value>) -> InterpResult<Value> {
         let env = Rc::new(RefCell::new(Env::with_parent(self.globals.clone())));
         for (i, param) in fd.params.iter().enumerate() {
-            let val = args.get(i).cloned().unwrap_or(Value::Nil);
+            let val = match (args.get(i), &param.default) {
+                (Some(v), _) => v.clone(),
+                (None, Some(d)) => self.eval_expr(d, &env)?,
+                (None, None) => Value::Nil,
+            };
             env.borrow_mut().define(param.name.clone(), val);
         }
         // a library function runs in its own module, a lambda in the module that made it

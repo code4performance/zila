@@ -1,0 +1,32 @@
+// Formatting: a right-aligned table of names and amounts.
+//
+//   brasa-parse examples/report.br -o report.exe
+//
+// `use format` is a library written in Brasa. A template is a text with `%` placeholders
+// (`%` is the next argument, `%1` the second one, `%(>8)` pads to 8 characters, right
+// aligned, `%%` is a percent sign). The arguments are texts; format.int, format.float,
+// format.thousands and friends turn numbers into texts.
+
+package main
+
+use format
+
+func main()
+    let names = ["Apples", "Figs", "Kiwi", "Ação"]
+    let quantities = [1200, 35, 98000, 7]
+    let prices = [1.5, 12.25, 0.333, 100.0]
+
+    print(format.text("%(<8)|%(>8)|%(>10)", ["item", "qty", "price"]) ?? "")
+    print(format.repeat("-", 28))
+
+    var i = 0
+    while i < names.len
+        let row = format.text("%(<8)|%(>8)|%(>10)", [names[i], format.thousands(quantities[i]), format.float(prices[i], 2)])
+        print(row ?? "")
+        i += 1
+    end
+
+    print(format.repeat("=", 28))
+    print(format.text("hex %, binary %, padded %(*>6) and 100%%", [format.hex(255), format.bin(10), "ok"]) ?? "")
+    print(format.center("the end", 28, "."))
+end

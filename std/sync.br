@@ -1,0 +1,235 @@
+// =====================================================================
+// Brasa standard library: synchronization between threads
+//
+//     use sync
+//
+//     let counter = shared sync.Mutex(0)
+//     counter.update(func(n: int) -> int
+//         return n + 1
+//     end)
+//
+//     let hits = shared sync.Atomic{ value: 0 }
+//     hits.add(1)
+//
+// `Mutex<T>` guards one value of a transferable type `T`. A thread that has to wait sleeps in
+// the kernel (`WaitOnAddress`); it does not spin. Locking a mutex the calling thread already
+// holds stops the program. `update`, `with` and `get` lock for you; `lock`/`unlock` (with
+// `defer m.unlock()`) hold the lock over several statements, and `locked_get`/`locked_set`
+// read and write the value while it is held.
+//
+// `Atomic` is one `long` changed with `lock`-prefixed instructions, no mutex.
+// =====================================================================
+
+package sync
+
+#[link("kernel32")]
+extern "system" func GetCurrentThreadId() -> u32
+#[link("api-ms-win-core-synch-l1-2-0")]
+extern "system" func WaitOnAddress(address: long, compare: *long, size: usize, ms: u32) -> i32
+extern "system" func WakeByAddressSingle(address: long)
+
+// One integer shared by threads. The value is the first field: the instructions below address it.
+#[shared]
+type Atomic = record
+    value: long
+end
+
+// The current value.
+func (a: Atomic) load() -> long
+    return a.value
+end
+
+// Replaces the value.
+func (a: Atomic) store(v: long)
+    unsafe
+        asm
+            in rcx = a
+            in rax = v
+            xchg qword ptr [rcx], rax
+        end
+    end
+end
+
+// Adds `n` and returns the value it had before.
+func (a: Atomic) add(n: long) -> long
+    var old: long = 0
+    unsafe
+        asm
+            in rcx = a
+            in rax = n
+            lock xadd qword ptr [rcx], rax
+            out rax = old
+        end
+    end
+    return old
+end
+
+// Replaces the value and returns the one it had before.
+func (a: Atomic) swap(v: long) -> long
+    var old: long = 0
+    unsafe
+        asm
+            in rcx = a
+            in rax = v
+            xchg qword ptr [rcx], rax
+            out rax = old
+        end
+    end
+    return old
+end
+
+// Replaces the value with `to` when it is `expected`; returns the value it had.
+func (a: Atomic) compare_swap(expected: long, to: long) -> long
+    var old: long = 0
+    unsafe
+        asm
+            in rcx = a
+            in rax = expected
+            in rdx = to
+            lock cmpxchg qword ptr [rcx], rdx
+            out rax = old
+        end
+    end
+    return old
+end
+
+// A value guarded by a lock. `state` is 0 (free), 1 (held) or 2 (held, someone is waiting);
+// it is the first field: the instructions below address it.
+#[shared]
+type Mutex<T> = record
+    state: long
+    owner: long
+    value: T
+end
+
+func thread_id() -> long
+    var r: long = 0
+    unsafe
+        r = long(GetCurrentThreadId())
+    end
+    return r
+end
+
+// A mutex holding `value`.
+func Mutex<T>(value: T) -> Mutex<T>
+    return Mutex { state: 0, owner: 0, value: value }
+end
+
+// Sets the state to `to` when it is `expected`; returns the state it had.
+func (m: Mutex<T>) cas(expected: long, to: long) -> long
+    var old: long = 0
+    unsafe
+        asm
+            in rcx = m
+            in rax = expected
+            in rdx = to
+            lock cmpxchg qword ptr [rcx], rdx
+            out rax = old
+        end
+    end
+    return old
+end
+
+// Sets the state and returns the one it had.
+func (m: Mutex<T>) exchange(to: long) -> long
+    var old: long = 0
+    unsafe
+        asm
+            in rcx = m
+            in rax = to
+            xchg qword ptr [rcx], rax
+            out rax = old
+        end
+    end
+    return old
+end
+
+func (m: Mutex<T>) address() -> long
+    var a: long = 0
+    unsafe
+        asm
+            in rax = m
+            out rax = a
+        end
+    end
+    return a
+end
+
+// Waits until the state is no longer 2 (or someone wakes this thread).
+func (m: Mutex<T>) sleep_while_contended()
+    var two: long = 2
+    unsafe
+        WaitOnAddress(m.address(), &two, 8, 0xFFFFFFFF)
+    end
+end
+
+// Takes the lock, sleeping while another thread holds it.
+func (m: Mutex<T>) lock()
+    let me = thread_id()
+    if m.owner == me and m.state != 0
+        abort("the mutex is already locked by this thread")
+    end
+    var c = m.cas(0, 1)
+    if c != 0
+        if c != 2
+            c = m.exchange(2)
+        end
+        while c != 0
+            m.sleep_while_contended()
+            c = m.exchange(2)
+        end
+    end
+    m.owner = me
+end
+
+// Releases the lock and wakes one waiting thread.
+func (m: Mutex<T>) unlock()
+    if m.owner != thread_id()
+        abort("the mutex is not locked by this thread")
+    end
+    m.owner = 0
+    if m.exchange(0) == 2
+        unsafe
+            WakeByAddressSingle(m.address())
+        end
+    end
+end
+
+// The value; the lock must be held (`lock`).
+func (m: Mutex<T>) locked_get() -> T
+    return m.value
+end
+
+// Replaces the value; the lock must be held (`lock`).
+func (m: Mutex<T>) locked_set(v: T)
+    m.value = v
+end
+
+// A copy of the value, read under the lock.
+func (m: Mutex<T>) get() -> T
+    m.lock()
+    let v = m.value
+    m.unlock()
+    return v
+end
+
+// Replaces the value under the lock.
+func (m: Mutex<T>) set(v: T)
+    m.lock()
+    m.value = v
+    m.unlock()
+end
+
+// Runs `body` with the value while holding the lock.
+func (m: Mutex<T>) with(body: func(T))
+    m.lock()
+    body(m.value)
+    m.unlock()
+end
+
+// Replaces the value with what `body` makes of it, all under the lock.
+func (m: Mutex<T>) update(body: func(T) -> T)
+    m.lock()
+    m.value = body(m.value)
+    m.unlock()
+end

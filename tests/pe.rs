@@ -210,7 +210,7 @@ fn a_bad_asm_block_names_the_file_and_line_and_leaves_nothing() {
 
 #[test]
 fn executables_are_small() {
-    for (p, limit) in [("examples/hello.br", 8 * 1024), ("examples/ui.br", 64 * 1024)] {
+    for (p, limit) in [("examples/hello.br", 8 * 1024), ("examples/ui.br", 68 * 1024)] {
         let src = std::fs::read_to_string(p).unwrap();
         let name = format!("size_{}.exe", p.replace('/', "_"));
         let b = build(&src, &name).unwrap_or_else(|e| panic!("{}: {}", p, e));

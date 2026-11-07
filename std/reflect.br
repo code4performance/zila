@@ -1,0 +1,179 @@
+// =====================================================================
+// Brasa standard library: reflect
+//
+//     use reflect
+//
+//     #[derive]
+//     comptime func describe(t: Type) -> text
+//         var out = "func (v: {t.name()}) describe() -> text\n"
+//         ...
+//     end
+//
+// The API of compile-time reflection. A `comptime func` receives a `Type`, a value that exists
+// only while the compiler runs, and returns Brasa source text. Everything here is plain Brasa
+// code; the compiler fills the tables below before a generator runs (the functions `begin`,
+// `add_type`, `set_target` and `emit` belong to the program the compiler builds around the
+// generators, not to user code).
+//
+// Kinds: record, enum, alias, int, float, bool, text, list, map, set, optional, func, error,
+// pointer. Reflection never exposes sizes, offsets or alignment.
+// =====================================================================
+
+package reflect
+
+// A type described to a generator.
+type Type = record
+    id: int
+end
+
+// `#[json("full_name")]` is the attribute `json` with the argument `full_name`.
+type Attribute = record
+    name: text
+    args: []text
+end
+
+type Field = record
+    name: text
+    ty: Type
+    attrs: []Attribute
+    line: int
+end
+
+type Variant = record
+    name: text
+    fields: []Field
+    attrs: []Attribute
+    line: int
+end
+
+// Anything a generator can refuse: a type, a field or a variant.
+type Located = interface
+    func at_line(self) -> int
+end
+
+type Entry = record
+    name: text
+    kind: text
+    line: int
+    elem: int
+    key: int
+    value: int
+    inner: int
+    attrs: []Attribute
+    fields: []Field
+    variants: []Variant
+end
+
+var entries: []Entry = []
+var call_id: int = 0
+var fresh_tag: text = ""
+var fresh_count: int = 0
+var target_name: text = ""
+
+// ---- the queries ----
+
+// The declared name; `[]User`, `User?`, `Map<text, int>` for composite types.
+func (t: Type) name() -> text
+    return entries[t.id].name
+end
+
+func (t: Type) kind() -> text
+    return entries[t.id].kind
+end
+
+func (t: Type) fields() -> []Field
+    return entries[t.id].fields
+end
+
+func (t: Type) variants() -> []Variant
+    return entries[t.id].variants
+end
+
+func (t: Type) attrs() -> []Attribute
+    return entries[t.id].attrs
+end
+
+// The element of a list or set.
+func (t: Type) element() -> Type
+    return Type { id: need(entries[t.id].elem, t, "element()") }
+end
+
+func (t: Type) key() -> Type
+    return Type { id: need(entries[t.id].key, t, "key()") }
+end
+
+func (t: Type) value() -> Type
+    return Type { id: need(entries[t.id].value, t, "value()") }
+end
+
+// The type inside an optional or an alias.
+func (t: Type) inner() -> Type
+    return Type { id: need(entries[t.id].inner, t, "inner()") }
+end
+
+func (t: Type) at_line() -> int
+    return entries[t.id].line
+end
+
+func (f: Field) at_line() -> int
+    return f.line
+end
+
+func (v: Variant) at_line() -> int
+    return v.line
+end
+
+func need(id: int, t: Type, what: text) -> int
+    if id < 0
+        abort("{what} does not apply to {entries[t.id].name} (a {entries[t.id].kind})")
+    end
+    return id
+end
+
+// ---- helpers for generators ----
+
+// A name that is unique in the whole build, for local helpers in generated code. Names that
+// start with `__` are reserved for it.
+func fresh(base: text) -> text
+    fresh_count += 1
+    return "__{base}_{fresh_tag}{fresh_count}"
+end
+
+// The target of the build: `windows` or `linux`.
+func target() -> text
+    return target_name
+end
+
+// Stops the generator with an error reported at the line of `at` (a type, a field or a
+// variant) in the user's code.
+func fail<T: Located>(msg: text, at: T)
+    print("fail {call_id} {at.at_line()} {msg.len}")
+    print(msg)
+    abort("comptime generator failed")
+end
+
+// ---- the program the compiler builds around the generators ----
+
+func begin(id: int, tag: text)
+    entries = []
+    call_id = id
+    fresh_tag = tag
+    fresh_count = 0
+end
+
+func set_target(name: text)
+    target_name = name
+end
+
+func add_type(name: text, kind: text, line: int, elem: int, key: int, value: int, inner: int, attrs: []Attribute, fields: []Field, variants: []Variant)
+    entries.add(Entry { name: name, kind: kind, line: line, elem: elem, key: key, value: value, inner: inner, attrs: attrs, fields: fields, variants: variants })
+end
+
+func type_at(id: int) -> Type
+    return Type { id: id }
+end
+
+func emit(id: int, out: text)
+    print("ok {id} {out.len}")
+    print(out)
+end

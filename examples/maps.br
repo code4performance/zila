@@ -2,7 +2,8 @@
 //
 //   brasa-parse examples/maps.br -o maps.exe
 //
-// A Map<K, V> keeps values under keys (text or integers) and remembers the order
+// A Map<K, V> keeps values under keys (any type that is Hash: text, integers, records,
+// enums, lists...) and remembers the order
 // in which the keys were first added.
 
 package main

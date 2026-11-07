@@ -5,7 +5,7 @@
 //! entry and nothing else.
 
 /// Every option `brasa-parse` accepts.
-pub const FLAGS: &[&str] = &["--ast", "--tokens", "--asm", "--run", "--build", "-o", "--os", "--docs", "--no-opt", "--fmt", "--fmt-check", "--test", "--target", "--lsp"];
+pub const FLAGS: &[&str] = &["--ast", "--tokens", "--asm", "--run", "--build", "-o", "--os", "--docs", "--no-opt", "--fmt", "--fmt-check", "--test", "--target", "--lsp", "--comptime-timeout", "--no-comptime-cache", "--comptime-dump"];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Mode {
@@ -45,13 +45,19 @@ pub struct Options {
     pub target: String,
     /// Whether `--target` was given (without it, `--run` uses the host).
     pub target_explicit: bool,
+    /// `--comptime-timeout <seconds>`: the limit of a run of comptime generators (default 5).
+    pub comptime_timeout: Option<u64>,
+    /// `--no-comptime-cache`: do not read or write the cache of generator results.
+    pub no_comptime_cache: bool,
+    /// `--comptime-dump`: print the text every generator produced to standard error.
+    pub comptime_dump: bool,
 }
 
 /// The targets `--target` accepts.
 pub const TARGETS: &[&str] = &["windows", "linux"];
 
 pub fn parse(args: &[String]) -> Result<Options, String> {
-    let mut o = Options { mode: Mode::Check, path: None, extra: Vec::new(), out: None, optimize: true, target: "windows".to_string(), target_explicit: false };
+    let mut o = Options { mode: Mode::Check, path: None, extra: Vec::new(), out: None, optimize: true, target: "windows".to_string(), target_explicit: false, comptime_timeout: None, no_comptime_cache: false, comptime_dump: false };
     let mut explicit = false;
     let mut i = 0;
     while i < args.len() {
@@ -68,6 +74,15 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
             "--test" => o.mode = Mode::Test,
             "--lsp" => o.mode = Mode::Lsp,
             "--no-opt" => o.optimize = false,
+            "--no-comptime-cache" => o.no_comptime_cache = true,
+            "--comptime-dump" => o.comptime_dump = true,
+            "--comptime-timeout" => {
+                i += 1;
+                match args.get(i).and_then(|v| v.parse::<u64>().ok()) {
+                    Some(v) if v > 0 => o.comptime_timeout = Some(v),
+                    _ => return Err("--comptime-timeout needs a number of seconds".into()),
+                }
+            }
             "--build" | "build" => o.mode = Mode::Build,
             "--target" => {
                 i += 1;
@@ -100,7 +115,7 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
                 }
             }
         }
-        if FLAGS.contains(&a) && a != "-o" && a != "--no-opt" && a != "--target" {
+        if FLAGS.contains(&a) && !matches!(a, "-o" | "--no-opt" | "--target" | "--comptime-timeout" | "--no-comptime-cache" | "--comptime-dump") {
             explicit = true;
         }
         i += 1;
@@ -139,6 +154,16 @@ mod tests {
     }
 
     #[test]
+    fn comptime_options() {
+        let o = p(&["a.br", "--run", "--comptime-timeout", "9", "--no-comptime-cache", "--comptime-dump"]).unwrap();
+        assert!(o.mode == Mode::Run && o.comptime_timeout == Some(9) && o.no_comptime_cache && o.comptime_dump);
+        let d = p(&["a.br"]).unwrap();
+        assert!(d.comptime_timeout.is_none() && !d.no_comptime_cache && !d.comptime_dump);
+        assert!(p(&["a.br", "--comptime-timeout", "x"]).is_err());
+        assert!(p(&["a.br", "--comptime-timeout"]).is_err());
+    }
+
+    #[test]
     fn unknown_options_are_rejected() {
         assert!(p(&["a.br", "--bogus"]).unwrap_err().contains("unknown option"));
         assert!(p(&["a.br", "-o"]).is_err());
@@ -150,6 +175,7 @@ mod tests {
             let args: Vec<&str> = match *f {
                 "-o" => vec!["a.br", "-o", "x"],
                 "--target" => vec!["a.br", "--target", "linux"],
+                "--comptime-timeout" => vec!["a.br", "--comptime-timeout", "9"],
                 _ => vec!["a.br", f],
             };
             assert!(p(&args).is_ok(), "{} is listed in FLAGS but not parsed", f);

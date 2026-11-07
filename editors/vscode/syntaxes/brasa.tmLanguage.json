@@ -33,6 +33,24 @@
     "attributes": {
       "patterns": [
         {
+          "name": "meta.attribute.allocation.brasa",
+          "begin": "(#\\[)\\s*(no_alloc|allocates|allocator)\\b",
+          "beginCaptures": {
+            "1": { "name": "punctuation.definition.attribute.brasa" },
+            "2": { "name": "entity.name.tag.attribute.allocation.brasa" }
+          },
+          "end": "\\]",
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.attribute.brasa" }
+          },
+          "patterns": [
+            {
+              "name": "constant.language.allocator-role.brasa",
+              "match": "\\b(alloc|free|realloc)\\b"
+            }
+          ]
+        },
+        {
           "name": "meta.attribute.brasa",
           "begin": "(#\\[)\\s*([a-zA-Z_][a-zA-Z0-9_]*)",
           "beginCaptures": {
@@ -214,7 +232,7 @@
         },
         {
           "name": "keyword.control.brasa",
-          "match": "\\b(if|else|match|for|in|while|break|continue|return|defer|spawn|try|async|await)\\b"
+          "match": "\\b(if|else|match|for|in|while|break|continue|return|defer|spawn|spawn_thread|shared|try|async|await)\\b"
         },
         {
           "name": "keyword.control.end.brasa",
@@ -222,7 +240,7 @@
         },
         {
           "name": "storage.modifier.brasa",
-          "match": "\\b(unsafe|ref|self)\\b"
+          "match": "\\b(unsafe|ref|self|comptime)\\b"
         },
         {
           "name": "keyword.operator.logical.brasa",

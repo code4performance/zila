@@ -49,7 +49,7 @@ end
 
 func trim_end(s: text) -> text
     var n = s.len
-    while n > 0 and s[n - 1] <= 32
+    while n > 0 and s.byte(n - 1) <= 32
         n -= 1
     end
     return s.slice(0, n)

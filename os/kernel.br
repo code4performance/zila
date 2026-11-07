@@ -7,8 +7,8 @@
 // os/boot.br loads and starts it.
 //
 // Everything the language offers works here, including text, lists,
-// enums, `match`, `try`, closures and reference counting: the compiler
-// provides a bare-metal runtime with its own heap. Hardware access uses
+// enums, `match`, `try`, closures and reference counting: the kernel
+// supplies the heap itself (see `heap_alloc`). Hardware access uses
 // `unsafe` raw pointers (VGA memory) and `asm` (I/O ports).
 //
 // Output goes to the VGA screen and to the serial port COM1, so it also
@@ -141,7 +141,7 @@ end
 // Everything `print` writes arrives here (the compiler requires this function).
 func console_write(s: text)
     for i in 0..s.len
-        let c = int(s[i])
+        let c = int(s.byte(i))
         put_char(c)
         if c == 10
             serial_put(13)
@@ -181,9 +181,9 @@ func read_key() -> int
         return 0
     end
     if shift
-        return int(KEYMAP_SHIFT[code])
+        return int(KEYMAP_SHIFT.byte(code))
     end
-    return int(KEYMAP[code])
+    return int(KEYMAP.byte(code))
 end
 
 // Reads a line, echoing it and handling backspace.
@@ -201,8 +201,8 @@ func read_line() -> text
                 console_write("\x08 \x08")
             end
         else if c >= 32 and c < 127
-            line = line + chr(c)
-            console_write(chr(c))
+            line = line + char(c).to_text()
+            console_write(char(c).to_text())
         end
     end
     return line
@@ -226,7 +226,7 @@ func split_words(line: text) -> []text
     var words: []text = []
     var start = -1
     for i in 0..line.len + 1
-        let is_space = i == line.len or line[i] == 32
+        let is_space = i == line.len or line.byte(i) == 32
         if is_space
             if start >= 0
                 words.add(line.slice(start, i))
@@ -246,12 +246,12 @@ func parse_number(s: text) -> int or error
     var n = 0
     var negative = false
     var first = 0
-    if s[0] == 45
+    if s.byte(0) == 45
         negative = true
         first = 1
     end
     for i in first..s.len
-        let d = int(s[i]) - 48
+        let d = int(s.byte(i)) - 48
         if d < 0 or d > 9
             return error("'{s}' is not a number")
         end
@@ -307,7 +307,7 @@ func show_help()
 end
 
 func show_mem()
-    print("heap used    : {heap_bytes()} bytes")
+    print("heap used    : {heap_used()} bytes")
     print("live objects : {live_objects()}")
 end
 
@@ -410,6 +410,75 @@ func install_idt()
             in rax = IDT_PTR
         end
     end
+end
+
+// ---------------------------------------------------------------------
+// The heap
+//
+// The kernel supplies the allocator behind every list, text and record:
+// the compiler's runtime asks `heap_alloc` for each object and gives it
+// back to `heap_free`. Blocks of less than 4096 bytes are kept on a free
+// list per 16-byte size class and reused; larger blocks are never reused
+// (as in the heap the runtime used to carry). The memory is the region
+// from 2 MiB to 64 MiB; the free-list heads live in its first 2 KiB.
+// ---------------------------------------------------------------------
+
+let HEAP_TABLE: u64 = 2097152
+let HEAP_START: u64 = 2101248
+let HEAP_LIMIT: u64 = 67108864
+
+var heap_brk: u64 = 0
+
+#[allocator(alloc)]
+func heap_alloc(size: u64, align: u64) -> *u8
+    let table: *u64 = HEAP_TABLE
+    let n = (size + 15) / 16 * 16
+    unsafe
+        if heap_brk == 0
+            for i in 0..256
+                table[i] = 0
+            end
+            heap_brk = HEAP_START
+        end
+        if n < 4096
+            let head = table[n / 16]
+            if head != 0
+                let block: *u64 = head
+                table[n / 16] = block[0]
+                let reused: *u8 = head
+                return reused
+            end
+        end
+    end
+    let start = heap_brk
+    if start + n > HEAP_LIMIT
+        return nil
+    end
+    heap_brk = start + n
+    let fresh: *u8 = start
+    return fresh
+end
+
+#[allocator(free)]
+func heap_free(ptr: *u8, size: u64, align: u64)
+    let n = (size + 15) / 16 * 16
+    if n >= 4096
+        return
+    end
+    let table: *u64 = HEAP_TABLE
+    let block: *u64 = ptr
+    unsafe
+        block[0] = table[n / 16]
+        table[n / 16] = u64(ptr)
+    end
+end
+
+// bytes the heap has taken from memory so far
+func heap_used() -> u64
+    if heap_brk == 0
+        return 0
+    end
+    return heap_brk - HEAP_TABLE
 end
 
 // ---------------------------------------------------------------------

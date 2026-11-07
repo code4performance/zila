@@ -37,14 +37,14 @@
     <section id="supported">
       <h2>What works</h2>
       <ul>
-        <li>Integers (<code>int</code>, <code>byte</code>, and sized types such as <code>i32</code> or <code>u16</code> for low-level code), <code>bool</code>, <code>text</code> with <code>{interpolation}</code>, <code>[]T</code> lists and raw pointers.</li>
+        <li>Integers (<code>int</code> = <code>i32</code>, <code>long</code> = <code>i64</code>, <code>byte</code>, and sized types such as <code>u16</code> or <code>usize</code> for low-level code; lengths and indices are <code>int</code>, sizes and offsets of files are <code>long</code>), <code>bool</code>, <code>text</code> with <code>{interpolation}</code>, <code>[]T</code> lists and raw pointers.</li>
         <li><code>record</code> types, methods, default and named arguments, variadic <code>...T</code> parameters.</li>
         <li><code>enum</code> with or without data and <code>match</code>, which must cover every case.</li>
         <li>Errors: <code>-&gt; T or error</code>, <code>try</code>, <code>error("message")</code>, <code>match</code> with <code>ok(v)</code> and <code>err(e)</code>, and <code>??</code>.</li>
         <li>Closures (they capture by value) and top-level functions passed to C as callbacks.</li>
         <li>Generic functions and records with inferred type arguments, and structural interfaces used as bounds (see the <a href="syntax.html#generics">syntax guide</a>).</li>
         <li><code>float</code>, <code>f64</code> and <code>f32</code>: arithmetic, comparison, conversion, shortest-text printing, <code>use math</code>, and <code>extern</code> calls (see the <a href="syntax.html#floats">syntax guide</a>).</li>
-        <li><code>Map&lt;K, V&gt;</code>: maps with text or integer keys, literals, <code>m[key]</code>, <code>has</code>, <code>get</code>, <code>remove</code> and <code>for</code> in insertion order (see the <a href="syntax.html#maps">syntax guide</a>).</li>
+        <li><code>Map&lt;K, V&gt;</code>: maps with any <code>Hash</code> key (text, integers, records, enums, lists), literals, <code>m[key]</code>, <code>has</code>, <code>get</code>, <code>remove</code> and <code>for</code> in insertion order (see the <a href="syntax.html#maps">syntax guide</a>).</li>
         <li><code>defer</code>: a call that runs when the function ends, however it ends (see the <a href="syntax.html#defer">syntax guide</a>).</li>
         <li><code>if</code> as an expression, <code>while</code>, <code>for</code> over ranges, lists and maps, <code>break</code> and <code>continue</code>.</li>
         <li><code>unsafe</code>, <code>extern "system"</code> calls, <code>asm</code> blocks and <code>#[naked]</code> functions.</li>
@@ -56,10 +56,11 @@
       <h2>Memory</h2>
       <p>Heap values (text, records, lists, closures, enums with data, results, channels, futures) are managed with <strong>reference counting</strong>. A value is freed the moment the last reference to it goes away, including when a function ends early with <code>return</code>, <code>break</code> or <code>try</code>. There is no garbage collector, so there are no pauses.</p>
       <ul>
-        <li>Records are <strong>copied</strong> when assigned or passed; <code>ref</code> passes the original instead.</li>
-        <li>Lists and closures are shared: assigning a list gives a second name for the same list.</li>
-        <li>A cycle (a record that holds a list that holds the record) is never freed. Avoid building cycles.</li>
+        <li>Records are <strong>copied</strong> when assigned or passed; <code>ref</code> lends the original for the duration of the call (the callee cannot store, return or capture it; use <code>new T{ ... }</code> for a value that must live longer).</li>
+        <li>Lists and maps have value semantics too: assigning, passing or returning one gives the new holder its own value, also when it sits in a record field. Copying is cheap (the elements are not copied) and <strong>writing to a shared list copies it</strong>: the first write to a list or map that another holder still has copies it once, and later writes go in place. Pass it as <code>ref</code> when the callee should change the caller's list. A loop over a list keeps visiting the elements it started with, even if its body writes to the list. Closures are shared.</li>
+        <li><code>new Node{ ... }</code> makes a <strong>shared</strong> object of type <code>Rc&lt;Node&gt;</code>: copying an <code>Rc</code> (assigning, passing, storing in a list or field, capturing) shares the same object and adds one to its count, and a field written through one name is seen through all. <code>==</code> compares identity. A cycle made only of <code>Rc</code> references is never freed (the language does not detect cycles): break it with <code>Weak&lt;T&gt;</code>, see <a href="#weak">Shared objects and weak references</a>.</li>
         <li><code>live_objects()</code> returns how many heap objects are alive, which makes leaks easy to see.</li>
+        <li>The heap is the default allocator and can be replaced: a program that declares <code>#[allocator(alloc)]</code> and <code>#[allocator(free)]</code> functions (and optionally <code>realloc</code>) gets all its memory from them on every target. The Windows executable then does not import <code>HeapAlloc</code>, <code>HeapFree</code> or <code>GetProcessHeap</code>, and a Linux executable carries no free lists and no <code>mmap</code> code. <code>heap_bytes()</code> is not available then. <code>#[no_alloc]</code> makes the compiler prove that a function allocates nothing. See <a href="syntax.html#no-alloc">Attributes</a>.</li>
       </ul>
       <pre><code><span class="kw">type</span> Point = <span class="kw">record</span>
     x: int
@@ -92,7 +93,15 @@
     <span class="kw">let</span> a = Handle{ id: 1 }
     print(<span class="str">"working"</span>)
 <span class="kw">end</span>                                   <span class="cm">// prints: working, then closing 1</span></code></pre>
-      <p>A <code>drop</code> method takes nothing and returns nothing. Records marked <code>#[shared]</code> (used by the standard library for files, sockets and futures) are never copied: every name refers to the same object.</p>
+      <p>A <code>drop</code> method takes nothing and returns nothing. Records marked <code>#[shared]</code> (used by the standard library for files, sockets and futures) are never copied: every name refers to the same object, and writes to their lists and maps are seen by every name (<code>new T{ ... }</code> makes a shared object that user code can create; <code>#[shared]</code> stays for library records).</p>
+    </section>
+
+    <section id="weak">
+      <h2>Shared objects and weak references</h2>
+      <p><code>new Node{ value: 1 }</code> allocates one reference-counted object (non-atomic in a program without threads; an <code>Rc</code> is not transferable to another thread) and has type <code>Rc&lt;Node&gt;</code>. The record <code>Node</code> itself stays a value type; only an <code>Rc</code> is shared. <code>new</code> needs a record literal, and an <code>Rc</code> cannot be used where a plain <code>Node</code> is expected.</p>
+      <p><code>Weak&lt;T&gt;</code> refers to an object without keeping it alive. <code>weak(x)</code> takes an <code>Rc&lt;T&gt;</code> and returns a <code>Weak&lt;T&gt;</code>; <code>w.upgrade()</code> returns an <code>Rc&lt;T&gt;?</code>, <code>nil</code> once the last strong reference is gone. A <code>Weak&lt;T&gt;</code> may be <code>nil</code> (a root node has no parent) and <code>upgrade()</code> on it returns <code>nil</code>. A child that holds <code>parent: Weak&lt;Node&gt;</code> while the parent holds <code>children: []Rc&lt;Node&gt;</code> is freed completely, which <code>live_objects()</code> shows; two objects that hold each other with <code>Rc</code> fields still leak. A closure holds an <code>Rc</code> it uses strongly and a <code>Weak</code> weakly, so capturing <code>weak(node)</code> breaks the cycle between a node and a callback stored in it.</p>
+      <p>Memory layout: a shared object is the record followed by one extra word, the <em>cell</em>, which is <code>0</code> until the first <code>weak(x)</code>. The cell is a small counted heap object holding a pointer to the object; the object owns one reference to it and every <code>Weak</code> value owns another, so a <code>Weak</code> stays valid after the object is freed (and shows up in <code>live_objects()</code> until the last one goes). When the strong count reaches zero the order is: the cell is cleared (so <code>upgrade()</code> is <code>nil</code> from now on, also inside <code>drop</code>), the record's <code>drop</code> method runs once, then the heap fields are released. Releasing a <code>Weak</code> never runs <code>drop</code>.</p>
+      <p>See <a href="examples.html#tree-example">examples/tree.br</a>.</p>
     </section>
 
     <section id="optimizer">
@@ -109,17 +118,31 @@
       <p><strong>Inlining:</strong> a call to a small function is compiled in place, with no <code>call</code>, when the function is just <code>return</code> and an expression of a few operations, takes at most four numbers, booleans or pointers and returns one. <code>func square(x: int) -&gt; int return x * x end</code> is inlined; a function with several statements, text, lists or records, a method, a generic, <code>async</code>, <code>extern</code> or recursive function, or one with <code>asm</code>, <code>try</code>, <code>match</code> or a lambda is still called. Arguments are evaluated once, in order, exactly as in a call, and the body only sees its own parameters and the names of its own module. The function itself is still compiled, so you can keep using it as a value. A loop that calls three small helpers 100 million times runs about 2.5 times faster.</p>
     </section>
 
+    <section id="comptime">
+      <h2>Compile-time code generation</h2>
+      <p>A program that uses <code>comptime func</code>, <code>#[derive]</code>, <code>#[generated]</code> or a block form (see the <a href="syntax.html#comptime">syntax guide</a>) is compiled in rounds. Each round finds every request in the program, builds <strong>one</strong> program for this machine that contains the generators and what they call, runs it as a child process, and splices the text it printed into the program; text that asks for more generation takes another round, up to eight.</p>
+      <ol>
+        <li>The generators are checked against the comptime subset by following the call graph.</li>
+        <li>The compiler describes each type a generator will receive (name, kind, fields, variants, attributes and every type reachable from it) and writes a small driver: it rebuilds those descriptions, calls each generator and prints <code>ok</code> or <code>fail</code> records. The description is also written in a line-oriented text form, which is what the cache hashes.</li>
+        <li>The driver is built for the host with the compiler's own back end (the PE writer on Windows, the ELF writer on Linux, so no Visual Studio or linker) and started with no input, a time limit, an output limit and a memory limit (a job object on Windows, <code>setrlimit</code> on Linux).</li>
+        <li>The text is parsed into the program. Errors in it are reported at the use site with the generator's name and the generated line.</li>
+      </ol>
+      <p>The generators run on the machine that builds, so <code>--target linux</code> on Windows runs a Windows program to generate code for a Linux executable. The cache lives in <code>brasa-comptime</code> in the system temporary directory (the <code>BRASA_COMPTIME_CACHE</code> environment variable names another place) and holds one file per generator call, named by the SHA-256 of the compiler version, the host and target, the source of every function the generator reaches and the serialized input. Only successful results are stored; a damaged entry counts as a miss. Options: <code>--comptime-timeout seconds</code> (default 5), <code>--no-comptime-cache</code> and <code>--comptime-dump</code>.</p>
+      <p>There is no interpreter: compile-time code is native code, which is why the limit is a time limit. Programs and packages are found as before (the standard library, and the file itself); the files next to the source file that a <code>use</code> names are read too, so a program can keep its generators in a package of its own.</p>
+    </section>
+
     <section id="linux">
       <h2>Linux</h2>
       <p><code>brasa-parse prog.br --target linux -o prog</code> writes an x86-64 ELF executable. The compiler does everything itself (its own assembler, no linker, no Visual Studio) and the program talks to the kernel with system calls. A program that does not call C needs no library at all (a static executable); one that declares <code>extern</code> functions is dynamically linked and starts through <code>/lib64/ld-linux-x86-64.so.2</code>. <code>--asm --target linux</code> prints the assembly instead. The result was checked under WSL with Ubuntu (glibc).</p>
-      <p>The language is the same and so is the output. A program whose <code>main</code> returns an error prints <code>error: ...</code> and exits with status 1, an <code>abort</code> writes <code>abort: file.br:line: ...</code> to standard error and exits with 101, and an integer division by zero is an abort (<code>abort: main.br:7: division by zero</code>) on both targets. Objects are reference counted as on Windows and <code>live_objects()</code> counts them. Small objects come from a 256 MiB region that the executable asks the kernel for, and large ones from <code>mmap</code>, given back when freed; running out of memory is <code>abort: out of memory</code> (no file and line: the allocator has none).</p>
+      <p>The language is the same and so is the output. A program whose <code>main</code> returns an error prints <code>error: ...</code> and exits with status 1, an <code>abort</code> writes <code>abort: file.br:line: ...</code> to standard error and exits with 101, and an integer division by zero is an abort (<code>abort: main.br:7: division by zero</code>) on both targets. Objects are reference counted as on Windows and <code>live_objects()</code> counts them. Small objects come from a 256 MiB region that the executable asks the kernel for, and large ones from <code>mmap</code>, given back when freed (this is the default allocator; <code>#[allocator]</code> replaces it); running out of memory is <code>abort: out of memory</code> (no file and line: the allocator has none).</p>
       <p>The libraries have the same functions on both targets. Where a library talks to the operating system, a file called <code>std/&lt;name&gt;.linux.br</code> replaces <code>std/&lt;name&gt;.br</code> when you build for Linux (the Linux layers use <code>epoll</code>, <code>pread</code>/<code>pwrite</code>, sockets and a DNS client written in Brasa), so one source builds for both.</p>
       <table class="compat">
         <thead><tr><th>Library or feature</th><th>Windows</th><th>Linux</th><th>Notes</th></tr></thead>
         <tbody>
           <tr><td>The language, <code>print</code>, text, lists, maps, records, enums, generics, interfaces, closures, <code>defer</code>, errors, floats, <code>unsafe</code>, <code>asm</code></td><td>yes</td><td>yes</td><td>same output</td></tr>
           <tr><td><code>text</code>, <code>list</code>, <code>math</code>, <code>float</code>, <code>format</code>, <code>set</code>, <code>sorted</code>, <code>bufio</code>, <code>errors</code></td><td>yes</td><td>yes</td><td>written in Brasa, no operating system calls</td></tr>
-          <tr><td><code>task</code>, <code>future</code>: <code>spawn</code>, <code>sleep</code>, channels, <code>async</code>, <code>await</code></td><td>yes</td><td>yes</td><td>cooperative tasks on one thread; each task has a 256 KiB stack with a guard page (Windows fibers there)</td></tr>
+          <tr><td><code>task</code>, <code>future</code>: <code>spawn</code>, <code>sleep</code>, channels, <code>async</code>, <code>await</code></td><td>yes</td><td>yes</td><td>cooperative tasks, one scheduler per thread; each task has a 256 KiB stack with a guard page (Windows fibers there)</td></tr>
+          <tr><td><code>thread</code>, <code>sync</code>: <code>spawn_thread</code>, <code>shared</code>, <code>Mutex</code>, <code>Atomic</code></td><td>yes</td><td>not yet</td><td>operating-system threads with atomic reference counts; rejected with a message in a bare-metal kernel</td></tr>
           <tr><td><code>fs</code></td><td>yes</td><td>yes</td><td>on Linux a regular file is read and written in pieces of at most 64 KiB and the other tasks run between the pieces (Windows moves the data in the background); errors read <code>path: reason</code> with the operating system's wording</td></tr>
           <tr><td><code>net</code>: TCP, UDP, <code>lookup</code>, <code>resolve</code></td><td>yes</td><td>yes</td><td>IPv4 only on both. Names: <code>/etc/hosts</code>, then the servers of <code>/etc/resolv.conf</code> over UDP (2 seconds, two tries, TCP when the answer is cut short, CNAME chains followed)</td></tr>
           <tr><td><code>sys</code></td><td>yes</td><td>yes</td><td>internal helpers of <code>fs</code> and <code>net</code>: the operating system's error messages</td></tr>
@@ -144,7 +167,7 @@
       <ul>
         <li>Fixed-size arrays.</li>
         <li>Generic enums and type aliases, generic methods with their own type parameters, explicit type arguments at call sites (<code>first&lt;int&gt;(x)</code>), and interfaces as the type of a variable or parameter (they only work as bounds).</li>
-        <li><code>new</code>, spreading a list into arguments (<code>f(...xs)</code>), and <code>html</code> templates.</li>
+        <li>Spreading a list into arguments (<code>f(...xs)</code>).</li>
       </ul>
     </section>
   </main>

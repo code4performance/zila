@@ -35,7 +35,7 @@
 <span class="kw">let</span> clean = text.trim(words[1])                    <span class="cm">// "green"</span>
 print(text.join([<span class="str">"a"</span>, <span class="str">"b"</span>, <span class="str">"c"</span>], <span class="str">"-"</span>))                 <span class="cm">// a-b-c</span>
 <span class="kw">let</span> n = text.parse_int(<span class="str">"42"</span>) ?? 0                 <span class="cm">// 42; 0 when the text is not a number</span></code></pre>
-      <p>Text is bytes (UTF-8). Searching, splitting, trimming and replacing compare whole byte sequences, so they work for any UTF-8 text. <code>upper</code> and <code>lower</code> change ASCII letters only, and <code>reverse</code> reverses bytes. Positions and lengths count bytes.</p>
+      <p>A text is immutable UTF-8: <code>len</code> and positions count bytes, a <code>char</code> is one code point and <code>for c in s</code> walks the characters (see <a href="syntax.html#text">Text and characters</a>). Searching, splitting, trimming and replacing compare whole byte sequences, so they work for any UTF-8 text. <code>upper</code> and <code>lower</code> change ASCII letters only; <code>reverse</code> and the padding functions work on characters. A function never cuts a character in half, so what it returns is valid UTF-8. Text that comes from outside (<code>fs</code>, <code>net</code>) is not validated when it is read: <code>from_bytes</code> is the way to check bytes.</p>
       <table>
         <thead><tr><th>Function</th><th>What it gives</th></tr></thead>
         <tbody>
@@ -48,9 +48,12 @@ print(text.join([<span class="str">"a"</span>, <span class="str">"b"</span>, <sp
           <tr><td><code>trim(s)</code>, <code>trim_start(s)</code>, <code>trim_end(s)</code></td><td><code>s</code> without spaces, tabs, carriage returns and newlines at the ends.</td></tr>
           <tr><td><code>replace(s, from, to)</code></td><td>Every non-overlapping <code>from</code> replaced, left to right. An empty <code>from</code> changes nothing.</td></tr>
           <tr><td><code>repeat(s, n)</code></td><td><code>s</code> <code>n</code> times (empty for <code>n &lt;= 0</code>).</td></tr>
-          <tr><td><code>pad_left(s, width, fill)</code>, <code>pad_right(s, width, fill)</code></td><td><code>s</code> padded with the one-byte <code>fill</code> up to <code>width</code> bytes. Longer texts are returned unchanged.</td></tr>
-          <tr><td><code>upper(s)</code>, <code>lower(s)</code>, <code>reverse(s)</code></td><td>ASCII capitals, ASCII lower case, and the bytes in the opposite order.</td></tr>
-          <tr><td><code>parse_int(s)</code></td><td>The whole number in <code>s</code> (optional sign, digits) as <code>int or error</code>. Spaces, separators and values outside the <code>int</code> range are errors.</td></tr>
+          <tr><td><code>pad_left(s, width, fill)</code>, <code>pad_right(s, width, fill)</code></td><td><code>s</code> padded with the one-character <code>fill</code> up to <code>width</code> characters (counted by <code>char_count</code>, so <code>pad_right("ação", 6, ".")</code> is <code>ação..</code>). Longer texts are returned unchanged. A <code>fill</code> that is not exactly one character aborts.</td></tr>
+          <tr><td><code>upper(s)</code>, <code>lower(s)</code>, <code>reverse(s)</code></td><td>ASCII capitals, ASCII lower case, and the characters in the opposite order (<code>reverse("ação")</code> is <code>oãça</code>).</td></tr>
+          <tr><td><code>chars(s)</code>, <code>from_chars(cs)</code></td><td>The characters of <code>s</code> as a <code>[]char</code>, and a list of characters joined into a text: <code>from_chars(chars(s)) == s</code>.</td></tr>
+          <tr><td><code>from_bytes(b)</code></td><td>The text of a <code>[]byte</code>, or the error <code>not valid UTF-8 at byte N</code> when the bytes are not valid UTF-8.</td></tr>
+          <tr><td><code>parse_int(s)</code></td><td>The whole number in <code>s</code> (optional sign, digits) as <code>int or error</code>. Spaces, separators and values outside the <code>int</code> range (32 bits) are errors.</td></tr>
+          <tr><td><code>parse_long(s)</code></td><td>Like <code>parse_int</code> for a number up to 64 bits, as <code>long or error</code>.</td></tr>
           <tr><td><code>parse_float(s)</code></td><td>The float in <code>s</code> as <code>float or error</code>: <code>1.5</code>, <code>-2e3</code>, <code>.5</code>, <code>5.</code>, <code>inf</code>, <code>-inf</code>, <code>NaN</code>. The result is the float nearest to the written number, so printing a float and parsing it back gives the same float.</td></tr>
         </tbody>
       </table>
@@ -77,6 +80,7 @@ print(text.join([<span class="str">"a"</span>, <span class="str">"b"</span>, <sp
           <tr><td><code>reverse(xs)</code>, <code>concat(a, b)</code></td><td>The elements in the opposite order; all of <code>a</code> then all of <code>b</code>.</td></tr>
           <tr><td><code>slice(xs, from, to)</code></td><td>The elements from <code>from</code> up to (not including) <code>to</code>. Both are clamped to the list.</td></tr>
           <tr><td><code>range(a, b)</code></td><td>The integers from <code>a</code> up to (not including) <code>b</code>.</td></tr>
+          <tr><td><code>sort(xs)</code>, <code>contains(xs, x)</code></td><td><code>sort</code> returns a new list in ascending order of <code>compare</code> for any element type that is <code>Ord</code> (integers, text by bytes, records and enums by their derived or declared order; a NaN goes last), stable, and leaves <code>xs</code> alone. <code>contains</code> is true when some element is <code>==</code> to <code>x</code> (any <code>Eq</code> type). Another element type is a compile error naming the type.</td></tr>
           <tr><td><code>sort_by(xs, less)</code></td><td>A new list in order, where <code>less(a, b)</code> says whether <code>a</code> goes before <code>b</code>. It is a stable merge sort, so equal elements keep their order; sorting 100,000 numbers takes a fraction of a second. For texts use <code>text.compare(a, b) &lt; 0</code>.</td></tr>
         </tbody>
       </table>
@@ -127,7 +131,7 @@ print(format.float(3.14159, 2))                                           <span 
     print(<span class="str">"first time"</span>)
 <span class="kw">end</span>
 <span class="kw">let</span> ids = set.from_list([3, 1, 3])   <span class="cm">// two elements</span></code></pre>
-      <p>A <code>Set&lt;T&gt;</code> holds text or integers, each at most once, and remembers the order in which they were first added, so a loop over <code>to_list()</code> gives the same order every run. It is a shared reference, like a map. Types from a module are written with the module name: <code>set.Set&lt;text&gt;</code>. (A set is kept as a map, so any other element type fails with the map key error.)</p>
+      <p>A <code>Set&lt;T&gt;</code> holds values of any type that is <code>Hash</code> (text, integers, records and enums of such types, lists), each at most once, and remembers the order in which they were first added, so a loop over <code>to_list()</code> gives the same order every run. It is a value, like a map: a copy shares its storage until one of them is written, and a function changes the caller's set only through a <code>ref</code> parameter. Types from a module are written with the module name: <code>set.Set&lt;text&gt;</code>. (A set is kept as a map, so an element type that is not <code>Hash</code>, such as <code>float</code>, fails with the map key error.)</p>
       <table>
         <thead><tr><th>Function</th><th>What it gives</th></tr></thead>
         <tbody>
@@ -165,19 +169,19 @@ print(b.take_line())        <span class="cm">// abc</span></code></pre>
       <h2>sorted</h2>
       <pre><code><span class="kw">use</span> sorted
 
-<span class="kw">let</span> scores: sorted.SortedMap&lt;text, int&gt; = sorted.text_map()
+<span class="kw">let</span> scores: sorted.SortedMap&lt;text, int&gt; = sorted.map()
 scores.put(<span class="str">"carla"</span>, 70)
 scores.put(<span class="str">"ana"</span>, 90)
 <span class="kw">for</span> e <span class="kw">in</span> scores.entries()          <span class="cm">// ana first: keys come out in order</span>
     print(<span class="str">"{e.key} {e.value}"</span>)
 <span class="kw">end</span>
 <span class="kw">let</span> late: sorted.SortedSet&lt;int&gt; = sorted.set_by(<span class="kw">func</span>(a, b) a &gt; b <span class="kw">end</span>)   <span class="cm">// largest first</span></code></pre>
-      <p>A <code>SortedMap&lt;K, V&gt;</code> and a <code>SortedSet&lt;T&gt;</code> keep their entries in key order. They are balanced (AVL) trees, so adding, finding and removing take time proportional to the logarithm of the number of entries, even when keys arrive in order. The order comes from a function <code>less(a, b)</code> (true when <code>a</code> goes before <code>b</code>; write <code>a &lt; b</code>, not <code>a &lt;= b</code>), so keys can be any type you can compare, such as records. Two keys are the same key when neither is less than the other. Both are shared references, like a map.</p>
+      <p>A <code>SortedMap&lt;K, V&gt;</code> and a <code>SortedSet&lt;T&gt;</code> keep their entries in key order. They are balanced (AVL) trees, so adding, finding and removing take time proportional to the logarithm of the number of entries, even when keys arrive in order. The order comes from a function <code>less(a, b)</code> (true when <code>a</code> goes before <code>b</code>; write <code>a &lt; b</code>, not <code>a &lt;= b</code>), so keys can be any type you can order, such as records. <code>sorted.map()</code> and <code>sorted.set()</code> order any key type that is <code>Ord</code> (integers, text by bytes, records and enums by their derived or declared <code>compare</code>), and <code>map_by</code> and <code>set_by</code> take your own function. Two keys are the same key when neither is less than the other. Both are shared references (their nodes are <code>#[shared]</code> records): every name for a sorted map sees the same entries.</p>
       <table>
         <thead><tr><th>Function</th><th>What it gives</th></tr></thead>
         <tbody>
-          <tr><td><code>sorted.int_map()</code>, <code>sorted.text_map()</code>, <code>sorted.map_by(less)</code></td><td>An empty map ordered by integers (smallest first), by text bytes, or by your function. The types come from the variable's type.</td></tr>
-          <tr><td><code>sorted.int_set()</code>, <code>sorted.text_set()</code>, <code>sorted.set_by(less)</code></td><td>The same for sets.</td></tr>
+          <tr><td><code>sorted.map()</code>, <code>sorted.map_by(less)</code></td><td>An empty map for any key type that is <code>Ord</code> (smallest first), or ordered by your function. The types come from the variable's type. (The ready-made integer and text constructors are gone: write <code>sorted.map()</code>.)</td></tr>
+          <tr><td><code>sorted.set()</code>, <code>sorted.set_by(less)</code></td><td>The same for sets (the integer and text constructors became <code>sorted.set()</code>).</td></tr>
           <tr><td><code>m.put(k, v)</code>, <code>m.get(k, default)</code>, <code>m.has(k)</code>, <code>m.remove(k)</code></td><td>Add or replace (true when the key was new), read with a default, test, remove (true when it was there).</td></tr>
           <tr><td><code>m.len</code>, <code>m.clear()</code></td><td>The number of entries, and emptying the map.</td></tr>
           <tr><td><code>m.keys()</code>, <code>m.values()</code>, <code>m.entries()</code></td><td>New lists in key order; an entry has <code>key</code> and <code>value</code>.</td></tr>
@@ -185,6 +189,33 @@ scores.put(<span class="str">"ana"</span>, 90)
           <tr><td><code>m.range(lo, hi)</code></td><td>The keys from <code>lo</code> up to but not including <code>hi</code>.</td></tr>
           <tr><td><code>s.add(x)</code>, <code>s.has(x)</code>, <code>s.remove(x)</code>, <code>s.len</code>, <code>s.to_list()</code>, <code>s.min()</code>, <code>s.max()</code>, <code>s.floor(x)</code>, <code>s.ceil(x)</code>, <code>s.range(lo, hi)</code></td><td>The same operations on a set; <code>to_list()</code> is in order.</td></tr>
           <tr><td><code>sorted.union(a, b)</code>, <code>sorted.intersect(a, b)</code>, <code>sorted.difference(a, b)</code>, <code>sorted.is_subset(a, b)</code></td><td>New sets ordered like <code>a</code> (the arguments do not change), and the subset test.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="derive">
+      <h2>derive</h2>
+      <p><code>use derive</code> gives hand-written <code>hash</code> methods the function derived hashes are built with. <code>eq</code>, <code>compare</code> and <code>hash</code> themselves come from the compiler (see <a href="syntax.html#eq-ord-hash">Eq, Ord and Hash</a>).</p>
+      <table>
+        <thead><tr><th>Function</th><th>What it gives</th></tr></thead>
+        <tbody>
+          <tr><td><code>derive.hash_combine(h, x)</code></td><td>Folds the <code>long</code> <code>x</code> into the running hash <code>h</code> and returns the new hash. Equal inputs give equal results.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="reflect">
+      <h2>reflect</h2>
+      <p><code>use reflect</code> is the API of compile-time code generation (see <a href="syntax.html#comptime">the syntax guide</a>). It declares the plain records a generator works with and three helpers. The type <code>Type</code> needs no name: it exists only in comptime code.</p>
+      <table>
+        <thead><tr><th>Name</th><th>What it is</th></tr></thead>
+        <tbody>
+          <tr><td><code>reflect.Field</code></td><td>A record field: <code>name</code>, <code>ty</code> (a <code>Type</code>), <code>attrs</code> and <code>line</code>.</td></tr>
+          <tr><td><code>reflect.Variant</code></td><td>An enum variant: <code>name</code>, <code>fields</code>, <code>attrs</code> and <code>line</code>.</td></tr>
+          <tr><td><code>reflect.Attribute</code></td><td><code>name</code> and <code>args</code>, the arguments of <code>#[name(args)]</code> as text.</td></tr>
+          <tr><td><code>reflect.fresh(base)</code></td><td>A name that is unique in the whole build, for local helpers in generated code (<code>__base_...</code>).</td></tr>
+          <tr><td><code>reflect.fail(message, at)</code></td><td>Stops the generator; the error is reported at the line of <code>at</code> (a type, a field or a variant) in your code.</td></tr>
+          <tr><td><code>reflect.target()</code></td><td>The target of the build, <code>windows</code> or <code>linux</code>.</td></tr>
         </tbody>
       </table>
     </section>

@@ -80,7 +80,7 @@ fn expect(body: &str, want: &str) {
 #[test]
 fn put_get_has_and_replace() {
     expect(
-        "let m: sorted.SortedMap<int, text> = sorted.int_map()\nprint(m.len)\nprint(m.put(2, \"b\"))\nprint(m.put(1, \"a\"))\nprint(m.put(2, \"B\"))\nprint(m.len)\nprint(m.get(2, \"?\"))\nprint(m.get(9, \"?\"))\nprint(m.has(1))\nprint(m.has(7))\n",
+        "let m: sorted.SortedMap<int, text> = sorted.map()\nprint(m.len)\nprint(m.put(2, \"b\"))\nprint(m.put(1, \"a\"))\nprint(m.put(2, \"B\"))\nprint(m.len)\nprint(m.get(2, \"?\"))\nprint(m.get(9, \"?\"))\nprint(m.has(1))\nprint(m.has(7))\n",
         "0\ntrue\ntrue\nfalse\n2\nB\n?\ntrue\nfalse\n",
     );
 }
@@ -88,7 +88,7 @@ fn put_get_has_and_replace() {
 #[test]
 fn remove_and_clear() {
     expect(
-        "let m: sorted.SortedMap<int, int> = sorted.int_map()\nfor i in 0..10\nm.put(i, i)\nend\nprint(m.remove(3))\nprint(m.remove(3))\nprint(m.remove(0))\nprint(m.remove(9))\nprint(m.len)\nprint(show(m.keys()))\nm.clear()\nprint(m.len)\nprint(show(m.keys()))\nprint(m.put(5, 5))\nprint(m.len)\n",
+        "let m: sorted.SortedMap<int, int> = sorted.map()\nfor i in 0..10\nm.put(i, i)\nend\nprint(m.remove(3))\nprint(m.remove(3))\nprint(m.remove(0))\nprint(m.remove(9))\nprint(m.len)\nprint(show(m.keys()))\nm.clear()\nprint(m.len)\nprint(show(m.keys()))\nprint(m.put(5, 5))\nprint(m.len)\n",
         "true\nfalse\ntrue\ntrue\n7\n[1,2,4,5,6,7,8]\n0\n[]\ntrue\n1\n",
     );
 }
@@ -96,7 +96,7 @@ fn remove_and_clear() {
 #[test]
 fn entries_come_out_in_key_order_whatever_the_insertion_order() {
     expect(
-        "let m: sorted.SortedMap<int, text> = sorted.int_map()\nm.put(5, \"e\")\nm.put(1, \"a\")\nm.put(4, \"d\")\nm.put(2, \"b\")\nm.put(3, \"c\")\nprint(show(m.keys()))\nprint(shows(m.values()))\nfor e in m.entries()\nprint(\"{e.key}={e.value}\")\nend\n",
+        "let m: sorted.SortedMap<int, text> = sorted.map()\nm.put(5, \"e\")\nm.put(1, \"a\")\nm.put(4, \"d\")\nm.put(2, \"b\")\nm.put(3, \"c\")\nprint(show(m.keys()))\nprint(shows(m.values()))\nfor e in m.entries()\nprint(\"{e.key}={e.value}\")\nend\n",
         "[1,2,3,4,5]\n[a,b,c,d,e]\n1=a\n2=b\n3=c\n4=d\n5=e\n",
     );
 }
@@ -104,7 +104,7 @@ fn entries_come_out_in_key_order_whatever_the_insertion_order() {
 #[test]
 fn text_keys_are_ordered_by_bytes_and_sets_can_be_ordered_by_a_function() {
     expect(
-        "let t: sorted.SortedSet<text> = sorted.text_set()\nt.add(\"pear\")\nt.add(\"apple\")\nt.add(\"fig\")\nt.add(\"Zed\")\nprint(shows(t.to_list()))\nlet d: sorted.SortedSet<int> = sorted.set_by(func(a, b) a > b end)\nfor x in [3, 9, 1, 7]\nd.add(x)\nend\nprint(show(d.to_list()))\nprint(d.min() ?? 0)\nprint(d.max() ?? 0)\n",
+        "let t: sorted.SortedSet<text> = sorted.set()\nt.add(\"pear\")\nt.add(\"apple\")\nt.add(\"fig\")\nt.add(\"Zed\")\nprint(shows(t.to_list()))\nlet d: sorted.SortedSet<int> = sorted.set_by(func(a, b) a > b end)\nfor x in [3, 9, 1, 7]\nd.add(x)\nend\nprint(show(d.to_list()))\nprint(d.min() ?? 0)\nprint(d.max() ?? 0)\n",
         "[Zed,apple,fig,pear]\n[9,7,3,1]\n9\n1\n",
     );
 }
@@ -124,7 +124,7 @@ fn records_can_be_keys_ordered_by_a_field() {
 #[test]
 fn nearest_keys_and_ranges() {
     expect(
-        "let m: sorted.SortedMap<int, int> = sorted.int_map()\nm.put(20, 0)\nm.put(10, 0)\nm.put(30, 0)\nprint(m.min() ?? 0 - 1)\nprint(m.max() ?? 0 - 1)\nprint(m.floor(25) ?? 0 - 1)\nprint(m.ceil(25) ?? 0 - 1)\nprint(m.floor(20) ?? 0 - 1)\nprint(m.ceil(20) ?? 0 - 1)\nprint(m.floor(5) ?? 0 - 1)\nprint(m.ceil(35) ?? 0 - 1)\nprint(show(m.range(10, 30)))\nprint(show(m.range(11, 100)))\nprint(show(m.range(30, 10)))\nprint(show(m.range(0, 5)))\n",
+        "let m: sorted.SortedMap<int, int> = sorted.map()\nm.put(20, 0)\nm.put(10, 0)\nm.put(30, 0)\nprint(m.min() ?? 0 - 1)\nprint(m.max() ?? 0 - 1)\nprint(m.floor(25) ?? 0 - 1)\nprint(m.ceil(25) ?? 0 - 1)\nprint(m.floor(20) ?? 0 - 1)\nprint(m.ceil(20) ?? 0 - 1)\nprint(m.floor(5) ?? 0 - 1)\nprint(m.ceil(35) ?? 0 - 1)\nprint(show(m.range(10, 30)))\nprint(show(m.range(11, 100)))\nprint(show(m.range(30, 10)))\nprint(show(m.range(0, 5)))\n",
         "10\n30\n20\n30\n20\n20\n-1\n-1\n[10,20]\n[20,30]\n[]\n[]\n",
     );
 }
@@ -133,7 +133,7 @@ fn nearest_keys_and_ranges() {
 fn missing_keys_are_errors_with_messages() {
     let src = program(
         "",
-        "let m: sorted.SortedMap<int, int> = sorted.int_map()\nmatch m.min()\nok(v) -> print(\"min {v}\")\nerr(e) -> print(\"error: {e.message}\")\nend\nm.put(10, 1)\nmatch m.floor(5)\nok(v) -> print(\"floor {v}\")\nerr(e) -> print(\"error: {e.message}\")\nend\nmatch m.ceil(11)\nok(v) -> print(\"ceil {v}\")\nerr(e) -> print(\"error: {e.message}\")\nend\nmatch m.max()\nok(v) -> print(\"max {v}\")\nerr(e) -> print(\"error: {e.message}\")\nend\nlet s: sorted.SortedSet<int> = sorted.int_set()\nprint(show(s.to_list()))\nprint(s.min() ?? 0 - 1)\nprint(s.max() ?? 0 - 1)\n",
+        "let m: sorted.SortedMap<int, int> = sorted.map()\nmatch m.min()\nok(v) -> print(\"min {v}\")\nerr(e) -> print(\"error: {e.message}\")\nend\nm.put(10, 1)\nmatch m.floor(5)\nok(v) -> print(\"floor {v}\")\nerr(e) -> print(\"error: {e.message}\")\nend\nmatch m.ceil(11)\nok(v) -> print(\"ceil {v}\")\nerr(e) -> print(\"error: {e.message}\")\nend\nmatch m.max()\nok(v) -> print(\"max {v}\")\nerr(e) -> print(\"error: {e.message}\")\nend\nlet s: sorted.SortedSet<int> = sorted.set()\nprint(show(s.to_list()))\nprint(s.min() ?? 0 - 1)\nprint(s.max() ?? 0 - 1)\n",
     );
     if let Some(out) = native(&src) {
         assert_eq!(
@@ -146,14 +146,14 @@ fn missing_keys_are_errors_with_messages() {
 #[test]
 fn set_operations_keep_the_order() {
     expect(
-        "let a: sorted.SortedSet<int> = sorted.int_set()\nfor x in [3, 1, 2]\na.add(x)\nend\nlet b: sorted.SortedSet<int> = sorted.int_set()\nb.add(2)\nb.add(4)\nprint(show(sorted.union(a, b).to_list()))\nprint(show(sorted.intersect(a, b).to_list()))\nprint(show(sorted.difference(a, b).to_list()))\nprint(sorted.is_subset(sorted.intersect(a, b), a))\nprint(sorted.is_subset(a, b))\nprint(show(a.to_list()))\nprint(show(b.to_list()))\nprint(a.add(2))\nprint(a.remove(2))\nprint(a.remove(2))\nprint(a.has(1))\nprint(show(a.range(1, 3)))\nprint(a.floor(5) ?? 0 - 1)\nprint(a.ceil(2) ?? 0 - 1)\n",
+        "let a: sorted.SortedSet<int> = sorted.set()\nfor x in [3, 1, 2]\na.add(x)\nend\nlet b: sorted.SortedSet<int> = sorted.set()\nb.add(2)\nb.add(4)\nprint(show(sorted.union(a, b).to_list()))\nprint(show(sorted.intersect(a, b).to_list()))\nprint(show(sorted.difference(a, b).to_list()))\nprint(sorted.is_subset(sorted.intersect(a, b), a))\nprint(sorted.is_subset(a, b))\nprint(show(a.to_list()))\nprint(show(b.to_list()))\nprint(a.add(2))\nprint(a.remove(2))\nprint(a.remove(2))\nprint(a.has(1))\nprint(show(a.range(1, 3)))\nprint(a.floor(5) ?? 0 - 1)\nprint(a.ceil(2) ?? 0 - 1)\n",
         "[1,2,3,4]\n[2]\n[1,3]\ntrue\nfalse\n[1,2,3]\n[2,4]\nfalse\ntrue\nfalse\ntrue\n[1]\n3\n3\n",
     );
 }
 
 #[test]
 fn the_tree_stays_balanced_for_ascending_and_descending_keys() {
-    let body = "let m: sorted.SortedMap<int, int> = sorted.int_map()\nfor i in 0..100000\nm.put(i, i * 2)\nend\nvar i = 0\nwhile i < 100000\nm.remove(i)\ni += 2\nend\nvar ok = true\nfor j in 0..100000\nif m.has(j) != (j % 2 == 1)\nok = false\nend\nend\nlet ks = m.keys()\nfor j in 1..ks.len\nif ks[j - 1] >= ks[j]\nok = false\nend\nend\nprint(\"{m.len} {ok} {m.get(99999, 0)}\")\nlet d: sorted.SortedMap<int, int> = sorted.int_map()\nfor k in 0..100000\nd.put(100000 - k, k)\nend\nprint(\"{d.len} {d.min() ?? 0} {d.max() ?? 0}\")\n";
+    let body = "let m: sorted.SortedMap<int, int> = sorted.map()\nfor i in 0..100000\nm.put(i, i * 2)\nend\nvar i = 0\nwhile i < 100000\nm.remove(i)\ni += 2\nend\nvar ok = true\nfor j in 0..100000\nif m.has(j) != (j % 2 == 1)\nok = false\nend\nend\nlet ks = m.keys()\nfor j in 1..ks.len\nif ks[j - 1] >= ks[j]\nok = false\nend\nend\nprint(\"{m.len} {ok} {m.get(99999, 0)}\")\nlet d: sorted.SortedMap<int, int> = sorted.map()\nfor k in 0..100000\nd.put(100000 - k, k)\nend\nprint(\"{d.len} {d.min() ?? 0} {d.max() ?? 0}\")\n";
     let Some((out, took)) = native_timed(&program("", body)) else { return };
     assert_eq!(out, "50000 true 199998\n100000 1 100000\n");
     assert!(took < Duration::from_secs(20), "took {:?}", took);
@@ -161,14 +161,14 @@ fn the_tree_stays_balanced_for_ascending_and_descending_keys() {
 
 #[test]
 fn random_operations_agree_with_a_simple_model() {
-    let body = "let m: sorted.SortedMap<int, int> = sorted.int_map()\nlet present: []bool = []\nfor i in 0..300\npresent.add(false)\nend\nvar seed = 12345\nvar bad = 0\nfor step in 0..4000\nseed = (seed * 1103515245 + 12345) % 2147483648\nlet k = seed / 16 % 300\nlet op = seed / 8 % 4\nif op < 2\nlet fresh = m.put(k, step)\nif fresh == present[k]\nbad += 1\nend\npresent[k] = true\nelse if op == 2\nlet gone = m.remove(k)\nif gone != present[k]\nbad += 1\nend\npresent[k] = false\nelse\nif m.has(k) != present[k]\nbad += 1\nend\nend\nend\nvar count = 0\nlet want: []int = []\nfor i in 0..300\nif present[i]\ncount += 1\nwant.add(i)\nend\nend\nprint(\"{bad} {m.len == count} {show(m.keys()) == show(want)}\")\n";
+    let body = "let m: sorted.SortedMap<int, int> = sorted.map()\nlet present: []bool = []\nfor i in 0..300\npresent.add(false)\nend\nvar seed: long = 12345\nvar bad = 0\nfor step in 0..4000\nseed = (seed * 1103515245 + 12345) % 2147483648\nlet k = int(seed / 16 % 300)\nlet op = seed / 8 % 4\nif op < 2\nlet fresh = m.put(k, step)\nif fresh == present[k]\nbad += 1\nend\npresent[k] = true\nelse if op == 2\nlet gone = m.remove(k)\nif gone != present[k]\nbad += 1\nend\npresent[k] = false\nelse\nif m.has(k) != present[k]\nbad += 1\nend\nend\nend\nvar count = 0\nlet want: []int = []\nfor i in 0..300\nif present[i]\ncount += 1\nwant.add(i)\nend\nend\nprint(\"{bad} {m.len == count} {show(m.keys()) == show(want)}\")\n";
     expect(body, "0 true true\n");
 }
 
 #[test]
 fn sorted_collections_do_not_leak() {
     let src = format!(
-        "package main\n\nuse sorted\n\nfunc work(n: int) -> int\n    let m: sorted.SortedMap<text, int> = sorted.text_map()\n    for i in 0..40\n        m.put(\"k {{i}}\", i)\n    end\n    m.remove(\"k 3\")\n    m.remove(\"k 30\")\n    let s: sorted.SortedSet<text> = sorted.text_set()\n    for i in 0..20\n        s.add(\"s {{i}}\")\n    end\n    let t = sorted.union(s, sorted.intersect(s, s))\n    var total = m.len + t.len + m.keys().len + m.entries().len\n    for x in t.range(\"s 1\", \"s 5\")\n        total += x.len\n    end\n    if n % 2 == 0\n        m.clear()\n    end\n    return total\nend\n\nfunc main()\n    let warm = work(1)\n    let before = live_objects()\n    var total = 0\n    for i in 0..3000\n        total += work(i)\n    end\n    print(\"grew {{live_objects() - before}} {{total > 0}}\")\nend\n"
+        "package main\n\nuse sorted\n\nfunc work(n: int) -> int\n    let m: sorted.SortedMap<text, int> = sorted.map()\n    for i in 0..40\n        m.put(\"k {{i}}\", i)\n    end\n    m.remove(\"k 3\")\n    m.remove(\"k 30\")\n    let s: sorted.SortedSet<text> = sorted.set()\n    for i in 0..20\n        s.add(\"s {{i}}\")\n    end\n    let t = sorted.union(s, sorted.intersect(s, s))\n    var total = m.len + t.len + m.keys().len + m.entries().len\n    for x in t.range(\"s 1\", \"s 5\")\n        total += x.len\n    end\n    if n % 2 == 0\n        m.clear()\n    end\n    return total\nend\n\nfunc main()\n    let warm = work(1)\n    let before = live_objects()\n    var total = 0\n    for i in 0..3000\n        total += work(i)\n    end\n    print(\"grew {{live_objects() - before}} {{total > 0}}\")\nend\n"
     );
     if let Some(out) = native(&src) {
         assert_eq!(out, "grew 0 true\n");
@@ -180,5 +180,74 @@ fn the_sorted_example_runs() {
     let src = std::fs::read_to_string("examples/sorted.br").unwrap();
     if let Some(out) = native(&src) {
         assert!(out.contains("leaderboard"), "{}", out);
+    }
+}
+
+fn compile_error(src: &str) -> String {
+    let file = parse_source(src).unwrap_or_else(|d| panic!("parse error: {}", d));
+    let exe = std::env::temp_dir().join(format!("brasa-sorted-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    match compile_to_native(&file, exe.to_str().unwrap()) {
+        Ok(()) => panic!("expected a compile error"),
+        Err(e) => e,
+    }
+}
+
+#[test]
+fn ready_made_order_for_any_ord_key() {
+    expect(
+        "let m: sorted.SortedMap<int, text> = sorted.map()\nlet d: sorted.SortedSet<int> = sorted.set_by(func(a, b) a > b end)\nprint(\"{m.len} {d.len}\")\nfor x in [3, 9, 1]\nd.add(x)\nend\nprint(show(d.to_list()))\nlet t: sorted.SortedMap<text, int> = sorted.map()\nt.put(\"b\", 1)\nt.put(\"a\", 2)\nt.put(\"c\", 3)\nprint(shows(t.keys()))\n",
+        "0 0\n[9,3,1]\n[a,b,c]\n",
+    );
+}
+
+#[test]
+fn records_as_keys_follow_the_derived_order() {
+    let src = program(
+        "type Version = record\n    major: int\n    minor: int\n    patch: int\nend\n",
+        "let m: sorted.SortedMap<Version, text> = sorted.map()\nm.put(Version { major: 1, minor: 10, patch: 0 }, \"b\")\nm.put(Version { major: 1, minor: 2, patch: 5 }, \"a\")\nm.put(Version { major: 2, minor: 0, patch: 0 }, \"c\")\nprint(m.put(Version { major: 1, minor: 2, patch: 5 }, \"A\"))\nfor e in m.entries()\nprint(\"{e.key.major}.{e.key.minor}.{e.key.patch}={e.value}\")\nend\nprint(m.len)\n",
+    );
+    if let Some(out) = native(&src) {
+        assert_eq!(out, "false\n1.2.5=A\n1.10.0=b\n2.0.0=c\n3\n");
+    }
+}
+
+#[test]
+fn a_declared_compare_decides_the_order() {
+    let src = program(
+        "func (a: Task) compare(b: Task) -> int\n    return b.prio - a.prio\nend\n",
+        "let s: sorted.SortedSet<Task> = sorted.set()\ns.add(Task { prio: 1, name: \"low\" })\ns.add(Task { prio: 9, name: \"high\" })\ns.add(Task { prio: 5, name: \"mid\" })\nfor t in s.to_list()\nprint(t.name)\nend\n",
+    );
+    if let Some(out) = native(&src) {
+        assert_eq!(out, "high\nmid\nlow\n");
+    }
+}
+
+#[test]
+fn a_custom_order_works_for_any_type() {
+    let src = program(
+        "",
+        "let m: sorted.SortedMap<Task, int> = sorted.map_by(func(a, b) a.prio < b.prio end)\nm.put(Task { prio: 2, name: \"x\" }, 1)\nm.put(Task { prio: 1, name: \"y\" }, 2)\nm.put(Task { prio: 2, name: \"z\" }, 3)\nprint(m.len)\nfor k in m.keys()\nprint(k.name)\nend\n",
+    );
+    if let Some(out) = native(&src) {
+        assert_eq!(out, "2\ny\nx\n");
+    }
+}
+
+#[test]
+fn a_key_without_an_order_is_rejected() {
+    let src = program(
+        "type Bag = record\n    items: Map<text, int>\nend\n",
+        "let m: sorted.SortedMap<Bag, int> = sorted.map()\nprint(m.len)\n",
+    );
+    let e = compile_error(&src);
+    assert!(e.contains("Bag") && e.contains("not Ord") && e.contains("a map has no order"), "{}", e);
+}
+
+#[test]
+fn the_ready_made_constructors_are_gone() {
+    for name in ["int_map", "text_map"] {
+        let src = program("", &format!("let m: sorted.SortedMap<int, int> = sorted.{}()\nprint(m.len)\n", name));
+        let e = compile_error(&src);
+        assert!(e.contains(&format!("no function '{}'", name)), "{}", e);
     }
 }

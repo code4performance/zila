@@ -14,25 +14,30 @@ package math
 use errors
 
 // Square root. `sqrt(-1.0)` is NaN.
+#[no_alloc]
 func sqrt(x: float) -> float
     return __sqrt(x)
 end
 
 // Largest whole number not above x.
+#[no_alloc]
 func floor(x: float) -> float
     return __floor(x)
 end
 
 // Smallest whole number not below x.
+#[no_alloc]
 func ceil(x: float) -> float
     return __ceil(x)
 end
 
 // x without its fractional part (rounds toward zero).
+#[no_alloc]
 func trunc(x: float) -> float
     return __trunc(x)
 end
 
+#[no_alloc]
 func abs(x: float) -> float
     if x < 0.0 or (x == 0.0 and 1.0 / x < 0.0)
         return -x
@@ -40,6 +45,7 @@ func abs(x: float) -> float
     return x
 end
 
+#[no_alloc]
 func min(a: float, b: float) -> float
     if b < a
         return b
@@ -47,6 +53,7 @@ func min(a: float, b: float) -> float
     return a
 end
 
+#[no_alloc]
 func max(a: float, b: float) -> float
     if b > a
         return b
@@ -55,6 +62,7 @@ func max(a: float, b: float) -> float
 end
 
 // Nearest whole number; halves round away from zero (`round(2.5)` is 3.0, `round(-2.5)` is -3.0).
+#[no_alloc]
 func round(x: float) -> float
     let t = __trunc(x)
     let d = abs(x - t)
@@ -68,6 +76,7 @@ func round(x: float) -> float
 end
 
 // x to a whole-number power; negative powers give 1 / x^|n|.
+#[no_alloc]
 func pow(x: float, n: int) -> float
     var e = n
     if e < 0

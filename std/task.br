@@ -10,6 +10,8 @@
 //   print(ch.receive())
 //
 // Rules:
+//   - `await` may run in any function (not only `async` ones and `main`): it parks the
+//     current task; task 0 is the main program.
 //   - Tasks are cooperative: a task runs until it waits (`receive`, `await`),
 //     calls `task.yield()`, or finishes.
 //   - `send` never blocks (channels are unbounded queues).
@@ -34,6 +36,7 @@ extern "system" func ExitProcess(code: u32)
 extern "system" func GetTickCount64() -> u64
 extern "system" func Sleep(ms: u32)
 extern "system" func GetLastError() -> u32
+extern "system" func CloseHandle(handle: usize) -> i32
 extern "system" func CreateIoCompletionPort(file: usize, port: usize, key: usize, threads: u32) -> usize
 extern "system" func PostQueuedCompletionStatus(port: usize, bytes: u32, key: usize, ov: usize) -> i32
 extern "system" func GetQueuedCompletionStatusEx(port: usize, entries: *u8, count: u32, removed: *usize, ms: u32, alertable: i32) -> i32
@@ -82,7 +85,10 @@ end
 
 // Words in transit are plain integers: ownership of a value moves into the
 // queue on `send` and out of it on `receive`.
+// `lock` is a spin lock word, used only once the program has threads (`multi`). A waiting task
+// is recorded as `slot * 2^32 + id`: the scheduler it belongs to and its id there.
 type Chan = record
+    lock: long
     items: []long
     head: long
     waiting: []long
@@ -90,37 +96,346 @@ type Chan = record
     closed: bool
 end
 
-var tasks: []Task
-var ready: []long
-var ready_head: long = 0
-// ids of tasks that finished (their fibers are deleted later) and ids free for reuse
-var finished: []long
-var free_ids: []long
-var current: long = 0
-var started = false
-var switches: long = 0
+// One scheduler: the tasks, run queue, timers and I/O state of a single thread. Every thread
+// has its own (`sched()`); a task never changes thread. `lock` is the spin lock of `inbox`, the
+// ids of tasks that other threads woke (see `wake_remote`).
+#[shared]
+type Sched = record
+    lock: long
+    slot: long
+    idle: long
+    inbox: []long
+    tasks: []Task
+    ready: []long
+    ready_head: long
+    // ids of tasks that finished (their fibers are deleted later) and ids free for reuse
+    finished: []long
+    free_ids: []long
+    current: long
+    started: bool
+    switches: long
+    // Timers, ascending by deadline (milliseconds of the system tick count).
+    timer_at: []long
+    timer_run: []func()
+    // Operations the operating system is still working on (see std/fs.br, std/net.br).
+    pending_io: long
+    iocp: usize
+    ops: []Op
+    op_free: []long
+end
 
-// Timers, ascending by deadline (milliseconds of the system tick count).
-var timer_at: []long
-var timer_run: []func()
+// A place for one scheduler; the table of places never changes after it is made, so threads
+// can read it while others register.
+#[shared]
+type Place = record
+    s: Sched
+end
 
-// Operations the operating system is still working on (see std/fs.br, std/net.br).
-var pending_io: long = 0
-var iocp: usize = 0
-var ops: []Op
-var op_free: []long
+// `multi` is 1 once the program has started a thread (std/thread.br): from then on the
+// scheduler of the calling thread is found through thread-local storage and channels lock.
+var main_sched: Sched
+var multi: long = 0
+var tls_index: long = 0
+var main_tid: long = 0
+var places: []Place
+// Serializes the thread bookkeeping below.
+var dl_lock: long = 0
+// Threads alive, and threads that can only be woken by another one (an idle scheduler with no
+// timer, a `join`): when every live thread is in that state, the program is deadlocked.
+var live: long = 1
+var blocked: long = 0
 
-func init()
-    if started
+let MAX_THREADS = 1024
+let INFINITE: long = 0xFFFFFFFF
+
+#[link("kernel32")]
+extern "system" func TlsAlloc() -> u32
+extern "system" func TlsGetValue(index: u32) -> usize
+extern "system" func TlsSetValue(index: u32, value: usize) -> i32
+extern "system" func GetCurrentThreadId() -> u32
+
+// Takes the spin lock that is the first field of the scheduler.
+func sched_lock(s: Sched)
+    while true
+        var old: long = 0
+        unsafe
+            asm
+                in rcx = s
+                mov eax, 1
+                xchg qword ptr [rcx], rax
+                out rax = old
+            end
+        end
+        if old == 0
+            return
+        end
+        unsafe
+            Sleep(0)
+        end
+    end
+end
+
+func sched_unlock(s: Sched)
+    s.lock = 0
+end
+
+// Takes the spin lock that is the first field of the channel.
+func chan_lock(ref ch: Chan)
+    while true
+        var old: long = 0
+        unsafe
+            asm
+                in rcx = ch
+                mov eax, 1
+                xchg qword ptr [rcx], rax
+                out rax = old
+            end
+        end
+        if old == 0
+            return
+        end
+        unsafe
+            Sleep(0)
+        end
+    end
+end
+
+func chan_unlock(ref ch: Chan)
+    ch.lock = 0
+end
+
+// Takes the lock of the thread bookkeeping (`live`, `blocked`, the `idle` flags).
+func dl_enter()
+    while true
+        var old: long = 0
+        unsafe
+            asm
+                lea rcx, G_task_dl_lock
+                mov eax, 1
+                xchg qword ptr [rcx], rax
+                out rax = old
+            end
+        end
+        if old == 0
+            return
+        end
+        unsafe
+            Sleep(0)
+        end
+    end
+end
+
+func dl_leave()
+    dl_lock = 0
+end
+
+// Every live thread can only be woken by another one: nothing will ever run again.
+// The caller holds the bookkeeping lock.
+func check_deadlock()
+    if live > 0 and blocked >= live
+        fatal("all tasks are asleep - deadlock!")
+    end
+end
+
+func thread_id() -> long
+    var r: long = 0
+    unsafe
+        r = long(GetCurrentThreadId())
+    end
+    return r
+end
+
+// The scheduler of the calling thread.
+func sched() -> Sched
+    if multi == 0
+        if main_sched == nil
+            main_sched = Sched{}
+        end
+        return main_sched
+    end
+    var v: usize = 0
+    unsafe
+        v = TlsGetValue(u32(tls_index))
+    end
+    if v != 0
+        return places[long(v) - 1].s
+    end
+    if thread_id() == main_tid
+        return main_sched
+    end
+    return register_thread()
+end
+
+// A new thread's first use of its scheduler: gives it a place and a doorbell.
+func register_thread() -> Sched
+    let s = Sched{}
+    unsafe
+        s.iocp = CreateIoCompletionPort(0xFFFFFFFFFFFFFFFF, 0, 0, 1)
+    end
+    dl_enter()
+    var k: long = 1
+    while k < MAX_THREADS and places[k].s != nil
+        k += 1
+    end
+    if k == MAX_THREADS
+        dl_leave()
+        fatal("too many threads")
+    end
+    s.slot = k
+    places[k].s = s
+    dl_leave()
+    unsafe
+        TlsSetValue(u32(tls_index), usize(k + 1))
+    end
+    return s
+end
+
+// Called by the first `thread.start`, before any thread exists: the main thread's scheduler
+// becomes place 0, and threads from now on find theirs through thread-local storage.
+func threads_begin()
+    if multi != 0
         return
     end
-    started = true
+    if main_sched == nil
+        main_sched = Sched{}
+    end
+    unsafe
+        main_sched.iocp = CreateIoCompletionPort(0xFFFFFFFFFFFFFFFF, 0, 0, 1)
+        tls_index = long(TlsAlloc())
+    end
+    main_tid = thread_id()
+    for i in 0..MAX_THREADS
+        places.add(Place{})
+    end
+    places[0].s = main_sched
+    multi = 1
+end
+
+// A thread was created (the caller is the creating thread).
+func thread_started()
+    dl_enter()
+    live += 1
+    dl_leave()
+end
+
+// The calling thread is ending: its scheduler's place is free again.
+func thread_exit()
+    if multi == 0
+        return
+    end
+    var v: usize = 0
+    unsafe
+        v = TlsGetValue(u32(tls_index))
+    end
+    if v != 0
+        let k = long(v) - 1
+        let s = places[k].s
+        places[k].s = nil
+        if s.iocp != 0
+            unsafe
+                CloseHandle(s.iocp)
+            end
+        end
+    end
+end
+
+// A thread that other threads may be joining ended. `joiners` threads were blocked on it; they
+// are runnable now.
+func thread_done(joiners: long)
+    dl_enter()
+    blocked -= joiners
+    live -= 1
+    check_deadlock()
+    dl_leave()
+end
+
+// Counts threads as blocked (the caller holds the bookkeeping lock).
+func blocked_add(n: long)
+    blocked += n
+end
+
+// Wakes the task `id` of the scheduler in place `slot` (another thread's).
+func wake_remote(slot: long, id: long)
+    let t = places[slot].s
+    if t == nil
+        return
+    end
+    sched_lock(t)
+    t.inbox.add(id)
+    sched_unlock(t)
+    dl_enter()
+    if t.idle != 0
+        t.idle = 0
+        blocked -= 1
+    end
+    dl_leave()
+    unsafe
+        PostQueuedCompletionStatus(t.iocp, 0, 0, 0)
+    end
+end
+
+// Makes ready the tasks that other threads woke.
+func drain_inbox(s: Sched)
+    sched_lock(s)
+    if s.inbox.len == 0
+        sched_unlock(s)
+        return
+    end
+    var batch: []long = []
+    for i in 0..s.inbox.len
+        batch.add(s.inbox[i])
+    end
+    s.inbox.clear()
+    sched_unlock(s)
+    for i in 0..batch.len
+        wake(batch[i])
+    end
+end
+
+// The code a channel records for the calling task, and waking by such a code.
+func waiter_code(s: Sched) -> long
+    return s.slot * 4294967296 + s.current
+end
+
+func wake_waiter(code: long)
+    let s = sched()
+    let slot = code / 4294967296
+    let id = code % 4294967296
+    if slot == s.slot
+        wake(id)
+    else
+        wake_remote(slot, id)
+    end
+end
+
+// Nothing can run on this thread until another thread wakes it: sleep in the kernel.
+func wait_forever(s: Sched)
+    dl_enter()
+    s.idle = 1
+    blocked += 1
+    check_deadlock()
+    dl_leave()
+    poll_io(INFINITE, true)
+    dl_enter()
+    if s.idle != 0
+        s.idle = 0
+        blocked -= 1
+    end
+    dl_leave()
+end
+
+func init()
+    let s = sched()
+    if s.started
+        return
+    end
+    s.started = true
     var main_fiber: usize = 0
     unsafe
         main_fiber = ConvertThreadToFiber(0)
     end
     // Task 0 is the main program.
-    tasks.add(Task{ fiber: main_fiber })
+    s.tasks.add(Task{ fiber: main_fiber })
 end
 
 func fatal(message: text)
@@ -141,41 +456,44 @@ end
 // Deletes the fibers of finished tasks and makes their ids reusable.
 // A finished task is never the running one: it switched away for good.
 func reap()
-    for i in 0..finished.len
-        let id = finished[i]
+    let s = sched()
+    for i in 0..s.finished.len
+        let id = s.finished[i]
         unsafe
-            DeleteFiber(tasks[id].fiber)
+            DeleteFiber(s.tasks[id].fiber)
         end
-        tasks[id].fiber = 0
-        free_ids.add(id)
+        s.tasks[id].fiber = 0
+        s.free_ids.add(id)
     end
-    finished.clear()
+    s.finished.clear()
 end
 
 // Runs `action` once the clock reaches `at`.
 func add_timer(at: long, action: func())
-    timer_at.add(at)
-    timer_run.add(action)
-    var j = timer_at.len - 1
-    while j > 0 and timer_at[j - 1] > timer_at[j]
-        let a = timer_at[j - 1]
-        timer_at[j - 1] = timer_at[j]
-        timer_at[j] = a
-        let f = timer_run[j - 1]
-        timer_run[j - 1] = timer_run[j]
-        timer_run[j] = f
+    let s = sched()
+    s.timer_at.add(at)
+    s.timer_run.add(action)
+    var j = s.timer_at.len - 1
+    while j > 0 and s.timer_at[j - 1] > s.timer_at[j]
+        let a = s.timer_at[j - 1]
+        s.timer_at[j - 1] = s.timer_at[j]
+        s.timer_at[j] = a
+        let f = s.timer_run[j - 1]
+        s.timer_run[j - 1] = s.timer_run[j]
+        s.timer_run[j] = f
         j -= 1
     end
 end
 
 // Runs the actions of every timer whose time has come, earliest first.
 func fire_timers()
-    if timer_at.len == 0
+    let s = sched()
+    if s.timer_at.len == 0
         return
     end
     let t = now()
     var fired: long = 0
-    while fired < timer_at.len and timer_at[fired] <= t
+    while fired < s.timer_at.len and s.timer_at[fired] <= t
         fired += 1
     end
     if fired == 0
@@ -183,17 +501,17 @@ func fire_timers()
     end
     var batch: []func() = []
     for i in 0..fired
-        batch.add(timer_run[i])
+        batch.add(s.timer_run[i])
     end
     var k: long = 0
-    while k + fired < timer_at.len
-        timer_at[k] = timer_at[k + fired]
-        timer_run[k] = timer_run[k + fired]
+    while k + fired < s.timer_at.len
+        s.timer_at[k] = s.timer_at[k + fired]
+        s.timer_run[k] = s.timer_run[k + fired]
         k += 1
     end
     for i in 0..fired
-        timer_at.take()
-        timer_run.take()
+        s.timer_at.take()
+        s.timer_run.take()
     end
     for i in 0..batch.len
         batch[i]()
@@ -202,19 +520,21 @@ end
 
 // Creates the I/O completion port the first time it is needed.
 func io_init()
-    if iocp != 0
+    let s = sched()
+    if s.iocp != 0
         return
     end
     unsafe
-        iocp = CreateIoCompletionPort(0xFFFFFFFFFFFFFFFF, 0, 0, 1)
+        s.iocp = CreateIoCompletionPort(0xFFFFFFFFFFFFFFFF, 0, 0, 1)
     end
 end
 
 // Lets completions of operations on `handle` arrive at the port.
 func io_attach(handle: usize)
+    let s = sched()
     io_init()
     unsafe
-        CreateIoCompletionPort(handle, iocp, 0, 0)
+        CreateIoCompletionPort(handle, s.iocp, 0, 0)
     end
 end
 
@@ -228,8 +548,9 @@ end
 
 // A zeroed operation, ready to hand to the operating system.
 func op_new() -> Op
-    if op_free.len > 0
-        let reused = ops[op_free.take()]
+    let s = sched()
+    if s.op_free.len > 0
+        let reused = s.ops[s.op_free.take()]
         reused.internal = 0
         reused.internal_high = 0
         reused.offset = 0
@@ -242,19 +563,21 @@ func op_new() -> Op
         return reused
     end
     let op = Op{}
-    op.id = ops.len
-    ops.add(op)
+    op.id = s.ops.len
+    s.ops.add(op)
     return op
 end
 
 func op_release(op: Op)
-    op_free.add(op.id)
+    let s = sched()
+    s.op_free.add(op.id)
 end
 
 // The system accepted the operation: its completion will arrive at the port.
 func op_submit(op: Op)
-    op.task = current
-    pending_io += 1
+    let s = sched()
+    op.task = s.current
+    s.pending_io += 1
 end
 
 func op_wait(op: Op)
@@ -269,37 +592,39 @@ end
 // by itself after a routine has run, so the routine also posts an empty packet to the port,
 // which makes `poll_io` return and lets the scheduler see the task it woke.
 func dns_done(error: u32, bytes: u32, overlapped: usize)
+    let s = sched()
     let idp: *long = overlapped + 32
     var id: long = 0
     unsafe
         id = idp[0]
     end
-    let op = ops[id]
+    let op = s.ops[id]
     op.bytes = long(bytes)
     op.status = long(error)
     op.done = true
-    pending_io -= 1
+    s.pending_io -= 1
     wake(op.task)
     unsafe
-        PostQueuedCompletionStatus(iocp, 0, 0, 0)
+        PostQueuedCompletionStatus(s.iocp, 0, 0, 0)
     end
 end
 
 // Collects completed operations, waiting up to `ms` milliseconds for the first. The wait is
 // alertable, so completion routines queued by the system (name lookups) run inside it.
-func poll_io(ms: long)
-    if iocp == 0
+func poll_io(ms: long, force: bool)
+    let s = sched()
+    if s.iocp == 0
         return
     end
     let entry = IoEntry{}
     let out = IoOut{}
     var wait = ms
-    while pending_io > 0
+    while s.pending_io > 0 or force
         entry.ov = 0
         out.removed = 0
         var ok: long = 0
         unsafe
-            ok = GetQueuedCompletionStatusEx(iocp, &entry, 1, &out.removed, u32(wait), 1)
+            ok = GetQueuedCompletionStatusEx(s.iocp, &entry, 1, &out.removed, u32(wait), 1)
         end
         if ok == 0
             // 192 (WAIT_IO_COMPLETION): a completion routine ran; anything else: nothing arrived
@@ -317,7 +642,7 @@ func poll_io(ms: long)
         unsafe
             id = idp[0]
         end
-        let op = ops[id]
+        let op = s.ops[id]
         // the operation's own status (an NTSTATUS in its OVERLAPPED) as a Windows error code
         var status: long = 0
         if op.internal != 0
@@ -328,7 +653,7 @@ func poll_io(ms: long)
         op.bytes = long(entry.bytes)
         op.status = status
         op.done = true
-        pending_io -= 1
+        s.pending_io -= 1
         wake(op.task)
         wait = 0
     end
@@ -336,16 +661,17 @@ end
 
 // Nothing is ready: wait for the earliest timer or for an I/O completion.
 func wait_events()
+    let s = sched()
     var ms: long = 0xFFFFFFFF
-    if timer_at.len > 0
-        ms = timer_at[0] - now()
+    if s.timer_at.len > 0
+        ms = s.timer_at[0] - now()
         if ms < 0
             ms = 0
         end
     end
-    if pending_io > 0
-        poll_io(ms)
-    else if timer_at.len > 0 and ms > 0
+    if s.pending_io > 0 or multi != 0
+        poll_io(ms, multi != 0)
+    else if s.timer_at.len > 0 and ms > 0
         unsafe
             Sleep(u32(ms))
         end
@@ -355,50 +681,60 @@ end
 // Runs the next ready task. The caller has already queued itself (yield),
 // parked itself (receive, await), or has finished.
 func switch_away()
-    let me = current
+    let s = sched()
+    let me = s.current
     while true
-        switches += 1
-        if timer_at.len > 0 and (ready_head >= ready.len or switches % 64 == 0)
+        s.switches += 1
+        if multi != 0
+            drain_inbox(s)
+        end
+        if s.timer_at.len > 0 and (s.ready_head >= s.ready.len or s.switches % 64 == 0)
             fire_timers()
         end
-        if pending_io > 0 and switches % 64 == 0
-            poll_io(0)
+        if s.pending_io > 0 and s.switches % 64 == 0
+            poll_io(0, false)
         end
-        if ready_head < ready.len
+        if s.ready_head < s.ready.len
             break
         end
-        if timer_at.len == 0 and pending_io == 0
-            fatal("all tasks are asleep - deadlock!")
+        if s.timer_at.len == 0 and s.pending_io == 0
+            if multi == 0
+                fatal("all tasks are asleep - deadlock!")
+            end
+            wait_forever(s)
+            continue
         end
         wait_events()
     end
-    let next = ready[ready_head]
-    ready_head += 1
-    if ready_head == ready.len
-        ready.clear()
-        ready_head = 0
+    let next = s.ready[s.ready_head]
+    s.ready_head += 1
+    if s.ready_head == s.ready.len
+        s.ready.clear()
+        s.ready_head = 0
     end
     if next == me
         return
     end
-    current = next
+    s.current = next
     unsafe
-        SwitchToFiber(tasks[next].fiber)
+        SwitchToFiber(s.tasks[next].fiber)
     end
 end
 
 // Waits until another task (or a timer) calls `wake` for this task.
 func park()
-    tasks[current].waiting = true
+    let s = sched()
+    s.tasks[s.current].waiting = true
     switch_away()
 end
 
 // Makes a parked task ready. Waking a task that is not parked does nothing,
 // so a stale registration can never run a task twice.
 func wake(id: long)
-    if id < tasks.len and tasks[id].waiting
-        tasks[id].waiting = false
-        ready.add(id)
+    let s = sched()
+    if id < s.tasks.len and s.tasks[id].waiting
+        s.tasks[id].waiting = false
+        s.ready.add(id)
     end
 end
 
@@ -407,38 +743,40 @@ func fiber_main(id: usize)
     let me = long(id)
     // No local may own heap values here: this function never returns,
     // so nothing it holds would ever be released.
-    tasks[me].action()
-    tasks[me].action = nil
-    tasks[me].done = true
-    finished.add(me)
+    sched().tasks[me].action()
+    sched().tasks[me].action = nil
+    sched().tasks[me].done = true
+    sched().finished.add(me)
     switch_away()
 end
 
 func start(action: func())
+    let s = sched()
     init()
     reap()
     var id: long = 0
-    if free_ids.len > 0
-        id = free_ids.take()
-        tasks[id].action = action
-        tasks[id].done = false
-        tasks[id].waiting = false
+    if s.free_ids.len > 0
+        id = s.free_ids.take()
+        s.tasks[id].action = action
+        s.tasks[id].done = false
+        s.tasks[id].waiting = false
     else
-        id = tasks.len
-        tasks.add(Task{ action: action })
+        id = s.tasks.len
+        s.tasks.add(Task{ action: action })
     end
     var fiber: usize = 0
     unsafe
         fiber = CreateFiber(0, fiber_main, usize(id))
     end
-    tasks[id].fiber = fiber
-    ready.add(id)
+    s.tasks[id].fiber = fiber
+    s.ready.add(id)
 end
 
 // Lets other tasks run; the caller continues later.
 func yield()
+    let s = sched()
     init()
-    ready.add(current)
+    s.ready.add(s.current)
     switch_away()
 end
 
@@ -449,7 +787,7 @@ end
 
 func wake_one(ref ch: Chan)
     if ch.whead < ch.waiting.len
-        wake(ch.waiting[ch.whead])
+        wake_waiter(ch.waiting[ch.whead])
         ch.whead += 1
         if ch.whead == ch.waiting.len
             ch.waiting.clear()
@@ -458,17 +796,28 @@ func wake_one(ref ch: Chan)
     end
 end
 
+// With threads, every channel operation runs under the channel's lock; without them the
+// lock is never touched.
 func chan_send(ref ch: Chan, word: long)
+    if multi != 0
+        chan_lock(ref ch)
+    end
     if ch.closed
         fatal("send on a closed channel")
     end
     ch.items.add(word)
     wake_one(ref ch)
+    if multi != 0
+        chan_unlock(ref ch)
+    end
 end
 
 func chan_recv(ref ch: Chan) -> long
     init()
     while true
+        if multi != 0
+            chan_lock(ref ch)
+        end
         if ch.head < ch.items.len
             let v = ch.items[ch.head]
             ch.head += 1
@@ -476,20 +825,40 @@ func chan_recv(ref ch: Chan) -> long
                 ch.items.clear()
                 ch.head = 0
             end
+            if multi != 0
+                chan_unlock(ref ch)
+            end
             return v
         end
         if ch.closed
+            if multi != 0
+                chan_unlock(ref ch)
+            end
             return 0
         end
-        ch.waiting.add(current)
+        ch.waiting.add(waiter_code(sched()))
+        if multi != 0
+            chan_unlock(ref ch)
+        end
         park()
     end
     return 0
 end
 
 func chan_close(ref ch: Chan)
+    if multi != 0
+        chan_lock(ref ch)
+    end
     ch.closed = true
     while ch.whead < ch.waiting.len
         wake_one(ref ch)
     end
+    if multi != 0
+        chan_unlock(ref ch)
+    end
+end
+
+// The id of the running task of this thread.
+func cur() -> long
+    return sched().current
 end

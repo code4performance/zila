@@ -69,13 +69,26 @@ fn to_list_keeps_the_order_of_first_insertion() {
 }
 
 #[test]
-fn sets_are_shared_references() {
+fn sets_are_values_and_ref_shares_them() {
     let src = main_of(
-        "func fill(s: set.Set<int>)\n    s.add(7)\nend\n",
-        "let s: set.Set<int> = set.empty()\nfill(s)\nprint(s.has(7))\n",
+        "func fill(s: set.Set<int>)
+    s.add(7)
+end
+func fill_ref(ref s: set.Set<int>)
+    s.add(8)
+end
+",
+        "let s: set.Set<int> = set.empty()
+fill(s)
+print(s.has(7))
+fill_ref(ref s)
+print(s.has(8))
+",
     );
     if let Some(out) = native(&src).unwrap() {
-        assert_eq!(out, "true\n");
+        assert_eq!(out, "false
+true
+");
     }
 }
 
@@ -128,12 +141,23 @@ end
 }
 
 #[test]
-fn only_text_and_integers_are_elements() {
-    let src = main_of("type Point = record\n    x: int\nend\n", "let a: set.Set<Point> = set.empty()\nprint(a.len)\n");
+fn only_hash_types_are_elements() {
+    let src = main_of("", "let a: set.Set<float> = set.empty()\nprint(a.len)\n");
     match native(&src) {
-        Err(e) => assert!(e.contains("Point cannot be a map key"), "{}", e),
+        Err(e) => assert!(e.contains("float cannot be a map key because it is not Hash"), "{}", e),
         Ok(None) => {}
-        Ok(Some(_)) => panic!("a set of records must not compile"),
+        Ok(Some(_)) => panic!("a set of floats must not compile"),
+    }
+}
+
+#[test]
+fn record_elements() {
+    let src = main_of(
+        "type P = record\n    x: int\n    y: int\nend\n",
+        "let s = set.from_list([P { x: 1, y: 2 }, P { x: 1, y: 2 }, P { x: 2, y: 1 }])\nprint(s.len)\nprint(s.has(P { x: 2, y: 1 }))\nlet t = set.from_list([P { x: 2, y: 1 }, P { x: 9, y: 9 }])\nprint(set.union(s, t).len)\nprint(set.intersect(s, t).len)\nprint(set.difference(s, t).len)\n",
+    );
+    if let Some(out) = native(&src).unwrap_or_else(|e| panic!("compile error: {}", e)) {
+        assert_eq!(out, "2\ntrue\n3\n1\n1\n");
     }
 }
 

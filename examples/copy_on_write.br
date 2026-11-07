@@ -1,0 +1,38 @@
+// Lists and maps are values: copying one costs nothing, and the first write to a list that
+// someone else still holds copies it.
+//
+//   brasa-parse examples/copy_on_write.br -o copy_on_write.exe
+//
+// `var b = a` gives `b` its own list, even when the list sits inside a record: a write to `b`
+// never shows through `a`. The copy is made lazily, when the write happens. A function that
+// should change the caller's list takes it as `ref` (and the caller repeats `ref`); without it
+// the function works on its own value. Native compiler only.
+package main
+
+type Bag = record
+    name: text
+    items: []int
+end
+
+func fill(ref xs: []int, n: int)
+    for i in 0..n
+        xs.push(i)
+    end
+end
+
+func grow(xs: []int)
+    xs.push(99)
+end
+
+func main()
+    let a = Bag { name: "a", items: [1, 2] }
+    var b = a
+    b.items.push(3)
+    print("a has {a.items.len} items, b has {b.items.len}")
+
+    var xs = [10, 20]
+    grow(xs)
+    print("after grow: {xs.len}")
+    fill(ref xs, 3)
+    print("after fill: {xs.len}")
+end

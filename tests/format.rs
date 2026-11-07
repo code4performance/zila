@@ -102,7 +102,7 @@ fn fixed_decimals_round_halves_away_from_zero() {
 
 #[test]
 fn the_extreme_integers_format_correctly() {
-    let body = "let least = 0 - 9223372036854775807 - 1\nprint(format.hex(9223372036854775807))\nprint(format.bin(least).len)\nprint(format.hex(least))\nprint(format.thousands(least))\nprint(format.thousands(9223372036854775807))\n";
+    let body = "let big: long = 9223372036854775807\nlet least = 0 - big - 1\nprint(format.hex(big))\nprint(format.bin(least).len)\nprint(format.hex(least))\nprint(format.thousands(least))\nprint(format.thousands(big))\n";
     expect(body, "7fffffffffffffff\n65\n-8000000000000000\n-9,223,372,036,854,775,808\n9,223,372,036,854,775,807\n");
 }
 
@@ -186,7 +186,8 @@ fn floats_take_a_precision_and_round_halves_away_from_zero() {
 #[test]
 fn the_extreme_integers_work_with_types() {
     expect(
-        &fmt_show("%(x) %(b)", "9223372036854775807, 0 - 1"),
+        &format!("let big: long = 9223372036854775807
+{}", fmt_show("%(x) %(b)", "big, 0 - 1")),
         "[7fffffffffffffff -1]\n",
     );
 }

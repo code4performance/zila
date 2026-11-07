@@ -74,7 +74,7 @@ impl Walk {
                 self.expr(cond, depth + 1);
                 self.block(body, depth + 1);
             }
-            StmtKind::Break | StmtKind::Continue => {}
+            StmtKind::Break | StmtKind::Continue | StmtKind::Block { .. } => {}
             StmtKind::Expr(e) => self.expr(e, depth),
         }
     }
@@ -90,7 +90,12 @@ impl Walk {
     fn expr(&mut self, e: &Expr, depth: u32) {
         match &e.kind {
             ExprKind::Ident(n) => *self.score.entry(n.clone()).or_default() += weight(depth),
-            ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Char(_) | ExprKind::Bool(_) | ExprKind::Nil | ExprKind::New(_) => {}
+            ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Char(_) | ExprKind::Bool(_) | ExprKind::Nil => {}
+            ExprKind::New(e) | ExprKind::Shared(e) => self.expr(e, depth),
+            ExprKind::SpawnThread(e) => {
+                self.blocked = true;
+                self.expr(e, depth)
+            }
             ExprKind::Text(parts) => {
                 for p in parts {
                     if let TextPart::Expr(x) = p {
@@ -141,7 +146,7 @@ impl Walk {
                 self.expr(expr, depth);
             }
             ExprKind::Deref(x) | ExprKind::Propagate(x) => self.expr(x, depth),
-            ExprKind::Await(_) => self.blocked = true,
+            ExprKind::Await(_) | ExprKind::Block { .. } => self.blocked = true,
             ExprKind::Field { expr, .. } => self.expr(expr, depth),
             ExprKind::Binary { lhs, rhs, .. } => {
                 self.expr(lhs, depth);

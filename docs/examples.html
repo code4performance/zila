@@ -246,7 +246,8 @@
 <span class="cm">//</span>
 <span class="cm">//   brasa-parse examples/maps.br -o maps.exe</span>
 <span class="cm">//</span>
-<span class="cm">// A Map&lt;K, V&gt; keeps values under keys (text or integers) and remembers the order</span>
+<span class="cm">// A Map&lt;K, V&gt; keeps values under keys (any type that is Hash: text, integers, records,</span>
+<span class="cm">// enums, lists...) and remembers the order</span>
 <span class="cm">// in which the keys were first added.</span>
 
 <span class="kw">package</span> main
@@ -344,6 +345,39 @@
       <p>This program cuts a sentence into words with <code>text.split</code>, drops the empty pieces with <code>list.filter</code>, counts them in a map, and ranks them with <code>list.sort_by</code>: the function you pass says that a higher count goes first and ties go in alphabetical order (<code>text.compare</code>). The last lines show <code>text.parse_int</code> and <code>text.parse_float</code>, which give a default with <code>??</code> when the text is not a number. The <a href="stdlib.html">Library page</a> lists every function.</p>
     </section>
 
+    <section id="unicode-example">
+      <h2>Text and characters: ação in bytes and characters</h2>
+      <div class="file-label">examples/unicode.br</div>
+      <pre><code><span class="cm">// Text is UTF-8: `len` counts bytes, `char_count()` counts characters, `for c in s` visits the</span>
+<span class="cm">// characters and `slice` cuts by byte positions (it aborts inside a character).</span>
+<span class="cm">//</span>
+<span class="cm">//   brasa-parse examples/unicode.br -o unicode.exe</span>
+
+<span class="kw">package</span> main
+
+<span class="kw">use</span> text
+
+<span class="kw">func</span> show(word: text)
+    print(<span class="str">"{word}: len {word.len}, char_count {word.char_count()}, reversed {text.reverse(word)}"</span>)
+    <span class="kw">for</span> c <span class="kw">in</span> word
+        print(<span class="str">"  {c} U+{c.code} ({c.len_utf8()} bytes)"</span>)
+    <span class="kw">end</span>
+<span class="kw">end</span>
+
+<span class="kw">func</span> main()
+    show(<span class="str">"ação"</span>)
+    show(<span class="str">"coração"</span>)
+    show(<span class="str">"São Paulo"</span>)
+
+    <span class="cm">// a safe cut: byte positions 0 to 3 are the whole of "aç"</span>
+    <span class="kw">let</span> word = <span class="str">"ação"</span>
+    print(<span class="str">"slice(0, 3) = {word.slice(0, 3)}"</span>)
+    print(<span class="str">"first byte {word.byte(0)}, bytes {word.bytes().len}"</span>)
+    print(<span class="str">"pad: [{text.pad_right(word, 6, ".")}]"</span>)
+<span class="kw">end</span></code></pre>
+      <p><code>len</code> counts bytes and <code>char_count()</code> counts characters, so <code>"ação"</code> is 6 bytes and 4 characters. <code>for c in word</code> visits the characters, <code>c.code</code> is the code point and <code>c.len_utf8()</code> the bytes it takes, and <code>text.reverse</code> reverses characters, so the accents stay on their letters. <code>slice(0, 3)</code> cuts by byte positions and is safe here because position 3 is the start of <code>ã</code>; <code>slice(0, 2)</code> would abort because position 2 is inside <code>ç</code>. See <a href="syntax.html#text">Text and characters</a>.</p>
+    </section>
+
     <section id="generics-example">
       <h2>Generics: one function, many types</h2>
       <div class="file-label">examples/generics.br</div>
@@ -419,6 +453,99 @@
     show(42)
 <span class="kw">end</span></code></pre>
       <p><code>Stack&lt;T&gt;</code> and <code>first&lt;T&gt;</code> are written once and used with <code>int</code> and <code>text</code>; the compiler works out <code>T</code> from the arguments and the declared type of the variable. <code>Printable</code> lists one method, and <code>show&lt;T: Printable&gt;</code> accepts anything that has it: a record with a <code>to_text</code> method, or even <code>int</code>, because <code>func (n: int) to_text()</code> gives it one. There is no <code>implements</code> keyword. See the <a href="syntax.html#generics">syntax guide</a> for the exact rules.</p>
+    </section>
+
+    <section id="comptime-example">
+      <h2>comptime: code that writes code</h2>
+      <div class="file-label">examples/comptime.br</div>
+      <pre><code><span class="cm">// Compile-time code generation: a function that writes code for your types.</span>
+<span class="cm">//</span>
+<span class="cm">//   brasa-parse examples/comptime.br -o comptime.exe</span>
+<span class="cm">//</span>
+<span class="cm">// A `comptime func` receives a `Type` (what the compiler knows about a type: its name, kind,</span>
+<span class="cm">// fields, variants and attributes) and returns Brasa source text. The compiler builds the</span>
+<span class="cm">// generators into a program for this machine, runs it while compiling, and compiles what it</span>
+<span class="cm">// returned as if you had written it:</span>
+<span class="cm">//</span>
+<span class="cm">//   #[derive(name)]   on a type: adds the declarations the derive `name` generates (methods)</span>
+<span class="cm">//   #[generated(g)]   on a function without a body: `g` writes the body for each type it is called with</span>
+<span class="cm">//   #[block]          a function that gives a name its own block syntax: the name, raw lines, `end`</span>
+<span class="cm">//</span>
+<span class="cm">// Generators may only use text, lists, maps, records, enums, loops and calls to code that does</span>
+<span class="cm">// the same: no files, network, clock, `spawn`, `unsafe`, `asm` or global variables.</span>
+
+<span class="kw">package</span> main
+
+<span class="kw">use</span> reflect
+<span class="kw">use</span> text
+
+<span class="kw">type</span> Point = <span class="kw">record</span>
+    x: int
+    y: int
+<span class="kw">end</span>
+
+<span class="kw">type</span> Config = <span class="kw">record</span>
+    port: int
+    name: text
+<span class="kw">end</span>
+
+<span class="cm">// `#[derive(describe)]` gives a type a `describe()` method that lists its fields.</span>
+#[derive]
+<span class="kw">comptime</span> <span class="kw">func</span> describe(t: Type) -&gt; text
+    <span class="kw">var</span> parts = <span class="str">""</span>
+    <span class="kw">for</span> f <span class="kw">in</span> t.fields()
+        <span class="kw">if</span> parts != <span class="str">""</span>
+            parts = parts + <span class="str">", "</span>
+        <span class="kw">end</span>
+        parts = parts + <span class="str">"{f.name}=\{v.{f.name}\}"</span>
+    <span class="kw">end</span>
+    <span class="kw">return</span> <span class="str">"func (v: {t.name()}) describe() -&gt; text\n    return \"{t.name()}({parts})\"\nend\n"</span>
+<span class="kw">end</span>
+
+<span class="cm">// A function whose body is written by `zero_gen` for each type it is called with.</span>
+#[generated(zero_gen)]
+<span class="kw">func</span> zero(<span class="kw">comptime</span> t: Type) -&gt; t
+
+<span class="kw">comptime</span> <span class="kw">func</span> zero_gen(t: Type) -&gt; text
+    <span class="kw">var</span> fields = <span class="str">""</span>
+    <span class="kw">for</span> f <span class="kw">in</span> t.fields()
+        <span class="kw">var</span> value = <span class="str">"0"</span>
+        <span class="kw">if</span> f.ty.kind() == <span class="str">"text"</span>
+            value = <span class="str">"\"\""</span>
+        <span class="kw">end</span>
+        <span class="kw">if</span> fields != <span class="str">""</span>
+            fields = fields + <span class="str">", "</span>
+        <span class="kw">end</span>
+        fields = fields + <span class="str">"{f.name}: {value}"</span>
+    <span class="kw">end</span>
+    <span class="kw">return</span> <span class="str">"return t \{ {fields} \}"</span>
+<span class="kw">end</span>
+
+<span class="cm">// A block: everything between the name and `end` is handed to `shout` as text.</span>
+#[block]
+<span class="kw">comptime</span> <span class="kw">func</span> shout(raw: text) -&gt; text
+    <span class="kw">return</span> <span class="str">"\"{text.upper(text.trim(raw))}\""</span>
+<span class="kw">end</span>
+
+#[derive(describe)]
+<span class="kw">type</span> Pair = <span class="kw">record</span>
+    left: text
+    right: text
+<span class="kw">end</span>
+
+<span class="kw">func</span> main()
+    <span class="kw">let</span> p = Point{ x: 3, y: 4 }
+    <span class="kw">let</span> pair = Pair{ left: <span class="str">"a"</span>, right: <span class="str">"b"</span> }
+    print(pair.describe())
+    <span class="kw">let</span> c = zero(Config)
+    print(<span class="str">"zero(Config): port {c.port}, name length {c.name.len}"</span>)
+    <span class="kw">let</span> banner = shout
+        hello from a block
+    <span class="kw">end</span>
+    print(banner)
+    print(p.x + p.y)
+<span class="kw">end</span></code></pre>
+      <p><code>describe</code> is a <code>#[derive]</code> generator: it receives the type <code>Pair</code> and returns the source of a <code>describe()</code> method that lists the fields, which the compiler then compiles into the program. <code>zero</code> has no body: <code>zero_gen</code> writes one for each type it is called with (here <code>Config</code>, with <code>t</code> standing for the type). <code>shout</code> is a block: the lines between the name and <code>end</code> are handed to it as text and its result replaces the block. Everything runs while compiling, so the program is plain native code. See <a href="syntax.html#comptime">Compile-time code generation</a>.</p>
     </section>
 
     <section id="floats-example">
@@ -513,11 +640,17 @@
 <span class="kw">package</span> main
 
 <span class="kw">use</span> fs
+<span class="kw">use</span> list
 <span class="kw">use</span> net
 
-<span class="kw">async</span> <span class="kw">func</span> fetch_title(id: int) -&gt; text
+<span class="cm">// a plain function may await too: it suspends only the task that calls it</span>
+<span class="kw">func</span> fetch_title(id: int) -&gt; text
     <span class="kw">await</span> sleep(100)
     <span class="kw">return</span> <span class="str">"title {id}"</span>
+<span class="kw">end</span>
+
+<span class="kw">async</span> <span class="kw">func</span> fetch_title_task(id: int) -&gt; text
+    <span class="kw">return</span> fetch_title(id)
 <span class="kw">end</span>
 
 <span class="kw">async</span> <span class="kw">func</span> echo_server(listener: net.Listener) -&gt; error
@@ -530,8 +663,12 @@
 
 <span class="kw">func</span> main() -&gt; error
     <span class="cm">// three 100 ms waits overlap: all of it takes about 100 ms, not 300</span>
-    <span class="kw">let</span> titles = <span class="kw">await</span> all([fetch_title(1), fetch_title(2), fetch_title(3)])
+    <span class="kw">let</span> titles = <span class="kw">await</span> all([fetch_title_task(1), fetch_title_task(2), fetch_title_task(3)])
     print(<span class="str">"{titles[0]}, {titles[1]}, {titles[2]}"</span>)
+
+    <span class="cm">// the same with `map` and a lambda that awaits (one after another here)</span>
+    <span class="kw">let</span> ids = list.map([1, 2, 3], <span class="kw">func</span>(i) <span class="kw">await</span> fetch_title_task(i) <span class="kw">end</span>)
+    print(<span class="str">"titles {ids[0].len} {ids[1].len} {ids[2].len}"</span>)
 
     <span class="cm">// files</span>
     <span class="kw">try</span> <span class="kw">await</span> fs.write(<span class="str">"brasa-example.txt"</span>, <span class="str">"written by an async function"</span>)
@@ -632,6 +769,58 @@
     print(<span class="str">"tsc: {rdtsc()}"</span>)
 <span class="kw">end</span></code></pre>
       <p>This program exercises Brasa on both sides of the C boundary. <code>extern "C" func sqrt(...)</code> and <code>printf</code> declare foreign functions pulled in via <code>#[link("m")]</code> (link against <code>libm</code>); <code>printf</code>'s trailing <code>...</code> marks it as C-variadic. <code>qsort</code>'s <code>cmp</code> parameter shows an <code>extern "C" func(...)</code> type used as a C-compatible function-pointer callback. <code>#[c_layout]</code> on <code>Point</code> pins field order and alignment to match a C <code>struct</code> exactly, so it can be passed across the FFI boundary safely. <code>#[export("brasa_add")]</code> does the reverse — it exposes a Brasa function to C callers under a fixed, unmangled symbol name. <code>rdtsc</code> reads the CPU timestamp counter with a short inline <code>asm</code> block, using <code>out eax = lo</code> / <code>out edx = hi</code> to bind two hardware registers to Brasa variables. Every one of these operations — calling <code>extern</code> functions and running <code>asm</code> — is wrapped in <code>unsafe</code>, since the compiler can't verify what happens on the other side of the boundary. See the <a href="syntax.html#ffi">FFI section of the syntax guide</a> and the project's <code>brasa-ffi.md</code> for the full specification.</p>
+    </section>
+    <section id="tree-example">
+      <h2>tree: shared objects and weak references</h2>
+      <div class="file-label">examples/tree.br</div>
+      <pre><code><span class="cm">// tree: shared objects with `new`, and weak parent links that do not leak.</span>
+<span class="cm">//</span>
+<span class="cm">//   brasa-parse examples/tree.br -o tree.exe</span>
+<span class="cm">//</span>
+<span class="cm">// `new Node{ ... }` makes one shared, reference-counted object of type Rc&lt;Node&gt;:</span>
+<span class="cm">// copying an Rc shares the object. A child that points back at its parent with an</span>
+<span class="cm">// Rc would make a cycle that is never freed, so it holds a Weak&lt;Node&gt; instead:</span>
+<span class="cm">// `weak(x)` makes one, `w.upgrade()` returns the parent again while it is alive</span>
+<span class="cm">// (and nil once the last Rc to it is gone).</span>
+
+<span class="kw">package</span> main
+
+<span class="kw">type</span> Node = <span class="kw">record</span>
+    name: text
+    parent: Weak&lt;Node&gt;
+    children: []Rc&lt;Node&gt;
+<span class="kw">end</span>
+
+<span class="kw">func</span> add_child(parent: Rc&lt;Node&gt;, name: text) -&gt; Rc&lt;Node&gt;
+    <span class="kw">let</span> child = <span class="kw">new</span> Node{ name: name, parent: weak(parent) }
+    parent.children.push(child)
+    <span class="kw">return</span> child
+<span class="kw">end</span>
+
+<span class="kw">func</span> path(node: Rc&lt;Node&gt;) -&gt; text
+    <span class="kw">let</span> up = node.parent.upgrade()
+    <span class="kw">if</span> up == <span class="kw">nil</span>
+        <span class="kw">return</span> node.name
+    <span class="kw">end</span>
+    <span class="kw">return</span> path(up) + <span class="str">"/"</span> + node.name
+<span class="kw">end</span>
+
+<span class="kw">func</span> build() -&gt; int
+    <span class="kw">let</span> root = <span class="kw">new</span> Node{ name: <span class="str">"root"</span> }
+    <span class="kw">let</span> src = add_child(root, <span class="str">"src"</span>)
+    add_child(src, <span class="str">"main.br"</span>)
+    add_child(src, <span class="str">"util.br"</span>)
+    add_child(root, <span class="str">"docs"</span>)
+    print(path(src.children[1]))
+    <span class="kw">return</span> root.children.len
+<span class="kw">end</span>
+
+<span class="kw">func</span> main()
+    <span class="kw">let</span> before = live_objects()
+    print(<span class="str">"top-level entries: {build()}"</span>)
+    print(<span class="str">"objects left after the tree is gone: {live_objects() - before}"</span>)
+<span class="kw">end</span></code></pre>
+      <p>A tree whose children point back at their parent. <code>new Node{ ... }</code> makes a shared, reference-counted <code>Rc&lt;Node&gt;</code>; the child's <code>parent</code> field is a <code>Weak&lt;Node&gt;</code>, so the parent and its children do not keep each other alive. <code>live_objects()</code> shows that the whole tree is freed when the last outside reference goes away.</p>
     </section>
   </main>
 

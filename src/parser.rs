@@ -14,7 +14,13 @@ use std::collections::{BTreeMap, BTreeSet};
 type R<T> = Result<T, Diag>;
 
 pub fn parse_source(src: &str) -> R<File> {
-    let toks = Lexer::new(src).tokenize()?;
+    parse_source_with(src, crate::comptime::block_names(src))
+}
+
+/// `parse_source` with the names that start a block form given (instead of found by the
+/// pre-scan of the `use` lines).
+pub fn parse_source_with(src: &str, blocks: std::collections::HashSet<String>) -> R<File> {
+    let toks = Lexer::new(src).with_blocks(blocks).tokenize()?;
     Parser::new(toks).parse_file()
 }
 
@@ -31,7 +37,7 @@ pub struct Layout {
 
 /// Parses `src` and also returns the tokens, the comments and where the blocks are.
 pub fn parse_with_layout(src: &str) -> R<(File, Layout, Vec<Token>, Vec<Comment>)> {
-    let (toks, comments) = Lexer::new(src).tokenize_all()?;
+    let (toks, comments) = Lexer::new(src).with_blocks(crate::comptime::block_names(src)).tokenize_all()?;
     let mut p = Parser::new(toks.clone());
     let file = p.parse_file()?;
     Ok((file, p.layout, toks, comments))
@@ -107,6 +113,7 @@ impl Parser {
             Tok::Text(_) => "a text literal".into(),
             Tok::Newline => "end of line".into(),
             Tok::Eof => "end of file".into(),
+            Tok::Block { name, .. } => format!("block '{}'", name),
         }
     }
 
@@ -285,6 +292,9 @@ impl Parser {
                 self.expect_op(")")?;
             }
             self.expect_op("]")?;
+            if name == "generated" && !(args.len() == 1 && path_of(&args[0]).is_some()) {
+                return self.err("`#[generated]` needs the name of a comptime function: #[generated(name)]");
+            }
             v.push(Attr { name, args });
             // attributes may be stacked on separate lines
             if matches!(self.cur(), Tok::Newline) && matches!(self.at(1), Tok::Op("#[")) {
@@ -299,13 +309,22 @@ impl Parser {
         self.skip_nl();
         let line = self.line();
         let kind = match self.kw() {
-            Some("func") => DeclKind::Func(self.func_decl(false)?),
+            Some("func") => DeclKind::Func(self.func_decl(false, attrs.iter().any(|a| a.name == "generated"))?),
+            Some("comptime") => {
+                self.bump();
+                if !self.is_kw("func") {
+                    return self.err(format!("'comptime' applies only to functions, found {} after it", self.describe()));
+                }
+                let mut f = self.func_decl(false, false)?;
+                f.comptime = true;
+                DeclKind::Func(f)
+            }
             Some("async") => {
                 self.bump();
                 if !self.is_kw("func") {
                     return self.err(format!("expected 'func' after 'async', found {}", self.describe()));
                 }
-                DeclKind::Func(self.func_decl(true)?)
+                DeclKind::Func(self.func_decl(true, false)?)
             }
             Some("type") => DeclKind::Type(self.type_decl()?),
             Some("let") | Some("var") => DeclKind::Var(self.var_decl()?),
@@ -445,10 +464,14 @@ impl Parser {
                         break;
                     }
                     let attrs = self.attrs()?;
+                    if !attrs.is_empty() {
+                        self.skip_nl();
+                    }
+                    let line = self.line();
                     let name = self.expect_ident()?;
                     self.expect_op(":")?;
                     let ty = self.ty()?;
-                    fields.push(Field { attrs, name, ty });
+                    fields.push(Field { attrs, name, ty, line });
                     self.eat_op(",");
                     self.stmt_end()?;
                 }
@@ -463,10 +486,22 @@ impl Parser {
                     if self.eat_end(open) {
                         break;
                     }
+                    let attrs = self.attrs()?;
+                    if !attrs.is_empty() {
+                        self.skip_nl();
+                    }
+                    let line = self.line();
                     let name = self.expect_ident()?;
                     let mut fields = Vec::new();
+                    let mut field_names = Vec::new();
                     if self.eat_op("(") {
                         loop {
+                            if matches!(self.cur(), Tok::Ident(_)) && matches!(self.at(1), Tok::Op(":")) {
+                                field_names.push(self.expect_ident()?);
+                                self.bump();
+                            } else {
+                                field_names.push(String::new());
+                            }
                             fields.push(self.ty()?);
                             if !self.eat_op(",") {
                                 break;
@@ -474,7 +509,7 @@ impl Parser {
                         }
                         self.expect_op(")")?;
                     }
-                    variants.push(Variant { name, fields });
+                    variants.push(Variant { attrs, name, fields, field_names, line });
                     if !self.eat_op(",") && !matches!(self.cur(), Tok::Newline) {
                         return self.err(format!("expected ',' or a new line after a variant, found {}", self.describe()));
                     }
@@ -510,7 +545,8 @@ impl Parser {
         Ok(TypeDecl { name, generics, body })
     }
 
-    fn func_decl(&mut self, is_async: bool) -> R<FuncDecl> {
+    /// `body_less`: a `#[generated]` function has no body; the generator writes it.
+    fn func_decl(&mut self, is_async: bool, body_less: bool) -> R<FuncDecl> {
         let open = self.pos;
         self.expect_kw("func")?;
         let receiver = if self.eat_op("(") {
@@ -529,9 +565,12 @@ impl Parser {
         let params = self.params(false)?;
         self.expect_op(")")?;
         let ret = if self.eat_op("->") { Some(self.result()?) } else { None };
+        if body_less {
+            return Ok(FuncDecl { receiver, name, generics, params, ret, body: Vec::new(), is_async, comptime: false });
+        }
         let body = self.block()?;
         self.end_block(open)?;
-        Ok(FuncDecl { receiver, name, generics, params, ret, body, is_async })
+        Ok(FuncDecl { receiver, name, generics, params, ret, body, is_async, comptime: false })
     }
 
     /// Parameters up to (not including) `)`. Lambdas may omit types.
@@ -550,6 +589,10 @@ impl Parser {
     }
 
     fn param(&mut self, lambda: bool) -> R<Param> {
+        let comptime = self.eat_kw("comptime");
+        if comptime && lambda {
+            return self.err("'comptime' parameters are only allowed in function declarations");
+        }
         let by_ref = self.eat_kw("ref");
         let name = self.expect_ident()?;
         let mut variadic = false;
@@ -561,7 +604,7 @@ impl Parser {
             return self.err(format!("expected ':' and a type for parameter '{}'", name));
         }
         let default = if self.eat_op("=") { Some(self.expr()?) } else { None };
-        Ok(Param { by_ref, name, ty, variadic, default })
+        Ok(Param { by_ref, name, ty, variadic, default, comptime })
     }
 
     // ---------- types ----------
@@ -662,6 +705,10 @@ impl Parser {
                     _ => self.err("expected ']' or an array size"),
                 }
             }
+            Tok::Kw("shared") => {
+                self.bump();
+                Ok(Type::Shared(Box::new(self.ty()?)))
+            }
             Tok::Kw("func") => self.func_type(None),
             Tok::Kw("extern") => {
                 self.bump();
@@ -733,6 +780,11 @@ impl Parser {
                 StmtKind::Unsafe(b)
             }
             Some("asm") => StmtKind::Asm(self.asm_block()?),
+            None if matches!(self.cur(), Tok::Block { .. }) && matches!(self.at(1), Tok::Newline | Tok::Eof) => {
+                let Tok::Block { name, raw } = self.cur().clone() else { unreachable!() };
+                self.bump();
+                StmtKind::Block { name, raw }
+            }
             Some("for") => {
                 let open = self.pos;
                 self.bump();
@@ -1074,6 +1126,10 @@ impl Parser {
                 self.bump();
                 ExprKind::Ident(n)
             }
+            Tok::Block { name, raw } => {
+                self.bump();
+                ExprKind::Block { name, raw }
+            }
             Tok::Kw("true") => {
                 self.bump();
                 ExprKind::Bool(true)
@@ -1092,9 +1148,32 @@ impl Parser {
             }
             Tok::Kw("if") => return self.if_expr(),
             Tok::Kw("match") => return self.match_expr(),
+            Tok::Kw("shared") => {
+                self.bump();
+                let e = self.unary()?;
+                ExprKind::Shared(Box::new(e))
+            }
+            Tok::Kw("spawn_thread") => {
+                self.bump();
+                let e = self.unary()?;
+                if !matches!(e.kind, ExprKind::Call { .. }) {
+                    return self.err("'spawn_thread' requires a function call, like `spawn_thread work(x)`");
+                }
+                ExprKind::SpawnThread(Box::new(e))
+            }
             Tok::Kw("new") => {
                 self.bump();
-                ExprKind::New(self.ty()?)
+                let mut path = vec![self.expect_name()?];
+                while self.is_op(".") {
+                    self.bump();
+                    path.push(self.expect_name()?);
+                }
+                if !self.is_op("{") {
+                    return self.err(format!("'new' needs a record literal such as `new {}{{ ... }}`", path.join(".")));
+                }
+                self.bump();
+                let fields = self.record_fields()?;
+                ExprKind::New(Box::new(Expr { kind: ExprKind::Record { path, fields }, line }))
             }
             Tok::Op("(") => {
                 self.bump();

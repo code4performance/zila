@@ -179,6 +179,23 @@ fn passing_tests_exit_with_zero() {
 }
 
 #[test]
+fn a_test_function_may_await() {
+    let f = temp_file("package main
+
+#[test]
+func waits() -> error
+    await sleep(1)
+    assert_eq(1, 1)
+    return
+end
+");
+    let Some((out, _, code)) = run_tests(&[&f], &[]) else { return };
+    let _ = std::fs::remove_file(&f);
+    assert_eq!(code, 0, "{}", out);
+    assert_eq!(lines(&out), ["ok waits", "test result: 1 passed, 0 failed"]);
+}
+
+#[test]
 fn one_failing_test_among_passing_ones() {
     let f = temp_file("package main\n\n#[test]\nfunc first() -> error\n    return\nend\n\n#[test]\nfunc second() -> error\n    assert_eq(1, 2)\n    return\nend\n");
     let Some((out, _, code)) = run_tests(&[&f], &[]) else { return };

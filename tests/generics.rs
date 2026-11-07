@@ -165,8 +165,9 @@ fn inference_errors() {
         &["cannot infer the type of T"],
     );
     fails(
-        "package main\nfunc same<T>(a: T, b: T) -> T\n    return a\nend\nfunc main()\n    let a = same(1, \"x\")\nend\n",
-        &["T is both", "i64", "text"],
+        "package main\nfunc same<T>(a: T, b: T) -> T\n    return a\nend\nfunc main()\n    let n = 1
+    let a = same(n, \"x\")\nend\n",
+        &["T is both", "int", "text"],
     );
 }
 
@@ -208,7 +209,7 @@ end
 #[test]
 fn generic_record_errors() {
     let decl = "package main\ntype Stack<T> = record\n    items: []T\nend\n";
-    fails(&format!("{}func take(s: Stack<int>)\nend\nfunc main()\n    let a: Stack<text> = Stack {{ items: [] }}\n    take(a)\nend\n", decl), &["Stack<i64>", "Stack<text>"]);
+    fails(&format!("{}func take(s: Stack<int>)\nend\nfunc main()\n    let a: Stack<text> = Stack {{ items: [] }}\n    take(a)\nend\n", decl), &["Stack<int>", "Stack<text>"]);
     fails(&format!("{}func main()\n    let a: Stack<int, text> = Stack {{ items: [] }}\nend\n", decl), &["Stack takes 1 type argument"]);
     fails(&format!("{}func main()\n    let a = Stack {{ items: [] }}\nend\n", decl), &["cannot infer the type arguments of Stack"]);
 }
@@ -252,7 +253,7 @@ fn bound_errors() {
     );
     fails(
         &with_prelude("func show<T: Printable>(x: T) -> text\n    return x.to_text()\nend\nfunc main()\n    show(Cat { lives: 9 })\nend\n"),
-        &["Cat does not satisfy Printable", "returns i64 where Printable needs text"],
+        &["Cat does not satisfy Printable", "returns int where Printable needs text"],
     );
     fails(
         &with_prelude("type Box<T: Printable> = record\n    item: T\nend\nfunc main()\n    let b: Box<Dog> = Box { item: Dog { name: \"a\" } }\nend\n"),
@@ -444,4 +445,75 @@ end
 "#,
     );
     assert!(e.contains("type argument"), "{}", e);
+}
+
+#[test]
+fn self_in_a_user_interface() {
+    expect(
+        r#"package main
+
+type Shape = interface
+    func bigger(self, other: Self) -> bool
+end
+
+type Square = record
+    side: int
+end
+
+func (a: Square) bigger(b: Square) -> bool
+    return a.side > b.side
+end
+
+func pick<T: Shape>(a: T, b: T) -> bool
+    return a.bigger(b)
+end
+
+func main()
+    println(pick(Square { side: 3 }, Square { side: 2 }))
+end
+"#,
+        "true\n",
+    );
+    let e = compile_error(
+        r#"package main
+
+type Shape = interface
+    func bigger(self, other: Self) -> bool
+end
+
+type Odd = record
+    side: int
+end
+
+func (a: Odd) bigger(b: int) -> bool
+    return a.side > b
+end
+
+func pick<T: Shape>(a: T, b: T) -> bool
+    return a.bigger(b)
+end
+
+func main()
+    println(pick(Odd { side: 3 }, Odd { side: 2 }))
+end
+"#,
+    );
+    assert!(e.contains("does not satisfy Shape"), "{}", e);
+}
+
+#[test]
+fn self_outside_an_interface() {
+    let e = compile_error(
+        r#"package main
+
+func f(a: Self) -> int
+    return 1
+end
+
+func main()
+    println(1)
+end
+"#,
+    );
+    assert!(e.contains("`Self` is only valid inside an interface"), "{}", e);
 }

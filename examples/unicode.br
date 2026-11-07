@@ -1,0 +1,27 @@
+// Text is UTF-8: `len` counts bytes, `char_count()` counts characters, `for c in s` visits the
+// characters and `slice` cuts by byte positions (it aborts inside a character).
+//
+//   brasa-parse examples/unicode.br -o unicode.exe
+
+package main
+
+use text
+
+func show(word: text)
+    print("{word}: len {word.len}, char_count {word.char_count()}, reversed {text.reverse(word)}")
+    for c in word
+        print("  {c} U+{c.code} ({c.len_utf8()} bytes)")
+    end
+end
+
+func main()
+    show("ação")
+    show("coração")
+    show("São Paulo")
+
+    // a safe cut: byte positions 0 to 3 are the whole of "aç"
+    let word = "ação"
+    print("slice(0, 3) = {word.slice(0, 3)}")
+    print("first byte {word.byte(0)}, bytes {word.bytes().len}")
+    print("pad: [{text.pad_right(word, 6, ".")}]")
+end

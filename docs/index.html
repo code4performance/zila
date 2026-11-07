@@ -42,9 +42,9 @@
         <li><strong>Readable by default.</strong> Newline-terminated statements, <code>end</code>-delimited blocks, and method chains that read top-to-bottom.</li>
         <li><strong>Errors you can see.</strong> No hidden exceptions — failure is part of a function's return type (<code>T or error</code>), and propagation (<code>try</code>) is explicit at every call site.</li>
         <li><strong>Native and tiny.</strong> Programs compile straight to machine code, with memory freed by reference counting and no runtime to install: see <a href="native.html">Native compilation</a>. The same compiler builds native windows with the <code>ui</code> library (see the <a href="examples.html#ui">example</a>) and a bootable kernel: <a href="os.html">Brasa OS</a>.</li>
-        <li><strong>Waiting without freezing.</strong> <code>async</code>/<code>await</code>, timers, files and TCP run on cooperative tasks: see <a href="async.html">Async</a>.</li>
+        <li><strong>Waiting without freezing.</strong> <code>async</code>/<code>await</code>, timers, files and TCP run on cooperative tasks: see <a href="async.html">Async</a>. <strong>Real parallelism</strong> comes from threads, <code>shared</code> data and <code>sync.Mutex</code>: see <a href="concurrency.html#threads">Threads</a>.</li>
         <li><strong>A practical type system.</strong> Records, enums (with or without data), and structural interfaces (a type satisfies an interface just by having the right methods — no inheritance, no explicit <code>implements</code>).</li>
-        <li><strong>No surprise costs.</strong> Records are copied on assignment and call unless passed <code>ref</code>; there's no borrow checker and no hidden allocation magic.</li>
+        <li><strong>No surprise costs.</strong> Records are copied on assignment and call unless passed <code>ref</code>, a temporary borrow that cannot escape the call; lists and maps are values too, copied lazily (writing to a shared list copies it, writing to your own list does not); there's no borrow checker and no hidden allocation magic.</li>
         <li><strong>Systems-capable when you need it.</strong> Raw pointers, <code>unsafe</code> blocks, C FFI, and inline assembly are part of the language, gated behind explicit syntax rather than bolted on.</li>
       </ul>
     </section>

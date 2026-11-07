@@ -8,11 +8,17 @@
 package main
 
 use fs
+use list
 use net
 
-async func fetch_title(id: int) -> text
+// a plain function may await too: it suspends only the task that calls it
+func fetch_title(id: int) -> text
     await sleep(100)
     return "title {id}"
+end
+
+async func fetch_title_task(id: int) -> text
+    return fetch_title(id)
 end
 
 async func echo_server(listener: net.Listener) -> error
@@ -25,8 +31,12 @@ end
 
 func main() -> error
     // three 100 ms waits overlap: all of it takes about 100 ms, not 300
-    let titles = await all([fetch_title(1), fetch_title(2), fetch_title(3)])
+    let titles = await all([fetch_title_task(1), fetch_title_task(2), fetch_title_task(3)])
     print("{titles[0]}, {titles[1]}, {titles[2]}")
+
+    // the same with `map` and a lambda that awaits (one after another here)
+    let ids = list.map([1, 2, 3], func(i) await fetch_title_task(i) end)
+    print("titles {ids[0].len} {ids[1].len} {ids[2].len}")
 
     // files
     try await fs.write("brasa-example.txt", "written by an async function")

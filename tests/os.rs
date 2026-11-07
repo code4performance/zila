@@ -95,6 +95,7 @@ fn boots_in_qemu_and_runs_shell_commands() {
         "division by zero",
         "error: 'abc' is not a number",
         "error: unknown command 'bogus'",
+        "heap used    : ",
         "live objects : 2",
     ] {
         assert!(text.contains(want), "missing {:?} in:\n{}", want, text);
@@ -117,4 +118,13 @@ fn kernels_cannot_use_async_or_the_windows_libraries() {
         let e = build_os(&boot, &parse_source(&src).unwrap()).unwrap_err();
         assert!(e.contains("bare-metal"), "{}: {}", lib, e);
     }
+}
+
+#[test]
+fn the_kernel_supplies_its_own_heap() {
+    // the heap is `#[allocator]` code in os/kernel.br, so the runtime's built-in size-class heap is gone
+    let kernel = parse_source(&std::fs::read_to_string("os/kernel.br").unwrap()).unwrap();
+    let asm = brasa::codegen_x64::generate_asm_for(&kernel, &brasa::codegen_x64::CompileOptions::default(), brasa::codegen_x64::Target::Bare).unwrap();
+    assert!(asm.contains("call B_main_heap_alloc") && asm.contains("call B_main_heap_free"));
+    assert!(!asm.contains("rt_freelists") && !asm.contains("rt_brk"));
 }

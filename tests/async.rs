@@ -76,14 +76,123 @@ func main() -> error
     return
 end
 "#;
-    // `twice` is a plain function using await: rejected at compile time
-    let file = parse_source(src).unwrap();
-    let e = brasa::codegen_x64::generate_asm(&file).unwrap_err();
-    assert!(e.contains("`await` can only be used inside an `async func` or inside `main`"), "{}", e);
-    let fixed = src.replace("func twice(s: text)", "async func twice(s: text)");
-    let Some((out, code)) = run(&fixed) else { return };
+    // `twice` is a plain function using await: it compiles and runs
+    let Some((out, code)) = run(src) else { return };
     assert_eq!(out, "4\nfailed: cannot parse 'bad'\nfallback 9\n");
     assert_eq!(code, 0);
+}
+
+#[test]
+fn await_works_in_plain_functions_and_map() {
+    let src = r#"package main
+use task
+use list
+async func work(n: int) -> int
+    await sleep(10)
+    return n * 10
+end
+func load(n: int) -> int
+    await sleep(10)
+    return n + 1
+end
+func outer() -> int
+    return load(1) + load(2)
+end
+func pause()
+    await sleep(5)
+end
+func with_defer()
+    defer pause()
+    print("body")
+end
+func main()
+    print("load {load(4)}")
+    let r = list.map([1, 2, 3], func(i) await work(i) end)
+    print("map {r[0]} {r[1]} {r[2]}")
+    with_defer()
+    spawn ticker()
+    print("outer {outer()}")
+end
+func ticker()
+    for i in 0..3
+        print("tick")
+        await sleep(3)
+    end
+end
+"#;
+    let Some((out, code)) = run(src) else { return };
+    assert!(out.starts_with("load 5
+map 10 20 30
+body
+"), "{}", out);
+    assert!(out.contains("tick") && out.ends_with("outer 5
+"), "{}", out);
+    assert_eq!(code, 0);
+}
+
+#[test]
+fn await_only_in_a_plain_function_pulls_in_the_runtime() {
+    let src = "package main
+func pause()
+    await sleep(5)
+end
+func main()
+    pause()
+    print(\"done\")
+end
+";
+    let Some((out, code)) = run(src) else { return };
+    assert_eq!(out, "done
+");
+    assert_eq!(code, 0);
+}
+
+#[test]
+fn await_is_rejected_in_drop_and_c_callbacks() {
+    let drop_src = "package main
+type R = record
+    x: int
+end
+func (ref r: R) drop()
+    await sleep(1)
+end
+func main()
+end
+";
+    let file = parse_source(drop_src).unwrap();
+    let e = brasa::codegen_x64::generate_asm(&file).unwrap_err();
+    assert!(e.contains("`await` cannot be used in a `drop` method"), "{}", e);
+    let cb_src = "package main
+func cb(x: int) -> int
+    await sleep(1)
+    return x
+end
+func main()
+    let f: extern \"system\" func(int) -> int = cb
+end
+";
+    let file = parse_source(cb_src).unwrap();
+    let e = brasa::codegen_x64::generate_asm(&file).unwrap_err();
+    assert!(e.contains("`await` cannot be used in a function called from C"), "{}", e);
+}
+
+#[test]
+fn a_plain_function_awaiting_a_stuck_future_is_a_deadlock() {
+    let src = "package main
+async func never() -> int
+    let c = channel(int)
+    return c.receive()
+end
+func wait_it() -> int
+    return await never()
+end
+func main()
+    print(wait_it())
+end
+";
+    let Some((out, code)) = run(src) else { return };
+    assert!(out.contains("deadlock"), "{}", out);
+    assert_ne!(code, 0);
 }
 
 #[test]
@@ -182,7 +291,7 @@ fn a_future_is_not_an_int() {
     let src = "package main\nasync func f() -> int\n    return 1\nend\nfunc main()\n    let x: int = f()\nend\n";
     let file = parse_source(src).unwrap();
     let e = brasa::codegen_x64::generate_asm(&file).unwrap_err();
-    assert!(e.contains("expected i64, found Future<i64>"), "{}", e);
+    assert!(e.contains("expected int, found Future<int>"), "{}", e);
 }
 
 const COMBINATORS: &str = r#"package main
@@ -552,7 +661,7 @@ async func serve(l: net.Listener, n: int) -> error
     return
 end
 
-async func ask(port: int, id: int) -> text or error
+async func ask(port: long, id: int) -> text or error
     let c = try await net.connect("127.0.0.1", port)
     try await c.write("hello {id}")
     let r = try await c.read(64)
@@ -560,7 +669,7 @@ async func ask(port: int, id: int) -> text or error
     return r
 end
 
-async func sequential(port: int, n: int) -> error
+async func sequential(port: long, n: int) -> error
     for i in 0..n
         let r = try await ask(port, i)
         if r.len == 0
@@ -661,7 +770,7 @@ async func serve(l: net.Listener) -> error
     return
 end
 
-async func fetch(port: int) -> text or error
+async func fetch(port: long) -> text or error
     let c = try await net.connect("127.0.0.1", port)
     try await c.write("ping")
     return try await c.read(64)
@@ -715,7 +824,7 @@ fn the_async_example_builds_and_runs() {
     let result = run(&src);
     let _ = std::fs::remove_file(&path);
     let Some((out, code)) = result else { return };
-    assert_eq!(out, "title 1, title 2, title 3\nwritten by an async function\necho: hello\n");
+    assert_eq!(out, "title 1, title 2, title 3\ntitles 7 7 7\nwritten by an async function\necho: hello\n");
     assert_eq!(code, 0);
 }
 

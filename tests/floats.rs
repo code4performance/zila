@@ -139,7 +139,7 @@ end
 #[test]
 fn type_errors() {
     let e = compile_error(&main_of("let x: float = 3"));
-    assert!(e.contains("expected float, found i64") && e.contains("3.0"), "{}", e);
+    assert!(e.contains("expected float, found int") && e.contains("3.0"), "{}", e);
     let e = compile_error(&main_of("let a = 1
 let b = 1.5
 let c = a + b"));
@@ -171,7 +171,8 @@ let e: f32 = f32(0.1)
 let f = f64(e)
 let g = int(f32(2.75))
 let h = i32(-7.9)
-let ok = a == 3.5 and b == 3 and c == -3 and d == 18446744073709551616.0 and f != 0.1 and f > 0.0999 and f < 0.1001 and g == 2 and h == -7 and int(-9223372036854775808.0) == -9223372036854775807 - 1
+let m: long = -9223372036854775807
+let ok = a == 3.5 and b == 3 and c == -3 and d == 18446744073709551616.0 and f != 0.1 and f > 0.0999 and f < 0.1001 and g == 2 and h == -7 and long(-9223372036854775808.0) == m - 1 and int(-2147483648.0) == -2147483647 - 1 and long(7) == 7
 if ok
     println("ok")
 end"#,

@@ -251,7 +251,8 @@ fn scrambled_indentation_formats_back_to_the_same_text() {
     let mut tested = 0;
     for f in repo_files() {
         let src = std::fs::read_to_string(&f).unwrap();
-        if src.contains("asm\n") || src.contains("asm\r\n") || src.contains("/*") {
+        // asm lines and block forms (raw text) depend on their own indentation
+        if src.contains("asm\n") || src.contains("asm\r\n") || src.contains("/*") || src.contains("#[block]") {
             continue;
         }
         let formatted = format_source(&src).unwrap();
@@ -317,4 +318,30 @@ fn fmt_leaves_a_broken_file_alone() {
     assert!(err.contains("broken.br"), "{}", err);
     assert_eq!(std::fs::read_to_string(&broken).unwrap(), "package t\nfunc f(\n");
     let _ = std::fs::remove_file(&broken);
+}
+
+// ---- block forms ----
+
+const BLOCK_PKG: &str = "package fmtblocks_pkg\n#[block]\ncomptime func raw_text(raw: text) -> text\n    return raw\nend\n";
+
+#[test]
+fn block_content_stays_byte_for_byte_and_only_the_name_and_end_are_aligned() {
+    brasa::comptime::register_package("fmtblocks_pkg", BLOCK_PKG);
+    let src = "package t\nuse fmtblocks_pkg\n\nfunc f()\nlet s = raw_text   // note\n   <p>  {not brasa ((  \n\t odd   indentation\n      end\n  print(s)\nend\n";
+    let out = fmt(src);
+    assert_eq!(
+        out,
+        "package t\nuse fmtblocks_pkg\n\nfunc f()\n    let s = raw_text   // note\n   <p>  {not brasa ((  \n\t odd   indentation\n    end\n    print(s)\nend\n"
+    );
+    // idempotent
+    assert_eq!(fmt(&out), out);
+    // a block standing alone on its line
+    let alone = "package t\nuse fmtblocks_pkg\nfunc f()\nif true\nraw_text\n x  y\n   end\nend\nend\n";
+    assert_eq!(fmt(alone), "package t\nuse fmtblocks_pkg\nfunc f()\n    if true\n        raw_text\n x  y\n        end\n    end\nend\n");
+}
+
+#[test]
+fn a_name_that_is_not_a_block_formats_as_ordinary_code() {
+    let src = "package t\nfunc f()\nlet s = nothing_here\n  print(s)\nend\n";
+    assert_eq!(fmt(src), "package t\nfunc f()\n    let s = nothing_here\n    print(s)\nend\n");
 }

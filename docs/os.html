@@ -45,7 +45,7 @@
         <dt>calc &lt;a&gt; &lt;op&gt; &lt;b&gt;</dt>
         <dd>Integer arithmetic with <code>+ - * / %</code>. Bad input prints an error instead of crashing.</dd>
         <dt>mem</dt>
-        <dd>Shows the heap size and the number of live objects.</dd>
+        <dd>Shows the heap size (the kernel's own counter) and the number of live objects.</dd>
         <dt>clear</dt>
         <dd>Clears the screen.</dd>
         <dt>reboot</dt>
@@ -65,7 +65,7 @@
         <li>It builds page tables that map the first gigabyte one-to-one with 2 MiB pages.</li>
         <li>It turns on PAE, long mode and paging, then jumps into 64-bit code and from there into the kernel.</li>
       </ol>
-      <p>The kernel is ordinary Brasa: text, lists, enums, <code>match</code>, <code>try</code>, closures and reference counting all work, because the compiler links a bare-metal runtime with its own heap. Hardware access uses <code>unsafe</code> raw pointers (the VGA memory) and <code>asm</code> blocks (I/O ports). Everything <code>print</code> writes goes to the <code>console_write(s: text)</code> function the kernel defines.</p>
+      <p>The kernel is ordinary Brasa: text, lists, enums, <code>match</code>, <code>try</code>, closures and reference counting all work, because the kernel supplies the heap itself: <code>heap_alloc</code> and <code>heap_free</code> in <code>os/kernel.br</code> are marked <code>#[allocator(alloc)]</code> and <code>#[allocator(free)]</code>, and the runtime asks them for every object. A kernel that declares no allocator gets the compiler's built-in size-class heap instead (and <code>heap_bytes()</code>). Hardware access uses <code>unsafe</code> raw pointers (the VGA memory) and <code>asm</code> blocks (I/O ports). Everything <code>print</code> writes goes to the <code>console_write(s: text)</code> function the kernel defines.</p>
     </section>
 
     <section id="limits">

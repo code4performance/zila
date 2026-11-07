@@ -25,7 +25,7 @@
 
   <main>
     <h1>Async</h1>
-    <p>Programs that wait — for time, a file, a network peer — should not freeze while they wait. In Brasa a function that waits is marked <code>async</code>, and <code>await</code> is the one place where a task gives up the processor so another can run. Everything here is compiled natively and needs the Windows target.</p>
+    <p>Programs that wait — for time, a file, a network peer — should not freeze while they wait. In Brasa <code>await</code> is the one place where a task gives up the processor so another can run. Everything here is compiled natively and needs the Windows target.</p>
 
     <section id="basics">
       <h2>async and await</h2>
@@ -42,11 +42,20 @@
 <span class="kw">end</span></code></pre>
       <p>Rules to remember:</p>
       <ul>
-        <li><code>await</code> is allowed only inside an <code>async func</code> and inside <code>main</code>; anywhere else the compiler tells you so.</li>
+        <li><code>await</code> is allowed in <strong>any</strong> function, method, lambda or <code>defer</code>red call, and in <code>main</code>. It suspends only the current task: the function that contains it does not continue, and neither does its caller, until the future is done. Every wait is still written as <code>await</code>; nothing waits silently.</li>
+        <li><code>async func</code> is the short form for &ldquo;run this call as its own task and give me a <code>Future&lt;T&gt;</code>&rdquo;. A function does not need <code>async</code> to contain <code>await</code>.</li>
+        <li><code>await</code> is an error (the compiler says so) in a <code>drop</code> method and in a function called from C (<code>#[export]</code>, or an <code>extern</code> callback such as a window procedure). Only a direct <code>await</code> is detected; from callbacks, <code>send</code> on a channel instead.</li>
         <li>A future can be awaited <strong>once</strong>. Awaiting it again stops the program with <code>future already awaited</code>.</li>
-        <li>An <code>async func</code> cannot take <code>ref</code> parameters: the task works on copies. Pass values or a channel.</li>
+        <li>An <code>async func</code> cannot take <code>ref</code> parameters: a task may outlive the caller, and a <code>ref</code> cannot escape the call. Pass values or a channel.</li>
         <li><code>await</code> does not create futures; it only waits for them. A future you never await still runs, and its result is released when nothing refers to it any more.</li>
       </ul>
+      <p>Two ways to fetch several things:</p>
+      <pre><code><span class="cm">// one after another: the lambda awaits, so map waits for each call</span>
+<span class="kw">let</span> a = list.map(ids, <span class="kw">func</span>(i) <span class="kw">await</span> fetch(i) <span class="kw">end</span>)
+
+<span class="cm">// all at once: start every call, then collect (fetch is an async func)</span>
+<span class="kw">let</span> b = <span class="kw">await</span> all(list.map(ids, fetch))</code></pre>
+      <p>Caveats: two tasks can be inside the same function at once, so globals touched across an <code>await</code> are shared; a callback or <code>drop</code> method cannot await.</p>
     </section>
 
     <section id="errors">
@@ -165,7 +174,7 @@
     <section id="how">
       <h2>How tasks run</h2>
       <ul>
-        <li>All tasks run on <strong>one thread</strong> and take turns. A task gives up the processor only at <code>await</code>, when it waits on a channel, with <code>task.yield()</code>, or when it finishes.</li>
+        <li>The tasks of a thread run on <strong>that thread</strong> and take turns. A task gives up the processor only at <code>await</code>, when it waits on a channel, with <code>task.yield()</code>, or when it finishes.</li>
         <li>A task that computes for a long time without awaiting makes every other task wait.</li>
         <li><code>async</code> functions, <code>spawn</code> and channels share the same scheduler and can be mixed freely.</li>
         <li>If every task is waiting and there is no timer or file or network operation in progress, the program stops with <code>fatal: all tasks are asleep - deadlock!</code> and a non-zero exit code. Waiting for a timer is not a deadlock.</li>
@@ -180,10 +189,14 @@
 
 <span class="kw">func</span> main() -&gt; error
     <span class="kw">let</span> conn = <span class="kw">try</span> <span class="kw">await</span> tls.connect(<span class="str">"example.com"</span>, 443)
-    <span class="kw">try</span> <span class="kw">await</span> conn.write(<span class="str">"GET / HTTP/1.1
-Host: example.com
-Connection: close
-
+    <span class="kw">try</span> <span class="kw">await</span> conn.write(<span class="str">"GET / HTTP/1.1
+
+Host: example.com
+
+Connection: close
+
+
+
 "</span>)
     print(<span class="kw">try</span> <span class="kw">await</span> conn.read(4096))
     <span class="kw">return</span>
@@ -195,7 +208,7 @@ Connection: close
       <h2>Limits in this version</h2>
       <ul>
         <li>Windows x64 and Linux x86-64 (<code>--target linux</code>; see <a href="native.html#linux">the Linux target</a>). A bare-metal kernel that uses <code>async</code> fails to build with a message saying so.</li>
-        <li>No parallelism (one thread) and no cancellation.</li>
+        <li>An async function runs on the thread that called it (see <a href="concurrency.html#threads">threads</a>); there is no cancellation.</li>
         <li>A future is awaited once.</li>
         <li>Only TCP and UDP over IPv4: TLS only as a client, connected UDP sockets, broadcast, multicast or directory operations, and the <code>ui</code> message loop does not yet run other tasks.</li>
       </ul>

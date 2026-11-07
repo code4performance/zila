@@ -32,7 +32,7 @@ func big_from(n: long) -> []long
 end
 
 // a = a * k, for 0 <= k <= 2^30
-func b_mul(a: []long, k: long)
+func b_mul(ref a: []long, k: long)
     var carry: long = 0
     for i in 0..a.len
         let t = a[i] * k + carry
@@ -45,18 +45,18 @@ func b_mul(a: []long, k: long)
     end
 end
 
-func b_mul_pow2(a: []long, n: int)
+func b_mul_pow2(ref a: []long, n: int)
     var left = n
     while left >= 30
-        b_mul(a, 1073741824)
+        b_mul(ref a, 1073741824)
         left -= 30
     end
-    b_mul(a, 1 << left)
+    b_mul(ref a, 1 << left)
 end
 
 func b_pow2(n: int) -> []long
     let a = big_from(1)
-    b_mul_pow2(a, n)
+    b_mul_pow2(ref a, n)
     return a
 end
 
@@ -122,7 +122,7 @@ func b_add(a: []long, b: []long) -> []long
 end
 
 // a = a - b, requires a >= b
-func b_sub(a: []long, b: []long)
+func b_sub(ref a: []long, b: []long)
     var borrow: long = 0
     for i in 0..a.len
         var t = a[i] - borrow
@@ -197,23 +197,23 @@ func to_text(bits: long, single: bool) -> text
     var mm = big_from(1)
     if e >= 0
         if unequal
-            b_mul_pow2(r, e + 2)
+            b_mul_pow2(ref r, e + 2)
             s = big_from(4)
             mp = b_pow2(e + 1)
             mm = b_pow2(e)
         else
-            b_mul_pow2(r, e + 1)
+            b_mul_pow2(ref r, e + 1)
             s = big_from(2)
             mp = b_pow2(e)
             mm = b_pow2(e)
         end
     else
         if unequal
-            b_mul(r, 4)
+            b_mul(ref r, 4)
             s = b_pow2(2 - e)
             mp = big_from(2)
         else
-            b_mul(r, 2)
+            b_mul(ref r, 2)
             s = b_pow2(1 - e)
         end
     end
@@ -224,7 +224,7 @@ func to_text(bits: long, single: bool) -> text
     while scaling
         let c = b_cmp(b_add(r, mp), s)
         if c > 0 or (c == 0 and even)
-            b_mul(s, 10)
+            b_mul(ref s, 10)
             k += 1
         else
             scaling = false
@@ -233,12 +233,12 @@ func to_text(bits: long, single: bool) -> text
     scaling = true
     while scaling
         let hi = b_add(r, mp)
-        b_mul(hi, 10)
+        b_mul(ref hi, 10)
         let c = b_cmp(hi, s)
         if c < 0 or (c == 0 and not even)
-            b_mul(r, 10)
-            b_mul(mp, 10)
-            b_mul(mm, 10)
+            b_mul(ref r, 10)
+            b_mul(ref mp, 10)
+            b_mul(ref mm, 10)
             k -= 1
         else
             scaling = false
@@ -249,12 +249,12 @@ func to_text(bits: long, single: bool) -> text
     let digits: []int = []
     var more = true
     while more
-        b_mul(r, 10)
-        b_mul(mp, 10)
-        b_mul(mm, 10)
+        b_mul(ref r, 10)
+        b_mul(ref mp, 10)
+        b_mul(ref mm, 10)
         var d = 0
         while b_cmp(r, s) >= 0
-            b_sub(r, s)
+            b_sub(ref r, s)
             d += 1
         end
         let c1 = b_cmp(r, mm)

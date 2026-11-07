@@ -153,8 +153,8 @@ end
 println(names, people[0].name)
 let words = list.sort_by(["pear", "apple", "fig"], func(a, b) text.compare(a, b) < 0 end)
 println(words[0], words[1], words[2])
-var seed = 12345
-let big: []int = []
+var seed: long = 12345
+let big: []long = []
 for i in 0..100000
     seed = (seed * 1103515245 + 12345) % 2147483648
     big.add(seed)
@@ -234,13 +234,14 @@ fn parsing_whole_numbers() {
         "use text",
         r#"println(text.parse_int("42") ?? 0 - 1, text.parse_int("-7") ?? 0, text.parse_int("+5") ?? 0)
 println(text.parse_int("12x") ?? 0 - 1, text.parse_int("") ?? 0 - 1, text.parse_int("-") ?? 0 - 1)
-println(text.parse_int("9223372036854775807") ?? 0, text.parse_int("-9223372036854775808") ?? 5)
-println(text.parse_int("9223372036854775808") ?? 0 - 1, text.parse_int("oops") ?? 0)
+println(text.parse_long("9223372036854775807") ?? 0, text.parse_long("-9223372036854775808") ?? 5)
+println(text.parse_int("2147483647") ?? 0, text.parse_int("2147483648") ?? 7, text.parse_long("2147483648") ?? 7)
+println(text.parse_long("9223372036854775808") ?? 0 - 1, text.parse_int("oops") ?? 0)
 match text.parse_int("12x")
     ok(n) -> println("ok {n}")
     err(e) -> println(e.message)
 end"#,
-        "42 -7 5\n-1 -1 -1\n9223372036854775807 -9223372036854775808\n-1 0\nnot a whole number: \"12x\"\n",
+        "42 -7 5\n-1 -1 -1\n9223372036854775807 -9223372036854775808\n2147483647 7 2147483648\n-1 0\nnot a whole number: \"12x\"\n",
     );
 }
 
@@ -361,4 +362,57 @@ top three: THE, DOG, FOX
 42 -1 39.98
 ");
     }
+}
+
+#[test]
+fn sorting_and_searching_by_the_standard_order() {
+    prints(
+        "use list\n",
+        "let a = list.sort([3, 1, 2])\nlet b = list.sort([\"b\", \"a\"])\nprint(\"{a[0]}{a[1]}{a[2]} {b[0]}{b[1]}\")\nlet xs = [3, 1, 2]\nlet ys = list.sort(xs)\nprint(\"{xs[0]} {ys[0]}\")\nlet ps = list.sort([P { name: \"b\", age: 1 }, P { name: \"a\", age: 9 }, P { name: \"a\", age: 2 }])\nprint(\"{ps[0].name}{ps[0].age} {ps[1].name}{ps[1].age} {ps[2].name}\")\nprint(\"{list.contains(ps, P { name: \"a\", age: 2 })} {list.contains(ps, P { name: \"z\", age: 2 })} {list.contains([1, 2], 2)}\")\nlet f = list.sort([2.5, 0.0 / 0.0, 1.5])\nprint(\"{f[0]} {f[1]} {f[2] == f[2]}\")\n",
+        "123 ab\n3 1\na2 a9 b\ntrue false true\n1.5 2.5 false\n",
+    );
+}
+
+#[test]
+fn an_unsortable_element_is_rejected() {
+    let e = compile_err(
+        "use list\ntype Bag = record\n    items: Map<text, int>\nend\n",
+        "let bs: []Bag = []\nlet s = list.sort(bs)\nprint(s.len)\n",
+    );
+    assert!(e.contains("Bag") && e.contains("Ord"), "{}", e);
+}
+
+#[test]
+fn list_results_are_independent_of_their_arguments() {
+    expect(
+        &main_of(
+            "use list",
+            "var xs = [1, 2, 3]\nvar whole = list.slice(xs, 0, 3)\nwhole.push(4)\nlet none: []int = []
+var same = list.concat(xs, none)\nsame[0] = 9\nvar rev = list.reverse(xs)\nrev.push(0)\nprint(\"{xs.len} {xs[0]} {whole.len} {same.len} {rev.len}\")",
+        ),
+        "3 1 4 3 4\n",
+    );
+}
+
+#[test]
+fn the_reflect_library_compiles_and_answers_queries() {
+    prints(
+        "use reflect",
+        "reflect.begin(7, \"t\")
+    let attr = reflect.Attribute { name: \"json\", args: [\"full_name\"] }
+    let id = reflect.Field { name: \"id\", ty: reflect.type_at(1), attrs: [], line: 3 }
+    let name = reflect.Field { name: \"name\", ty: reflect.type_at(2), attrs: [attr], line: 4 }
+    reflect.add_type(\"User\", \"record\", 2, 0 - 1, 0 - 1, 0 - 1, 0 - 1, [], [id, name], [])
+    reflect.add_type(\"int\", \"int\", 0, 0 - 1, 0 - 1, 0 - 1, 0 - 1, [], [], [])
+    reflect.add_type(\"text\", \"text\", 0, 0 - 1, 0 - 1, 0 - 1, 0 - 1, [], [], [])
+    reflect.set_target(\"windows\")
+    let t = reflect.type_at(0)
+    print(t.name(), t.kind(), t.fields().len)
+    for f in t.fields()
+        print(f.name, f.ty.kind(), f.line, f.attrs.len)
+    end
+    print(t.fields()[1].attrs[0].args[0])
+    print(reflect.target(), reflect.fresh(\"x\"), reflect.fresh(\"x\"))",
+        "User record 2\nid int 3 0\nname text 4 1\nfull_name\nwindows __x_t1 __x_t2\n",
+    );
 }

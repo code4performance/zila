@@ -96,7 +96,7 @@ extern "system" func WriteFile(handle: usize, buffer: *u8, count: u32, done: *in
 
 func main()
     print("to stdout")
-    var done = 0
+    var done: usize = 0
     unsafe
         WriteFile(GetStdHandle(-12), c.cstr("to stderr"), 9, &done, 0)
     end
@@ -166,12 +166,12 @@ extern "system" func ReadFile(handle: usize, buffer: *u8, count: u32, done: *int
 
 func main()
     let b = sys.buffer(64)
-    var got = 0
+    var got: usize = 0
     unsafe
         let h = GetStdHandle(-10)
         ReadFile(h, b.ptr, 64, &got, 0)
     end
-    print("read: {c.from_bytes(b.ptr, got)}")
+    print("read: {c.from_bytes(b.ptr, int(got))}")
 end
 "#;
 
@@ -184,7 +184,7 @@ use sys
 func main()
     let b = sys.buffer(64)
     let got = sys.syscall(0, 0, int(b.ptr), 64, 0, 0, 0)
-    print("read: {c.from_bytes(b.ptr, got)}")
+    print("read: {c.from_bytes(b.ptr, int(got))}")
 end
 "#;
 

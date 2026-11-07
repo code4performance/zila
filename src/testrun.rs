@@ -68,6 +68,7 @@ fn entry_point(tests: &[Test]) -> String {
 /// Builds and runs the tests of one file.
 fn run_file(path: &str, optimize: bool) -> Result<Outcome, String> {
     let src = std::fs::read_to_string(path).map_err(|e| format!("cannot read {}: {}", path, e))?;
+    crate::comptime::register_siblings(std::path::Path::new(path), &src);
     let mut file = parse_source(&src).map_err(|d| format!("{}:{}:{}: {}", path, d.line, d.col, d.msg))?;
     let tests = find_tests(&file).map_err(|e| format!("{}: {}", path, e))?;
     if tests.is_empty() {

@@ -36,8 +36,10 @@
         <li><a href="#bindings">Variables (<code>let</code> / <code>var</code>)</a></li>
         <li><a href="#control-flow">Control flow</a></li>
         <li><a href="#errors">Error handling</a></li>
+        <li><a href="#text">Text and characters</a></li>
         <li><a href="#interpolation">String interpolation</a></li>
         <li><a href="#attributes">Attributes</a></li>
+        <li><a href="#comptime">Compile-time code generation</a></li>
         <li><a href="#ffi">FFI &amp; inline assembly</a></li>
       </ul>
     </nav>
@@ -55,7 +57,7 @@
       <p>A <code>type</code> declaration introduces a <code>record</code> (a struct), an <code>enum</code> (a fixed set of names, optionally carrying data), or a structural <code>interface</code>. Any type can be made generic with <code>&lt;T&gt;</code>, and appending <code>?</code> to a type makes it optional (<code>T?</code>).</p>
 
       <h3>Basic types</h3>
-      <p>Everyday code uses <code>int</code> (64-bit), <code>float</code>, <code>byte</code>, <code>bool</code> and <code>text</code>. Sized integers such as <code>i32</code>, <code>u16</code> or <code>u64</code> exist for low-level and C code. Lists are written <code>[]T</code>, raw pointers <code>*T</code>, and a type followed by <code>?</code> may be <code>nil</code>. <code>float</code> is a 64-bit number with a fractional part (see <a href="#floats">Floats</a>).</p>
+      <p>Everyday code uses <code>int</code>, <code>long</code>, <code>float</code>, <code>byte</code>, <code>bool</code>, <code>char</code> and <code>text</code> (see <a href="#text">Text and characters</a>). <code>int</code> is another name for <code>i32</code> (32-bit), <code>long</code> for <code>i64</code> (64-bit) and <code>float</code> for <code>f64</code>: they are the same types, interchangeable everywhere, and error messages print the everyday names. Other sized integers such as <code>u16</code>, <code>u64</code> or <code>usize</code> exist for low-level and C code. An integer literal is an <code>int</code> unless the context asks for another type, and a literal that does not fit (such as <code>3000000000</code>) is an error that asks for a <code>long</code>. A conversion keeps every value, so an <code>int</code> goes into a <code>long</code> (and a <code>u32</code> into an <code>i64</code>) without writing anything and <code>int + long</code> is a <code>long</code>; going the other way, between signed and unsigned of the same size, or between integer and float needs <code>int(x)</code>, <code>long(x)</code>, <code>float(x)</code> and so on. Arithmetic happens in the type of its operands and wraps there, so <code>int * int</code> wraps at 32 bits even when the result is stored in a <code>long</code>; write <code>long(a) * long(b)</code> for the exact product. Lengths and list indices are <code>int</code>, which limits a list, map or text to 2,147,483,647 elements (2 GB of text); the program stops with an error past that. Sizes and offsets of files and times are <code>long</code>. Lists are written <code>[]T</code>, raw pointers <code>*T</code>, and a type followed by <code>?</code> may be <code>nil</code>. <code>float</code> is a 64-bit number with a fractional part (see <a href="#floats">Floats</a>).</p>
 
       <h3>Records</h3>
       <pre><code><span class="kw">type</span> Customer = <span class="kw">record</span>
@@ -105,7 +107,7 @@
 
     <section id="functions">
       <h2>Functions &amp; generics</h2>
-      <p>Functions are declared with <code>func</code>. A parameter marked <code>ref</code> is passed by reference (there's no borrow checker); without <code>ref</code>, records and arrays are copied. Parameters can have default values, and a trailing <code>...name: T</code> parameter collects a variadic argument list.</p>
+      <p>Functions are declared with <code>func</code>. A parameter marked <code>ref</code> is a passing mode: the callee borrows the caller's value for the duration of the call (there's no borrow checker, so the compiler enforces the escape rule below); without <code>ref</code>, records, lists and maps are values: the callee gets its own, and writing to a list the caller still holds copies it first (cheap to pass, one copy on the first write). A function that fills the caller's list declares <code>ref xs: []int</code> and the call writes <code>fill(ref xs)</code>; migrating older code means adding <code>ref</code> at both places or returning the new list. Parameters can have default values, and a trailing <code>...name: T</code> parameter collects a variadic argument list.</p>
 
       <h3>Methods (receivers)</h3>
       <p>A function with a receiver in parentheses before its name becomes a method on that type. There's no class hierarchy — just functions attached to a type.</p>
@@ -133,6 +135,7 @@
     <span class="kw">let</span> xs = [1, 2, 3]
     log(<span class="str">"x"</span>, ...xs)
 <span class="kw">end</span></code></pre>
+      <p>A <code>ref</code> is only a temporary borrow, not a type. Outside <code>unsafe</code> the compiler rejects storing it in a field, list, map or global, returning it, assigning it to another variable, passing it without <code>ref</code>, taking <code>&amp;</code> of it, capturing it in a lambda, or sending it to <code>spawn</code> or an <code>async</code> function. Reading and writing its fields and elements, calling methods, iterating it and passing it on as <code>ref r</code> are fine. Use <code>new T</code> for a value that must live longer.</p>
       <p>At the call site, <code>ref</code> is repeated before the argument (<code>fill(ref b)</code>) so by-reference passing is visible wherever it happens, not just in the declaration. A leading <code>...</code> on an argument spreads a list into a variadic parameter.</p>
     </section>
 
@@ -244,13 +247,13 @@
       <p>These words belong to the language and cannot be used as names.</p>
       <dl class="cli">
         <dt>Declarations</dt>
-        <dd><code>package</code> <code>use</code> <code>type</code> <code>record</code> <code>enum</code> <code>interface</code> <code>func</code> <code>return</code> <code>var</code> <code>let</code> <code>extern</code> <code>embed</code> <code>end</code></dd>
+        <dd><code>package</code> <code>use</code> <code>type</code> <code>record</code> <code>enum</code> <code>interface</code> <code>func</code> <code>return</code> <code>var</code> <code>let</code> <code>extern</code> <code>embed</code> <code>end</code> <code>comptime</code> (see <a href="#comptime">Compile-time code generation</a>)</dd>
 
         <dt>Control flow</dt>
         <dd><code>if</code> <code>else</code> <code>match</code> <code>for</code> <code>in</code> <code>while</code> <code>break</code> <code>continue</code> <code>defer</code> <code>try</code></dd>
 
         <dt>Tasks</dt>
-        <dd><code>spawn</code> starts a task (see <a href="concurrency.html">Tasks</a>); <code>async</code> and <code>await</code> work with futures (see <a href="async.html">Async</a>).</dd>
+        <dd><code>spawn</code> starts a task (see <a href="concurrency.html">Tasks</a>); <code>async</code> and <code>await</code> work with futures (see <a href="async.html">Async</a>). <code>spawn_thread</code> starts an operating-system thread and <code>shared</code> makes a value that threads may read (see <a href="concurrency.html">Threads</a>).</dd>
 
         <dt>Operators written as words</dt>
         <dd><code>and</code> <code>or</code> <code>not</code> for logic; <code>bitand</code> <code>bitor</code> <code>bitxor</code> <code>bitnot</code> for bits.</dd>
@@ -258,7 +261,7 @@
         <dt>Values and low level</dt>
         <dd><code>true</code> <code>false</code> <code>nil</code> <code>self</code> <code>ref</code> <code>new</code> <code>unsafe</code> <code>asm</code></dd>
       </dl>
-      <p><code>new</code> is part of the grammar but is not supported by the <a href="native.html#not-yet">native compiler</a> yet. A method or field may be named like a keyword after a dot (<code>app.use(x)</code>).</p>
+      <p><code>new T{ ... }</code> makes a shared, reference-counted object of type <code>Rc&lt;T&gt;</code> (it needs a record literal; see <a href="native.html#weak">shared objects and weak references</a>); <code>Weak&lt;T&gt;</code>, <code>weak(x)</code> and <code>upgrade()</code> break reference cycles. A method or field may be named like a keyword after a dot (<code>app.use(x)</code>).</p>
     </section>
 
     <section id="generics">
@@ -285,8 +288,37 @@ s.push(<span class="str">"hello"</span>)</code></pre>
         <li><strong>Interfaces</strong> list methods, and a type satisfies one when it has a method of each name with the same parameter and result types. <code>func (n: int) to_text() -&gt; text</code> gives built-in types methods too.</li>
         <li><strong>Bounds:</strong> <code>func show&lt;T: Printable&gt;(x: T)</code> accepts only types that satisfy <code>Printable</code>, and inside the function <code>x.to_text()</code> is allowed. Otherwise the error names the type, the interface and the missing or mismatching method.</li>
         <li><strong>Checked once, at the definition.</strong> A generic body is checked with <code>T</code> as an unknown type that only has its bound's methods, so calling <code>x.to_text()</code> without a bound, or writing <code>a + b</code> on two <code>T</code> values, is an error where the function is written, even if it is never called. Putting a <code>T</code> in text with <code>"{x}"</code> is checked per instance.</li>
+        <li><strong><code>Self</code></strong> in an interface method signature means the type that satisfies the interface: <code>func bigger(self, other: Self) -&gt; bool</code> is satisfied by <code>func (a: Square) bigger(b: Square) -&gt; bool</code>. Anywhere else <code>Self</code> is an error.</li>
+        <li><strong>Standard interfaces:</strong> <code>Eq</code>, <code>Ord</code> and <code>Hash</code> need no <code>use</code>; see <a href="#eq-ord-hash">Eq, Ord and Hash</a>.</li>
         <li><strong>Interfaces are only bounds.</strong> <code>func show(x: Printable)</code> is an error (it would need dynamic dispatch); write <code>func show&lt;T: Printable&gt;(x: T)</code>.</li>
         <li><strong>Not supported yet:</strong> generic enums and type aliases, <code>async</code> generic functions, methods with their own type parameters, and interfaces with type parameters. They stop with a message naming the form.</li>
+      </ul>
+    </section>
+
+    <section id="eq-ord-hash">
+      <h2>Eq, Ord and Hash</h2>
+      <p>Three interfaces are available in every program without <code>use</code>: <code>Eq</code> (<code>func eq(self, other: Self) -&gt; bool</code>), <code>Ord</code> (<code>func compare(self, other: Self) -&gt; int</code>, negative, zero or positive) and <code>Hash</code> (<code>func hash(self) -&gt; long</code>). A bound of <code>Ord</code> or <code>Hash</code> also provides <code>eq</code>, so one bound is enough. A declaration with one of these names in your package shadows the standard one.</p>
+      <pre><code><span class="kw">type</span> Version = <span class="kw">record</span>
+    major: int
+    minor: int
+<span class="kw">end</span>
+
+<span class="kw">func</span> largest&lt;T: Ord&gt;(a: T, b: T) -&gt; T
+    <span class="kw">if</span> a &gt; b
+        <span class="kw">return</span> a
+    <span class="kw">end</span>
+    <span class="kw">return</span> b
+<span class="kw">end</span>
+
+<span class="kw">let</span> v = largest(Version { major: 1, minor: 9 }, Version { major: 2, minor: 0 })   <span class="cm">// 2.0</span>
+<span class="kw">let</span> names: Map&lt;Version, text&gt; = {}                                            <span class="cm">// a record as a key</span></code></pre>
+      <ul>
+        <li><strong>Derived for records and enums.</strong> <code>eq</code> is true when all fields are equal, <code>compare</code> compares fields in declaration order and returns the first non-zero result, and <code>hash</code> combines the hashes of all fields, so equal values hash alike. An enum compares its variants in declaration order (<code>Dot &lt; Circle(1)</code>), then the payload. The derived methods are ordinary methods (<code>a.compare(b)</code> works) and recursive types work. A type that holds a field without the capability does not have it either, and the error explains the chain (<code>Line is not Hash because field from: Point is not Hash because field x: float is not Hash</code>).</li>
+        <li><strong>Overriding.</strong> A method named <code>eq</code>, <code>compare</code> or <code>hash</code> with the interface's signature replaces the derived one everywhere: operators, maps, sets, sorted collections and generic code. A type that defines <code>eq</code> but not <code>hash</code> is <em>not</em> <code>Hash</code>, so it cannot silently become an inconsistent key; write both. A method with the wrong signature is an error naming the interface.</li>
+        <li><strong>Operators.</strong> <code>==</code>, <code>!=</code>, <code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code> and <code>&gt;=</code> stay operators. On records, enums with data, lists and maps they call <code>eq</code> and <code>compare</code>; on a type parameter they are allowed when the bound provides them (<code>Eq</code> gives <code>==</code> and <code>!=</code>, <code>Ord</code> also the ordering operators). A type without the capability is a compile error naming the type, the operator and the reason. <code>x == nil</code> keeps its meaning.</li>
+        <li><strong>Built-in types.</strong> Integers and <code>bool</code> (false before true) are <code>Eq</code>, <code>Ord</code> and <code>Hash</code>. Text compares by bytes (<code>text.compare</code>). A <code>float</code> is <code>Eq</code> and <code>Ord</code> but not <code>Hash</code>: <code>==</code> and <code>&lt;</code> keep their IEEE meaning, while <code>compare</code> is a total order (NaN after every number and equal to itself, <code>-0.0</code> equal to <code>0.0</code>), so sorting with a NaN is deterministic. Lists compare element by element (lexicographic, a prefix first); <code>T?</code> is the reference type itself, and <code>nil</code> equals <code>nil</code> and comes before any value; a map is <code>Eq</code> and <code>Hash</code> (same keys with equal values, in any order) but never <code>Ord</code>.</li>
+        <li><strong>Identity types.</strong> A <code>#[shared]</code> record (and later <code>new T</code> and <code>shared T</code>) is <code>Eq</code> and <code>Hash</code> by identity, unless it declares <code>eq</code> or <code>hash</code>, and is not <code>Ord</code> unless it declares <code>compare</code>.</li>
+        <li><strong>Library.</strong> <code>use derive</code> adds <code>derive.hash_combine(h, x)</code>, the function derived hashes fold fields with, for hand-written <code>hash</code> methods. <code>list.sort</code> and <code>list.contains</code>, <code>set.Set</code> and <code>sorted.map()</code> build on these interfaces (see <a href="stdlib.html">the standard library</a>).</li>
       </ul>
     </section>
 
@@ -307,13 +339,13 @@ print(1.0 / 0.0)                          <span class="cm">// inf</span></code><
         <li><strong>Printing</strong> uses the shortest text that reads back as exactly the same number: <code>0.1</code>, <code>3.0</code>, <code>1e21</code>, <code>1.5e-7</code>. Numbers from <code>1e-4</code> up to <code>1e16</code> are written plainly; others use exponent form. <code>NaN</code>, <code>inf</code>, <code>-inf</code> and <code>-0.0</code> print as shown.</li>
         <li><strong>Math library.</strong> <code>use math</code> gives <code>math.sqrt</code>, <code>math.floor</code>, <code>math.ceil</code>, <code>math.trunc</code>, <code>math.round</code> (halves away from zero), <code>math.abs</code>, <code>math.min</code>, <code>math.max</code>, <code>math.pow(x, n)</code> with a whole-number power, and <code>math.fixed(x, digits)</code>, which writes a float with a fixed number of decimals (<code>math.fixed(3.14159, 2)</code> is <code>3.14</code>).</li>
         <li><strong>Calling C.</strong> <code>extern</code> functions take and return <code>f64</code> and <code>f32</code> the way Windows x64 expects, in the XMM registers.</li>
-        <li><strong>Not everywhere.</strong> Floats work in the native compiler. The bare-metal target rejects floats. A float cannot be a map key.</li>
+        <li><strong>Not everywhere.</strong> Floats work in the native compiler. The bare-metal target rejects floats. A float cannot be a map key (a float is not <a href="#eq-ord-hash"><code>Hash</code></a>, because NaN is not equal to itself).</li>
       </ul>
     </section>
 
     <section id="maps">
       <h2>Maps</h2>
-      <p>A <code>Map&lt;K, V&gt;</code> stores values under keys. The key type <code>K</code> is <code>text</code> or an integer type; the value type <code>V</code> can be anything the native compiler supports. A map is built with a literal, read and written with <code>m[key]</code>, and shared like a list: assigning it to another name or passing it to a function does not copy it.</p>
+      <p>A <code>Map&lt;K, V&gt;</code> stores values under keys. The key type <code>K</code> is <code>text</code> or an integer type; the value type <code>V</code> can be anything the native compiler supports. A map is built with a literal, read and written with <code>m[key]</code>, and a value like a list: assigning it to another name or passing it to a function does not copy it until one of them is written, and writing to a map that another holder still has copies it first (use <code>ref</code> to change the caller's map).</p>
       <pre><code><span class="kw">let</span> ages = { <span class="str">"ada"</span>: 36, <span class="str">"alan"</span>: 41 }       <span class="cm">// a Map&lt;text, int&gt;</span>
 <span class="kw">var</span> seen: Map&lt;int, text&gt; = {}              <span class="cm">// an empty map needs its type</span>
 
@@ -332,7 +364,7 @@ ages.remove(<span class="str">"alan"</span>)                      <span class="c
         <li><strong>A missing key stops the program.</strong> <code>m[key]</code> on a key that was never stored aborts with <code>map key not found</code>, like an index out of bounds. Use <code>has</code> or <code>get(key, default)</code> when the key may be missing.</li>
         <li><strong>Methods:</strong> <code>has(key)</code>, <code>get(key, default)</code>, <code>remove(key)</code> and <code>clear()</code>. The number of entries is the property <code>len</code>, as for lists and text.</li>
         <li><strong>Iteration order is insertion order.</strong> <code>for key, value in m</code> and <code>for key in m</code> visit the keys in the order they were first added. Replacing a value keeps the key's place; removing a key and adding it again moves it to the end. Do not add or remove keys inside the loop.</li>
-        <li><strong>Only text and integer keys.</strong> A record, enum or other key type is a compile error. Maps work in the native compiler, but not in the bare-metal target.</li>
+        <li><strong>Keys are any <code>Hash</code> type.</strong> Text, integers, <code>bool</code>, records and enums whose parts are <code>Hash</code>, lists and optionals of such types, and types held by reference (by identity, or by their own <code>eq</code> and <code>hash</code>) can be keys; two keys that are <code>==</code> are one key. A key that is not <code>Hash</code> is a compile error naming the type and the reason (a <code>float</code> field, an <code>eq</code> without a <code>hash</code>); see <a href="#eq-ord-hash">Eq, Ord and Hash</a>. Do not change the hashed fields of a key held by reference after inserting it: lookups become unspecified (never memory-unsafe). Maps work in the native compiler, but not in the bare-metal target.</li>
       </ul>
     </section>
 
@@ -361,7 +393,7 @@ ages.remove(<span class="str">"alan"</span>)                      <span class="c
 
     <section id="async">
       <h2>Async</h2>
-      <p>An <code>async func</code> starts as its own task when called and returns a <code>Future&lt;T&gt;</code>; <code>await</code> waits for a future without blocking the other tasks. <code>await</code> is allowed only inside an <code>async func</code> and inside <code>main</code>, and it works with <code>try</code> on futures of <code>T or error</code>. Timers, files and TCP are covered on the <a href="async.html">Async page</a>.</p>
+      <p>An <code>async func</code> starts as its own task when called and returns a <code>Future&lt;T&gt;</code>; <code>await</code> waits for a future without blocking the other tasks. <code>await</code> is allowed in any function, method, lambda or deferred call (it suspends only the current task), but not in a <code>drop</code> method or a function called from C, and it works with <code>try</code> on futures of <code>T or error</code>. Timers, files and TCP are covered on the <a href="async.html">Async page</a>.</p>
       <pre><code><span class="kw">async</span> <span class="kw">func</span> double(n: int) -&gt; int
     <span class="kw">await</span> sleep(100)
     <span class="kw">return</span> n * 2
@@ -371,6 +403,21 @@ ages.remove(<span class="str">"alan"</span>)                      <span class="c
     <span class="kw">let</span> f = double(21)      <span class="cm">// starts running now</span>
     print(<span class="kw">await</span> f)           <span class="cm">// 42</span>
 <span class="kw">end</span></code></pre>
+    </section>
+
+    <section id="text">
+      <h2>Text and characters</h2>
+      <p>A <code>text</code> is an immutable sequence of bytes that holds UTF-8, and <code>s.len</code> is the number of <strong>bytes</strong>, not of characters: <code>"ação".len</code> is <code>6</code> because <code>ç</code> and <code>ã</code> take two bytes each. A <code>char</code> is one Unicode code point (<code>'ç'</code> is a <code>char</code>; so is <code>'😀'</code>). A <code>char</code> compares with <code>==</code>, <code>&lt;</code> and the other operators by code point, prints and interpolates as the one-character text, and is <em>not</em> an <code>int</code>: <code>let n: int = 'a'</code> is an error and <code>c + 1</code> does not exist. Two conversions cross the line: <code>c.code</code> is the code point as an <code>int</code>, and <code>char(n)</code> makes a <code>char</code> from an integer (it aborts for a negative number, a number above <code>0x10FFFF</code> or a surrogate, <code>0xD800</code> to <code>0xDFFF</code>). A <code>char</code> also has <code>c.to_text()</code>, <code>c.len_utf8()</code> (1 to 4) and <code>c.is_ascii()</code>.</p>
+      <pre><code><span class="kw">let</span> s = <span class="str">"ação"</span>
+print(s.len)                  <span class="cm">// 6   (bytes)</span>
+print(s.char_count())         <span class="cm">// 4   (characters, counted by walking the text)</span>
+<span class="kw">for</span> c <span class="kw">in</span> s
+    print("{c} {c.code}")     <span class="cm">// a 97, ç 231, ã 227, o 111</span>
+<span class="kw">end</span>
+print(s.slice(0, 3))          <span class="cm">// aç   (byte positions 0 up to 3)</span>
+print(char(231).to_text())    <span class="cm">// ç</span></code></pre>
+      <p><code>for c in s</code> visits the characters in order. A byte that is not valid UTF-8 (possible only in text that came from outside the program, such as a file or a socket, which is not checked when it is read) is visited as U+FFFD, one per bad byte, and the loop never aborts. <code>s.slice(a, b)</code> takes <strong>byte</strong> positions and aborts, naming the position, when <code>a</code> or <code>b</code> is out of range, when <code>a &gt; b</code>, or when a position falls inside a character: <code>"ação".slice(0, 2)</code> aborts with <code>text position 2 is not on a character boundary</code>. So a text built by the program is always valid UTF-8. <code>s.bytes()</code> returns a copy of the bytes as a <code>[]byte</code>, <code>s.byte(i)</code> returns one byte in constant time without copying (and aborts out of range), and <code>s.char_count()</code> counts the characters (an invalid byte counts as one). <code>text.from_bytes(b)</code> in the <a href="stdlib.html#text">text library</a> turns bytes back into text and checks that they are valid UTF-8.</p>
+      <p><strong>There is no <code>s[i]</code></strong> on a text: <code>"ação"[2]</code> would be half of a character. The compiler says <code>text cannot be indexed</code> and points to <code>s.bytes()</code>, <code>s.slice(a, b)</code> and <code>for c in s</code>. In a loop that reads many bytes, use <code>s.byte(i)</code> rather than calling <code>bytes()</code> every time. There is no normalization, grapheme or locale support: a character is a code point, and <code>upper</code> and <code>lower</code> in the library change ASCII letters only. <code>chr(n)</code> is gone; write <code>char(n).to_text()</code>. See <a href="examples.html#unicode-example">the unicode example</a>.</p>
     </section>
 
     <section id="interpolation">
@@ -397,6 +444,56 @@ ages.remove(<span class="str">"alan"</span>)                      <span class="c
         hlt
     <span class="kw">end</span>
 <span class="kw">end</span></code></pre>
+
+      <h3 id="no-alloc"><code>#[no_alloc]</code> and <code>#[allocator]</code></h3>
+      <p><code>#[no_alloc]</code> on a function is a promise the compiler checks: neither the function nor anything it calls may allocate. The allocating operations are a fixed list: text with interpolation, list, map and set literals (an empty <code>[]</code> too), <code>Map.new()</code> and the other collection constructors, <code>new</code>, a closure that captures a variable, <code>spawn</code>, <code>channel</code>, <code>defer</code>, <code>c.alloc</code>, calling an async function, and the list and text methods <code>add</code>, <code>push</code> and <code>slice</code>. Text without interpolation and a closure that captures nothing do not allocate. The standard library is analysed like your own code, so there is no list of allocating functions to keep. A function that calls through a function value (a parameter or a local holding a function) is rejected, because the callee is unknown. Calls on a type parameter bound by an interface are analysed as direct calls to every method of that name. <code>extern</code> functions are trusted unless marked <code>#[allocates]</code>, and <code>asm</code> blocks are not looked into. The error names the chain: <code>'parse_line' is #[no_alloc] but allocates</code>, then <code>parse_line -&gt; trim_all -&gt; text interpolation at util.br:12</code>.</p>
+      <p>A program replaces the heap with three functions of fixed signatures, at most one of each. The runtime keeps the object headers, reference counts and zeroing; the allocator only hands out raw memory (it may return it uninitialized), and the runtime asks for the payload plus a 24-byte header, aligned to 16. They are checked as <code>#[no_alloc]</code> themselves, are accepted only in the program (not in <code>std/</code>), and need both <code>alloc</code> and <code>free</code>; <code>realloc</code> is optional and used to grow lists (without it the runtime allocates, copies and frees). A null from <code>alloc</code> or <code>realloc</code> ends the program with <code>out of memory</code>. <code>live_objects()</code> keeps counting; <code>heap_bytes()</code> is a compile error with a custom allocator.</p>
+      <pre><code>#[allocator(alloc)]   <span class="kw">func</span> my_alloc(size: u64, align: u64) -&gt; *u8
+#[allocator(free)]    <span class="kw">func</span> my_free(ptr: *u8, size: u64, align: u64)
+#[allocator(realloc)] <span class="kw">func</span> my_realloc(ptr: *u8, old: u64, size: u64, align: u64) -&gt; *u8</code></pre>
+      <p>See <code>examples/no_alloc.br</code> and <code>examples/allocator.br</code>.</p>
+    </section>
+
+    <section id="comptime">
+      <h2>Compile-time code generation</h2>
+      <p>A <code>comptime func</code> runs while the program is being compiled. It receives a <code>Type</code>, a value that exists only at compile time and describes a declared type, and returns Brasa source text that the compiler compiles as if you had written it. Libraries use this to add per-type code (equality, JSON, printing) and their own block syntax without any change to the compiler.</p>
+      <pre><code><span class="kw">use</span> reflect
+
+#[derive]
+<span class="kw">comptime</span> <span class="kw">func</span> describe(t: Type) -&gt; text
+    <span class="kw">var</span> parts = <span class="str">""</span>
+    <span class="kw">for</span> f <span class="kw">in</span> t.fields()
+        parts = parts + <span class="str">" {f.name}=\{v.{f.name}\}"</span>
+    <span class="kw">end</span>
+    <span class="kw">return</span> <span class="str">"func (v: {t.name()}) describe() -&gt; text\n    return \"{t.name()}{parts}\"\nend\n"</span>
+<span class="kw">end</span>
+
+#[derive(describe)]
+<span class="kw">type</span> Point = <span class="kw">record</span>
+    x: int
+    y: int
+<span class="kw">end</span>
+
+<span class="cm">// somewhere else: p.describe() gives "Point x=1 y=2"</span></code></pre>
+      <h3>The Type API</h3>
+      <p>A <code>Type</code> answers <code>name()</code>, <code>kind()</code> (<code>record</code>, <code>enum</code>, <code>alias</code>, <code>int</code>, <code>float</code>, <code>bool</code>, <code>text</code>, <code>list</code>, <code>map</code>, <code>set</code>, <code>optional</code>, <code>func</code>), <code>fields()</code> for records (each with <code>name</code>, <code>ty</code>, <code>attrs</code> and <code>line</code>), <code>variants()</code> for enums (each with <code>name</code>, <code>fields</code>, <code>attrs</code> and <code>line</code>; a payload is written <code>Circle(r: float)</code>, or is positional and called <code>_0</code>, <code>_1</code>), <code>element()</code>, <code>key()</code> and <code>value()</code> for containers, <code>inner()</code> for optionals and aliases, and <code>attrs()</code>. An attribute has a <code>name</code> and <code>args</code>, the arguments written in the source as text: <code>#[json("full_name")]</code> is <code>json</code> with the argument <code>full_name</code>. Sizes, offsets and alignment are never exposed, so the answers do not depend on the target. <code>Type</code> exists only in comptime code: using it anywhere else is a compile error. See <a href="stdlib.html#reflect">reflect</a>.</p>
+      <h3>Derive, generated functions and blocks</h3>
+      <ul>
+        <li><code>#[derive(a, b)]</code> on a type runs the <code>#[derive] comptime func</code>s named <code>a</code> and <code>b</code> (found in the program's own package or an imported one; write <code>json.json</code> to choose between two) with the type. The text it returns is added to the program: methods (<code>func (v: Point) describe()</code>), helper functions, constants and types. An unknown or ambiguous name is an error at the attribute. A derive cannot change the declaration it is attached to, and a generated method that collides with an existing one is an error naming both.</li>
+        <li><code>#[generated(gen)] func parse(comptime t: Type, raw: text) -&gt; t</code> has no body. A call <code>parse(Config, raw)</code> (or <code>parse&lt;Config&gt;(raw)</code>) runs <code>gen</code> with <code>Config</code>; the text it returns is the body of a copy of <code>parse</code> for <code>Config</code>, in which <code>t</code> stands for <code>Config</code>. There is one copy, and one run of <code>gen</code>, per type. The argument must be a type name known at compile time; a variable is an error.</li>
+        <li><code>#[block] comptime func shout(raw: text) -&gt; text</code> gives the name <code>shout</code> a block syntax: a line that holds only that name (or ends with it, as in <code>let s = shout</code>), the raw lines, then a line that is only <code>end</code>. The raw text goes to the function unchanged and the source it returns replaces the block: an expression, or statements when the block stands alone on a line. The name must belong to an imported package or the file itself; a name that is not a block is an ordinary identifier. The formatter keeps the lines of a block as they are (it aligns only the name and <code>end</code>) and the language server never looks inside.</li>
+      </ul>
+      <h3>What a comptime function may do</h3>
+      <p>Only text, lists, maps, sets, records, enums, loops and calls to code that does the same, and that includes every function it reaches. The compiler follows the calls and rejects <code>extern</code> functions, <code>asm</code>, <code>unsafe</code>, raw pointers, <code>spawn</code>, <code>async</code>, <code>await</code>, channels, global <code>var</code>s and anything that reaches files, sockets, the clock or the console, naming the chain: <code>`async` is not allowed in comptime code: gen -&gt; helper -&gt; fs.read</code>. <code>text</code>, <code>list</code>, <code>format</code> and <code>math</code> are fine; nothing is allowed or denied by library name. A comptime function cannot be called from runtime code.</p>
+      <h3>Names, limits and errors</h3>
+      <ul>
+        <li><strong>Hygiene.</strong> The top-level functions, types and constants a generator emits are renamed so that they cannot capture or collide with your names; methods attach to their type. Names that start with <code>__</code> are reserved (a program that declares one is rejected). <code>reflect.fresh("tmp")</code> gives a local name that is unique in the build.</li>
+        <li><strong>Limits.</strong> One run of generators may take 5 seconds (<code>--comptime-timeout seconds</code>), write 1 MiB per call and use 1 GiB of memory; output that itself asks for generation is expanded for at most 8 rounds. The limit is time rather than steps because the generators are compiled native code. Exceeding one, or a crash, is an error naming the generator and where it was used.</li>
+        <li><strong>Errors point at your code.</strong> A generator refuses with <code>reflect.fail("message", field)</code> and the error is reported at that field's line with the generator's name. A mistake in generated text is reported at the <code>#[derive]</code>, the call or the block, with <code>error in code generated by `gen` for `Type`</code>, the message and the generated line. <code>--comptime-dump</code> prints everything the generators produced to standard error.</li>
+        <li><strong>Cross-compiling.</strong> Generators are built for, and run on, the machine that compiles, whatever <code>--target</code> says; <code>reflect.target()</code> tells them which target the build is for.</li>
+        <li><strong>Trust.</strong> A generator is code that runs on your machine during the build. The subset check is what makes running a package's generators reasonably safe: it is enforced for every function a generator reaches, the process has no input, a time limit, an output limit and a memory limit, and the language server and the formatter never run one. It is not a hard sandbox against code that gets around the check; read the generators of packages you do not trust.</li>
+      </ul>
+      <p>Results are cached on disk, keyed by a hash of the compiler version, the target, the source of what the generator reaches and the description of the type, so an unchanged build does not run the generators again (<code>--no-comptime-cache</code> turns this off). See <a href="native.html#comptime">the pipeline</a> and <code>examples/comptime.br</code>.</p>
     </section>
 
     <section id="ffi">
@@ -447,7 +544,7 @@ ages.remove(<span class="str">"alan"</span>)                      <span class="c
     </section>
 
     <div class="note">
-      <strong>Note:</strong> <code>html ... end</code> templates (a markup-aware syntax extension for <code>use web</code>) are described in the grammar but not yet implemented by the parser. Explicit generic arguments work at call sites (<code>first&lt;int&gt;(x)</code>) when written without spaces around the brackets; the rest are still inferred.
+      <strong>Note:</strong> Explicit generic arguments work at call sites (<code>first&lt;int&gt;(x)</code>) when written without spaces around the brackets; the rest are still inferred.
     </div>
   </main>
 

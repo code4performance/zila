@@ -107,7 +107,7 @@ func init()
     clock = sys.buffer(16)
     evbuf = sys.buffer(256)
     evreg = sys.buffer(16)
-    // Task 0 is the main program, on the process stack.
+    // Task 0 is the main program, on the process stack; `await` may park it from any function.
     tasks.add(Task{ slot: sys.buffer(8) })
 end
 

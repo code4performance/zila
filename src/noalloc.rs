@@ -18,6 +18,8 @@ pub struct FuncNode {
     pub line: u32,
     pub is_no_alloc: bool,
     pub is_extern: bool,
+    pub is_method: bool,
+    pub is_async: bool,
     pub direct_allocs: Vec<AllocOp>,
     pub callees: Vec<(String, u32)>, // (qname of callee, call site line)
 }
@@ -34,6 +36,7 @@ pub fn check_program(
     modules: &[(String, File)],
     interfaces: &HashSet<String>,
 ) -> Result<Option<CustomAllocatorInfo>, String> {
+    let main_pkg = modules.first().map(|m| m.0.clone()).unwrap_or_default();
     // 1. Validate attribute targets and allocator roles
     let mut alloc_func: Option<(String, u32, String)> = None; // (file, line, func_name)
     let mut free_func: Option<(String, u32, String)> = None;
@@ -88,6 +91,8 @@ pub fn check_program(
                             line,
                             is_no_alloc: false,
                             is_extern: true,
+                            is_method: false,
+                            is_async: false,
                             direct_allocs: Vec::new(),
                             callees: Vec::new(),
                         },
@@ -103,7 +108,7 @@ pub fn check_program(
                     // Check #[allocator]
                     for a in &d.attrs {
                         if a.name == "allocator" {
-                            if mname != "main" && mname.starts_with("std") {
+                            if *mname != main_pkg {
                                 return Err(format!("{}.br:{}: #[allocator] is only allowed on top-level functions of the program, not in the standard library", mname, line));
                             }
                             if fd.receiver.is_some() {
@@ -170,12 +175,20 @@ pub fn check_program(
                             line,
                             is_no_alloc,
                             is_extern: false,
+                            is_method: fd.receiver.is_some(),
+                            is_async: fd.is_async,
                             direct_allocs: Vec::new(),
                             callees: Vec::new(),
                         },
                     );
                 }
-                _ => {}
+                DeclKind::Embed(_) => {
+                    for a in &d.attrs {
+                        if matches!(a.name.as_str(), "no_alloc" | "allocates" | "allocator") {
+                            return Err(format!("{}.br:{}: #[{}] only applies to functions", mname, line, a.name));
+                        }
+                    }
+                }
             }
         }
     }
@@ -183,9 +196,9 @@ pub fn check_program(
     // Verify allocator completeness: if any is declared, both alloc and free are required
     let custom_allocator = match (&alloc_func, &free_func, &realloc_func) {
         (Some(a), Some(f), r) => Some(CustomAllocatorInfo {
-            alloc_sym: a.2.clone(),
-            free_sym: f.2.clone(),
-            realloc_sym: r.as_ref().map(|x| x.2.clone()),
+            alloc_sym: format!("B_{}_{}", a.0, a.2),
+            free_sym: format!("B_{}_{}", f.0, f.2),
+            realloc_sym: r.as_ref().map(|x| format!("B_{}_{}", x.0, x.2)),
         }),
         (Some(a), None, _) => {
             return Err(format!("{}.br:{}: custom allocator declares 'alloc' but is missing 'free'", a.0, a.1));
@@ -228,6 +241,21 @@ pub fn check_program(
                 }
                 for p in &fd.params {
                     local_vars.insert(p.name.clone());
+                    // a by-value list, map or record may be shared with its caller: a write to it may copy
+                    if !p.by_ref {
+                        match &p.ty {
+                            Some(Type::Slice(_)) => {
+                                local_vars.insert(format!("#cow:{}", p.name));
+                            }
+                            Some(Type::Named { path, .. }) if path.last().map_or(false, |l| l == "Map") => {
+                                local_vars.insert(format!("#cow:{}", p.name));
+                            }
+                            Some(Type::Named { .. }) => {
+                                local_vars.insert(format!("#cowrec:{}", p.name));
+                            }
+                            _ => {}
+                        }
+                    }
                     if let Some(ty) = &p.ty {
                         match ty {
                             Type::Func { .. } => {
@@ -265,9 +293,57 @@ pub fn check_program(
         }
     }
 
+    // Resolve callees: a name that is not a known function may be a method called on a value;
+    // every method with that name is a possible target (static dispatch is conservative).
+    let mut methods: HashMap<String, Vec<String>> = HashMap::new();
+    for (q, n) in &func_nodes {
+        if n.is_method {
+            methods.entry(n.name.clone()).or_default().push(q.clone());
+        }
+    }
+    let keys: Vec<String> = func_nodes.keys().cloned().collect();
+    for k in keys {
+        let callees = func_nodes[&k].callees.clone();
+        let mut resolved: Vec<(String, u32)> = Vec::new();
+        let mut extra: Vec<AllocOp> = Vec::new();
+        for (c, line) in callees {
+            let targets: Vec<String> = if func_nodes.contains_key(&c) {
+                vec![c.clone()]
+            } else if let Some(m) = methods.get(c.rsplit('.').next().unwrap_or("")) {
+                m.clone()
+            } else {
+                // built-in list and text methods that may allocate
+                let last = c.rsplit('.').next().unwrap_or("");
+                if c.contains('.') && matches!(last, "add" | "push" | "slice") {
+                    extra.push(AllocOp {
+                        description: format!("call to `{}` (grows a list or makes a text)", last),
+                        file: func_nodes[&k].file.clone(),
+                        line,
+                    });
+                }
+                Vec::new()
+            };
+            for t in targets {
+                if func_nodes[&t].is_async {
+                    extra.push(AllocOp {
+                        description: format!("call to async function '{}' (creates a future)", func_nodes[&t].name),
+                        file: func_nodes[&k].file.clone(),
+                        line,
+                    });
+                }
+                resolved.push((t, line));
+            }
+        }
+        let n = func_nodes.get_mut(&k).unwrap();
+        n.callees = resolved;
+        n.direct_allocs.extend(extra);
+    }
+
     // 3. Transitive analysis: compute for each #[no_alloc] function if it allocates
     // Run BFS from each #[no_alloc] function to find the shortest path to a direct allocating op
-    for (qname, node) in &func_nodes {
+    let mut ordered: Vec<(&String, &FuncNode)> = func_nodes.iter().collect();
+    ordered.sort_by(|a, b| (a.1.file.as_str(), a.1.line).cmp(&(b.1.file.as_str(), b.1.line)));
+    for (qname, node) in ordered {
         if node.is_no_alloc {
             if let Some(chain) = find_alloc_chain(qname, &func_nodes) {
                 return Err(format!(
@@ -283,6 +359,7 @@ pub fn check_program(
 
 fn type_to_string(ty: &Type) -> String {
     match ty {
+        Type::Shared(i) => format!("shared {}", type_to_string(i)),
         Type::Named { path, args } => {
             let base = path.join(".");
             if args.is_empty() {
@@ -417,6 +494,8 @@ fn collect_stmt_allocs(
     match &stmt.kind {
         StmtKind::Var(vd) => {
             locals.insert(vd.name.clone());
+            locals.remove(&format!("#cow:{}", vd.name));
+            locals.remove(&format!("#cowrec:{}", vd.name));
             if let Some(ty) = &vd.ty {
                 match ty {
                     Type::Func { .. } => {
@@ -443,6 +522,14 @@ fn collect_stmt_allocs(
             collect_expr_allocs(e, cur_mod, locals, fn_vals, iface_vars, direct_allocs, callees, interfaces, extern_allocates);
         }
         StmtKind::Assign { target, value, .. } => {
+            let copies = match &target.kind {
+                ExprKind::Index { expr: base, .. } => write_may_copy(base, locals),
+                ExprKind::Field { expr: base, .. } => path_has_index(base) && write_may_copy(base, locals),
+                _ => false,
+            };
+            if copies {
+                direct_allocs.push(AllocOp { description: "this write may copy".to_string(), file: cur_mod.to_string(), line });
+            }
             collect_expr_allocs(target, cur_mod, locals, fn_vals, iface_vars, direct_allocs, callees, interfaces, extern_allocates);
             collect_expr_allocs(value, cur_mod, locals, fn_vals, iface_vars, direct_allocs, callees, interfaces, extern_allocates);
         }
@@ -468,6 +555,8 @@ fn collect_stmt_allocs(
         StmtKind::For { vars, iter, body } => {
             for v in vars {
                 locals.insert(v.clone());
+                locals.remove(&format!("#cow:{}", v));
+                locals.remove(&format!("#cowrec:{}", v));
             }
             collect_expr_allocs(iter, cur_mod, locals, fn_vals, iface_vars, direct_allocs, callees, interfaces, extern_allocates);
             collect_body_allocs(body, cur_mod, locals, fn_vals, iface_vars, direct_allocs, callees, interfaces, extern_allocates);
@@ -514,36 +603,34 @@ fn collect_expr_allocs(
             }
         }
         ExprKind::List(items) => {
-            if !items.is_empty() {
-                direct_allocs.push(AllocOp {
-                    description: "list literal".to_string(),
-                    file: cur_mod.to_string(),
-                    line,
-                });
-            }
+            // an empty list is still a list object
+            direct_allocs.push(AllocOp {
+                description: "list literal".to_string(),
+                file: cur_mod.to_string(),
+                line,
+            });
             for it in items {
                 collect_expr_allocs(it, cur_mod, locals, fn_vals, iface_vars, direct_allocs, callees, interfaces, extern_allocates);
             }
         }
         ExprKind::Map(items) => {
-            if !items.is_empty() {
-                direct_allocs.push(AllocOp {
-                    description: "map literal".to_string(),
-                    file: cur_mod.to_string(),
-                    line,
-                });
-            }
+            direct_allocs.push(AllocOp {
+                description: "map literal".to_string(),
+                file: cur_mod.to_string(),
+                line,
+            });
             for (k, v) in items {
                 collect_expr_allocs(k, cur_mod, locals, fn_vals, iface_vars, direct_allocs, callees, interfaces, extern_allocates);
                 collect_expr_allocs(v, cur_mod, locals, fn_vals, iface_vars, direct_allocs, callees, interfaces, extern_allocates);
             }
         }
-        ExprKind::New(ty) => {
-            direct_allocs.push(AllocOp {
-                description: format!("new {}", type_to_string(ty)),
-                file: cur_mod.to_string(),
-                line,
-            });
+        ExprKind::New(inner) => {
+            let name = match &inner.kind {
+                ExprKind::Record { path, .. } => path.join("."),
+                _ => String::new(),
+            };
+            direct_allocs.push(AllocOp { description: format!("new {}", name), file: cur_mod.to_string(), line });
+            collect_expr_allocs(inner, cur_mod, locals, fn_vals, iface_vars, direct_allocs, callees, interfaces, extern_allocates);
         }
         ExprKind::Lambda { params, body } => {
             // Check for captures
@@ -565,9 +652,9 @@ fn collect_expr_allocs(
         ExprKind::Call { callee, args, .. } => {
             // Check special calls
             if let ExprKind::Ident(name) = &callee.kind {
-                if name == "channel" {
+                if name == "channel" || name == "weak" {
                     direct_allocs.push(AllocOp {
-                        description: "channel".to_string(),
+                        description: if name == "weak" { "weak (allocates the weak handle on first use)".to_string() } else { "channel".to_string() },
                         file: cur_mod.to_string(),
                         line,
                     });
@@ -590,8 +677,17 @@ fn collect_expr_allocs(
                     callees.push((target_qname, line));
                 }
             } else if let ExprKind::Field { expr: base, name: field, .. } = &callee.kind {
+                if matches!(field.as_str(), "push" | "add" | "clear" | "take" | "remove") && write_may_copy(base, locals) {
+                    direct_allocs.push(AllocOp { description: "this write may copy".to_string(), file: cur_mod.to_string(), line });
+                }
                 if let ExprKind::Ident(base_name) = &base.kind {
-                    if base_name == "c" && field == "alloc" {
+                    if matches!(base_name.as_str(), "Map" | "Set" | "List" | "Sorted") && field == "new" {
+                        direct_allocs.push(AllocOp {
+                            description: format!("{}.new (creates a collection)", base_name),
+                            file: cur_mod.to_string(),
+                            line,
+                        });
+                    } else if base_name == "c" && field == "alloc" {
                         direct_allocs.push(AllocOp {
                             description: "c.alloc".to_string(),
                             file: cur_mod.to_string(),
@@ -795,4 +891,29 @@ fn find_alloc_chain(start_qname: &str, nodes: &HashMap<String, FuncNode>) -> Opt
     }
 
     None
+}
+
+/// A write into the list or map `base` that the compiler cannot show to be uniquely owned: `base` is
+/// a by-value list or map parameter, or a path through a by-value parameter (its lists and maps may
+/// be shared with the caller, so the first write copies).
+fn write_may_copy(base: &Expr, locals: &HashSet<String>) -> bool {
+    match &base.kind {
+        ExprKind::Ident(n) => locals.contains(&format!("#cow:{}", n)),
+        ExprKind::Field { expr, .. } | ExprKind::Index { expr, .. } => {
+            let mut root = &**expr;
+            while let ExprKind::Field { expr, .. } | ExprKind::Index { expr, .. } = &root.kind {
+                root = expr;
+            }
+            matches!(&root.kind, ExprKind::Ident(n) if locals.contains(&format!("#cow:{}", n)) || locals.contains(&format!("#cowrec:{}", n)))
+        }
+        _ => false,
+    }
+}
+
+fn path_has_index(e: &Expr) -> bool {
+    match &e.kind {
+        ExprKind::Index { .. } => true,
+        ExprKind::Field { expr, .. } => path_has_index(expr),
+        _ => false,
+    }
 }

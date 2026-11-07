@@ -176,7 +176,7 @@ func parse_ip(host: text) -> long
     for i in 0..host.len + 1
         var ch: long = 46
         if i < host.len
-            ch = long(host[i])
+            ch = long(host.byte(i))
         end
         if ch == 46
             if digits == 0 or value > 255

@@ -11,6 +11,7 @@
 // created with the element-ownership flag of T, so a result nobody awaited
 // is released together with the future.
 //
+// `await` is allowed in any function, not only in `async` ones: it parks the current task.
 // A future can be awaited once: `wait` takes the value out of the slot.
 // =====================================================================
 
@@ -45,7 +46,7 @@ end
 func wait(fut: Future) -> long
     task.init()
     while not fut.done
-        fut.waiters.add(task.current)
+        fut.waiters.add(task.cur())
         task.park()
     end
     if fut.slot.len == 0
@@ -64,7 +65,7 @@ func wait_any(fs: []Future) -> long
             end
         end
         for i in 0..fs.len
-            fs[i].waiters.add(task.current)
+            fs[i].waiters.add(task.cur())
         end
         task.park()
     end
@@ -75,7 +76,7 @@ end
 // A stale wake-up (from an earlier timer) only makes the loop check again.
 func timeout_wait(ms: long, f: Future) -> long
     task.init()
-    let me = task.current
+    let me = task.cur()
     let deadline = task.now() + ms
     task.add_timer(deadline, func()
         task.wake(me)

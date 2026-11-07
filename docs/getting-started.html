@@ -83,6 +83,15 @@ cargo test</code></pre>
         <dt>--lsp</dt>
         <dd>Runs a language server on standard input and output (Language Server Protocol). It reports syntax errors as you type and formats documents in the standard style, like <code>--fmt</code>. Any editor with an LSP client can use it by starting <code>brasa-parse --lsp</code> for <code>.br</code> files.</dd>
 
+        <dt>--comptime-timeout seconds</dt>
+        <dd>The time one run of comptime generators may take (default 5). A generator that takes longer is stopped and the build fails with an error naming it. See <a href="syntax.html#comptime">Compile-time code generation</a>.</dd>
+
+        <dt>--no-comptime-cache</dt>
+        <dd>Runs the comptime generators again instead of reusing the results saved by earlier builds (and does not save new ones).</dd>
+
+        <dt>--comptime-dump</dt>
+        <dd>Prints the text every comptime generator produced to standard error, so you can see what was compiled.</dd>
+
         <dt>--os boot.br kernel.br -o disk.img</dt>
         <dd>Builds a bootable disk image from a boot sector and a kernel, both written in Brasa (see <code>os/</code> in the repository). Run it with QEMU.</dd>
       </dl>
@@ -109,9 +118,9 @@ code --install-extension brasa-lang-0.2.0.vsix</code></pre>
       <ul>
         <li>Skim the <a href="syntax.html">Syntax Guide</a> for a tour of the language's constructs.</li>
         <li>Read the <a href="examples.html">annotated examples</a> and try running them yourself with <code>--run</code>.</li>
-        <li>Read about <a href="native.html">native compilation</a> and what it supports, then <a href="concurrency.html">tasks and channels</a> and <a href="async.html">async/await</a>.</li>
+        <li>Read about <a href="native.html">native compilation</a> and what it supports, then <a href="concurrency.html">tasks, channels and threads</a> and <a href="async.html">async/await</a>.</li>
         <li>Boot your own kernel: <a href="os.html">Brasa OS</a>.</li>
-        <li>The project's <code>README.md</code> lists what's not implemented yet (such as <code>html ... end</code> templates and explicit generic call-site arguments) and has a file-by-file map of the parser's source (<code>src/lexer.rs</code>, <code>src/ast.rs</code>, <code>src/parser.rs</code>, <code>src/interp.rs</code>).</li>
+        <li>The project's <code>README.md</code> lists what's not implemented yet (such as explicit generic call-site arguments) and has a file-by-file map of the parser's source (<code>src/lexer.rs</code>, <code>src/ast.rs</code>, <code>src/parser.rs</code>, <code>src/interp.rs</code>).</li>
       </ul>
     </section>
   </main>

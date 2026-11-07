@@ -175,3 +175,19 @@ func sort_by<T>(xs: []T, less: func(T, T) -> bool) -> []T
     end
     return src
 end
+
+// The elements in ascending order of `compare` (integers by value, text by bytes, records and
+// enums by their derived or declared `compare`). A stable merge sort; `xs` is not changed.
+func sort<T: Ord>(xs: []T) -> []T
+    return sort_by(xs, func(a, b) a.compare(b) < 0 end)
+end
+
+// True when some element of `xs` is `==` to `x`.
+func contains<T: Eq>(xs: []T, x: T) -> bool
+    for y in xs
+        if y == x
+            return true
+        end
+    end
+    return false
+end

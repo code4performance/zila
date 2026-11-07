@@ -448,3 +448,148 @@ func f()
 end
 ").is_err());
 }
+
+// ---- comptime, attributes and block forms (spec comptime-reflection) ----
+
+fn func_of(src: &str, name: &str) -> FuncDecl {
+    let file = parse_source(src).unwrap_or_else(|d| panic!("{}", d));
+    file.decls
+        .iter()
+        .find_map(|d| match &d.kind {
+            DeclKind::Func(f) if f.name == name => Some(f.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no func {}", name))
+}
+
+#[test]
+fn comptime_func_and_comptime_parameters_parse() {
+    let f = func_of("package t\ncomptime func gen(t: Type) -> text\n    return \"\"\nend\n", "gen");
+    assert!(f.comptime && !f.params[0].comptime);
+    let g = func_of("package t\n#[generated(gen)]\nfunc parse(comptime t: Type, raw: text) -> t\n", "parse");
+    assert!(!g.comptime && g.params[0].comptime && !g.params[1].comptime && g.body.is_empty());
+    assert!(brasa::lexer::KEYWORDS.contains(&"comptime"));
+}
+
+#[test]
+fn comptime_only_applies_to_functions() {
+    let e = parse_source("package t\ncomptime type X = int\n").unwrap_err().to_string();
+    assert!(e.contains("'comptime' applies only to functions"), "{}", e);
+    let e = parse_source("package t\nfunc f()\n    let g = func(comptime x: int) end\nend\n").unwrap_err().to_string();
+    assert!(e.contains("only allowed in function declarations"), "{}", e);
+}
+
+#[test]
+fn derive_generated_and_block_attributes_parse() {
+    let file = parse_source(
+        "package t\n#[derive(describe, json.json)]\ntype P = record\n    x: int\nend\n#[derive]\ncomptime func describe(t: Type) -> text\n    return \"\"\nend\n#[block]\ncomptime func shout(raw: text) -> text\n    return raw\nend\n",
+    )
+    .unwrap();
+    assert_eq!(file.decls[0].attrs[0].name, "derive");
+    assert_eq!(file.decls[0].attrs[0].args.len(), 2);
+    assert_eq!(file.decls[1].attrs[0].name, "derive");
+    assert_eq!(file.decls[2].attrs[0].name, "block");
+}
+
+#[test]
+fn generated_needs_a_generator_name() {
+    let e = parse_source("package t\n#[generated]\nfunc parse(comptime t: Type) -> t\n").unwrap_err().to_string();
+    assert!(e.contains("needs the name of a comptime function"), "{}", e);
+}
+
+fn blocks(names: &[&str]) -> std::collections::HashSet<String> {
+    names.iter().map(|s| s.to_string()).collect()
+}
+
+#[test]
+fn a_block_form_is_an_expression_or_a_statement() {
+    let src = "package t\nfunc f()\n    let s = shout\n        hello { not code\n    end\n    shout\n  more\n    end\nend\n";
+    let file = brasa::parser::parse_source_with(src, blocks(&["shout"])).unwrap();
+    let DeclKind::Func(f) = &file.decls[0].kind else { panic!() };
+    let StmtKind::Var(v) = &f.body[0].kind else { panic!("{:?}", f.body[0]) };
+    match &v.value.as_ref().unwrap().kind {
+        ExprKind::Block { name, raw } => {
+            assert_eq!(name, "shout");
+            assert_eq!(raw, "        hello { not code");
+        }
+        other => panic!("{:?}", other),
+    }
+    match &f.body[1].kind {
+        StmtKind::Block { name, raw } => assert_eq!((name.as_str(), raw.as_str()), ("shout", "  more")),
+        other => panic!("{:?}", other),
+    }
+}
+
+#[test]
+fn an_unknown_name_alone_on_a_line_is_an_ordinary_identifier() {
+    let src = "package t\nfunc f()\n    let s = shout\n    shout\nend\n";
+    let file = parse_source(src).unwrap();
+    let DeclKind::Func(f) = &file.decls[0].kind else { panic!() };
+    assert!(matches!(&f.body[1].kind, StmtKind::Expr(Expr { kind: ExprKind::Ident(_), .. })));
+}
+
+#[test]
+fn block_names_come_from_the_file_and_registered_packages() {
+    brasa::comptime::register_package("blockpkg_parse", "package blockpkg_parse\n#[block]\ncomptime func twice(raw: text) -> text\n    return raw\nend\n");
+    let src = "package t\nuse blockpkg_parse\nfunc f()\n    let s = twice\n        a < b ? {\n    end\nend\n";
+    let file = parse_source(src).unwrap();
+    let DeclKind::Func(f) = &file.decls[0].kind else { panic!() };
+    let StmtKind::Var(v) = &f.body[0].kind else { panic!() };
+    assert!(matches!(v.value.as_ref().unwrap().kind, ExprKind::Block { .. }));
+    // a package that cannot be found: the name is an ordinary identifier
+    let src2 = "package t\nuse nowhere_pkg\nfunc f()\n    let s = twice\nend\n";
+    assert!(parse_source(src2).is_ok());
+}
+
+#[test]
+fn an_unclosed_block_is_an_error() {
+    let e = brasa::parser::parse_source_with("package t\nfunc f()\n    let s = shout\n        hi\n", blocks(&["shout"])).unwrap_err().to_string();
+    assert!(e.contains("not closed with 'end'"), "{}", e);
+}
+
+#[test]
+fn the_grammar_has_no_html_expression() {
+    let g = std::fs::read_to_string("brasa.ebnf").unwrap();
+    assert!(!g.contains("html_expr"));
+    assert!(g.contains("block_expr") && g.contains("comptime"));
+}
+
+#[test]
+fn shared_and_spawn_thread_forms_parse() {
+    let src = "package t\n\
+type Job = record\n    items: shared []int\nend\n\
+func run(job: shared Job, n: int)\nend\n\
+func f()\n\
+    let a = shared [1, 2, 3]\n\
+    let b: shared []int = a\n\
+    let c = shared Job{ items: a }\n\
+    spawn_thread run(c, 1)\n\
+    let t = spawn_thread run(c, 2)\n\
+    t.join()\n\
+end\n";
+    let file = parse_source(src).unwrap();
+    let DeclKind::Func(f) = &file.decls[2].kind else { panic!() };
+    let StmtKind::Var(v) = &f.body[0].kind else { panic!() };
+    assert!(matches!(v.value.as_ref().unwrap().kind, ExprKind::Shared(_)));
+    let StmtKind::Var(v) = &f.body[1].kind else { panic!() };
+    assert!(matches!(v.ty, Some(Type::Shared(_))));
+    let StmtKind::Expr(e) = &f.body[3].kind else { panic!() };
+    assert!(matches!(e.kind, ExprKind::SpawnThread(_)));
+    let StmtKind::Var(v) = &f.body[4].kind else { panic!() };
+    assert!(matches!(v.value.as_ref().unwrap().kind, ExprKind::SpawnThread(_)));
+}
+
+#[test]
+fn spawn_thread_without_a_call_is_a_syntax_error() {
+    for body in ["    spawn_thread 5\n", "    let t = spawn_thread work\n"] {
+        let src = format!("package t\nfunc f()\n{}end\n", body);
+        let e = parse_source(&src).unwrap_err().to_string();
+        assert!(e.contains("spawn_thread") && e.contains("function call"), "{}", e);
+    }
+}
+
+#[test]
+fn shared_attribute_name_still_parses() {
+    let src = "package t\n#[shared]\ntype Cell = record\n    v: int\nend\n";
+    assert!(parse_source(src).is_ok());
+}

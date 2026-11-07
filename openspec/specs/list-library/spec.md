@@ -53,8 +53,27 @@ Gives programs the everyday operations on lists (transforming, searching, orderi
 - **THEN** the result is ordered and the call finishes in well under a second
 
 ### Requirement: Ownership
-All functions SHALL follow the existing list rules for element ownership: lists of texts, records and lists SHALL be retained and released correctly, so that building and dropping results leaves `live_objects()` unchanged.
+All functions SHALL follow the existing list rules for element ownership: lists of texts, records and lists SHALL be retained and released correctly, so that building and dropping results leaves `live_objects()` unchanged. The functions SHALL NOT change their arguments, and a result SHALL be independent of its arguments: a later write to the result SHALL NOT change an argument and the reverse, whether the function built a new list or returned its argument unchanged (a returned argument is a copy-on-write copy, see `copy-on-write`).
 
 #### Scenario: No leaks
 - **WHEN** a program maps, filters, sorts and reverses a list of texts 500 times
 - **THEN** `live_objects()` does not grow between iterations
+
+#### Scenario: Result independent of argument
+- **WHEN** a program takes `ys = list.slice(xs, 0, xs.len)` and pushes to `ys`
+- **THEN** `xs` keeps its old length
+
+### Requirement: Sorting and searching by the standard order
+`sort(xs)` SHALL return a new list holding the elements of a list whose element type is `Ord`, ordered ascending by `compare`, stable and in O(n log n) comparisons, and `contains(xs, x)` SHALL be true when some element of a list of an `Eq` type is `==` to `x`. An element type without the capability SHALL be a compile error naming the type.
+
+#### Scenario: Sort integers, text and records
+- **WHEN** a program sorts `[3, 1, 2]`, `["b", "a"]` and a list of records with derived `compare`
+- **THEN** the results are `[1, 2, 3]`, `["a", "b"]` and the records in field order, and the argument is unchanged
+
+#### Scenario: Contains
+- **WHEN** a program calls `contains` on a list of records for an equal record and for a different one
+- **THEN** the results are true and false
+
+#### Scenario: Unsortable element
+- **WHEN** a program sorts a list of records that hold a map field
+- **THEN** compilation fails with an error that the record is not Ord

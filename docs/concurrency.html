@@ -59,10 +59,43 @@
 <span class="kw">end</span></code></pre>
     </section>
 
+    <section id="threads">
+      <h2>Threads</h2>
+      <p>Tasks share one thread. To use a second core, start an operating-system thread: <code>spawn_thread f(args)</code> evaluates the arguments here, then runs <code>f</code> on a new thread and gives back a <code>Thread</code>. <code>t.join()</code> waits for it. Threads are heavy (an operating-system stack each): use them for parallel work, not for thousands of small jobs.</p>
+      <pre><code><span class="kw">use</span> thread
+<span class="kw">use</span> sync
+
+<span class="kw">func</span> count(hits: <span class="kw">shared</span> sync.Atomic)
+    <span class="kw">for</span> i <span class="kw">in</span> 0..100000
+        hits.add(1)
+    <span class="kw">end</span>
+<span class="kw">end</span>
+
+<span class="kw">func</span> main()
+    <span class="kw">let</span> hits = <span class="kw">shared</span> sync.Atomic{ value: 0 }
+    <span class="kw">let</span> a = <span class="kw">spawn_thread</span> count(hits)
+    <span class="kw">let</span> b = <span class="kw">spawn_thread</span> count(hits)
+    a.join()
+    b.join()
+    print(<span class="str">"{hits.load()}"</span>)    <span class="cm">// 200000</span>
+<span class="kw">end</span></code></pre>
+      <h3>shared: data that several threads read</h3>
+      <p><code>shared expr</code> makes a record, list, map or text whose reference counts are atomic; the type is written <code>shared T</code>. Its content is <strong>immutable</strong>: <code>s.count = 1</code> or <code>s.items.add(1)</code> through a <code>shared</code> value is a compile error that suggests <code>Mutex&lt;T&gt;</code>. A program that never uses <code>shared</code> or <code>spawn_thread</code> keeps plain, non-atomic counts and runs the same code as before; one that does counts every reference atomically (the runtime's counters get a <code>lock</code> prefix).</p>
+      <h3>Mutex and Atomic</h3>
+      <p><code>use sync</code> gives <code>Mutex&lt;T&gt;</code> and <code>Atomic</code>. <code>shared sync.Mutex(value)</code> guards a value: <code>m.update(func(v) ... end)</code> replaces it under the lock, <code>m.get()</code> and <code>m.set(v)</code> read and write it, <code>m.with(f)</code> calls <code>f</code> with it. To hold the lock over several statements use <code>m.lock()</code>, <code>defer m.unlock()</code> and <code>m.locked_get()</code> / <code>m.locked_set(v)</code>. A thread that waits for a lock sleeps in the kernel; locking a mutex the thread already holds stops the program with <code>the mutex is already locked by this thread</code>. <code>Atomic</code> is one <code>long</code> with <code>load</code>, <code>store</code>, <code>add</code> (returns the previous value), <code>swap</code> and <code>compare_swap</code>, all sequentially consistent.</p>
+      <h3>What may cross to another thread</h3>
+      <p>The compiler decides from the types, with no annotation. <strong>Transferable</strong>: numbers, <code>bool</code>, <code>char</code>, <code>text</code>, enums, closures, <code>Thread</code>, <code>Mutex</code> and <code>Atomic</code>, and records, lists, maps, channels and results of transferable types. <strong>Not transferable</strong>: <code>Rc&lt;T&gt;</code> (<code>new T</code>), <code>Weak&lt;T&gt;</code>, raw pointers and futures. Every argument of <code>spawn_thread</code>, every variable a closure passed to it captures, and the value after <code>shared</code> is checked, and the error names the argument, the field path and the type:</p>
+      <pre><code>argument 'job': field 'job.owner.next' has type 'new Node', which is not transferable between threads: it cannot be used by another thread; share data between threads with `shared`, `Mutex&lt;T&gt;` or `Atomic`</code></pre>
+      <p>A function started with <code>spawn_thread</code> (and the functions it calls by name) may not use a mutable global <code>var</code> unless its type is <code>sync.Mutex</code> or <code>sync.Atomic</code>; <code>let</code> globals are fine.</p>
+      <h3>One scheduler per thread</h3>
+      <p>Each thread has its own scheduler: <code>spawn</code>, <code>async</code>, <code>await</code>, <code>sleep</code> and the file and network libraries work inside a thread and never leave it; a task stays on the thread that created it. Channels are safe for any number of sending and receiving threads: values from one sender arrive in order, each value is received once, <code>receive</code> parks only the receiving task, a <code>send</code> from another thread wakes it on its own thread, and <code>close</code> wakes every receiver. An idle thread sleeps in the kernel (a completion port) and uses no CPU. Deadlock detection is per program: when every live thread is waiting for another one (an idle scheduler with no timer, a <code>join</code>), the program stops with <code>fatal: all tasks are asleep - deadlock!</code>.</p>
+      <p>The <code>ui</code> library stays on the main thread. <code>abort</code> in a thread stops the whole program with status 101. When <code>main</code> returns the process ends even if threads are still running. <code>thread.id()</code> is the calling thread's identifier and <code>thread.sleep(ms)</code> blocks the whole thread.</p>
+    </section>
+
     <section id="rules">
       <h2>How it behaves</h2>
       <ul>
-        <li>Tasks run on <strong>one thread</strong> and take turns. A task gives up the processor only when it waits (<code>receive</code>, <code>await</code>), calls <code>task.yield()</code>, or finishes. A task that computes for a long time makes the others wait.</li>
+        <li>Tasks of a thread run on <strong>that thread</strong> and take turns. A task gives up the processor only when it waits (<code>receive</code>, <code>await</code>), calls <code>task.yield()</code>, or finishes. A task that computes for a long time makes the others wait.</li>
         <li><code>send</code> never blocks: a channel is an unbounded queue.</li>
         <li><code>receive</code> waits for a value. On a channel that is closed and empty it returns <code>0</code> (or the empty value of its type). Sending on a closed channel stops the program.</li>
         <li>If every task is waiting and no timer or file or network operation is in progress, the program stops with <code>fatal: all tasks are asleep - deadlock!</code> and a non-zero exit code.</li>
@@ -74,11 +107,13 @@
     <section id="limits">
       <h2>Limits</h2>
       <ul>
-        <li>No parallelism: there is a single thread, so tasks never run at the same instant.</li>
+        <li>Tasks never run at the same instant on one thread; for parallelism use <a href="#threads">threads</a>.</li>
+        <li>Threads exist on Windows only for now (the Linux thread layer is not written yet); a bare-metal kernel rejects <code>spawn_thread</code>.</li>
+        <li>A mutex is not re-entrant and a task waiting for one blocks its whole thread; there are no condition variables or read-write locks yet.</li>
         <li>Windows x64 and Linux x86-64 (tasks are fibers on Windows and stack switches on Linux); a bare-metal kernel cannot use them.</li>
         <li>The <code>ui</code> message loop does not yet run other tasks.</li>
       </ul>
-      <p>For waiting on time, files and the network, use <a href="async.html">async/await</a>.</p>
+      <p><code>await</code> works in any function and suspends only the current task; <code>drop</code> methods and C callbacks cannot await. For waiting on time, files and the network, use <a href="async.html">async/await</a>.</p>
     </section>
   </main>
 

@@ -3,22 +3,31 @@
 ; A map object (after the 16-byte header):
 ;   +0 entries used (including removed ones)   +8 entry capacity   +16 entries
 ;   +24 flags (1 = text keys, 2 = values are heap objects)   +32 index   +40 index size (a power of two)
-;   +48 live entries
+;   +48 live entries   +56 hash function, +64 equality function (general keys, flags bit 4)
+; Flags: 1 = text keys, 2 = values are heap objects, 4 = general keys (the compiler's hash and equality
+; functions are called; keys are borrowed in rcx/rdx and a hash or a bool comes back), 8 = keys are
+; heap objects (released with the entry, retained when stored; text keys do this through bit 1).
 ; An entry is 32 bytes: [state: 1 live, 0 removed][hash][key][value]. The index holds entry number + 1
 ; (0 = empty); removed entries stay in the index chain, so removal needs no tombstone handling.
 
-; rax = new empty map; rcx = flags
+; rax = new empty map; rcx = flags; rdx, r8 = hash and equality functions (flags bit 4)
 rt_map_new proc
     push rbp
     mov rbp, rsp
     sub rsp, 64
     mov qword ptr [rbp - 8], rcx
-    mov ecx, 56
+    mov qword ptr [rbp - 24], rdx
+    mov qword ptr [rbp - 32], r8
+    mov ecx, 72
     lea rdx, rt_drop_map
     call rt_alloc
     mov qword ptr [rbp - 16], rax
     mov rcx, qword ptr [rbp - 8]
     mov qword ptr [rax + 24], rcx
+    mov rcx, qword ptr [rbp - 24]
+    mov qword ptr [rax + 56], rcx
+    mov rcx, qword ptr [rbp - 32]
+    mov qword ptr [rax + 64], rcx
     mov qword ptr [rax + 8], 4
     mov qword ptr [rax + 40], 8
     mov ecx, 128
@@ -39,6 +48,8 @@ rt_map_new endp
 
 ; rax = hash of key rdx (borrowed) for map rcx
 rt_map_hash proc
+    test qword ptr [rcx + 24], 4
+    jnz rt_mh_gen
     test qword ptr [rcx + 24], 1
     jnz rt_mh_text
     mov rax, rdx
@@ -47,6 +58,13 @@ rt_map_hash proc
     mov rcx, rax
     shr rcx, 32
     xor rax, rcx
+    ret
+rt_mh_gen:
+    mov rax, qword ptr [rcx + 56]
+    mov rcx, rdx
+    sub rsp, 40
+    call rax
+    add rsp, 40
     ret
 rt_mh_text:
     mov rax, 0cbf29ce484222325h
@@ -98,11 +116,22 @@ rt_mf_probe:
     mov rdx, qword ptr [rbp - 24]
     cmp rdx, qword ptr [rax + 8]
     jne rt_mf_next
+    test qword ptr [rcx + 24], 4
+    jnz rt_mf_gen
     test qword ptr [rcx + 24], 1
     jnz rt_mf_text
     mov rdx, qword ptr [rbp - 16]
     cmp rdx, qword ptr [rax + 16]
     je rt_mf_found
+    jmp rt_mf_next
+rt_mf_gen:
+    mov rax, qword ptr [rcx + 64]
+    mov rcx, qword ptr [rbp - 16]
+    mov rdx, qword ptr [rbp - 40]
+    mov rdx, qword ptr [rdx + 16]
+    call rax
+    test al, al
+    jnz rt_mf_found
     jmp rt_mf_next
 rt_mf_text:
     mov rcx, qword ptr [rbp - 16]
@@ -270,6 +299,8 @@ rt_ms_store:
 rt_ms_new:
     mov rcx, qword ptr [rbp - 8]
     mov rax, qword ptr [rcx]
+    cmp rax, qword ptr rt_max_len
+    jae rt_too_long
     cmp rax, qword ptr [rcx + 8]
     jb rt_ms_append
     call rt_map_grow
@@ -306,7 +337,7 @@ rt_ms_slot:
 rt_ms_put:
     inc rdx
     mov qword ptr [r11 + r10 * 8], rdx
-    test qword ptr [rcx + 24], 1
+    test qword ptr [rcx + 24], 9
     jz rt_ms_done
     mov rcx, qword ptr [rbp - 16]
     call rt_retain
@@ -329,7 +360,7 @@ rt_map_remove proc
     mov qword ptr [rax], 0
     mov rcx, qword ptr [rbp - 8]
     dec qword ptr [rcx + 48]
-    test qword ptr [rcx + 24], 1
+    test qword ptr [rcx + 24], 9
     jz rt_mr_val
     mov rcx, qword ptr [rax + 16]
     call rt_release
@@ -364,7 +395,7 @@ rt_mra_loop:
     cmp qword ptr [rax], 0
     je rt_mra_loop
     mov qword ptr [rbp - 24], rax
-    test qword ptr [rcx + 24], 1
+    test qword ptr [rcx + 24], 9
     jz rt_mra_val
     mov rcx, qword ptr [rax + 16]
     call rt_release
@@ -422,3 +453,131 @@ rt_drop_map proc
     pop rbp
     ret
 rt_drop_map endp
+
+; rax = a new map with the entries of map rcx, in the same order (rdx = function that copies a heap value, or 0
+; to retain it)
+rt_map_clone proc
+    push rbp
+    mov rbp, rsp
+    sub rsp, 96
+    mov qword ptr [rbp - 8], rcx
+    mov qword ptr [rbp - 16], rdx
+    mov ecx, 72
+    lea rdx, rt_drop_map
+    call rt_alloc
+    mov qword ptr [rbp - 24], rax
+    mov rcx, qword ptr [rbp - 8]
+    mov rdx, qword ptr [rcx]
+    mov qword ptr [rax], rdx
+    mov rdx, qword ptr [rcx + 8]
+    mov qword ptr [rax + 8], rdx
+    mov rdx, qword ptr [rcx + 24]
+    mov qword ptr [rax + 24], rdx
+    mov rdx, qword ptr [rcx + 40]
+    mov qword ptr [rax + 40], rdx
+    mov rdx, qword ptr [rcx + 48]
+    mov qword ptr [rax + 48], rdx
+    mov rdx, qword ptr [rcx + 56]
+    mov qword ptr [rax + 56], rdx
+    mov rdx, qword ptr [rcx + 64]
+    mov qword ptr [rax + 64], rdx
+    mov rcx, qword ptr [rcx + 8]
+    shl rcx, 5
+    xor edx, edx
+    call rt_alloc
+    mov r8, qword ptr [rbp - 24]
+    mov qword ptr [r8 + 16], rax
+    mov rcx, qword ptr [rbp - 8]
+    mov rcx, qword ptr [rcx + 40]
+    shl rcx, 3
+    xor edx, edx
+    call rt_alloc
+    mov r8, qword ptr [rbp - 24]
+    mov qword ptr [r8 + 32], rax
+    mov rcx, qword ptr [rbp - 8]
+    mov r9, qword ptr [rcx + 40]
+    mov r10, qword ptr [rcx + 32]
+    mov r11, qword ptr [r8 + 32]
+rt_mcl2_idx:
+    test r9, r9
+    jz rt_mcl2_ents
+    dec r9
+    mov rax, qword ptr [r10 + r9 * 8]
+    mov qword ptr [r11 + r9 * 8], rax
+    jmp rt_mcl2_idx
+rt_mcl2_ents:
+    mov r9, qword ptr [rcx]
+    shl r9, 2
+    mov r10, qword ptr [rcx + 16]
+    mov r11, qword ptr [r8 + 16]
+rt_mcl2_e:
+    test r9, r9
+    jz rt_mcl2_fix
+    dec r9
+    mov rax, qword ptr [r10 + r9 * 8]
+    mov qword ptr [r11 + r9 * 8], rax
+    jmp rt_mcl2_e
+rt_mcl2_fix:
+    mov qword ptr [rbp - 32], 0
+rt_mcl2_loop:
+    mov rcx, qword ptr [rbp - 24]
+    mov rax, qword ptr [rbp - 32]
+    cmp rax, qword ptr [rcx]
+    jae rt_mcl2_done
+    inc qword ptr [rbp - 32]
+    shl rax, 5
+    add rax, qword ptr [rcx + 16]
+    cmp qword ptr [rax], 0
+    je rt_mcl2_loop
+    mov qword ptr [rbp - 40], rax
+    test qword ptr [rcx + 24], 9
+    jz rt_mcl2_val
+    mov rcx, qword ptr [rax + 16]
+    call rt_retain
+rt_mcl2_val:
+    mov rcx, qword ptr [rbp - 24]
+    test qword ptr [rcx + 24], 2
+    jz rt_mcl2_loop
+    mov rax, qword ptr [rbp - 40]
+    mov rcx, qword ptr [rax + 24]
+    mov rdx, qword ptr [rbp - 16]
+    test rdx, rdx
+    jz rt_mcl2_ret
+    call rdx
+    mov rcx, qword ptr [rbp - 40]
+    mov qword ptr [rcx + 24], rax
+    jmp rt_mcl2_loop
+rt_mcl2_ret:
+    call rt_retain
+    jmp rt_mcl2_loop
+rt_mcl2_done:
+    mov rax, qword ptr [rbp - 24]
+    mov rsp, rbp
+    pop rbp
+    ret
+rt_map_clone endp
+
+; copy on write: rax = the map in the slot at rcx, copied into the slot first when someone else holds it
+; (rdx = the value copy function for rt_map_clone)
+rt_map_unique proc
+    mov rax, qword ptr [rcx]
+    test rax, rax
+    jz rt_mu_ret
+    cmp qword ptr [rax - 16], 1
+    jbe rt_mu_ret
+    push rbp
+    mov rbp, rsp
+    sub rsp, 48
+    mov qword ptr [rbp - 8], rcx
+    mov rcx, rax
+    call rt_map_clone
+    mov rcx, qword ptr [rbp - 8]
+    mov rdx, qword ptr [rcx]
+    mov qword ptr [rcx], rax
+    mov rcx, rdx
+    call rt_release
+    mov rsp, rbp
+    pop rbp
+rt_mu_ret:
+    ret
+rt_map_unique endp

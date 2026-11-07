@@ -50,18 +50,26 @@ Gives programs the everyday operations on text (searching, splitting, trimming, 
 - **THEN** the results are `ababab` and an empty text
 
 ### Requirement: Case and reversal
-`upper(s)` and `lower(s)` SHALL change ASCII letters only and leave every other byte as it is. `reverse(s)` SHALL reverse the bytes.
+`upper(s)` and `lower(s)` SHALL change ASCII letters only and leave every other character as it is. `reverse(s)` SHALL reverse the characters (code points), so the result is valid UTF-8 and `reverse(reverse(s)) == s`.
 
 #### Scenario: ASCII case
 - **WHEN** a program uppercases `"Straße 1"`
-- **THEN** the result is `STRAßE 1` (the non-ASCII bytes are unchanged)
+- **THEN** the result is `STRAßE 1` (the non-ASCII characters are unchanged)
+
+#### Scenario: Reversing Portuguese
+- **WHEN** a program reverses `"ação"`
+- **THEN** the result is `oãça`
 
 ### Requirement: Padding
-`pad_left(s, width, fill)` and `pad_right(s, width, fill)` SHALL add copies of the one-byte text `fill` until the text is `width` bytes long, and SHALL return `s` unchanged when it is already that long or longer.
+`pad_left(s, width, fill)` and `pad_right(s, width, fill)` SHALL add copies of the one-character text `fill` until the text is `width` characters long (counted as `char_count`, not `len`), and SHALL return `s` unchanged when it is already that long or longer. A `fill` that is not exactly one character SHALL abort with a message saying so.
 
 #### Scenario: Number column
 - **WHEN** a program evaluates `text.pad_left("7", 3, "0")` and `text.pad_right("ab", 4, ".")`
 - **THEN** the results are `007` and `ab..`
+
+#### Scenario: Accented text
+- **WHEN** a program evaluates `text.pad_right("ação", 6, ".")`
+- **THEN** the result is `ação..`
 
 ### Requirement: Parsing numbers
 `parse_int(s)` SHALL return the integer written in `s` (optional leading `-` or `+`, decimal digits, no surrounding spaces, no separators) as `int or error`. An empty text, a non-digit, or a value outside the `int` range SHALL give an error whose message names the text, such as `not a whole number: "12x"`. `parse_float(s)` SHALL accept an optional sign, digits with an optional fraction and an optional exponent (`1.5`, `-2e3`, `.5`, `5.`), plus `inf`, `-inf` and `NaN`, as `float or error`; the result SHALL be the float nearest to the written value.
@@ -88,3 +96,10 @@ Every function SHALL release the texts and lists it creates and does not return.
 #### Scenario: Repeated use
 - **WHEN** a program calls `split`, `join`, `replace` and `trim` on varying texts 1000 times
 - **THEN** `live_objects()` does not grow between iterations
+
+### Requirement: Characters
+`use text` SHALL provide `chars(s) -> []char`, the characters of `s` in order, and `from_chars(cs: []char) -> text`, their concatenation, so that `from_chars(chars(s)) == s` for every valid `s`.
+
+#### Scenario: Round trip
+- **WHEN** a program evaluates `text.chars("ação").len` and `text.from_chars(text.chars("ação"))`
+- **THEN** the results are `4` and `ação`

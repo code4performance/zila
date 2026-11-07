@@ -23,7 +23,7 @@ func main()
     end
 
     // a word index ordered alphabetically, with a range query
-    let words: sorted.SortedSet<text> = sorted.text_set()
+    let words: sorted.SortedSet<text> = sorted.set()
     for w in ["pear", "apple", "fig", "banana", "cherry", "date"]
         words.add(w)
     end
@@ -45,7 +45,7 @@ func main()
     end
 
     // the nearest numbers
-    let marks: sorted.SortedSet<int> = sorted.int_set()
+    let marks: sorted.SortedSet<int> = sorted.set()
     for n in [10, 20, 30, 40]
         marks.add(n)
     end

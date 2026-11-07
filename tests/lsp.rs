@@ -86,3 +86,85 @@ fn shutdown_and_exit() {
     assert!(shutdown);
     assert!(!handle(&parse_json(r#"{"jsonrpc":"2.0","method":"exit"}"#).unwrap(), &mut docs, &mut out, &mut shutdown));
 }
+
+#[test]
+fn a_no_alloc_violation_is_a_diagnostic_on_its_line() {
+    let mut docs = HashMap::new();
+    let src = "package main
+
+#[no_alloc]
+func f(n: int) -> text
+    return \"n = {n}\"
+end
+
+func main()
+end
+";
+    let r = open(&mut docs, "file:///na.br", src);
+    let Json::Arr(d) = r[0].get("params").get("diagnostics") else { panic!() };
+    assert_eq!(d.len(), 1);
+    assert_eq!(d[0].get("range").get("start").get("line"), &Json::Num(3.0));
+    let m = d[0].get("message").str().unwrap();
+    assert!(m.contains("'f' is #[no_alloc] but allocates") && m.contains("text interpolation"), "{}", m);
+}
+
+#[test]
+fn block_content_is_never_parsed_and_generators_never_run() {
+    let mut docs = HashMap::new();
+    let src = "package main
+
+use reflect
+
+#[derive(lsp_never_runs)]
+type Point = record
+    x: int
+end
+
+#[derive]
+comptime func lsp_never_runs(t: Type) -> text
+    return \"\"
+end
+
+#[block]
+comptime func raw_text(raw: text) -> text
+    return raw
+end
+
+func main()
+    let s = raw_text
+        {{ this ) is ] not Brasa ((
+    end
+    print(s)
+end
+";
+    let r = open(&mut docs, "file:///blocks.br", src);
+    assert_eq!(r[0].get("params").get("diagnostics"), &Json::Arr(vec![]));
+    assert!(!brasa::comptime::launch_log().iter().any(|l| l.starts_with("lsp_never_runs(")));
+    // an error outside the block is still reported
+    let r = open(&mut docs, "file:///bad.br", &src.replace("print(s)", "print(s"));
+    let Json::Arr(d) = r[0].get("params").get("diagnostics") else { panic!() };
+    assert_eq!(d.len(), 1);
+}
+
+#[test]
+fn indexing_a_text_is_a_diagnostic_that_points_to_the_alternatives() {
+    let mut docs = HashMap::new();
+    let src = "package main\n\nfunc main()\n    let s = \"ação\"\n    let b = s[0]\nend\n";
+    let r = open(&mut docs, "file:///idx.br", src);
+    let Json::Arr(d) = r[0].get("params").get("diagnostics") else { panic!() };
+    assert_eq!(d.len(), 1);
+    assert_eq!(d[0].get("range").get("start").get("line"), &Json::Num(4.0));
+    let m = d[0].get("message").str().unwrap();
+    assert!(m.contains("text cannot be indexed") && m.contains("bytes()") && m.contains("slice") && m.contains("for c in s"), "{}", m);
+}
+
+#[test]
+fn a_non_transferable_spawn_thread_argument_is_a_diagnostic() {
+    let mut docs = HashMap::new();
+    let src = "package main\n\nuse thread\n\ntype Node = record\n    value: int\nend\n\nfunc show(n: Rc<Node>)\nend\n\nfunc main()\n    let n = new Node{ value: 1 }\n    spawn_thread show(n)\nend\n";
+    let r = open(&mut docs, "file:///thr.br", src);
+    let Json::Arr(d) = r[0].get("params").get("diagnostics") else { panic!() };
+    assert_eq!(d.len(), 1);
+    let m = d[0].get("message").str().unwrap();
+    assert!(m.contains("argument 'n'") && m.contains("not transferable") && m.contains("Mutex"), "{}", m);
+}

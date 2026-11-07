@@ -46,7 +46,7 @@ end
 // Adds text that arrived.
 func (b: InBuf) feed(chunk: text)
     if b.pos > 0
-        b.data = b.data.slice(b.pos, b.data.len) + chunk
+        b.data = b.data.__raw_slice(b.pos, b.data.len) + chunk
         b.scan = b.scan - b.pos
         b.pos = 0
     else
@@ -96,14 +96,14 @@ func (b: InBuf) take_line() -> text
         if not b.done
             return ""
         end
-        line = b.data.slice(b.pos, b.data.len)
+        line = b.data.__raw_slice(b.pos, b.data.len)
         b.pos = b.data.len
     else
         var end_at = i
-        if end_at > b.pos and int(b.data[end_at - 1]) == 13
+        if end_at > b.pos and int(b.data.byte(end_at - 1)) == 13
             end_at -= 1
         end
-        line = b.data.slice(b.pos, end_at)
+        line = b.data.__raw_slice(b.pos, end_at)
         b.pos = i + 1
     end
     b.scan = b.pos
@@ -120,7 +120,7 @@ func (b: InBuf) take(max: int) -> text
     if n <= 0
         return ""
     end
-    let out = b.data.slice(b.pos, b.pos + n)
+    let out = b.data.__raw_slice(b.pos, b.pos + n)
     b.pos += n
     b.scan = b.pos
     b.release()
@@ -129,7 +129,7 @@ end
 
 // Everything that is left.
 func (b: InBuf) take_all() -> text
-    let out = b.data.slice(b.pos, b.data.len)
+    let out = b.data.__raw_slice(b.pos, b.data.len)
     b.pos = b.data.len
     b.scan = b.pos
     b.release()

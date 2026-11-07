@@ -1,0 +1,42 @@
+// no_alloc: the compiler checks that a function never allocates.
+//
+//   brasa-parse examples/no_alloc.br -o no_alloc.exe
+//
+// `#[no_alloc]` is a promise the compiler holds you to: the function and everything it
+// calls must be free of text interpolation, list and map literals, `new`, closures that
+// capture, `spawn` and the other allocating operations. Add one to a function below and
+// the build stops, naming the call chain that allocates.
+
+package main
+
+// A checksum over the bytes of a text: reads, arithmetic, no allocation.
+#[no_alloc]
+func checksum(data: text) -> int
+    var sum = 0
+    for i in 0..data.len
+        sum = (sum * 31 + data.byte(i)) % 65521
+    end
+    return sum
+end
+
+// A number from decimal digits, or -1 when a byte is not a digit.
+#[no_alloc]
+func parse_digits(s: text) -> int
+    var n = 0
+    for i in 0..s.len
+        let d = s.byte(i) - 48
+        if d < 0 or d > 9
+            return -1
+        end
+        n = n * 10 + d
+    end
+    return n
+end
+
+func main()
+    let line = "12345"
+    let good = "2024"
+    let bad = "20x4"
+    print("checksum: {checksum(line)}")
+    print("parsed: {parse_digits(good)} and {parse_digits(bad)}")
+end

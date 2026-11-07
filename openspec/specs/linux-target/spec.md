@@ -27,7 +27,7 @@ A program that uses only the language and the libraries available on Linux SHALL
 - **THEN** the first prints `error: boom` and exits with 1, and the second prints `abort: <file>.br:<line>: stop` and exits with 101
 
 ### Requirement: Memory
-Objects SHALL be reference counted and freed as on Windows, `live_objects()` SHALL count them, and memory SHALL be given back: a loop that builds and drops large texts and lists SHALL NOT grow without bound. Running out of memory SHALL abort the program with `abort: out of memory`.
+Objects SHALL be reference counted and freed as on Windows, `live_objects()` SHALL count them, and memory SHALL be given back: a loop that builds and drops large texts and lists SHALL NOT grow without bound. The built-in heap (size-class free lists over a region the executable asks the kernel for, large blocks from `mmap`) SHALL be the default allocator and SHALL be left out of the executable when the program declares a custom allocator with `#[allocator]`. Running out of memory SHALL stop the program with `abort: out of memory`.
 
 #### Scenario: Out of memory
 - **WHEN** a program keeps allocating small objects that stay alive until the heap is full
@@ -36,6 +36,10 @@ Objects SHALL be reference counted and freed as on Windows, `live_objects()` SHA
 #### Scenario: No leaks and big values
 - **WHEN** a program builds and drops 160,000-byte texts and lists of 2,000 elements hundreds of times, and a list of 300,000 integers is built and summed, and `live_objects()` is compared before and after
 - **THEN** the count has not grown and the program finishes in reasonable memory
+
+#### Scenario: Custom allocator replaces the heap
+- **WHEN** a Linux program declares `#[allocator]` functions and builds lists and texts
+- **THEN** their memory comes from those functions and the executable contains no `mmap` or `munmap` runtime code
 
 ### Requirement: Libraries and features that need Windows are rejected
 On the Linux target, `use ui` SHALL be accepted (its behavior is described by the `ui-library` capability). `use ws` SHALL be rejected on every target, user programs included, with a message that says it is internal to `net`. Every other library (`text`, `list`, `math`, `float`, `format`, `set`, `sorted`, `bufio`, `task`, `future`, `fs`, `net`, `sys`, `tls`), `async` functions, `spawn`, channels and `extern` declarations (with `#[link]`) SHALL be accepted; their behavior is described by the `linux-parity` capability.

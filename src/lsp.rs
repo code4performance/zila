@@ -256,10 +256,32 @@ fn position(line: i64, character: i64) -> Json {
     obj(vec![("line", num(line)), ("character", num(character))])
 }
 
-/// The diagnostics for a document: a syntax error, if any.
+/// The diagnostics for a document: a syntax error or, for a program that parses, a compile error.
 pub fn diagnostics(text: &str) -> Json {
     let mut list = Vec::new();
-    if let Err(d) = parse_source(text) {
+    let parsed = parse_source(text);
+    if let Ok(file) = &parsed {
+        // a program that parses is compiled, so the compiler's own errors (types, `#[no_alloc]`,
+        // `#[allocator]`) show up as you type: they start with `main.br:LINE:`
+        // a program that asks for code generation is not compiled here: the server never runs
+        // comptime code, so opening a file from an untrusted package executes nothing
+        if file.package == "main" && !crate::comptime::uses_comptime(file) {
+            if let Err(e) = crate::codegen_x64::generate_asm(file) {
+                let line = e.strip_prefix("main.br:").and_then(|r| r.split(':').next()).and_then(|n| n.trim().parse::<i64>().ok()).unwrap_or(1);
+                let line = (line.max(1) - 1) as i64;
+                let src_line = text.lines().nth(line as usize).unwrap_or("");
+                let end = src_line.chars().count();
+                let start = src_line.chars().take_while(|c| c.is_whitespace()).count();
+                list.push(obj(vec![
+                    ("range", obj(vec![("start", position(line, utf16_col(src_line, start))), ("end", position(line, utf16_col(src_line, end.max(start + 1))))])),
+                    ("severity", num(1)),
+                    ("source", Json::Str("brasa".into())),
+                    ("message", Json::Str(e)),
+                ]));
+            }
+        }
+    }
+    if let Err(d) = parsed {
         let line = (d.line.max(1) - 1) as i64;
         let src_line = text.lines().nth(line as usize).unwrap_or("");
         let start = (d.col.max(1) - 1) as usize;
@@ -284,6 +306,29 @@ pub fn formatting(text: &str) -> Json {
         }
         _ => Json::Arr(Vec::new()),
     }
+}
+
+/// Finds the packages that sit next to the document, so that their block names are known: the
+/// server only parses (block content is never looked into) and never runs comptime code.
+fn register_neighbours(uri: &str, text: &str) {
+    let Some(rest) = uri.strip_prefix("file://") else { return };
+    let mut path = String::new();
+    let b = rest.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            if let Ok(v) = u8::from_str_radix(&rest[i + 1..i + 3], 16) {
+                path.push(v as char);
+                i += 3;
+                continue;
+            }
+        }
+        path.push(b[i] as char);
+        i += 1;
+    }
+    // `file:///c:/dir/x.br` -> `c:/dir/x.br`
+    let path = if path.len() > 2 && path.as_bytes()[0] == b'/' && path.as_bytes()[2] == b':' { path[1..].to_string() } else { path };
+    crate::comptime::register_siblings(std::path::Path::new(&path), text);
 }
 
 fn publish(out: &mut dyn Write, uri: &str, diags: Json) {
@@ -322,6 +367,7 @@ pub fn handle(msg: &Json, docs: &mut HashMap<String, String>, out: &mut dyn Writ
             let d = params.get("textDocument");
             if let (Some(uri), Some(text)) = (d.get("uri").str(), d.get("text").str()) {
                 docs.insert(uri.to_string(), text.to_string());
+                register_neighbours(uri, text);
                 publish(out, uri, diagnostics(text));
             }
         }
@@ -330,6 +376,7 @@ pub fn handle(msg: &Json, docs: &mut HashMap<String, String>, out: &mut dyn Writ
             if let Json::Arr(changes) = params.get("contentChanges") {
                 if let Some(text) = changes.last().and_then(|c| c.get("text").str()) {
                     docs.insert(uri.clone(), text.to_string());
+                    register_neighbours(&uri, text);
                     publish(out, &uri, diagnostics(text));
                 }
             }

@@ -173,14 +173,14 @@ print("len {m.len} bad {bad}")"#,
 }
 
 #[test]
-fn maps_are_shared_and_can_be_stored_and_returned() {
+fn maps_are_values_and_can_be_stored_and_returned() {
     let src = r#"package main
 
 type Registry = record
     names: Map<text, int>
 end
 
-func fill(m: Map<text, int>)
+func fill(ref m: Map<text, int>)
     m["from"] = 1
 end
 
@@ -190,10 +190,10 @@ end
 
 func main()
     let m: Map<text, int> = {}
-    fill(m)
-    let alias = m
+    fill(ref m)
+    var alias = m
     alias["alias"] = 2
-    print("{m["from"]} {m["alias"]} {m.len}")
+    print("{m["from"]} {alias["alias"]} {m.len} {alias.len}")
     let r = Registry { names: make() }
     print("{r.names["made"]}")
     let groups: List<Map<text, int>> = [make(), make()]
@@ -201,7 +201,10 @@ func main()
 end
 "#;
     let Some((out, code)) = run(src) else { return };
-    assert_eq!(out, "1 2 2\n7\n2 7\n");
+    assert_eq!(out, "1 2 1 2
+7
+2 7
+");
     assert_eq!(code, 0);
 }
 
@@ -266,8 +269,10 @@ end
 
 #[test]
 fn compile_errors() {
-    let e = compile_error(&main_of("let m: Map<Point, int> = {}\nprint(\"{m.len}\")"));
-    assert!(e.contains("Point cannot be a map key"), "{}", e);
+    let e = compile_error("package main\n\ntype Spot = record\n    x: float\n    y: int\nend\n\nfunc main()\n    let m: Map<Spot, int> = {}\n    print(\"{m.len}\")\nend\n");
+    assert!(e.contains("Spot cannot be a map key because field `x: float` is not Hash"), "{}", e);
+    let e = compile_error(&main_of("let m: Map<float, int> = {}\nprint(\"{m.len}\")"));
+    assert!(e.contains("float cannot be a map key because it is not Hash"), "{}", e);
     let e = compile_error(&main_of("let m = { \"a\": 1, \"b\": \"two\" }\nprint(\"{m.len}\")"));
     assert!(e.contains("map value"), "{}", e);
     let e = compile_error(&main_of("let m = {}\nprint(\"{m.len}\")"));
@@ -332,5 +337,93 @@ fn the_maps_example_builds_and_prints_what_the_docs_say() {
     let src = std::fs::read_to_string("examples/maps.br").unwrap();
     let Some((out, code)) = run(&src) else { return };
     assert_eq!(out, "red: 3\ngreen: 2\nblue: 1\n2 prices, apple costs 3\nno pears today\nkiwi costs 0\n");
+    assert_eq!(code, 0);
+}
+
+#[test]
+fn record_enum_and_list_keys() {
+    let src = main_of(
+        r#"let m: Map<Point, text> = {}
+m[Point { x: 1, y: 2 }] = "a"
+print(m[Point { x: 1, y: 2 }])
+m[Point { x: 1, y: 2 }] = "b"
+print("{m.len} {m[Point { x: 1, y: 2 }]}")
+let l: Map<[]int, int> = {}
+l[[1, 2]] = 5
+l[[1, 2]] += 1
+print("{l[[1, 2]]} {l.has([2, 1])} {l.len}")
+let lit: Map<Point, int> = { Point { x: 0, y: 0 }: 10 }
+print(lit[Point { x: 0, y: 0 }])"#,
+    );
+    let Some((out, code)) = run(&src) else { return };
+    assert_eq!(out, "a\n1 b\n6 false 1\n10\n");
+    assert_eq!(code, 0);
+}
+
+#[test]
+fn many_record_keys() {
+    let src = main_of(
+        r#"let m: Map<Point, int> = {}
+var i = 0
+while i < 100000
+    m[Point { x: i, y: i % 7 }] = i
+    i += 1
+end
+i = 0
+while i < 100000
+    if i % 2 == 0
+        m.remove(Point { x: i, y: i % 7 })
+    end
+    i += 1
+end
+var ok = true
+i = 0
+while i < 100000
+    if m.has(Point { x: i, y: i % 7 }) != (i % 2 == 1)
+        ok = false
+    end
+    i += 1
+end
+print("{m.len} {ok}")"#,
+    );
+    let Some((out, code)) = run(&src) else { return };
+    assert_eq!(out, "50000 true\n");
+    assert_eq!(code, 0);
+}
+
+#[test]
+fn record_keys_are_released() {
+    let src = r#"package main
+
+type Name = record
+    first: text
+    last: text
+end
+
+func work(n: int) -> int
+    let m: Map<Name, int> = {}
+    for i in 0..30
+        m[Name { first: "f {i}", last: "l" }] = i
+    end
+    m[Name { first: "f 1", last: "l" }] = 99
+    m.remove(Name { first: "f 2", last: "l" })
+    if n % 2 == 0
+        m.clear()
+    end
+    return m.len
+end
+
+func main()
+    let warm = work(1)
+    let before = live_objects()
+    var total = 0
+    for i in 0..5000
+        total += work(i)
+    end
+    print("grew {live_objects() - before} {total > 0}")
+end
+"#;
+    let Some((out, code)) = run(src) else { return };
+    assert_eq!(out, "grew 0 true\n");
     assert_eq!(code, 0);
 }

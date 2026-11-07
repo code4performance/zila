@@ -69,10 +69,10 @@ type Conn = record
 end
 
 func (ref conn: Conn) drop()
-    release(conn)
+    release(ref conn)
 end
 
-func release(conn: Conn)
+func release(ref conn: Conn)
     if conn.open
         unsafe
             SSL_free(conn.ssl)
@@ -101,7 +101,7 @@ end
 func put_text(dest: *u8, data: text, from: long, n: long)
     unsafe
         for i in 0..n
-            dest[i] = data[from + i]
+            dest[i] = data.byte(from + i)
         end
     end
 end
@@ -193,7 +193,7 @@ async func connect(host: text, port: long) -> Conn or error
                     why = c.from_cstr(X509_verify_cert_error_string(i64(vr)))
                 end
             end
-            release(conn)
+            release(ref conn)
             return error(errors.Io, "TLS handshake with {host} failed: {why}")
         end
         try await flush(conn)
@@ -203,7 +203,7 @@ async func connect(host: text, port: long) -> Conn or error
         if e == SSL_ERROR_WANT_READ
             let alive = try await feed(conn)
             if not alive
-                release(conn)
+                release(ref conn)
                 return error(errors.ConnectionReset, "TLS handshake with {host} failed: the connection was closed")
             end
         end
@@ -283,6 +283,6 @@ end
 
 // Closes the connection now.
 async func (conn: Conn) close()
-    release(conn)
+    release(ref conn)
     await conn.raw.close()
 end

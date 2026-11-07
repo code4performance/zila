@@ -1,0 +1,26 @@
+// =====================================================================
+// Brasa standard library: derive
+//
+//     use derive
+//
+//     type Version = record
+//         major: int
+//         minor: int
+//     end
+//
+//     func (v: Version) hash() -> long
+//         return derive.hash_combine(derive.hash_combine(7, long(v.major)), long(v.minor))
+//     end
+//
+// `eq`, `compare` and `hash` are derived by the compiler for records and enums (see the standard
+// interfaces `Eq`, `Ord` and `Hash`, which need no `use`). This library holds the one piece a hand
+// written `hash` method needs: the function the derived hash folds its fields with.
+// =====================================================================
+
+package derive
+
+// Folds `x` into the running hash `h`. Equal inputs give equal results; a change in either
+// argument changes the result in all of its bits.
+func hash_combine(h: long, x: long) -> long
+    return __mix(h, x)
+end

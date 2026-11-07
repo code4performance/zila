@@ -1,0 +1,58 @@
+// allocator: a program replaces the heap behind every list, text and record.
+//
+//   brasa-parse examples/allocator.br -o allocator.exe
+//
+// Two functions marked `#[allocator(alloc)]` and `#[allocator(free)]` take over from the
+// runtime's heap. This one is a bump allocator over a single block of memory (an arena)
+// that counts its calls. The runtime still owns object headers, reference counts and zeroing;
+// the allocator only hands out and takes back raw memory. Windows: the arena comes from
+// VirtualAlloc.
+
+package main
+
+#[link("kernel32")]
+extern func VirtualAlloc(address: usize, size: usize, kind: u32, protect: u32) -> *u8
+
+let ARENA_SIZE: u64 = 1048576
+
+var arena_next: u64 = 0
+var arena_end: u64 = 0
+var alloc_calls = 0
+var free_calls = 0
+
+#[allocator(alloc)]
+func arena_alloc(size: u64, align: u64) -> *u8
+    if arena_next == 0
+        unsafe
+            let base = VirtualAlloc(0, ARENA_SIZE, 0x3000, 4)
+            arena_next = u64(base)
+        end
+        arena_end = arena_next + ARENA_SIZE
+    end
+    let start = (arena_next + align - 1) / align * align
+    if start + size > arena_end
+        return nil
+    end
+    arena_next = start + size
+    alloc_calls += 1
+    let block: *u8 = start
+    return block
+end
+
+// A bump allocator never reuses memory: freeing only counts.
+#[allocator(free)]
+func arena_free(ptr: *u8, size: u64, align: u64)
+    free_calls += 1
+end
+
+func main()
+    var line = ""
+    for word in ["bump", "allocator", "arena"]
+        line = "{line}{word} "
+    end
+    print(line)
+    let used = alloc_calls > 0
+    let freed = free_calls > 0
+    print("allocations came from the arena: {used}")
+    print("frees were counted: {freed}")
+end

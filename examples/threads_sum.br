@@ -1,0 +1,38 @@
+// Threads: a parallel sum. Workers add slices of a shared list and send their partial sums on
+// a channel. The output is the same every run.
+//
+//   brasa-parse examples/threads_sum.br -o threads_sum.exe
+
+package main
+
+use thread
+
+func partial(numbers: shared []long, from: int, to: int, results: Channel<long>)
+    var total: long = 0
+    for i in from..to
+        total += numbers[i]
+    end
+    results.send(total)
+end
+
+func main() -> error
+    var list: []long = []
+    for i in 1..10001
+        list.add(long(i))
+    end
+    let numbers = shared list
+    let results = channel(long)
+    var workers: []thread.Thread = []
+    for w in 0..4
+        workers.add(spawn_thread partial(numbers, w * 2500, (w + 1) * 2500, results))
+    end
+    var sum: long = 0
+    for w in 0..4
+        sum += results.receive()
+    end
+    for t in workers
+        t.join()
+    end
+    print("sum = {sum}")
+    return
+end

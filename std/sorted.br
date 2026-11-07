@@ -2,16 +2,18 @@
 // Brasa standard library: sorted maps and sets
 //
 //     use sorted
-//     let scores: sorted.SortedMap<text, int> = sorted.text_map()
+//     let scores: sorted.SortedMap<text, int> = sorted.map()
 //     scores.put("carla", 70)
 //     scores.put("ana", 90)
 //     print(scores.keys())            // [ana, carla]
 //     print(scores.min() ?? "none")   // ana
 //
 // Balanced (AVL) binary search trees: putting, finding and removing take time proportional
-// to the logarithm of the number of entries. The order is decided by a function
-// `less(a, b)` (true when `a` comes before `b`; it must be a strict order, so `a < b` and
-// not `a <= b`). Two keys are the same key when neither is less than the other.
+// to the logarithm of the number of entries. `sorted.map()` and `sorted.set()` order any key type
+// that is `Ord` (integers, text, records and enums by their derived or declared `compare`);
+// `map_by` and `set_by` take a function `less(a, b)` instead (true when `a` comes before `b`; it
+// must be a strict order, so `a < b` and not `a <= b`). Two keys are the same key when neither is
+// less than the other.
 // =====================================================================
 
 package sorted
@@ -53,14 +55,9 @@ func map_by<K, V>(less: func(K, K) -> bool) -> SortedMap<K, V>
     return SortedMap { root: nil, less: less, size: 0 }
 end
 
-// An empty map with integer keys, smallest first.
-func int_map<V>() -> SortedMap<int, V>
+// An empty map for any key type that is `Ord`, smallest key first.
+func map<K: Ord, V>() -> SortedMap<K, V>
     return SortedMap { root: nil, less: func(a, b) a < b end, size: 0 }
-end
-
-// An empty map with text keys ordered by bytes.
-func text_map<V>() -> SortedMap<text, V>
-    return SortedMap { root: nil, less: func(a, b) text.compare(a, b) < 0 end, size: 0 }
 end
 
 // An empty set ordered by `less`.
@@ -69,15 +66,9 @@ func set_by<T>(less: func(T, T) -> bool) -> SortedSet<T>
     return SortedSet { inner: m }
 end
 
-// An empty set of integers, smallest first.
-func int_set() -> SortedSet<int>
-    let m: SortedMap<int, bool> = SortedMap { root: nil, less: func(a, b) a < b end, size: 0 }
-    return SortedSet { inner: m }
-end
-
-// An empty set of text ordered by bytes.
-func text_set() -> SortedSet<text>
-    let m: SortedMap<text, bool> = SortedMap { root: nil, less: func(a, b) text.compare(a, b) < 0 end, size: 0 }
+// An empty set for any element type that is `Ord`, smallest first.
+func set<T: Ord>() -> SortedSet<T>
+    let m: SortedMap<T, bool> = SortedMap { root: nil, less: func(a, b) a < b end, size: 0 }
     return SortedSet { inner: m }
 end
 
@@ -208,45 +199,45 @@ func remove_node<K, V>(m: SortedMap<K, V>, n: Node<K, V>?, k: K) -> Node<K, V>?
     return balance(n)
 end
 
-func walk_keys<K, V>(n: Node<K, V>?, out: []K)
+func walk_keys<K, V>(n: Node<K, V>?, ref out: []K)
     if n == nil
         return
     end
-    walk_keys(n.left, out)
+    walk_keys(n.left, ref out)
     out.add(n.key)
-    walk_keys(n.right, out)
+    walk_keys(n.right, ref out)
 end
 
-func walk_values<K, V>(n: Node<K, V>?, out: []V)
+func walk_values<K, V>(n: Node<K, V>?, ref out: []V)
     if n == nil
         return
     end
-    walk_values(n.left, out)
+    walk_values(n.left, ref out)
     out.add(n.value)
-    walk_values(n.right, out)
+    walk_values(n.right, ref out)
 end
 
-func walk_entries<K, V>(n: Node<K, V>?, out: []Entry<K, V>)
+func walk_entries<K, V>(n: Node<K, V>?, ref out: []Entry<K, V>)
     if n == nil
         return
     end
-    walk_entries(n.left, out)
+    walk_entries(n.left, ref out)
     out.add(Entry { key: n.key, value: n.value })
-    walk_entries(n.right, out)
+    walk_entries(n.right, ref out)
 end
 
-func walk_range<K, V>(m: SortedMap<K, V>, n: Node<K, V>?, lo: K, hi: K, out: []K)
+func walk_range<K, V>(m: SortedMap<K, V>, n: Node<K, V>?, lo: K, hi: K, ref out: []K)
     if n == nil
         return
     end
     if m.less(lo, n.key)
-        walk_range(m, n.left, lo, hi, out)
+        walk_range(m, n.left, lo, hi, ref out)
     end
     if not m.less(n.key, lo) and m.less(n.key, hi)
         out.add(n.key)
     end
     if m.less(n.key, hi)
-        walk_range(m, n.right, lo, hi, out)
+        walk_range(m, n.right, lo, hi, ref out)
     end
 end
 
@@ -294,21 +285,21 @@ end
 // The keys, smallest first.
 func (m: SortedMap<K, V>) keys() -> []K
     let out: []K = []
-    walk_keys(m.root, out)
+    walk_keys(m.root, ref out)
     return out
 end
 
 // The values, in key order.
 func (m: SortedMap<K, V>) values() -> []V
     let out: []V = []
-    walk_values(m.root, out)
+    walk_values(m.root, ref out)
     return out
 end
 
 // The entries, in key order.
 func (m: SortedMap<K, V>) entries() -> []Entry<K, V>
     let out: []Entry<K, V> = []
-    walk_entries(m.root, out)
+    walk_entries(m.root, ref out)
     return out
 end
 
@@ -371,7 +362,7 @@ end
 // The keys from `lo` up to, but not including, `hi`, smallest first.
 func (m: SortedMap<K, V>) range(lo: K, hi: K) -> []K
     let out: []K = []
-    walk_range(m, m.root, lo, hi, out)
+    walk_range(m, m.root, lo, hi, ref out)
     return out
 end
 

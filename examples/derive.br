@@ -1,0 +1,87 @@
+// Equality, order and hashing come with the types.
+//
+//   brasa-parse examples/derive.br -o derive.exe
+//
+// Records and enums get `eq`, `compare` and `hash` from their fields (the interfaces Eq, Ord and
+// Hash need no `use`), so they work as map keys, set elements and sorted keys, and `==` and `<`
+// work on them. Defining a method of the same name replaces the derived one.
+
+package main
+
+use set
+use sorted
+
+type Fruit = record
+    name: text
+    ripe: bool
+end
+
+type Version = record
+    major: int
+    minor: int
+    patch: int
+end
+
+type Pair = enum
+    None
+    Two(int, int)
+end
+
+type User = record
+    id: int
+    name: text
+end
+
+// Two users are the same user when the ids match, whatever the names.
+func (a: User) eq(b: User) -> bool
+    return a.id == b.id
+end
+
+func (a: User) hash() -> long
+    return long(a.id)
+end
+
+func largest<T: Ord>(a: T, b: T) -> T
+    if a > b
+        return a
+    end
+    return b
+end
+
+func main()
+    // record keys in a map
+    let stock: Map<Fruit, int> = {}
+    stock[Fruit { name: "apples", ripe: true }] = 3
+    stock[Fruit { name: "pears", ripe: false }] = 5
+    stock[Fruit { name: "apples", ripe: true }] += 0
+    print("apples: {stock[Fruit { name: "apples", ripe: true }]}")
+    print("pears: {stock[Fruit { name: "pears", ripe: false }]}")
+
+    // enum values in a set
+    let seen: set.Set<Pair> = set.empty()
+    seen.add(Two(1, 2))
+    seen.add(None)
+    seen.add(Two(1, 2))
+    print("pair seen: {seen.has(Two(1, 2)) and seen.len == 2}")
+
+    // a sorted map of versions: ordered by major, then minor, then patch
+    let releases: sorted.SortedMap<Version, text> = sorted.map()
+    releases.put(Version { major: 2, minor: 1, patch: 0 }, "latest")
+    releases.put(Version { major: 1, minor: 9, patch: 3 }, "old")
+    releases.put(Version { major: 2, minor: 0, patch: 4 }, "mid")
+    let newest = releases.max() ?? Version { major: 0, minor: 0, patch: 0 }
+    print("latest: {newest.major}.{newest.minor}.{newest.patch}")
+
+    // a generic maximum on anything Ord
+    print("bigger: {largest(3, 9)}")
+    print("bigger text: {largest("pear", "apple")}")
+
+    // an overridden eq and hash: one key for one id
+    let a = User { id: 7, name: "ana" }
+    let b = User { id: 7, name: "ana maria" }
+    print("same user: {a == b}")
+    let users: Map<User, int> = {}
+    users[a] = 1
+    users[b] = 2
+    print("users: {users.len}")
+end

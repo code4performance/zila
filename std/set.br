@@ -7,8 +7,9 @@
 //         print("first time")
 //     end
 //
-// A set of text or integers. Elements are kept in the order they were first added, so
-// `to_list` (and a `for` over it) gives the same order every run.
+// A set of any type that is `Hash` (text, integers, records and enums of such types, lists...;
+// a float is not Hash). Elements are kept in the order they were first added, so `to_list`
+// (and a `for` over it) gives the same order every run.
 // =====================================================================
 
 package set
@@ -18,12 +19,12 @@ type Set<T> = record
 end
 
 // An empty set; the element type comes from the expected type.
-func empty<T>() -> Set<T>
+func empty<T: Hash>() -> Set<T>
     return Set { items: {} }
 end
 
 // A set of the elements of `xs`.
-func from_list<T>(xs: []T) -> Set<T>
+func from_list<T: Hash>(xs: []T) -> Set<T>
     let s: Set<T> = Set { items: {} }
     for x in xs
         s.items[x] = true
@@ -74,7 +75,7 @@ func (s: Set<T>) to_list() -> []T
 end
 
 // The elements of `a` and of `b`.
-func union<T>(a: Set<T>, b: Set<T>) -> Set<T>
+func union<T: Hash>(a: Set<T>, b: Set<T>) -> Set<T>
     let out = from_list(a.to_list())
     for x in b.to_list()
         out.add(x)
@@ -83,7 +84,7 @@ func union<T>(a: Set<T>, b: Set<T>) -> Set<T>
 end
 
 // The elements that are in both `a` and `b`.
-func intersect<T>(a: Set<T>, b: Set<T>) -> Set<T>
+func intersect<T: Hash>(a: Set<T>, b: Set<T>) -> Set<T>
     let out: Set<T> = Set { items: {} }
     for x in a.to_list()
         if b.has(x)
@@ -94,7 +95,7 @@ func intersect<T>(a: Set<T>, b: Set<T>) -> Set<T>
 end
 
 // The elements of `a` that are not in `b`.
-func difference<T>(a: Set<T>, b: Set<T>) -> Set<T>
+func difference<T: Hash>(a: Set<T>, b: Set<T>) -> Set<T>
     let out: Set<T> = Set { items: {} }
     for x in a.to_list()
         if not b.has(x)
@@ -105,7 +106,7 @@ func difference<T>(a: Set<T>, b: Set<T>) -> Set<T>
 end
 
 // True when every element of `a` is in `b`.
-func is_subset<T>(a: Set<T>, b: Set<T>) -> bool
+func is_subset<T: Hash>(a: Set<T>, b: Set<T>) -> bool
     for x in a.to_list()
         if not b.has(x)
             return false

@@ -1,0 +1,177 @@
+// =====================================================================
+// Brasa standard library: operating-system threads
+//
+// Written in Brasa. The compiler lowers `spawn_thread f(x)` to
+// `thread.start(func() f(x) end)` after checking that everything the call
+// uses is transferable (see docs/concurrency.html).
+//
+//     let t = spawn_thread work(n)
+//     t.join()
+//
+// Rules:
+//   - `start` runs the closure on a new OS thread (Windows `CreateThread`).
+//   - `Thread.join` blocks the calling thread until that thread has finished.
+//   - When `main` returns the process ends, even if threads are still running.
+//   - Each thread has its own task scheduler (std/task.br); tasks never move.
+//   - A program that uses threads counts references atomically (the compiler
+//     adds `lock` prefixes to the runtime's counters); other programs do not.
+// =====================================================================
+
+package thread
+
+use task
+
+#[link("kernel32")]
+extern "system" func CreateThread(attr: usize, stack: usize, start: extern "system" func(usize), param: usize, flags: u32, id: usize) -> usize
+extern "system" func WaitForSingleObject(handle: usize, ms: u32) -> u32
+extern "system" func CloseHandle(handle: usize) -> i32
+extern "system" func GetCurrentThreadId() -> u32
+extern "system" func Sleep(ms: u32)
+extern "system" func ExitProcess(code: u32)
+
+// A running (or finished) thread. Reference semantics: a copy is the same thread.
+#[shared]
+type Thread = record
+    done: long
+    handle: usize
+    action: func()
+    joiners: long
+end
+
+// One place of the table of threads that were started and have not picked up their closure yet.
+#[shared]
+type Pending = record
+    t: Thread
+    taken: long
+end
+
+// Threads that were started and have not picked up their closure yet. The table has a fixed
+// size, so readers never see it move; a slot is free while its flag is 0.
+let MAX_PENDING = 256
+var slots: []Pending
+var table_lock: long = 0
+
+func fatal(message: text)
+    print("fatal: {message}")
+    unsafe
+        ExitProcess(2)
+    end
+end
+
+// Sets the lock word and returns what it held before (0: the caller owns the lock now).
+func try_lock() -> long
+    var old: long = 0
+    unsafe
+        asm
+            lea rcx, G_thread_table_lock
+            mov eax, 1
+            xchg qword ptr [rcx], rax
+            out rax = old
+        end
+    end
+    return old
+end
+
+func lock_table()
+    while try_lock() != 0
+        unsafe
+            Sleep(0)
+        end
+    end
+end
+
+func unlock_table()
+    table_lock = 0
+end
+
+// Entry point of every new thread: takes its closure out of the table and runs it.
+func entry(index: usize)
+    let k = long(index)
+    let p = slots[k]
+    let t = p.t
+    p.t = nil
+    p.taken = 0
+    t.action()
+    t.action = nil
+    task.thread_exit()
+    // the threads blocked in `join` on this one are runnable now
+    task.dl_enter()
+    t.done = 1
+    let joiners = t.joiners
+    t.joiners = 0
+    task.dl_leave()
+    task.thread_done(joiners)
+end
+
+// Runs `action` on a new thread.
+func start(action: func()) -> Thread
+    let t = Thread{ done: 0, handle: 0, action: action, joiners: 0 }
+    lock_table()
+    if slots.len == 0
+        task.threads_begin()
+        for i in 0..MAX_PENDING
+            slots.add(Pending{})
+        end
+    end
+    var k: long = 0
+    while k < slots.len and slots[k].taken != 0
+        k += 1
+    end
+    if k == slots.len
+        unlock_table()
+        fatal("too many threads are starting at once")
+    end
+    slots[k].taken = 1
+    slots[k].t = t
+    task.thread_started()
+    unlock_table()
+    var h: usize = 0
+    unsafe
+        h = CreateThread(0, 0, entry, usize(k), 0, 0)
+    end
+    if h == 0
+        fatal("cannot create a thread")
+    end
+    t.handle = h
+    return t
+end
+
+// Waits until the thread has finished; its writes are visible afterwards.
+func (t: Thread) join()
+    if t.handle == 0
+        return
+    end
+    task.dl_enter()
+    if t.done == 0
+        t.joiners += 1
+        task.blocked_add(1)
+        task.check_deadlock()
+    end
+    task.dl_leave()
+    unsafe
+        WaitForSingleObject(t.handle, 0xFFFFFFFF)
+        CloseHandle(t.handle)
+    end
+    t.handle = 0
+end
+
+// True once the thread has finished.
+func (t: Thread) finished() -> bool
+    return t.done != 0
+end
+
+// The identifier of the calling thread.
+func id() -> long
+    var r: long = 0
+    unsafe
+        r = long(GetCurrentThreadId())
+    end
+    return r
+end
+
+// Blocks the calling thread (and every task on it) for `ms` milliseconds.
+func sleep(ms: long)
+    unsafe
+        Sleep(u32(ms))
+    end
+end

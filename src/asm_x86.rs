@@ -1162,10 +1162,22 @@ impl<'a> Asm<'a> {
                 self.modrm(ins, if mn == "lgdt" { 2 } else { 3 }, &Rm::Mem(m.clone()))
             }
             "xchg" => {
-                let (Op::Reg(a), Op::Reg(b)) = (&ops[0], &ops[1]) else { return Err("xchg needs two registers".into()) };
-                self.osize(ins, a.size)?;
-                ins.op.push(if a.size == 1 { 0x86 } else { 0x87 });
-                self.modrm(ins, b.code, &Rm::Reg(*a))
+                let (rm, reg) = match (&ops[0], &ops[1]) {
+                    (Op::Reg(a), Op::Reg(b)) => (Rm::Reg(*a), *b),
+                    (Op::Mem(m), Op::Reg(r)) | (Op::Reg(r), Op::Mem(m)) => (Rm::Mem(m.clone()), *r),
+                    _ => return Err("xchg needs a register and a register or memory".into()),
+                };
+                self.osize(ins, reg.size)?;
+                ins.op.push(if reg.size == 1 { 0x86 } else { 0x87 });
+                self.modrm(ins, reg.code, &rm)
+            }
+            "xadd" | "cmpxchg" => {
+                let Op::Reg(r) = &ops[1] else { return Err(format!("{} needs a register as its second operand", mn)) };
+                let (rm, _) = rm_of(&ops[0])?;
+                self.osize(ins, r.size)?;
+                let base = if mn == "xadd" { 0xC0 } else { 0xB0 };
+                ins.op.extend_from_slice(&[0x0F, if r.size == 1 { base } else { base + 1 }]);
+                self.modrm(ins, r.code, &rm)
             }
             "retf" => {
                 ins.op.push(0xCB);
@@ -1673,6 +1685,14 @@ mod tests {
     #[test]
     fn syscall_is_two_bytes() {
         assert_eq!(enc("syscall", 64), [0x0F, 0x05]);
+    }
+
+    #[test]
+    fn atomic_instructions() {
+        assert_eq!(enc("lock xadd qword ptr [rcx], rax", 64), [0xF0, 0x48, 0x0F, 0xC1, 0x01]);
+        assert_eq!(enc("lock cmpxchg qword ptr [rcx], rdx", 64), [0xF0, 0x48, 0x0F, 0xB1, 0x11]);
+        assert_eq!(enc("xchg qword ptr [rcx], rax", 64), [0x48, 0x87, 0x01]);
+        assert_eq!(enc("xchg rax, rcx", 64), [0x48, 0x87, 0xC8]);
     }
 
     #[test]

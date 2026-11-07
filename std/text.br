@@ -4,9 +4,11 @@
 //     use text
 //     let words = text.split("a,b,c", ",")
 //
-// Text is bytes (UTF-8). Searching, splitting, trimming and replacing compare whole byte
-// sequences, so they are correct for UTF-8. `upper` and `lower` only change ASCII letters,
-// and `reverse` reverses bytes.
+// A text is immutable UTF-8: `len` counts bytes, a `char` is one Unicode code point, `for c in s`
+// walks the characters and `s.slice(a, b)` cuts by byte positions (aborting inside a character).
+// Searching, splitting, trimming and replacing compare whole byte sequences, so they are correct
+// for UTF-8. `upper` and `lower` only change ASCII letters; `reverse` and the padding functions
+// work on characters.
 // =====================================================================
 
 package text
@@ -17,6 +19,7 @@ use errors
 // ---- searching ----
 
 // The byte position of the first `part` at or after `from`, or -1.
+#[no_alloc]
 func index_from(s: text, part: text, from: int) -> int
     let n = s.len
     let m = part.len
@@ -26,7 +29,7 @@ func index_from(s: text, part: text, from: int) -> int
     end
     while i + m <= n
         var j = 0
-        while j < m and s[i + j] == part[j]
+        while j < m and s.byte(i + j) == part.byte(j)
             j += 1
         end
         if j == m
@@ -38,10 +41,12 @@ func index_from(s: text, part: text, from: int) -> int
 end
 
 // The byte position of the first `part` in `s`, or -1.
+#[no_alloc]
 func index_of(s: text, part: text) -> int
     return index_from(s, part, 0)
 end
 
+#[no_alloc]
 func contains(s: text, part: text) -> bool
     return index_from(s, part, 0) >= 0
 end
@@ -55,13 +60,14 @@ func ends_with(s: text, suffix: text) -> bool
 end
 
 // -1, 0 or 1: how `a` orders against `b`, comparing byte by byte (shorter first on a tie).
+#[no_alloc]
 func compare(a: text, b: text) -> int
     var i = 0
     while i < a.len and i < b.len
-        if a[i] < b[i]
+        if a.byte(i) < b.byte(i)
             return -1
         end
-        if a[i] > b[i]
+        if a.byte(i) > b.byte(i)
             return 1
         end
         i += 1
@@ -141,7 +147,7 @@ func lines(s: text) -> []text
     end
     for i in 0..count
         let p = pieces[i]
-        if p.len > 0 and p[p.len - 1] == 13
+        if p.len > 0 and p.byte(p.len - 1) == 13
             out.add(p.slice(0, p.len - 1))
         else
             out.add(p)
@@ -179,13 +185,14 @@ end
 
 // ---- trimming and padding ----
 
+#[no_alloc]
 func is_space(b: int) -> bool
     return b == 32 or b == 9 or b == 10 or b == 13
 end
 
 func trim_start(s: text) -> text
     var i = 0
-    while i < s.len and is_space(int(s[i]))
+    while i < s.len and is_space(int(s.byte(i)))
         i += 1
     end
     return s.slice(i, s.len)
@@ -193,7 +200,7 @@ end
 
 func trim_end(s: text) -> text
     var n = s.len
-    while n > 0 and is_space(int(s[n - 1]))
+    while n > 0 and is_space(int(s.byte(n - 1)))
         n -= 1
     end
     return s.slice(0, n)
@@ -204,20 +211,30 @@ func trim(s: text) -> text
     return trim_end(trim_start(s))
 end
 
-// `fill` (one byte) added in front until `s` is `width` bytes long.
-func pad_left(s: text, width: int, fill: text) -> text
-    if s.len >= width
-        return s
+func check_fill(fill: text)
+    if fill.char_count() != 1
+        abort("the padding fill must be exactly one character")
     end
-    return repeat(fill, width - s.len) + s
 end
 
-// `fill` (one byte) added at the end until `s` is `width` bytes long.
-func pad_right(s: text, width: int, fill: text) -> text
-    if s.len >= width
+// `fill` (one character) added in front until `s` is `width` characters long.
+func pad_left(s: text, width: int, fill: text) -> text
+    check_fill(fill)
+    let n = s.char_count()
+    if n >= width
         return s
     end
-    return s + repeat(fill, width - s.len)
+    return repeat(fill, width - n) + s
+end
+
+// `fill` (one character) added at the end until `s` is `width` characters long.
+func pad_right(s: text, width: int, fill: text) -> text
+    check_fill(fill)
+    let n = s.char_count()
+    if n >= width
+        return s
+    end
+    return s + repeat(fill, width - n)
 end
 
 // ---- case and order ----
@@ -227,10 +244,10 @@ func shift_ascii(s: text, lo: int, hi: int, delta: int) -> text
     let parts: []text = []
     var run = 0
     for i in 0..s.len
-        let b = int(s[i])
+        let b = int(s.byte(i))
         if b >= lo and b <= hi
             parts.add(s.slice(run, i))
-            parts.add(chr(b + delta))
+            parts.add(char(b + delta).to_text())
             run = i + 1
         end
     end
@@ -248,13 +265,78 @@ func lower(s: text) -> text
     return shift_ascii(s, 65, 90, 32)
 end
 
-// The bytes in the opposite order.
-func reverse(s: text) -> text
+// The characters of `s` in order.
+func chars(s: text) -> []char
+    let out: []char = []
+    for c in s
+        out.add(c)
+    end
+    return out
+end
+
+// The characters joined into a text: `from_chars(chars(s)) == s`.
+func from_chars(cs: []char) -> text
     let parts: []text = []
-    var i = s.len - 1
+    for c in cs
+        parts.add(c.to_text())
+    end
+    return concat_all(parts)
+end
+
+// The characters in the opposite order: `reverse("ação")` is `oãça`.
+func reverse(s: text) -> text
+    let cs = chars(s)
+    let parts: []text = []
+    var i = cs.len - 1
     while i >= 0
-        parts.add(s.slice(i, i + 1))
+        parts.add(cs[i].to_text())
         i -= 1
+    end
+    return concat_all(parts)
+end
+
+// The text of the UTF-8 bytes `b`, or an error `not valid UTF-8 at byte N` naming where the
+// first bad sequence starts (a bad lead byte, a missing or wrong continuation byte, an overlong
+// encoding, a surrogate or a value above U+10FFFF).
+func from_bytes(b: []byte) -> text or error
+    let parts: []text = []
+    let n = b.len
+    var i = 0
+    while i < n
+        let lead = int(b[i])
+        var more = 0
+        var cp = lead
+        var least = 0
+        if lead >= 194 and lead <= 223
+            more = 1
+            cp = lead - 192
+            least = 128
+        else if lead >= 224 and lead <= 239
+            more = 2
+            cp = lead - 224
+            least = 2048
+        else if lead >= 240 and lead <= 244
+            more = 3
+            cp = lead - 240
+            least = 65536
+        else if lead >= 128
+            return error(errors.InvalidInput, "not valid UTF-8 at byte {i}")
+        end
+        if i + more >= n
+            return error(errors.InvalidInput, "not valid UTF-8 at byte {i}")
+        end
+        for k in 1..more + 1
+            let d = int(b[i + k])
+            if d < 128 or d > 191
+                return error(errors.InvalidInput, "not valid UTF-8 at byte {i}")
+            end
+            cp = cp * 64 + (d - 128)
+        end
+        if cp < least or cp > 1114111 or (cp >= 55296 and cp <= 57343)
+            return error(errors.InvalidInput, "not valid UTF-8 at byte {i}")
+        end
+        parts.add(char(cp).to_text())
+        i += more + 1
     end
     return concat_all(parts)
 end
@@ -276,8 +358,8 @@ func parse_long(s: text) -> long or error
     let bad = "not a whole number: \"" + s + "\""
     var i = 0
     var neg = false
-    if s.len > 0 and (s[0] == 45 or s[0] == 43)
-        neg = s[0] == 45
+    if s.len > 0 and (s.byte(0) == 45 or s.byte(0) == 43)
+        neg = s.byte(0) == 45
         i = 1
     end
     if i >= s.len
@@ -286,7 +368,7 @@ func parse_long(s: text) -> long or error
     let least: long = 0 - 9223372036854775807 - 1
     var acc: long = 0
     while i < s.len
-        let d = int(s[i]) - 48
+        let d = int(s.byte(i)) - 48
         if d < 0 or d > 9
             return error(errors.InvalidInput, bad)
         end
@@ -318,7 +400,7 @@ func copy_big(a: []long) -> []long
 end
 
 // a = a + d, for 0 <= d < 1000000000
-func add_small(a: []long, d: int)
+func add_small(ref a: []long, d: int)
     var carry: long = d
     var i = 0
     while carry > 0
@@ -335,7 +417,7 @@ end
 func big_pow10(n: int) -> []long
     let a = float.big_from(1)
     for i in 0..n
-        float.b_mul(a, 10)
+        float.b_mul(ref a, 10)
     end
     return a
 end
@@ -349,8 +431,8 @@ func parse_float(s: text) -> float or error
     let least: long = 0 - 9223372036854775807 - 1
     var i = 0
     var neg = false
-    if s.len > 0 and (s[0] == 45 or s[0] == 43)
-        neg = s[0] == 45
+    if s.len > 0 and (s.byte(0) == 45 or s.byte(0) == 43)
+        neg = s.byte(0) == 45
         i = 1
     end
     let word = s.slice(i, s.len)
@@ -372,7 +454,7 @@ func parse_float(s: text) -> float or error
     var j = i
     var more = true
     while j < s.len and more
-        let c = int(s[j])
+        let c = int(s.byte(j))
         if c == 46
             if seen_dot
                 return error(errors.InvalidInput, bad)
@@ -396,18 +478,18 @@ func parse_float(s: text) -> float or error
         return error(errors.InvalidInput, bad)
     end
     var e10 = 0
-    if j < s.len and (s[j] == 101 or s[j] == 69)
+    if j < s.len and (s.byte(j) == 101 or s.byte(j) == 69)
         j += 1
         var eneg = false
-        if j < s.len and (s[j] == 45 or s[j] == 43)
-            eneg = s[j] == 45
+        if j < s.len and (s.byte(j) == 45 or s.byte(j) == 43)
+            eneg = s.byte(j) == 45
             j += 1
         end
         if j >= s.len
             return error(errors.InvalidInput, bad)
         end
         while j < s.len
-            let c = int(s[j])
+            let c = int(s.byte(j))
             if c < 48 or c > 57
                 return error(errors.InvalidInput, bad)
             end
@@ -445,14 +527,14 @@ func parse_float(s: text) -> float or error
     // value = num / den
     let num = float.big_from(0)
     for d in digits
-        float.b_mul(num, 10)
-        add_small(num, d)
+        float.b_mul(ref num, 10)
+        add_small(ref num, d)
     end
     var den = float.big_from(1)
     if exp10 >= 0
         var k10 = exp10
         while k10 > 0
-            float.b_mul(num, 10)
+            float.b_mul(ref num, 10)
             k10 -= 1
         end
     else
@@ -472,17 +554,17 @@ func parse_float(s: text) -> float or error
         let n2 = copy_big(num)
         d2 = copy_big(den)
         if k < 0
-            float.b_mul_pow2(n2, 0 - k)
+            float.b_mul_pow2(ref n2, 0 - k)
         else
-            float.b_mul_pow2(d2, k)
+            float.b_mul_pow2(ref d2, k)
         end
         q = 0
         var bit = 54
         while bit >= 0
             let t = copy_big(d2)
-            float.b_mul_pow2(t, bit)
+            float.b_mul_pow2(ref t, bit)
             if float.b_cmp(n2, t) >= 0
-                float.b_sub(n2, t)
+                float.b_sub(ref n2, t)
                 q += 1 << bit
             end
             bit -= 1

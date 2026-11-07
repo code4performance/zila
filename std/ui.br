@@ -594,8 +594,8 @@ func script_step(window: Frame, line: text)
         end
     end
     if word == "type" and box != 0
-        for i in 0..rest.len
-            change_text(box, be_text(box) + rest.slice(i, i + 1))
+        for c in rest
+            change_text(box, be_text(box) + c.to_text())
         end
     end
     if word == "select" and list != 0
@@ -609,7 +609,9 @@ func script_step(window: Frame, line: text)
         if rest == "backspace" and box != 0
             let now = be_text(box)
             if now.len > 0
-                change_text(box, now.slice(0, now.len - 1))
+                let cs = text.chars(now)
+                cs.take()
+                change_text(box, text.from_chars(cs))
             end
         end
         if rest == "enter"

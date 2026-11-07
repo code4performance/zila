@@ -170,7 +170,7 @@ fn every_checking_site_reports_the_message_and_the_line_of_the_failing_statement
     // the statement under test is the last of each body: line 5 for two lines, 6 for three
     let cases: [(&str, &str, &str); 9] = [
         ("let xs = [1, 2, 3]\nvar i = 5\nprint(xs[i])", "index out of bounds", "6"),
-        ("let t = \"abc\"\nvar i = 9\nprint(t[i])", "index out of bounds", "6"),
+        ("let t = \"abc\"\nvar i = 9\nprint(t.byte(i))", "byte position 9 is out of range", "6"),
         ("let xs = [1, 2, 3]\nvar i = 5\nxs[i] = 1", "index out of bounds", "6"),
         ("var z = 0\nprint(10 / z)", "division by zero", "5"),
         ("var z = 0\nprint(10 % z)", "division by zero", "5"),

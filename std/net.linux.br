@@ -97,7 +97,7 @@ func parse_ip(host: text) -> long
     for i in 0..host.len + 1
         var ch: long = 46
         if i < host.len
-            ch = long(host[i])
+            ch = long(host.byte(i))
         end
         if ch == 46
             if digits == 0 or value > 255
@@ -230,7 +230,7 @@ func dns_query(host: text, id: long) -> sys.Buf
     var at = a + 12
     var start: long = 0
     for i in 0..host.len + 1
-        if i == host.len or long(host[i]) == 46
+        if i == host.len or long(host.byte(i)) == 46
             let n = i - start
             if n == 0 or n > 63
                 if i == host.len and n == 0 and i > 0
@@ -241,7 +241,7 @@ func dns_query(host: text, id: long) -> sys.Buf
             sys.put8(at, n)
             at += 1
             for k in 0..n
-                sys.put8(at + k, long(host[start + k]))
+                sys.put8(at + k, long(host.byte(start + k)))
             end
             at += n
             start = i + 1
@@ -436,7 +436,7 @@ async func ask_tcp(server: text, host: text, port: long = 53) -> Answer or error
         end
         data = data + piece
         if want < 0 and data.len >= 2
-            want = long(data[0]) * 256 + long(data[1])
+            want = long(data.byte(0)) * 256 + long(data.byte(1))
         end
         if want >= 0 and data.len >= want + 2
             break
@@ -461,7 +461,7 @@ async func lookup(host: text) -> text or error
         return known
     end
     var name = host
-    if name.len > 1 and long(name[name.len - 1]) == 46
+    if name.len > 1 and long(name.byte(name.len - 1)) == 46
         name = name.slice(0, name.len - 1)
     end
     if name.len == 0 or name.len > 253
@@ -488,7 +488,7 @@ async func lookup(host: text) -> text or error
                 missing = true
                 break
             end
-            if a.value.len > 0 and long(a.value[0]) == 61
+            if a.value.len > 0 and long(a.value.byte(0)) == 61
                 next = a.value.slice(1, a.value.len)
                 break
             end

@@ -116,10 +116,10 @@ type Conn = record
 end
 
 func (ref conn: Conn) drop()
-    release(conn)
+    release(ref conn)
 end
 
-func release(conn: Conn)
+func release(ref conn: Conn)
     if conn.ready
         unsafe
             DeleteSecurityContext(&conn.ctx)
@@ -142,7 +142,7 @@ end
 func put_text(dest: *u8, data: text, from: long, n: long)
     unsafe
         for i in 0..n
-            dest[i] = data[from + i]
+            dest[i] = data.byte(from + i)
         end
     end
 end
@@ -201,25 +201,25 @@ async func connect(host: text, port: long) -> Conn or error
         end
         if rc == SEC_E_OK
             if ib.kind1 == u32(SECBUFFER_EXTRA)
-                conn.pending = inbuf.slice(inbuf.len - long(ib.cb1), inbuf.len)
+                conn.pending = inbuf.__raw_slice(inbuf.len - long(ib.cb1), inbuf.len)
             end
             break
         end
         if rc == SEC_I_CONTINUE_NEEDED
             if ib.kind1 == u32(SECBUFFER_EXTRA)
-                inbuf = inbuf.slice(inbuf.len - long(ib.cb1), inbuf.len)
+                inbuf = inbuf.__raw_slice(inbuf.len - long(ib.cb1), inbuf.len)
             else
                 inbuf = ""
             end
         else
             if rc != SEC_E_INCOMPLETE_MESSAGE
-                release(conn)
+                release(ref conn)
                 return sys.error_for(rc, "TLS handshake with {host} failed")
             end
         end
         let more = try await raw.read(16384)
         if more.len == 0
-            release(conn)
+            release(ref conn)
             return error(errors.ConnectionReset, "TLS handshake with {host} failed: the connection was closed")
         end
         inbuf = inbuf + more
@@ -228,7 +228,7 @@ async func connect(host: text, port: long) -> Conn or error
         rc = code_of(QueryContextAttributesA(&conn.ctx, u32(SECPKG_ATTR_STREAM_SIZES), &conn.sizes))
     end
     if rc != SEC_E_OK
-        release(conn)
+        release(ref conn)
         return sys.error_for(rc, "TLS: cannot read the stream sizes")
     end
     return conn
@@ -286,8 +286,8 @@ async func (conn: Conn) read(max: long) -> text or error
             if long(n) > max
                 n = int(max)
             end
-            let out = conn.plain.slice(0, n)
-            conn.plain = conn.plain.slice(n, conn.plain.len)
+            let out = conn.plain.__raw_slice(0, n)
+            conn.plain = conn.plain.__raw_slice(n, conn.plain.len)
             return out
         end
         if not conn.ready
@@ -329,7 +329,7 @@ async func (conn: Conn) read(max: long) -> text or error
                 if bufs.kind3 == u32(SECBUFFER_EXTRA)
                     extra = long(bufs.cb3)
                 end
-                conn.pending = conn.pending.slice(conn.pending.len - extra, conn.pending.len)
+                conn.pending = conn.pending.__raw_slice(conn.pending.len - extra, conn.pending.len)
             else
                 if rc == SEC_I_CONTEXT_EXPIRED
                     conn.pending = ""
@@ -362,6 +362,6 @@ end
 
 // Closes the connection now.
 async func (conn: Conn) close()
-    release(conn)
+    release(ref conn)
     await conn.raw.close()
 end

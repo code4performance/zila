@@ -5,15 +5,35 @@ Lets a program store values under keys and find them again quickly, so lookups b
 ## Requirements
 
 ### Requirement: The Map type
-`Map<K, V>` SHALL be a type usable for variables, parameters, return values, record fields and list elements. `K` SHALL be `text` or an integer type, and `V` SHALL be any type the native compiler supports. Any other key type SHALL be rejected at compile time with a message naming the type.
+`Map<K, V>` SHALL be a type usable for variables, parameters, return values, record fields and list elements. `K` SHALL be any type that is `Hash` (and so `Eq`): `text`, integers, `bool`, records and enums whose parts are `Hash`, lists and optionals of such types, and types held by reference (by identity, or by their own `eq` and `hash`). `V` SHALL be any type the native compiler supports. A key type that is not `Hash` SHALL be rejected at compile time with a message naming the type and the reason (for example a `float` field, or an `eq` without a `hash`). Keys are found by `eq` and `hash`, so two keys that are `==` SHALL be one key.
 
 #### Scenario: Valid map type
 - **WHEN** a program declares `var ages: Map<text, int>`
 - **THEN** it compiles
 
+#### Scenario: Record key
+- **WHEN** a program declares `Map<Point, text>` for `type Point = record x: int  y: int end`, stores `m[Point { x: 1, y: 2 }] = "a"` and reads `m[Point { x: 1, y: 2 }]`
+- **THEN** it compiles and prints `a`, and storing again with an equal `Point` replaces the value so that `m.len` is 1
+
+#### Scenario: Enum and list keys
+- **WHEN** a program uses `Map<Shape, int>` for an enum and `Map<[]int, int>`
+- **THEN** both compile and find entries by equal keys
+
 #### Scenario: Unsupported key type
-- **WHEN** a program declares `Map<Point, int>` where `Point` is a record
-- **THEN** compilation fails with an error saying that `Point` cannot be a map key
+- **WHEN** a program declares `Map<Point, int>` where `Point` has a `float` field
+- **THEN** compilation fails with an error saying that `Point` cannot be a map key because field `x: float` is not Hash
+
+#### Scenario: Float key
+- **WHEN** a program declares `Map<float, int>`
+- **THEN** compilation fails with an error saying that `float` cannot be a map key because it is not Hash
+
+#### Scenario: Many record keys
+- **WHEN** a program inserts 100,000 distinct record keys, removes half, and reads the rest
+- **THEN** every remaining key is found, `len` is 50,000 and the program finishes within a few seconds
+
+#### Scenario: Keys are released
+- **WHEN** a function that builds a map with text-holding record keys, replaces, removes and clears entries is called 5000 times
+- **THEN** `live_objects()` afterwards equals the value before
 
 ### Requirement: Map literals
 `{ k1: v1, k2: v2 }` SHALL build a map. The key and value types SHALL come from the expected type when there is one, otherwise from the first pair, and every other pair SHALL match them. `{}` SHALL require an expected type.
@@ -79,13 +99,6 @@ A map SHALL provide the methods `has(key)` (bool), `get(key, default)` (the stor
 - **WHEN** `"b"` is removed from the map above and added again
 - **THEN** a loop prints `a`, `c`, `b`
 
-### Requirement: Maps are shared references
-Assigning a map to another variable or passing it to a function SHALL NOT copy it; changes made through one name SHALL be visible through the others.
-
-#### Scenario: Changed through a parameter
-- **WHEN** a function receives a map and sets a key, and the caller then reads that key
-- **THEN** the caller sees the new value
-
 ### Requirement: Many entries
 A map SHALL keep working correctly as it grows, so that every inserted key is still found after thousands of insertions and removals.
 
@@ -99,3 +112,18 @@ Maps, and the keys and values they own, SHALL be released when no longer used: w
 #### Scenario: Many maps
 - **WHEN** a function that builds a map of texts and records and sets, replaces and removes entries is called 5000 times
 - **THEN** the number of live heap objects afterwards equals the number before
+
+### Requirement: Maps have value semantics
+Assigning a map to another variable or passing it to a function SHALL give the new holder an independent value without copying the entries: the entries are copied by the first write to a map that another holder still has (see `copy-on-write`). A change made through one name SHALL NOT be visible through the others, except through a `ref` parameter or receiver, or when the map is held by a value created with `new` or `shared`.
+
+#### Scenario: Not changed through a parameter
+- **WHEN** a function receives a map (without `ref`) and sets a key, and the caller then reads that key
+- **THEN** the caller does not see the new key
+
+#### Scenario: Changed through a parameter
+- **WHEN** a function receives `ref m: Map<text, int>` and sets a key, and the caller then reads that key
+- **THEN** the caller sees the new value
+
+#### Scenario: Copy is independent
+- **WHEN** a program does `var b = a` for a map `a` and sets `b["x"] = 1`
+- **THEN** `a.has("x")` is false and `b["x"]` is 1

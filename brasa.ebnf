@@ -36,7 +36,7 @@ comment    = '//' { any } EOL | '/*' { any } '*/' ;
    package use type record enum func return var let
    if else match for in while break continue defer spawn asm end async await
    unsafe extern embed new try and or not true false nil
-   bitand bitor bitxor bitnot interface ref self *)
+   bitand bitor bitxor bitnot interface ref self shared spawn_thread *)
 
 
 (* ---------- Program and declarations ---------- *)
@@ -71,7 +71,8 @@ generics   = '<' tparam { ',' tparam } '>' ;
 tparam     = ident [ ':' qname ] ;              (* T: Printable *)
 
 type       = base_type [ '?' ] ;                (* T? = optional value *)
-base_type  = qname [ '<' type { ',' type } '>' ]
+base_type  = qname [ '<' type { ',' type } '>' ]   (* 'Type': a type at compile time, only in comptime code *)
+           | 'shared' type                      (* atomic counts, immutable content; see Semantic rules *)
            | '*' type                           (* raw pointer *)
            | '[' ']' type                       (* slice *)
            | '[' int_lit ']' type               (* fixed array *)
@@ -82,15 +83,19 @@ result     = type [ 'or' 'error' ] | 'error' ;  (* T or error = value or failure
 
 (* ---------- Functions ---------- *)
 
-func_decl  = [ 'async' ] 'func' [ receiver ] ident [ generics ] '(' [ params ] ')'
-             [ '->' result ] body ;     (* 'async': runs as a task, returns Future<T> *)
-receiver   = '(' [ 'ref' ] ident ':' type ')' ;  (* method; no inheritance *)
+func_decl  = [ 'async' | 'comptime' ] 'func' [ receiver ] ident [ generics ] '(' [ params ] ')'
+             [ '->' result ] body ;     (* 'async': runs as a task, returns Future<T>;
+                                           'comptime': runs at build time and returns source text;
+                                           a function with #[generated(gen)] has no body *)
+receiver   = '(' [ 'ref' ] ident ':' type ')' ;  (* method; no inheritance; 'ref' receiver is a borrow *)
 params     = param { ',' param } ;
-param      = [ 'ref' ] ident ':' [ '...' ] type [ '=' expr ] ;   (* '...' = variadic *)
+param      = [ 'comptime' | 'ref' ] ident ':' [ '...' ] type [ '=' expr ] ;   (* '...' = variadic;
+                                           'comptime t: Type' = a type given at compile time *)
 lambda_param = [ 'ref' ] ident [ ':' [ '...' ] type ] [ '=' expr ] ;  (* type may be inferred *)
-                                                (* ref = pass by reference;
-                                                   without it, records are
-                                                   copied (no borrow checker) *)
+                                                (* ref = passing mode: a temporary borrow of
+                                                   the caller's value; it cannot be stored,
+                                                   returned, captured or sent to a task.
+                                                   Without it, records are copied. *)
 body       = { stmt } 'end' ;
 
 
@@ -98,7 +103,7 @@ body       = { stmt } 'end' ;
 
 stmt        = var_decl | const_decl | assign | if_stmt | match_stmt
             | for_stmt | while_stmt | return_stmt | defer_stmt
-            | spawn_stmt | unsafe_stmt | asm_stmt
+            | spawn_stmt | unsafe_stmt | asm_stmt | block_expr
             | 'break' | 'continue' | expr ;
 
 assign      = place assign_op expr ;
@@ -134,7 +139,7 @@ cmp_op     = '==' | '!=' | '<' | '<=' | '>' | '>=' ;
 range_expr = add_expr [ '..' add_expr ] ;
 add_expr   = mul_expr { ( '+' | '-' | 'bitor' | 'bitxor' ) mul_expr } ;
 mul_expr   = unary { ( '*' | '/' | '%' | '<<' | '>>' | 'bitand' ) unary } ;
-unary      = ( 'not' | 'bitnot' | '-' | '&' | '*' | 'try' | 'await' ) unary | postfix ;
+unary      = ( 'not' | 'bitnot' | '-' | '&' | '*' | 'try' | 'await' | 'shared' ) unary | postfix ;
                                                 (* 'await' = wait for a Future<T> and yield T
                                                    (only in an async func or in main) *)
                                                 (* 'try' = propagate a failure to the caller
@@ -147,10 +152,13 @@ postfix    = primary { '.' ident | '?.' ident | '[' expr ']'
 call_args  = '(' [ args ] ')' ;
 args       = arg { ',' arg } ;
 arg        = [ '...' ] [ 'ref' ] [ ident ':' ] expr ;   (* '...' = spread a list *)     (* 'ref' repeated at call
-                                                   site for visibility *)
+                                                   site for visibility; the borrow cannot escape *)
 
 primary    = literal | ident | '(' expr ')' | list_lit | map_lit | record_lit
-           | lambda | if_expr | match_expr | new_expr ;
+           | lambda | if_expr | match_expr | new_expr | spawn_thread_expr | block_expr ;
+block_expr = ident NEWLINE { raw_line } 'end' ;   (* ident must be a #[block] comptime func of an
+                                                     imported package (or of this file); the raw lines
+                                                     are handed to it unchanged *)
 list_lit   = '[' [ expr { ',' expr } ] ']' ;
 map_lit    = '{' [ expr ':' expr { ',' expr ':' expr } ] '}' ;
 record_lit = qname '{' [ field_init { ',' field_init } ] '}' ;
@@ -159,23 +167,39 @@ lambda     = 'func' '(' [ lambda_params ] ')' { stmt } 'end' ;   (* no '->' *)
 lambda_params = lambda_param { ',' lambda_param } ;
 if_expr    = if_stmt ;                          (* value of last expr *)
 match_expr = match_stmt ;
-new_expr   = 'new' type ;
+new_expr   = 'new' record_lit ;                 (* the result has type Rc<T>; see Semantic rules *)
+spawn_thread_expr = 'spawn_thread' call ;      (* statement or expression; the result is a Thread *)
 
 
 (* ---------- Semantic rules (not expressible in EBNF) ---------- *)
 
 (* Types
    - Type inference is local: signatures are explicit, bodies are inferred.
-   - Literals: integer defaults to i32, float to f64; adapt to context.
-   - No implicit numeric coercion: i64(x) is an explicit conversion.
+   - Names: int = i32 and long = i64 are aliases (the same types, not new ones); float = f64.
+     Errors print i32 as int, i64 as long and f64 as float.
+   - Literals: an integer literal defaults to int (= i32), a float literal to float (= f64);
+     both adapt to the type the context expects, and a literal outside the range of its
+     type is an error (a literal above 2147483647 needs a long context).
+   - No implicit lossy coercion: only a widening that keeps every value is implicit (int to
+     long, u32 to i64, ..., in assignment, arguments, returns, fields and binary operands,
+     where the result takes the wider type). Narrowing, signed/unsigned of the same width and
+     integer/float are explicit: int(x), long(x), i16(x), float(x). Generic inference,
+     interface methods and function values need the exact types.
+   - Arithmetic is computed in the operand type and wraps there: int * int wraps at 32 bits
+     even when stored in a long; write long(a) * long(b) for the exact product.
+   - len, element counts and list indices are int; a list, map or text holds at most
+     2147483647 elements (bytes for text) and the program stops past that. Sizes and offsets
+     of files, memory and time are long.
    - 'nil' only exists in T?; flow typing narrows T? to T after a nil check
      or an early return.
    - 'try' (propagate) is only allowed in functions returning 'T or error' or 'error'.
    - match over an enum (or a 'T or error' result: ok(v) / err(e)) must be
      exhaustive unless it contains '_'.
    - async func f() -> T returns Future<T>; `await` yields T, waits without blocking other
-     tasks, and may be used once per future. `await` is allowed only in an `async` function
-     and in `main`; async functions take no `ref` parameters.
+     tasks, and may be used once per future. `await` is allowed in any function, method,
+     lambda or deferred call (it suspends only the current task); it is an error inside a
+     `drop` method and in a function used as a C callback (`#[export]` or an `extern` function
+     type). async functions take no `ref` parameters.
    - An 'error' has a kind (ErrorKind), a message (text) and a cause (error?, nil for a
      root error). error("message") has kind errors.Other; error(kind, "message") and
      error(kind, "message", cause) say more; e.kind, e.message and e.cause read the parts;
@@ -189,8 +213,18 @@ new_expr   = 'new' type ;
    - Interfaces are structural: a type satisfies an interface if it has
      the methods with matching signatures.
    Values
+   - `new T{ ... }` makes a shared, reference-counted object of type Rc<T> (copying an Rc shares it);
+     Weak<T> holds one without keeping it alive: weak(x) makes it, w.upgrade() returns Rc<T>? (nil once
+     the object is gone); a cycle made only of Rc references is not freed.
+   - `shared e` / `shared T`: a value of a record, list, map or text type whose reference counts are atomic;
+     its content is immutable (assigning through it or calling a mutating method is an error that
+     suggests Mutex<T>). `spawn_thread f(args)` runs f on a new OS thread and yields a Thread;
+     every argument and captured variable must be transferable: numbers, bool, text, enums, closures,
+     and records, lists, maps, channels of transferable types; Rc<T>, Weak<T>, raw pointers and futures
+     are not. A mutable global var used by the spawned function must be a Mutex or an Atomic.
    - record/array values are copied on assignment and call;
-     'ref' passes by reference (no borrow checker, no lifetimes).
+     'ref' = temporary borrow of a value that lives elsewhere; it cannot be stored, returned,
+     captured or sent to a task (use `new T{ ... }`, an Rc<T>, for a value that must live longer).
    - Integer arithmetic wraps at the width of the type.
    - 'text' is immutable UTF-8 (pointer + length); []u8 for raw bytes.
    FFI & Assembly
@@ -208,8 +242,9 @@ new_expr   = 'new' type ;
    - `#[naked]` omits function prologue/epilogue for custom low-level routines. *)
 
 
-(* ---------- Stdlib syntax extensions ---------- *)
+(* ---------- Compile-time attributes ---------- *)
 
-(* use web *)
-html_expr  = 'html' { html_node } 'end' ;
-(* html_node: markup with {expr} interpolation, and 'for'/'if' blocks *)
+(* The attributes the compiler recognises for comptime: #[derive(name, ...)] on a type runs the
+   #[derive] comptime funcs of those names; #[generated(gen)] on a body-less func with a
+   'comptime t: Type' parameter makes gen write its body for each type; #[block] marks a
+   comptime func that gives a package its own block syntax (block_expr). *)

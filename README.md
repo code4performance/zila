@@ -25,7 +25,7 @@ Most languages ask you to choose: simple *or* fast, safe *or* low-level, friendl
 
 - **Readable first.** Blocks end with `end`. No braces, no semicolons. A beginner can read a program top to bottom.
 - **Honest about failure.** There are no exceptions. A function that can fail says so in its type (`T or error`), and `try` is the one visible place where a failure travels up.
-- **Honest about cost.** Memory is freed by reference counting, the moment the last reference goes away. Unsafe code must say `unsafe`. Allocation only happens in known operations (text interpolation, list and map literals, closures that capture, `spawn`, `new`). Two guarantees are specified and not built yet: `#[no_alloc]`, where the compiler proves a function allocates nothing, and `#[allocator]`, to replace the allocator (what a kernel needs). See [what is planned](#how-brasa-will-evolve).
+- **Honest about cost.** Memory is freed by reference counting, the moment the last reference goes away. Unsafe code must say `unsafe`. Allocation only happens in known operations (text interpolation, list and map literals, closures that capture, `spawn`, `new`). Two guarantees are built: `#[no_alloc]`, where the compiler proves a function allocates nothing (the allocating operations are a fixed list, and the standard library is checked like your own code), and `#[allocator]`, to replace the allocator on every target (the kernel's heap is written that way). See [what is planned](#how-brasa-will-evolve).
 - **One language from app to metal.** The same syntax writes an everyday program, a native window, a C library binding, and a kernel.
 - **A toolchain you can read.** Lexer, parser, code generator, assembler, standard library: all in this repository, all small enough to understand.
 - **Built in the open.** Every language change goes through a written proposal, a spec with testable scenarios, and tests. See [GOVERNANCE.md](GOVERNANCE.md).
@@ -84,7 +84,122 @@ doubled in parallel: 10 and 12
 failed: cannot parse 'bad'
 ```
 
-A few things to notice: `match` must cover every case of an `enum`; `try` hands a failure to the caller; the two `double` calls run at the same time, so the program waits about 100 ms, not 200; and `await` never blocks the other tasks.
+A few things to notice: `match` must cover every case of an `enum`; `try` hands a failure to the caller; the two `double` calls run at the same time, so the program waits about 100 ms, not 200; and `await` never blocks the other tasks (it works in any function, not only `async` ones).
+
+---
+
+## The language in pictures
+
+Five diagrams that explain how Brasa works. (GitHub draws them for you.)
+
+### 1. From source to machine code
+
+There is no LLVM, no linker and no virtual machine in the middle: the compiler writes the executable itself.
+
+```mermaid
+flowchart LR
+    SRC["program.br"] --> LEX["Lexer<br/>(tokens, interpolation)"]
+    LEX --> PAR["Parser<br/>(syntax tree)"]
+    PAR --> CT{"comptime<br/>generators?"}
+    CT -- yes --> GEN["Run generators<br/>(native, cached)"]
+    GEN --> PAR
+    CT -- no --> CHK["Type check<br/>+ ref / no_alloc checks"]
+    CHK --> OPT["Optimizer<br/>(fold, inline, registers)"]
+    OPT --> CG["x86-64 code generator"]
+    CG --> ASM["Built-in x86 assembler"]
+    ASM --> PE["Windows .exe<br/>(PE writer)"]
+    ASM --> ELF["Linux ELF"]
+    ASM --> IMG["Bootable disk image<br/>(Brasa OS)"]
+```
+
+### 2. Errors are values
+
+A function that can fail says so in its type. `try` is the one visible place where a failure travels up.
+
+```mermaid
+flowchart TD
+    CALL["let n = try parse(s)"] --> R{"parse returns<br/>int or error"}
+    R -- "ok(v)" --> USE["n = v<br/>execution continues"]
+    R -- "err(e)" --> UP["current function returns e<br/>(defers run, memory is freed)"]
+    UP --> CALLER["caller receives the error<br/>e.kind, e.message, e.cause"]
+    CALLER --> M{"match result"}
+    M -- "ok(v)" --> HANDLE1["use the value"]
+    M -- "err(e)" --> HANDLE2["handle it, or try again upward"]
+```
+
+### 3. Memory without a garbage collector
+
+Values are reference counted and freed the instant the last reference goes away. Writes copy first when a value is shared.
+
+```mermaid
+flowchart TD
+    A["let a = [1, 2, 3]<br/>count = 1"] --> B["let b = a<br/>count = 2 (cheap, no copy)"]
+    B --> W{"write to b?"}
+    W -- "yes, still shared" --> COPY["copy on write<br/>b gets its own list, a.count = 1"]
+    W -- "no" --> SHARE["a and b share one list"]
+    COPY --> END1["scope ends: each count drops"]
+    SHARE --> END1
+    END1 --> FREE["count = 0: freed immediately<br/>(also on return, break, try)"]
+    FREE --> DROP["records with drop()<br/>close files and sockets"]
+```
+
+```mermaid
+flowchart LR
+    P["Parent<br/>new Node"] -- "strong Rc" --> C["Child<br/>new Node"]
+    C -. "Weak: weak(parent)" .-> P
+    C --> U["w.upgrade()<br/>returns Node? (none if freed)"]
+```
+
+A cycle made only of strong `Rc` references is not collected; break it with `Weak`.
+
+### 4. Concurrency: tasks on one scheduler
+
+Tasks are lightweight and cooperative. `await` hands the thread to another task instead of blocking it.
+
+```mermaid
+sequenceDiagram
+    participant M as main
+    participant S as Scheduler (Brasa code)
+    participant A as double(5)
+    participant B as double(6)
+    M->>S: let a = double(5)
+    M->>S: let b = double(6)
+    S->>A: run
+    A->>S: await sleep(100)
+    S->>B: run
+    B->>S: await sleep(100)
+    Note over S: both timers wait together<br/>about 100 ms in total, not 200
+    S-->>A: timer fired, resume
+    S-->>B: timer fired, resume
+    M->>S: await a, await b
+    S-->>M: 10 and 12
+```
+
+### 5. Compile-time code generation
+
+A `comptime func` is a native program that reads a type and writes Brasa source, which the compiler compiles in place.
+
+```mermaid
+flowchart LR
+    T["type User = record<br/>name: text, age: int"] --> ATTR["#[derive(describe)]"]
+    ATTR --> REF["Type value<br/>name, kind, fields,<br/>variants, attributes"]
+    REF --> GENF["comptime func describe(t: Type)<br/>(checked subset, time and output limits)"]
+    GENF --> SRC2["generated Brasa source"]
+    SRC2 --> BACK["compiled with your code<br/>errors point at your code"]
+    GENF -. "result cache on disk" .-> GENF
+```
+
+### One language, from app to metal
+
+```mermaid
+flowchart TB
+    L["Brasa<br/>one syntax, one compiler"]
+    L --> APP["Everyday programs<br/>text, lists, maps, generics"]
+    L --> NET["Concurrent programs<br/>spawn, async/await, net, tls, fs"]
+    L --> GUI["Native windows<br/>use ui (Win32 or X11)"]
+    L --> FFI["C bindings<br/>extern, #[c_layout], unsafe"]
+    L --> OS["Kernel and boot sector<br/>asm, #[naked], no runtime"]
+```
 
 ---
 
@@ -102,13 +217,15 @@ Everything in this list is implemented and covered by tests.
 **A predictable memory model**
 
 - Reference counting frees every heap value as soon as it is unreachable, including on early `return`, `break` and `try`. There are no GC pauses.
-- Records are copied when assigned (value semantics); `ref` shares. Records can define `drop` to close files and sockets automatically.
+- Records, lists and maps have value semantics: assigning or passing one is cheap (reference counted), and writing to a list or map that another holder still has copies it first (copy on write). `ref` shares the caller's value; to fill a caller's list, take it as `ref xs: []int` and call `fill(ref xs)`. Records can define `drop` to close files and sockets automatically.
 - `live_objects()` reports how many heap objects are alive, so leaks are easy to test for. The test suite uses it to check that thousands of tasks and connections leave nothing behind.
-- Reference cycles are not collected: avoid building them.
-- `use text`, `use list`, `use format`, `use set` and `use sorted`: `split`, `join`, `trim`, `replace`, `parse_int`, `parse_float`, `map`, `filter`, `reduce`, `sort_by` and more, written in Brasa on top of generics.
+- `new Node{ ... }` makes a shared, reference-counted object (`Rc<Node>`); `Weak<T>` with `weak(x)` and `w.upgrade()` holds one without keeping it alive, so trees with parent links, observers and graphs are freed completely. A cycle made only of `Rc` references is still not collected: break it with `Weak`. See `examples/tree.br`.
+- `use text`, `use list`, `use format`, `use set` and `use sorted`: `split`, `join`, `trim`, `replace`, `parse_int`, `parse_float`, `map`, `filter`, `reduce`, `sort_by`, `sort`, `contains` and more, written in Brasa on top of generics.
 - Generics and interfaces: `func first<T>(items: []T) -> T`, `type Stack<T>`, and `T: Printable` bounds with structural interfaces. The compiler infers the type arguments (or you write them: `empty<int>()`) and makes one copy per type used.
+- **Compile-time code generation**: a `comptime func` receives a `Type` (name, kind, fields, variants, attributes) and returns Brasa source that the compiler compiles in place. `#[derive(name)]` adds methods to a type, `#[generated(gen)]` writes the body of a function for each type it is called with, and `#[block]` gives a library its own block syntax (a name, raw lines, `end`). Generators are native programs built and run for the build machine, limited to a checked, deterministic subset of the language (no I/O, `spawn`, `unsafe`, `asm` or global variables), with a time and output limit, hygiene for generated names, errors that point at your code, and an on-disk cache. See [docs/syntax.html](docs/syntax.html#comptime) and `examples/comptime.br`.
 - `float` (`f64`) and `f32`: arithmetic, comparisons that follow IEEE 754, explicit `float(n)` / `int(x)` conversions, shortest-text printing, `use math`, and C calls through the XMM registers.
-- `Map<K, V>` stores values under text or integer keys: `{ "a": 1 }` literals, `m[key]`, `has`, `get(key, default)`, `remove`, and `for key, value in m` in insertion order.
+- `Map<K, V>` stores values under any key type that is `Hash` (text, integers, records, enums, lists): `{ "a": 1 }` literals, `m[key]`, `has`, `get(key, default)`, `remove`, and `for key, value in m` in insertion order.
+- `Eq`, `Ord` and `Hash` are standard interfaces (no `use`) that the compiler derives for records and enums and you can override with `eq`, `compare` and `hash` methods; `==`, `<` and the other comparison operators work on such types and on a bounded `T: Ord`, and `Self` names the satisfying type inside an interface.
 - `defer call(...)` runs a call when the function ends, however it ends (`return`, the end of the body, or a failed `try`), last in first out.
 
 **Types that help**
@@ -121,7 +238,7 @@ Everything in this list is implemented and covered by tests.
 - Lightweight tasks (`spawn`) and channels, plus `async` / `await` with futures.
 - Timers (`sleep`, `timeout`), `await all(...)`, `await race(...)`, file I/O, TCP and UDP networking, asynchronous name lookup and TLS that never block the other tasks, all on one scheduler written in Brasa. The same code runs on Windows and on Linux.
 - Measured: 2000 tasks at once, and 100 simultaneous TCP clients, each answered correctly.
-- Tasks are cooperative and run on one thread; there is no parallelism yet.
+- Tasks are cooperative and each thread has its own scheduler. For parallelism, `spawn_thread` starts an operating-system thread (Windows), `shared` makes data that threads may read (atomic reference counts, immutable content), and `sync.Mutex<T>` and `sync.Atomic` change it; the compiler decides what may cross to another thread from the types and names the field that cannot. Programs that use no threads pay nothing.
 
 **A standard library written in Brasa**
 
@@ -183,8 +300,9 @@ Brasa is **pre-alpha**. The design is settling, but breaking changes are still p
 | `async` / `await`, timers, files, TCP, UDP | ✅ Works |
 | Floating point | ✅ Works: `float`/`f64`/`f32`, `use math`, C calls, on Windows and Linux |
 | Generics and interfaces | ✅ Works: generic functions and records, inferred type arguments, structural interfaces as bounds |
-| Maps (`Map<K, V>`) | ✅ Works: text and integer keys, insertion order |
-| Text, list, format, set and sorted libraries | ✅ `use text`, `use list`, `use format` (`%` templates, padding, hex, thousands, and `format.fmt` for values of any type with `%(08x)`, `%(>10,)` and `%(.2f)`, native only), `use set`, `use sorted` (sorted maps and sets, ordered by a function) and `use bufio` (the buffers behind line reading and buffered writing in `fs` and `net`). More to come |
+| Maps (`Map<K, V>`) | ✅ Works: any `Hash` key (text, integers, records, enums, lists), insertion order |
+| Text, list, format, set and sorted libraries | ✅ `use text`, `use list`, `use format` (`%` templates, padding, hex, thousands, and `format.fmt` for values of any type with `%(08x)`, `%(>10,)` and `%(.2f)`, native only), `use set`, `use sorted` (sorted maps and sets, ordered by `compare` or by a function), `use derive` (`hash_combine`) and `use bufio` (the buffers behind line reading and buffered writing in `fs` and `net`). More to come |
+| Text and characters | ✅ A `char` type; `len` counts bytes, `for c in s` walks characters, `slice` cuts by bytes and aborts inside a character, `s.bytes()`, `s.byte(i)`, `s.char_count()`, `text.chars`, `text.from_bytes`; `reverse` and `pad_*` work on characters. **Breaking:** `s[i]` on a text and `chr(n)` are gone (use `s.byte(i)`, `for c in s`, `char(n).to_text()`) |
 | Optimizer | 🔧 Constant folding, direct operands, compare-and-branch, peephole cleanups, integer variables in registers and inlining of small functions (`--no-opt` turns them off) |
 | Formatter (`--fmt`, `--fmt-check`) | ✅ Standard style for `.br` files; only whitespace changes, comments kept |
 | Test runner (`--test`, `#[test]`, `assert`, `assert_eq`) | ✅ Runs the tests of a file natively and reports `ok`/`FAIL` with the line |
@@ -192,6 +310,7 @@ Brasa is **pre-alpha**. The design is settling, but breaking changes are still p
 | VS Code extension | ✅ Highlighting, syntax errors and formatting through the language server (package it with `npx @vscode/vsce package`; the manual smoke test is still open) |
 | TLS (`use tls`) | ✅ HTTPS client on Windows (SChannel) and Linux (OpenSSL 3), with certificate and host-name checks. Server side: ⏳ not started |
 | Windows and controls (`use ui`) | ✅ One API on both systems: native on Windows, drawn on X11 on Linux |
+| Compile-time reflection (`comptime func`, `#[derive]`, `#[generated]`, blocks) | ✅ Works: the `Type` API, derives, type-indexed functions and block syntax, the checked comptime subset, limits, hygiene, source-mapped errors, a result cache and `--comptime-*` options. Libraries that use it (`json`, `web`) and the package manager: ⏳ not started |
 | Package manager | ⏳ Specified (`add-package-manager`), not started |
 | Linux x86-64 (`--target linux`) | ✅ ELF written by the compiler (no linker; static unless the program calls C): the language and every library, `ui` included (drawn on an X11 display), with the same output as Windows (tasks, `async`, files, TCP/UDP, DNS, calling C) |
 | macOS, ARM64, Android, iOS | ⏳ Not started |
@@ -206,8 +325,7 @@ Every item below is an [OpenSpec](openspec) change that is already written (prop
 
 | Change | What it does |
 |---|---|
-| `add-int-long-aliases` | `int` becomes `i32` and `long` is `i64` (the code, docs and grammar all say `int`, but the compiler uses 64 bits today). **Breaking.** |
-| `add-text-bytes-and-char` | A `char` type and explicit text access: `s[i]` goes away in favor of `s.bytes()`, `for c in s` walks characters, and cutting text in the middle of a character is an error. **Breaking.** |
+| `add-int-long-aliases` | `int` is `i32` and `long` is `i64`: aliases of the sized types, with lossless widening (`int` goes into a `long`), 32-bit `int` arithmetic, `int` lengths and indices, and `long` for sizes and times. **Breaking.** |
 | `add-error-kind` | Errors carry a *kind* (`NotFound`, `PermissionDenied`, ...), a message and a cause, so programs stop comparing text. New `use errors`. **The code is in the working tree**; the change is open until archived. **Breaking.** |
 | `remove-panic-add-abort` | `panic` becomes `abort` (there are no exceptions, so the name should not suggest them), integer arithmetic wraps everywhere, and `checked_add` and friends return `int or error`. **Breaking.** |
 | `add-visibility-pub` | `pub`: declarations are private by default, so libraries can hide their helpers. **Breaking.** |
@@ -228,12 +346,12 @@ Every item below is an [OpenSpec](openspec) change that is already written (prop
 |---|---|
 | `remove-async-coloring` | `await` is allowed in any function, so a plain function can call something that waits. Nothing that compiles today stops compiling. |
 | `add-threads-and-shared` | Real parallelism: `shared T` with atomic reference counts, `spawn_thread`, thread-safe channels, one cooperative scheduler per thread. |
+| *(planned, stage 2)* | A work-stealing scheduler that moves tasks between threads, parallel `async`, a thread pool in the library, condition variables and read-write locks; the Linux thread layer (`clone` and `futex`). |
 
 **Metaprogramming and libraries**
 
 | Change | What it does |
 |---|---|
-| `add-comptime-reflection` | `comptime func` and a read-only `Type` API: a library can generate code for a type (`#[derive(...)]`, templates) without changing the compiler. |
 | `add-json` | `use json`: dynamic values, typed `json.parse(T, text)` and `json.encode`, derived through reflection. |
 | `add-web` | `use web`: an HTTP/1.1 server with routing, middleware, JSON helpers and error-to-status mapping, on top of `net`, `tls` and `json`. |
 | `add-package-manager` | A `brasa.toml` manifest, a lock file, `--init`, `--add <git-url>`, a cache outside the project, and `use name.path` across packages. |
@@ -336,6 +454,7 @@ src/
   pe.rs            the Windows PE writer
   regalloc.rs      register allocation for the optimizer
   fmt.rs, testrun.rs, lsp.rs   the formatter, the test runner, the language server
+  comptime.rs, comptime/   compile-time code generation: reflection data, subset check, generator driver and cache, expansion
   cli.rs, docs.rs  command-line options; the documentation generator
 std/               standard library, written in Brasa: ui, task, future, fs, net, tls, sys, text, list, format, set, sorted, bufio (and ws, internal to net); `*.linux.br` are the Linux layers
 os/                Brasa OS: boot.br (boot sector) and kernel.br

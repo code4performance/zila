@@ -46,7 +46,7 @@ pub fn format_source(src: &str) -> Result<String, String> {
     let (_, layout, toks, comments) = parse_with_layout(&text).map_err(|d| format!("{}:{}: {}", d.line, d.col, d.msg))?;
     let out = render(&text, &toks, &comments, &layout);
     // the program must not change
-    let (toks2, comments2) = Lexer::new(&out).tokenize_all().map_err(|d| format!("formatting would change the program ({}:{}: {})", d.line, d.col, d.msg))?;
+    let (toks2, comments2) = Lexer::new(&out).with_blocks(crate::comptime::block_names(&out)).tokenize_all().map_err(|d| format!("formatting would change the program ({}:{}: {})", d.line, d.col, d.msg))?;
     let same_toks = toks.len() == toks2.len() && toks.iter().zip(&toks2).all(|(a, b)| tok_eq(&a.tok, &b.tok));
     let chars: Vec<char> = text.chars().collect();
     let out_chars: Vec<char> = out.chars().collect();
@@ -278,7 +278,25 @@ fn render(text: &str, toks: &[Token], comments: &[Comment], layout: &Layout) -> 
                 let _ = had_space;
                 s.push_str(gap);
             }
-            s.push_str(&slice(e.start, e.end));
+            match e.kind {
+                // a block form: its lines are not Brasa and stay byte for byte; only the closing
+                // `end` is aligned with the line that opens the block
+                Kind::Tok(ti) if matches!(toks[ti].tok, Tok::Block { .. }) => {
+                    let whole: String = cs[e.start..e.end].iter().collect();
+                    let mut parts: Vec<&str> = whole.split('\n').collect();
+                    parts.pop();
+                    let first = parts.remove(0);
+                    s.push_str(first.trim_end());
+                    for p in parts {
+                        s.push('\n');
+                        s.push_str(p);
+                    }
+                    s.push('\n');
+                    s.push_str(&" ".repeat(cols[li]));
+                    s.push_str("end");
+                }
+                _ => s.push_str(&slice(e.start, e.end)),
+            }
         }
         out.push(s);
     }

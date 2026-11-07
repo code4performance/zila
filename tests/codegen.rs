@@ -10,7 +10,7 @@ fn asm(src: &str) -> Result<String, String> {
 
 #[test]
 fn examples_compile() {
-    for p in ["examples/hello.br", "examples/ui.br"] {
+    for p in ["examples/hello.br", "examples/ui.br", "examples/unicode.br"] {
         let src = std::fs::read_to_string(p).unwrap();
         let a = asm(&src).unwrap_or_else(|e| panic!("{}: {}", p, e));
         assert!(a.contains("brasa_start proc"), "{}", p);
@@ -50,7 +50,7 @@ fn let_is_immutable() {
 fn type_errors_are_reported_with_line() {
     let e = asm("package main\nfunc f(s: text)\nend\nfunc main()\n    f(42)\nend\n").unwrap_err();
     assert!(e.starts_with("main.br:5:"), "{}", e);
-    assert!(e.contains("expected text, found i64"), "{}", e);
+    assert!(e.contains("expected text, found int"), "{}", e);
 }
 
 #[test]
@@ -92,7 +92,7 @@ fn spawn_pulls_in_the_task_library() {
 }
 
 #[test]
-fn await_needs_an_async_function_or_main() {
+fn await_is_allowed_in_a_plain_function() {
     let e = asm("package main
 async func g() -> int
     return 1
@@ -102,8 +102,8 @@ func helper() -> int
 end
 func main()
 end
-").unwrap_err();
-    assert!(e.contains("`await` can only be used inside an `async func` or inside `main`"), "{}", e);
+").unwrap();
+    assert!(e.contains("helper"), "{}", e);
 }
 
 #[test]
@@ -128,4 +128,19 @@ fn raw_and_quoted_asm_lines_compile_to_the_same_code() {
     let (a, b) = (asm(raw).unwrap(), asm(quoted).unwrap());
     assert!(a.contains("in al, dx") && a.contains("movzx eax, al"), "{}", a);
     assert_eq!(a, b);
+}
+
+#[test]
+fn async_methods_cannot_take_a_ref_receiver() {
+    let src = "package main
+type R = record
+    x: int
+end
+async func (ref s: R) g()
+end
+func main()
+end
+";
+    let e = asm(src).unwrap_err();
+    assert!(e.contains("cannot take `ref` parameters"), "{}", e);
 }

@@ -481,8 +481,8 @@ func script_step(window: Frame, line: text)
         end
     end
     if word == "type" and box != 0
-        for i in 0..rest.len
-            change_text(box, be_text(box) + rest.slice(i, i + 1))
+        for c in rest
+            change_text(box, be_text(box) + c.to_text())
         end
     end
     if word == "select" and list != 0
@@ -496,7 +496,9 @@ func script_step(window: Frame, line: text)
         if rest == "backspace" and box != 0
             let now = be_text(box)
             if now.len > 0
-                change_text(box, now.slice(0, now.len - 1))
+                let cs = text.chars(now)
+                cs.take()
+                change_text(box, text.from_chars(cs))
             end
         end
         if rest == "enter"
@@ -664,9 +666,36 @@ func get16s(addr: long) -> long
     return v
 end
 
+// The nearest character boundary at or before byte `n` of `s` (a text is cut between characters).
+func boundary_down(s: text, n: long) -> long
+    var at = n
+    if at < 0
+        return 0
+    end
+    if at > s.len
+        return s.len
+    end
+    while at > 0 and at < s.len and (int(s.byte(at)) bitand 192) == 128
+        at -= 1
+    end
+    return at
+end
+
+// The nearest character boundary at or after byte `n` of `s`.
+func boundary_up(s: text, n: long) -> long
+    var at = n
+    if at > s.len
+        return s.len
+    end
+    while at < s.len and (int(s.byte(at)) bitand 192) == 128
+        at += 1
+    end
+    return at
+end
+
 func put_text(addr: long, s: text)
     for i in 0..s.len
-        sys.put8(addr + i, long(s[i]))
+        sys.put8(addr + i, long(s.byte(i)))
     end
 end
 
@@ -760,7 +789,7 @@ func env(name: text) -> text
         var same = stop - start > name.len
         var i: long = 0
         while same and i < name.len
-            if sys.get8(long(b.ptr) + start + i) != long(name[i])
+            if sys.get8(long(b.ptr) + start + i) != long(name.byte(i))
                 same = false
             end
             i += 1
@@ -814,12 +843,12 @@ func read_cookie(number: text) -> text
                 ok = false
                 break
             end
-            let n = long(f[p]) * 256 + long(f[p + 1])
+            let n = long(f.byte(p)) * 256 + long(f.byte(p + 1))
             if p + 2 + n > f.len
                 ok = false
                 break
             end
-            fields.add(f.slice(p + 2, p + 2 + n))
+            fields.add(f.__raw_slice(p + 2, p + 2 + n))
             p += 2 + n
         end
         if not ok
@@ -1048,8 +1077,8 @@ func be_window(title: text, width: i32, height: i32) -> usize
     // a new window means there is something to wait for again
     quit = false
     let id = new_rid()
-    let w = scale(width, screen_dpi)
-    let h = scale(height, screen_dpi)
+    let w = scale(width, i32(screen_dpi))
+    let h = scale(height, i32(screen_dpi))
     // CreateWindow: depth 0 copies the parent's; two values follow (background pixel, event mask)
     let cw = req(1, 0, 10)
     put32(cw + 4, id)
@@ -1321,7 +1350,7 @@ end
 func draw_text(target: long, x: long, baseline: long, s: text, fg: long, bg: long)
     var shown = s
     if shown.len > 255
-        shown = s.slice(0, 255)
+        shown = s.slice(0, boundary_down(s, 255))
     end
     if shown.len == 0
         return
@@ -1418,7 +1447,7 @@ func paint_widget(target: long, i: long, win: Win)
         if widgets[i].caret > room
             first = widgets[i].caret - room
         end
-        draw_text(target, x + 4, baseline_in(y, h), widgets[i].text.slice(first, widgets[i].text.len), C_TEXT, C_FIELD)
+        draw_text(target, x + 4, baseline_in(y, h), widgets[i].text.slice(boundary_down(widgets[i].text, first), widgets[i].text.len), C_TEXT, C_FIELD)
         if focused
             fill(target, x + 4 + (widgets[i].caret - first) * CHAR_W, y + 4, 1, h - 8, C_TEXT)
         end
@@ -1576,17 +1605,18 @@ func edit_key(i: long, sym: long, typed: text)
     let old = widgets[i].text
     let caret = widgets[i].caret
     if sym == KS_BACKSPACE and caret > 0
-        user_text(i, old.slice(0, caret - 1) + old.slice(caret, old.len), caret - 1)
+        let to = boundary_down(old, caret - 1)
+        user_text(i, old.slice(0, to) + old.slice(caret, old.len), to)
     end
     if sym == KS_DELETE and caret < old.len
-        user_text(i, old.slice(0, caret) + old.slice(caret + 1, old.len), caret)
+        user_text(i, old.slice(0, caret) + old.slice(boundary_up(old, caret + 1), old.len), caret)
     end
     if sym == KS_LEFT and caret > 0
-        widgets[i].caret = caret - 1
+        widgets[i].caret = boundary_down(old, caret - 1)
         mark_dirty(widgets[i].win)
     end
     if sym == KS_RIGHT and caret < old.len
-        widgets[i].caret = caret + 1
+        widgets[i].caret = boundary_up(old, caret + 1)
         mark_dirty(widgets[i].win)
     end
     if sym == KS_HOME

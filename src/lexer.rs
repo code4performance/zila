@@ -34,6 +34,9 @@ pub enum Tok {
     Float(f64),
     Char(char),
     Text(Vec<StrPart>),
+    /// A block form: `name`, raw lines, `end` (spec `comptime-reflection`). `raw` is the text
+    /// between the name line and the `end` line, unchanged.
+    Block { name: String, raw: String },
     Newline,
     Eof,
 }
@@ -60,7 +63,8 @@ pub const KEYWORDS: &[&str] = &[
     "package", "use", "type", "record", "enum", "interface", "func", "return", "var",
     "let", "if", "else", "match", "for", "in", "while", "break", "continue", "defer", "spawn",
     "end", "unsafe", "extern", "embed", "new", "and", "or", "not", "true", "false", "nil",
-    "bitand", "bitor", "bitxor", "bitnot", "ref", "self", "asm", "try", "async", "await",
+    "bitand", "bitor", "bitxor", "bitnot", "ref", "self", "asm", "try", "async", "await", "comptime",
+    "shared", "spawn_thread",
 ];
 
 /// Longest operators first.
@@ -81,6 +85,8 @@ pub struct Lexer {
     /// Offset where the token being read starts.
     tok_start: usize,
     comments: Vec<Comment>,
+    /// Names of `#[block]` functions of the imported packages (see `comptime::block_names`).
+    blocks: std::collections::HashSet<String>,
 }
 
 impl Lexer {
@@ -90,7 +96,13 @@ impl Lexer {
 
     /// Start counting from a given position (used for interpolations).
     pub fn at(src: &str, line: u32, col: u32) -> Self {
-        Lexer { chars: src.chars().collect(), pos: 0, line, col, out: Vec::new(), in_asm: false, tok_start: 0, comments: Vec::new() }
+        Lexer { chars: src.chars().collect(), pos: 0, line, col, out: Vec::new(), in_asm: false, tok_start: 0, comments: Vec::new(), blocks: std::collections::HashSet::new() }
+    }
+
+    /// The names that start a block form when alone at the end of a line.
+    pub fn with_blocks(mut self, blocks: std::collections::HashSet<String>) -> Self {
+        self.blocks = blocks;
+        self
     }
 
     fn peek(&self) -> Option<char> {
@@ -195,6 +207,18 @@ impl Lexer {
                         Some(k) => Tok::Kw(k),
                         None => Tok::Ident(s),
                     };
+                    if let Tok::Ident(name) = &tok {
+                        let after_dot_or_decl = matches!(
+                            self.out.last().map(|t| &t.tok),
+                            Some(Tok::Op(".")) | Some(Tok::Op("?.")) | Some(Tok::Kw("func")) | Some(Tok::Kw("type")) | Some(Tok::Kw("use")) | Some(Tok::Kw("package"))
+                        );
+                        if self.blocks.contains(name) && !after_dot_or_decl && self.rest_of_line_is_blank() {
+                            let name = name.clone();
+                            let raw = self.block_lines(&name, line, col)?;
+                            self.push(Tok::Block { name, raw }, line, col);
+                            continue;
+                        }
+                    }
                     let starts_block = matches!(tok, Tok::Kw("asm")) && self.rest_of_line_is_blank();
                     self.push(tok, line, col);
                     if starts_block {
@@ -214,6 +238,42 @@ impl Lexer {
         }
         self.push(Tok::Eof, line, col);
         Ok((self.out, self.comments))
+    }
+
+    /// After a block name: skips the rest of that line and returns the raw lines up to a line that
+    /// is only `end`. Stops at the end of the `end` line's text (its newline is left to the
+    /// main loop).
+    fn block_lines(&mut self, name: &str, line: u32, col: u32) -> Result<String, Diag> {
+        while let Some(c) = self.peek() {
+            if c == '\n' {
+                break;
+            }
+            self.bump();
+        }
+        let mut lines: Vec<String> = Vec::new();
+        loop {
+            if self.peek().is_none() {
+                return Err(Diag { line, col, msg: format!("block '{}' is not closed with 'end'", name) });
+            }
+            self.bump(); // the newline before this line
+            let mut i = self.pos;
+            while i < self.chars.len() && self.chars[i] != '\n' {
+                i += 1;
+            }
+            let text: String = self.chars[self.pos..i].iter().collect();
+            let text = text.trim_end_matches('\r').to_string();
+            while self.pos < i {
+                self.bump();
+            }
+            if text.trim() == "end" {
+                return Ok(lines.join("
+"));
+            }
+            lines.push(text);
+            if self.peek().is_none() {
+                return Err(Diag { line, col, msg: format!("block '{}' is not closed with 'end'", name) });
+            }
+        }
     }
 
     /// Only blanks or a `//` comment follow on this line.

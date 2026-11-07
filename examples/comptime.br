@@ -1,0 +1,87 @@
+// Compile-time code generation: a function that writes code for your types.
+//
+//   brasa-parse examples/comptime.br -o comptime.exe
+//
+// A `comptime func` receives a `Type` (what the compiler knows about a type: its name, kind,
+// fields, variants and attributes) and returns Brasa source text. The compiler builds the
+// generators into a program for this machine, runs it while compiling, and compiles what it
+// returned as if you had written it:
+//
+//   #[derive(name)]   on a type: adds the declarations the derive `name` generates (methods)
+//   #[generated(g)]   on a function without a body: `g` writes the body for each type it is called with
+//   #[block]          a function that gives a name its own block syntax: the name, raw lines, `end`
+//
+// Generators may only use text, lists, maps, records, enums, loops and calls to code that does
+// the same: no files, network, clock, `spawn`, `unsafe`, `asm` or global variables.
+
+package main
+
+use reflect
+use text
+
+type Point = record
+    x: int
+    y: int
+end
+
+type Config = record
+    port: int
+    name: text
+end
+
+// `#[derive(describe)]` gives a type a `describe()` method that lists its fields.
+#[derive]
+comptime func describe(t: Type) -> text
+    var parts = ""
+    for f in t.fields()
+        if parts != ""
+            parts = parts + ", "
+        end
+        parts = parts + "{f.name}=\{v.{f.name}\}"
+    end
+    return "func (v: {t.name()}) describe() -> text\n    return \"{t.name()}({parts})\"\nend\n"
+end
+
+// A function whose body is written by `zero_gen` for each type it is called with.
+#[generated(zero_gen)]
+func zero(comptime t: Type) -> t
+
+comptime func zero_gen(t: Type) -> text
+    var fields = ""
+    for f in t.fields()
+        var value = "0"
+        if f.ty.kind() == "text"
+            value = "\"\""
+        end
+        if fields != ""
+            fields = fields + ", "
+        end
+        fields = fields + "{f.name}: {value}"
+    end
+    return "return t \{ {fields} \}"
+end
+
+// A block: everything between the name and `end` is handed to `shout` as text.
+#[block]
+comptime func shout(raw: text) -> text
+    return "\"{text.upper(text.trim(raw))}\""
+end
+
+#[derive(describe)]
+type Pair = record
+    left: text
+    right: text
+end
+
+func main()
+    let p = Point{ x: 3, y: 4 }
+    let pair = Pair{ left: "a", right: "b" }
+    print(pair.describe())
+    let c = zero(Config)
+    print("zero(Config): port {c.port}, name length {c.name.len}")
+    let banner = shout
+        hello from a block
+    end
+    print(banner)
+    print(p.x + p.y)
+end

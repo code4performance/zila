@@ -48,6 +48,8 @@ pub struct FuncDecl {
     pub body: Block,
     /// `async func`: runs as its own task and returns a `Future<T>`
     pub is_async: bool,
+    /// `comptime func`: runs at build time and returns source text
+    pub comptime: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -72,6 +74,8 @@ pub struct Param {
     pub ty: Option<Type>,
     pub variadic: bool,
     pub default: Option<Expr>,
+    /// `comptime t: Type`: a type given at compile time
+    pub comptime: bool,
 }
 
 /// Return type: `T`, `T!` or `!`.
@@ -113,12 +117,17 @@ pub struct Field {
     pub attrs: Vec<Attr>,
     pub name: String,
     pub ty: Type,
+    pub line: u32,
 }
 
 #[derive(Debug, Clone)]
 pub struct Variant {
+    pub attrs: Vec<Attr>,
     pub name: String,
     pub fields: Vec<Type>,
+    /// The names of the payload fields (`Circle(r: float)`); empty text for a positional one.
+    pub field_names: Vec<String>,
+    pub line: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -133,6 +142,8 @@ pub enum Type {
     Named { path: Vec<String>, args: Vec<Type> },
     Optional(Box<Type>),
     Pointer(Box<Type>),
+    /// `shared T`: atomic reference counts, immutable content.
+    Shared(Box<Type>),
     Slice(Box<Type>),
     Array(u64, Box<Type>),
     /// `abi` is set for `extern "C" func(...)` (callable from C).
@@ -183,6 +194,8 @@ pub enum StmtKind {
     While { cond: Expr, body: Block },
     Break,
     Continue,
+    /// A block form standing alone on a line; replaced by statements before code generation.
+    Block { name: String, raw: String },
     Expr(Expr),
 }
 
@@ -208,7 +221,12 @@ pub enum ExprKind {
     /// `if` / `else if` / `else`; usable as a statement or a value.
     If { branches: Vec<(Expr, Block)>, else_body: Option<Block> },
     Match { scrutinee: Box<Expr>, arms: Vec<MatchArm> },
-    New(Type),
+    /// `new T{ ... }`: the operand is always an `ExprKind::Record`.
+    New(Box<Expr>),
+    /// `shared e`: `e` made visible to several threads (atomic counts, immutable content).
+    Shared(Box<Expr>),
+    /// `spawn_thread f(args)`: runs the call on a new OS thread and yields a `Thread`.
+    SpawnThread(Box<Expr>),
     Unary { op: &'static str, expr: Box<Expr> },
     Binary { op: &'static str, lhs: Box<Expr>, rhs: Box<Expr> },
     /// `a.b` or, with `safe`, `a?.b`
@@ -222,6 +240,8 @@ pub enum ExprKind {
     Propagate(Box<Expr>),
     /// `await e`: wait for a `Future<T>` without blocking other tasks
     Await(Box<Expr>),
+    /// A block form used as an expression; replaced by the expansion before code generation.
+    Block { name: String, raw: String },
 }
 
 #[derive(Debug, Clone)]

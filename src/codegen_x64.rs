@@ -20,9 +20,15 @@
 //! - `text`: `[len: u64][bytes...][0]` (always NUL-terminated, so `c.cstr(t)`
 //!   is just `t + 8`).
 //! - records: C layout (declaration order, natural alignment). Value
-//!   semantics: a record read from a variable/field/list is deep-copied when
-//!   it is stored somewhere else. `ref` parameters and receivers share it.
-//! - `[]T`: `[len][cap][data*][elements_are_heap]`, shared by reference.
+//!   semantics: a record read from a variable/field/list is copied (`B_copy_*`,
+//!   a shallow copy: nested plain records are copied, lists, maps and text are
+//!   retained) when it is stored somewhere else. `ref` parameters and receivers share it.
+//! - `[]T`: `[len][cap][data*][elements_are_heap]`. A list (and a map) is shared by
+//!   reference counting but has value semantics through copy on write: every write
+//!   goes through the writer's own place (`write_place`), which runs `rt_list_unique`
+//!   / `rt_map_unique` first: when the count is above 1 the list is copied one level
+//!   into the place (plain-record elements with `B_copy_*`, others retained). A `ref`
+//!   list or map parameter is passed as the address of the caller's slot.
 //! - enums: a number when no variant has data, otherwise `[tag][fields...]`.
 //! - `T or error`: a box `[error][value]`; `error` is `[message][kind][cause]` (the cause is an
 //!   `error` or 0). An `ErrorKind` is an interned text `package.Name`: equal names, same object.
@@ -37,6 +43,10 @@ use crate::parser::parse_source;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 type R<T> = Result<T, String>;
+
+#[path = "derive_ops.rs"]
+mod derive_ops;
+use derive_ops::Cap;
 
 /// The Linux layer of a library: `std/<name>.linux.br`, used instead of `std/<name>.br` when the
 /// target is Linux. Libraries that touch the operating system have one.
@@ -54,7 +64,7 @@ pub fn std_linux_source(name: &str) -> Option<&'static str> {
 
 /// Libraries that are written on the Windows API and need a Linux layer to be used on Linux.
 /// `ws` never gets one: it is internal to `net` on Windows.
-const OS_LIBRARIES: &[&str] = &["task", "fs", "net", "sys", "tls", "ui"];
+const OS_LIBRARIES: &[&str] = &["task", "fs", "net", "sys", "tls", "ui", "thread", "sync"];
 
 /// The source of library `name` for a target: the Linux layer on Linux when there is one.
 pub fn std_source_for(name: &str, target: Target) -> Option<&'static str> {
@@ -72,6 +82,8 @@ pub fn std_source(name: &str) -> Option<&'static str> {
         "ui" => Some(include_str!("../std/ui.br")),
         "task" => Some(include_str!("../std/task.br")),
         "future" => Some(include_str!("../std/future.br")),
+        "thread" => Some(include_str!("../std/thread.br")),
+        "sync" => Some(include_str!("../std/sync.br")),
         "fs" => Some(include_str!("../std/fs.br")),
         "net" => Some(include_str!("../std/net.br")),
         "sys" => Some(include_str!("../std/sys.br")),
@@ -86,6 +98,8 @@ pub fn std_source(name: &str) -> Option<&'static str> {
         "set" => Some(include_str!("../std/set.br")),
         "sorted" => Some(include_str!("../std/sorted.br")),
         "bufio" => Some(include_str!("../std/bufio.br")),
+        "derive" => Some(include_str!("../std/derive.br")),
+        "reflect" => Some(include_str!("../std/reflect.br")),
         _ => None,
     }
 }
@@ -105,6 +119,8 @@ enum Ty {
     /// `f32` (bits 32) and `f64`/`float` (bits 64). Held in rax as the raw IEEE bits.
     Float { bits: u8 },
     Text,
+    /// `char`: a Unicode scalar value, held zero-extended in 32 bits.
+    Char,
     Rec(String),
     Enum(String),
     List(Box<Ty>),
@@ -120,6 +136,10 @@ enum Ty {
     Chan(Box<Ty>),
     /// `Future<T>`: a handle to the result of an `async func` (`T` may be `Void`).
     Future(Box<Ty>),
+    /// `Rc<T>`: a shared, reference-counted record created by `new T{ ... }` (`T` is a record).
+    Rc(Box<Ty>),
+    /// `Weak<T>`: a counted handle to the weak cell of an `Rc<T>`; it does not keep the object alive.
+    Weak(Box<Ty>),
     /// A type parameter while a generic body is checked once: nothing is known about it but its bound
     /// (the qualified name of an interface).
     Param { name: String, bound: Option<String> },
@@ -140,19 +160,20 @@ impl Ty {
         matches!(self, Ty::Float { .. })
     }
     fn is_unsigned(&self) -> bool {
-        matches!(self, Ty::Int { signed: false, .. } | Ty::Ptr(_))
+        matches!(self, Ty::Int { signed: false, .. } | Ty::Char | Ty::Ptr(_))
     }
     /// Size in memory (record fields, pointer targets).
     fn size(&self) -> u32 {
         match self {
             Ty::Bool => 1,
+            Ty::Char => 4,
             Ty::Int { bits, .. } => *bits as u32 / 8,
             Ty::Float { bits } => *bits as u32 / 8,
             _ => 8,
         }
     }
     fn nullable(&self) -> bool {
-        matches!(self, Ty::Nil | Ty::Text | Ty::Err | Ty::Rec(_) | Ty::List(_) | Ty::Map(..) | Ty::Ptr(_) | Ty::Func { .. } | Ty::Chan(_) | Ty::Param { .. })
+        matches!(self, Ty::Nil | Ty::Text | Ty::Err | Ty::Rec(_) | Ty::List(_) | Ty::Map(..) | Ty::Ptr(_) | Ty::Func { .. } | Ty::Chan(_) | Ty::Param { .. } | Ty::Rc(_) | Ty::Weak(_))
     }
     fn show(&self) -> String {
         match self {
@@ -165,6 +186,7 @@ impl Ty {
             Ty::Float { bits: 32 } => "f32".into(),
             Ty::Float { .. } => "float".into(),
             Ty::Text => "text".into(),
+            Ty::Char => "char".into(),
             Ty::Rec(n) | Ty::Enum(n) => display_name(n),
             Ty::Param { name, .. } => name.clone(),
             Ty::List(t) => format!("[]{}", t.show()),
@@ -180,6 +202,8 @@ impl Ty {
                 }
             }
             Ty::Chan(t) => format!("Channel<{}>", t.show()),
+            Ty::Rc(t) => format!("Rc<{}>", t.show()),
+            Ty::Weak(t) => format!("Weak<{}>", t.show()),
             Ty::Future(t) => {
                 if **t == Ty::Void {
                     "Future<nothing>".into()
@@ -319,6 +343,11 @@ struct Local {
     /// A parameter of an inlined call whose argument is a literal: the value read from the
     /// variable (the raw bits, as `rax` would hold them), with no slot behind it.
     imm: Option<i64>,
+    /// A `ref` parameter, receiver or lambda parameter: a borrow that must not escape.
+    is_ref: bool,
+    /// A `ref` parameter of list or map type: the slot holds the address of the caller's slot, so a
+    /// write (after `unique`) updates the caller's own variable.
+    ind: bool,
 }
 
 #[derive(Default, Clone)]
@@ -350,7 +379,6 @@ struct FnState {
     /// Slots holding temporaries (`c.cstr`) released at the end of the statement.
     stmt_temps: Vec<i32>,
     /// `await` is allowed here: inside an `async func` and inside `main`.
-    allow_await: bool,
     /// Slot holding the list of deferred closures, and a slot to keep the return value.
     defer_list: Option<i32>,
     defer_save: Option<i32>,
@@ -364,6 +392,8 @@ struct FnState {
     /// Variables kept in registers (by name) and the registers that ended up used.
     regs: HashMap<String, &'static str>,
     used_regs: Vec<&'static str>,
+    /// Names of locals that hold a `shared` value: their content is immutable.
+    shared_locals: HashSet<String>,
 }
 
 impl FnState {
@@ -379,7 +409,6 @@ impl FnState {
             loops: Vec::new(),
             unsafe_depth: 0,
             stmt_temps: Vec::new(),
-            allow_await: false,
             defer_list: None,
             defer_save: None,
             allow_ignored_result: false,
@@ -387,6 +416,7 @@ impl FnState {
             may_own: false,
             regs: HashMap::new(),
             used_regs: Vec::new(),
+            shared_locals: HashSet::new(),
         }
     }
 }
@@ -398,8 +428,10 @@ const INLINE_NODES: usize = 12;
 const INLINE_DEPTH: usize = 4;
 const INLINE_PARAMS: usize = 4;
 
+const TEXT_INDEX_MSG: &str = "text cannot be indexed: use s.bytes() for the bytes, s.slice(a, b) for a piece (byte positions), or for c in s for the characters";
+
 fn plain_scalar(t: &Ty) -> bool {
-    matches!(t, Ty::Int { .. } | Ty::Bool | Ty::Float { .. } | Ty::Ptr(_))
+    matches!(t, Ty::Int { .. } | Ty::Char | Ty::Bool | Ty::Float { .. } | Ty::Ptr(_))
 }
 
 /// The expression of a function that calls may be compiled in place of: an ordinary function
@@ -488,6 +520,16 @@ fn is_int_literal(e: &Expr) -> bool {
     }
 }
 
+/// A number literal, or arithmetic on number literals only (it takes the type its context wants).
+fn is_const_int_expr(e: &Expr) -> bool {
+    match &e.kind {
+        ExprKind::Int(_) => true,
+        ExprKind::Unary { op: "-", expr } => is_const_int_expr(expr),
+        ExprKind::Binary { op, lhs, rhs } if matches!(*op, "+" | "-" | "*" | "/" | "%" | "bitand" | "bitor" | "bitxor" | "<<" | ">>") => is_const_int_expr(lhs) && is_const_int_expr(rhs),
+        _ => false,
+    }
+}
+
 fn is_place(e: &Expr) -> bool {
     matches!(e.kind, ExprKind::Ident(_) | ExprKind::Field { .. } | ExprKind::Index { .. } | ExprKind::Deref(_))
 }
@@ -532,11 +574,19 @@ fn c_type(name: &str) -> Option<Ty> {
     Some(Ty::Int { bits, signed })
 }
 
+/// The record behind an `Rc<T>` (a pointer to the same layout), or the type itself.
+fn rc_view(t: &Ty) -> Ty {
+    match t {
+        Ty::Rc(inner) if matches!(**inner, Ty::Rec(_)) => (**inner).clone(),
+        other => other.clone(),
+    }
+}
+
 /// Key under which the methods of a receiver type are stored.
 fn method_key(t: &Ty) -> String {
     match t {
         Ty::Rec(r) => r.clone(),
-        other => other.show(),
+        other => ty_full(other),
     }
 }
 
@@ -639,11 +689,15 @@ pub struct Compiler {
     /// All optimizations are on (see `CompileOptions`).
     opt: bool,
     test_mode: bool,
+    /// Compiling the program that runs comptime generators: `Type` is `reflect.Type`.
+    driver: bool,
     modules: Vec<Module>,
     imports: HashMap<String, HashSet<String>>,
     rec_decls: HashMap<String, (String, Vec<Field>)>,
     /// `#[shared]` records have reference semantics: never copied on assignment, capture or iteration.
     shared_recs: HashSet<String>,
+    /// records that `new` allocates (they get a `B_rcdrop_*` wrapper); never rolled back
+    rc_recs: HashSet<String>,
     enum_decls: HashMap<String, (String, Vec<Variant>)>,
     enum_payload: HashSet<String>,
     aliases: HashMap<String, (String, Type)>,
@@ -674,7 +728,10 @@ pub struct Compiler {
     fn_closures: BTreeSet<String>,
     labels: usize,
     /// the next `lambda()` is the body of an async function: `await` is allowed in it
-    next_lambda_await: bool,
+    /// symbols of functions whose body contains a direct `await`
+    await_syms: std::collections::HashSet<String>,
+    /// functions marked `#[export]`
+    exported: std::collections::HashSet<String>,
     /// the next `lambda()` shares the records it captures instead of copying them
     next_lambda_share: bool,
     /// the next `lambda()` may ignore the result of a call that can fail
@@ -683,6 +740,8 @@ pub struct Compiler {
     line: u32,
     fs: FnState,
     uses_ui: bool,
+    /// The program uses `shared` or `spawn_thread`: counts and `rt_live` use `lock` instructions.
+    threads: bool,
     // ---- generics and interfaces ----
     /// Generic functions: (module, name) -> declaration and line.
     tmpl_funcs: HashMap<(String, String), (FuncDecl, u32)>,
@@ -706,6 +765,12 @@ pub struct Compiler {
     deferred_bounds: Vec<(Ty, String, u32)>,
     inst_count: usize,
     custom_allocator: Option<crate::noalloc::CustomAllocatorInfo>,
+    /// Methods the compiler wrote itself (derived `eq`, `compare`, `hash`): (type key, name).
+    derived: HashSet<(String, String)>,
+    /// Hash and equality thunks of general map keys, by key type: (hash symbol, equality symbol).
+    map_thunks: BTreeMap<String, (String, String)>,
+    /// Map key types met before every method was known: (key type, line, module).
+    deferred_keys: Vec<(Ty, u32, String)>,
 }
 
 struct Pending {
@@ -733,6 +798,8 @@ struct Snapshot {
     bindings: HashMap<String, Ty>,
     cur_mod: String,
     line: u32,
+    derived: HashSet<(String, String)>,
+    map_thunks: BTreeMap<String, (String, String)>,
 }
 
 impl Compiler {
@@ -741,10 +808,12 @@ impl Compiler {
             target,
             opt: true,
             test_mode: false,
+            driver: crate::comptime::driver_mode(),
             modules: Vec::new(),
             imports: HashMap::new(),
             rec_decls: HashMap::new(),
             shared_recs: HashSet::new(),
+            rc_recs: HashSet::new(),
             enum_decls: HashMap::new(),
             enum_payload: HashSet::new(),
             aliases: HashMap::new(),
@@ -768,13 +837,15 @@ impl Compiler {
             strings: HashMap::new(),
             fn_closures: BTreeSet::new(),
             labels: 0,
-            next_lambda_await: false,
+            await_syms: std::collections::HashSet::new(),
+            exported: std::collections::HashSet::new(),
             next_lambda_share: false,
             next_lambda_ignore_result: false,
             cur_mod: String::new(),
             line: 0,
             fs: FnState::new(Ty::Void, String::new()),
             uses_ui: false,
+            threads: false,
             tmpl_funcs: HashMap::new(),
             tmpl_recs: HashMap::new(),
             tmpl_methods: HashMap::new(),
@@ -787,7 +858,28 @@ impl Compiler {
             deferred_bounds: Vec::new(),
             inst_count: 0,
             custom_allocator: None,
+            derived: HashSet::new(),
+            map_thunks: BTreeMap::new(),
+            deferred_keys: Vec::new(),
         }
+    }
+
+    /// Rejects uses of the ref bindings `refs` that could outlive the call (spec `ref-parameters`).
+    fn check_refs(&mut self, refs: &[(String, bool)], body: &[Stmt]) -> R<()> {
+        match crate::refcheck::check_ref_escapes(refs, body) {
+            Ok(()) => Ok(()),
+            Err((name, line)) => {
+                self.line = line;
+                self.ref_escape(&name)
+            }
+        }
+    }
+
+    fn ref_escape<T>(&self, name: &str) -> R<T> {
+        self.err(format!(
+            "`ref` parameter '{}' cannot escape: it is only a temporary borrow and cannot be stored, returned, captured or sent to a task; use `new T` for a value that must live longer",
+            name
+        ))
     }
 
     fn err<T>(&self, msg: impl Into<String>) -> R<T> {
@@ -849,7 +941,7 @@ impl Compiler {
 
     fn is_rc(&self, t: &Ty) -> bool {
         match t {
-            Ty::Text | Ty::Kind | Ty::Rec(_) | Ty::List(_) | Ty::Map(..) | Ty::Err | Ty::Result(_) | Ty::Chan(_) | Ty::Future(_) => true,
+            Ty::Text | Ty::Kind | Ty::Rec(_) | Ty::List(_) | Ty::Map(..) | Ty::Err | Ty::Result(_) | Ty::Chan(_) | Ty::Future(_) | Ty::Rc(_) | Ty::Weak(_) => true,
             Ty::Func { ext, .. } => !*ext,
             Ty::Enum(q) => self.enum_payload.contains(q),
             _ => false,
@@ -892,22 +984,57 @@ impl Compiler {
     }
 
     /// Checks the key type of a `Map<K, V>` and builds the type.
-    fn map_type(&self, k: Ty, v: Ty) -> R<Ty> {
+    fn map_type(&mut self, k: Ty, v: Ty) -> R<Ty> {
         if self.target == Target::Bare {
             return self.err("maps need the Windows runtime and cannot be used in a bare-metal kernel");
         }
-        if !(k == Ty::Text || k.is_int() || matches!(k, Ty::Param { .. })) {
-            return self.err(format!("{} cannot be a map key; keys are text or integers", k.show()));
+        if !matches!(k, Ty::Param { .. }) {
+            if self.declared {
+                self.check_key(&k)?;
+            } else {
+                self.deferred_keys.push((k.clone(), self.line, self.cur_mod.clone()));
+            }
         }
         Ok(Ty::Map(Box::new(k), Box::new(v)))
     }
 
+    /// A key type must be `Hash`: the error names the type and the reason.
+    fn check_key(&self, k: &Ty) -> R<()> {
+        match self.lacks(k, Cap::Hash) {
+            None => Ok(()),
+            Some((leaf, why)) => {
+                if leaf {
+                    self.err(format!("{} cannot be a map key because it is not Hash ({})", k.show(), why))
+                } else {
+                    self.err(format!("{} cannot be a map key because {}", k.show(), why))
+                }
+            }
+        }
+    }
+
+    /// Keys kept as plain numbers: integers, `bool` and enums without data.
+    fn plain_key(&self, k: &Ty) -> bool {
+        k.is_int() || matches!(k, Ty::Char | Ty::Bool | Ty::Param { .. }) || matches!(k, Ty::Enum(q) if !self.enum_payload.contains(q))
+    }
+
     /// rax = new empty map of type `t`.
-    fn new_map(&mut self, t: &Ty) {
+    fn new_map(&mut self, t: &Ty) -> R<()> {
         let Ty::Map(k, v) = t else { unreachable!() };
-        let flags = (**k == Ty::Text) as i32 | ((self.is_rc(v) as i32) << 1);
+        let mut flags = (self.is_rc(v) as i32) << 1;
+        let mut thunks = None;
+        if **k == Ty::Text {
+            flags |= 1;
+        } else if !self.plain_key(k) {
+            flags |= 12;
+            thunks = Some(self.map_thunks_for(k)?);
+        }
         self.e(format!("mov ecx, {}", flags));
+        if let Some((h, e)) = thunks {
+            self.e(format!("lea rdx, {}", h));
+            self.e(format!("lea r8, {}", e));
+        }
         self.e("call rt_map_new");
+        Ok(())
     }
 
     fn new_list(&mut self, el: &Ty) {
@@ -952,7 +1079,7 @@ impl Compiler {
 
     /// The register the plan gives to variable `name` when its type fits in one.
     fn reg_for(&mut self, name: &str, ty: &Ty) -> Option<&'static str> {
-        if !self.opt || !(ty.is_int() || matches!(ty, Ty::Bool | Ty::Ptr(_))) {
+        if !self.opt || !(ty.is_int() || matches!(ty, Ty::Char | Ty::Bool | Ty::Ptr(_))) {
             return None;
         }
         let r = *self.fs.regs.get(name)?;
@@ -967,6 +1094,10 @@ impl Compiler {
         match (l.reg, l.imm) {
             (_, Some(v)) => self.e(format!("mov {}, {}", dst, imm64(v))),
             (Some(r), _) => self.e(format!("mov {}, {}", dst, r)),
+            (None, _) if l.ind => {
+                self.e(format!("mov {}, qword ptr [rbp - {}]", dst, l.off));
+                self.e(format!("mov {d}, qword ptr [{d}]", d = dst));
+            }
             (None, _) => self.e(format!("mov {}, qword ptr [rbp - {}]", dst, l.off)),
         }
     }
@@ -984,7 +1115,7 @@ impl Compiler {
         let rc = self.is_rc(&ty);
         let reg = self.reg_for(name, &ty);
         let sc = self.fs.scopes.last_mut().unwrap();
-        sc.vars.insert(name.to_string(), Local { off, ty: ty.clone(), mutable, captured: false, reg, imm: None });
+        sc.vars.insert(name.to_string(), Local { off, ty: ty.clone(), mutable, captured: false, reg, imm: None, is_ref: false, ind: false });
         if rc {
             sc.owned.push((off, ty));
             self.fs.may_own = true;
@@ -1106,6 +1237,12 @@ impl Compiler {
     // ---------------- loading & declarations ----------------
 
     fn load(&mut self, main: &File) -> R<()> {
+        // generators run, derives, generated functions and blocks are expanded (comptime-reflection)
+        let expansion = if self.driver { None } else { Some(crate::comptime::expand(main, self.target)?) };
+        let main = match &expansion {
+            Some(x) => &x.main,
+            None => main,
+        };
         let mut queue = vec![(main.package.clone(), main.clone())];
         let mut seen = HashSet::new();
         seen.insert(main.package.clone());
@@ -1119,6 +1256,16 @@ impl Compiler {
                 wanted.push("task".into());
                 wanted.push("future".into());
             }
+            let (uses_shared, uses_spawn) = file_uses_threads(&file);
+            if uses_spawn {
+                if self.target == Target::Bare {
+                    return Err("'spawn_thread' needs operating-system threads: it is not available in a bare-metal kernel".into());
+                }
+                wanted.push("thread".into());
+            }
+            if (uses_shared || uses_spawn) && self.target != Target::Bare {
+                self.threads = true;
+            }
             if name != "float" && file_uses_floats(&file) {
                 if self.target == Target::Bare {
                     return Err("floating point is not available in a bare-metal kernel".into());
@@ -1129,7 +1276,7 @@ impl Compiler {
                 if m == "ws" && name == main.package {
                     return Err("'ws' is internal to 'net' and cannot be used by programs; use 'net' instead".into());
                 }
-                if self.target == Target::Bare && (matches!(m.as_str(), "ui" | "task" | "future" | "fs" | "net" | "sys" | "ws" | "tls")) {
+                if self.target == Target::Bare && (matches!(m.as_str(), "ui" | "task" | "future" | "fs" | "net" | "sys" | "ws" | "tls" | "thread" | "sync")) {
                     return Err(format!("'{}' needs Windows and cannot be used in a bare-metal kernel", m));
                 }
                 if self.target == Target::Linux
@@ -1138,13 +1285,25 @@ impl Compiler {
                     return Err(format!("'{}' is not available on Linux yet (it uses the Windows API)", m));
                 }
                 imps.insert(m.clone());
+                if m == "thread" {
+                    self.threads = true;
+                }
                 if m == "ui" {
                     self.uses_ui = true;
                 }
                 if !seen.contains(&m) {
-                    if let Some(src) = std_source_for(&m, self.target) {
+                    if let Some(src) = crate::comptime::package_source(&m, self.target) {
                         seen.insert(m.clone());
-                        let f = parse_source(src).map_err(|d| format!("std/{}.br:{}:{}: {}", m, d.line, d.col, d.msg))?;
+                        let mut f = parse_source(src).map_err(|d| format!("std/{}.br:{}:{}: {}", m, d.line, d.col, d.msg))?;
+                        // generators run at build time only; generated templates have no body here
+                        let driver = self.driver;
+                        f.decls.retain(|d| match &d.kind {
+                            DeclKind::Func(fd) => !(d.attrs.iter().any(|a| a.name == "generated") || (fd.comptime && !driver)),
+                            _ => true,
+                        });
+                        if let Some(extra) = expansion.as_ref().and_then(|x| x.extra.get(&m)) {
+                            f.decls.extend(extra.iter().cloned());
+                        }
                         queue.push((m.clone(), f));
                     }
                 }
@@ -1155,7 +1314,32 @@ impl Compiler {
         Ok(())
     }
 
+    /// The standard interfaces `Eq`, `Ord` and `Hash`, visible in every package without `use`.
+    fn install_prelude(&mut self) -> R<()> {
+        let src = "package std
+type Eq = interface
+    func eq(self, other: Self) -> bool
+end
+type Ord = interface
+    func compare(self, other: Self) -> int
+end
+type Hash = interface
+    func hash(self) -> long
+end
+";
+        let f = parse_source(src).map_err(|d| format!("prelude: {}", d.msg))?;
+        for d in f.decls {
+            if let DeclKind::Type(td) = d.kind {
+                if let TypeBody::Interface(sigs) = td.body {
+                    self.interfaces.insert(format!("std.{}", td.name), ("std".to_string(), sigs));
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn declare(&mut self) -> R<()> {
+        self.install_prelude()?;
         // Type names first, so records can refer to each other.
         let mods: Vec<(String, File)> = self.modules.iter().map(|m| (m.name.clone(), m.file.clone())).collect();
         for (mname, file) in &mods {
@@ -1164,6 +1348,9 @@ impl Compiler {
                 self.line = d.line;
                 if let DeclKind::Type(td) = &d.kind {
                     let q = format!("{}.{}", mname, td.name);
+                    if td.name == "Rc" || td.name == "Weak" {
+                        return self.err(format!("type '{}' is defined twice: '{}' is a built-in type (shared references)", td.name, td.name));
+                    }
                     if !td.generics.is_empty() {
                         match &td.body {
                             TypeBody::Record(_) => {
@@ -1362,6 +1549,12 @@ impl Compiler {
             }
         }
         self.declared = true;
+        let keys = std::mem::take(&mut self.deferred_keys);
+        for (k, line, m) in keys {
+            self.cur_mod = m;
+            self.line = line;
+            self.check_key(&k)?;
+        }
         let mods: Vec<(String, File)> = self.modules.iter().map(|m| (m.name.clone(), m.file.clone())).collect();
         let mut ifaces = HashSet::new();
         for k in self.interfaces.keys() {
@@ -1389,6 +1582,7 @@ impl Compiler {
 
     fn func_sig(&mut self, m: &str, fd: &FuncDecl) -> R<Sig> {
         if fd.is_async {
+            // spec `ref-parameters`: a task may outlive the caller, so it cannot borrow from it
             if fd.params.iter().any(|p| p.by_ref) || fd.receiver.as_ref().map_or(false, |r| r.by_ref) {
                 return self.err(format!(
                     "async func '{}' cannot take `ref` parameters: the task works on copies; pass a value or a channel",
@@ -1433,9 +1627,12 @@ impl Compiler {
         };
         let sym = match &receiver {
             Some(Ty::Rec(r)) => format!("B_{}_{}", sym_of(r), fd.name),
-            Some(t) => format!("B_T{}_{}", mangle(&t.show()), fd.name),
+            Some(t) => format!("B_T{}_{}", mangle(&ty_full(t)), fd.name),
             _ => format!("B_{}_{}", m, fd.name),
         };
+        if fd_has_await(fd) {
+            self.await_syms.insert(sym.clone());
+        }
         Ok(Sig { sym, module: m.to_string(), params, ret, variadic, c_variadic: false, is_extern: false, receiver })
     }
 
@@ -1444,7 +1641,8 @@ impl Compiler {
         Ok(match &e.kind {
             ExprKind::Bool(_) => Ty::Bool,
             ExprKind::Text(_) => Ty::Text,
-            ExprKind::Int(_) | ExprKind::Char(_) => Ty::int(),
+            ExprKind::Int(_) => Ty::int(),
+            ExprKind::Char(_) => Ty::Char,
             ExprKind::Float(_) => Ty::Float { bits: 64 },
             ExprKind::Record { path, .. } => Ty::Rec(self.record_name(path, m)?),
             ExprKind::Call { callee, .. } => match &callee.kind {
@@ -1500,6 +1698,7 @@ impl Compiler {
 
     fn resolve(&mut self, t: &Type, m: &str) -> R<Ty> {
         match t {
+            Type::Shared(inner) => return self.resolve(inner, m),
             Type::Named { path, args } => {
                 if path.len() == 1 {
                     let n = path[0].as_str();
@@ -1514,6 +1713,7 @@ impl Compiler {
                     match n {
                         "bool" => return Ok(Ty::Bool),
                         "text" => return Ok(Ty::Text),
+                        "char" => return Ok(Ty::Char),
                         "error" => return Ok(Ty::Err),
                         "ErrorKind" => return Ok(Ty::Kind),
                         "float" | "f64" => return Ok(Ty::Float { bits: 64 }),
@@ -1526,6 +1726,13 @@ impl Compiler {
                         }
                         "Channel" if args.len() == 1 => return Ok(Ty::Chan(Box::new(self.resolve(&args[0], m)?))),
                         "Future" if args.len() == 1 => return Ok(Ty::Future(Box::new(self.resolve(&args[0], m)?))),
+                        "Rc" | "Weak" if args.len() == 1 => {
+                            let inner = self.resolve(&args[0], m)?;
+                            if !matches!(inner, Ty::Rec(_) | Ty::Param { .. }) {
+                                return self.err(format!("{}<T> needs a record type, found {}", n, inner.show()));
+                            }
+                            return Ok(if n == "Rc" { Ty::Rc(Box::new(inner)) } else { Ty::Weak(Box::new(inner)) });
+                        }
                         _ => {}
                     }
                 }
@@ -1553,6 +1760,15 @@ impl Compiler {
                 }
                 if let Some((am, at)) = self.aliases.get(&q).cloned() {
                     return self.resolve(&at, &am);
+                }
+                if path.len() == 1 && path[0] == "Self" {
+                    return self.err("`Self` is only valid inside an interface method signature");
+                }
+                if path.len() == 1 && path[0] == "Type" {
+                    if self.driver && self.rec_decls.contains_key("reflect.Type") {
+                        return Ok(Ty::Rec("reflect.Type".to_string()));
+                    }
+                    return self.err("`Type` exists only at compile time: use it in a `comptime func` or as a `comptime` parameter");
                 }
                 self.err(format!("type '{}' is not supported by the native backend", path.join(".")))
             }
@@ -1609,6 +1825,11 @@ impl Compiler {
                 self.line = d.line;
                 if let DeclKind::Func(fd) = &d.kind {
                     if fd.generics.is_empty() && self.generic_receiver(m, fd).is_none() {
+                        if d.attrs.iter().any(|a| a.name == "export") {
+                            if let Some(sg) = self.funcs.get(&(m.to_string(), fd.name.clone())) {
+                                self.exported.insert(sg.sym.clone());
+                            }
+                        }
                         self.gen_func(m, fd, d.attrs.iter().any(|a| a.name == "naked"))?;
                     }
                 }
@@ -1622,6 +1843,11 @@ impl Compiler {
         let enums: Vec<String> = self.enums.keys().cloned().collect();
         for q in enums {
             self.gen_enum_drop(&q);
+        }
+        let mut rcs: Vec<String> = self.rc_recs.iter().filter(|q| self.records.contains_key(*q)).cloned().collect();
+        rcs.sort();
+        for q in rcs {
+            self.gen_rc_drop(&q);
         }
 
         let bare = self.target == Target::Bare;
@@ -1648,7 +1874,8 @@ option casemap:none
         }
         out.push('\n');
         if !bare && !linux {
-            for s in ["ExitProcess", "GetProcessHeap", "HeapAlloc", "HeapFree", "GetStdHandle", "WriteFile", "SetConsoleOutputCP"] {
+            let heap_syms: &[&str] = if self.custom_allocator.is_some() { &[] } else { &["GetProcessHeap", "HeapAlloc", "HeapFree"] };
+            for s in ["ExitProcess", "GetStdHandle", "WriteFile", "SetConsoleOutputCP"].iter().chain(heap_syms.iter()).copied() {
                 self.extern_syms.insert(s.to_string());
                 self.extern_lib.entry(s.to_string()).or_insert_with(|| "kernel32".to_string());
             }
@@ -1704,13 +1931,16 @@ brasa_main_ok:
             start.push_str("brasa_start proc
     and rsp, -16
     sub rsp, 48
-    lea rax, rt_image_end
+");
+            if self.custom_allocator.is_none() {
+                start.push_str("    lea rax, rt_image_end
     add rax, 4095
     and rax, -4096
     mov qword ptr rt_brk, rax
     add rax, 268435456
     mov qword ptr rt_heap_end, rax
 ");
+            }
         } else {
             start.push_str("brasa_start proc
     sub rsp, 40
@@ -1730,19 +1960,33 @@ brasa_main_ok:
 brasa_start endp
 
 ");
+        let custom = self.custom_allocator.clone();
+        let common = match &custom {
+            Some(c) if c.realloc_sym.is_some() => RUNTIME_COMMON.replace(
+                "rt_lp_cap:\n    mov qword ptr [rbp - 24], rax\n",
+                &format!("rt_lp_cap:\n    mov qword ptr [rbp - 24], rax\n{}", RUNTIME_LIST_REALLOC),
+            ),
+            _ => RUNTIME_COMMON.to_string(),
+        };
+        let heap_runtime = |rt: String| -> String {
+            match &custom {
+                Some(c) => format!("{}{}", strip_heap(&rt), custom_runtime(c)),
+                None => rt,
+            }
+        };
         if bare {
             // the entry point is the first byte of the image
             out.push_str(&start);
-            out.push_str(RUNTIME_COMMON);
-            out.push_str(&RUNTIME_BARE.replace("B_CONSOLE_WRITE", &format!("B_{}_console_write", main_mod)));
+            out.push_str(&common);
+            out.push_str(&heap_runtime(RUNTIME_BARE.replace("B_CONSOLE_WRITE", &format!("B_{}_console_write", main_mod))));
         } else if linux {
             out.push_str(&start);
-            out.push_str(RUNTIME_COMMON);
+            out.push_str(&common);
             if dynamic {
                 // leave through the C library, so that it can flush what it buffered
                 // and flush what C buffered before Brasa writes, so the output keeps its order
-                out.push_str(
-                    &RUNTIME_LINUX
+                out.push_str(&heap_runtime(
+                    RUNTIME_LINUX
                         .replace(
                             "rt_exit proc\n    mov edi, ecx\n    mov eax, 231\n    syscall\nrt_exit endp",
                             "rt_exit proc\n    sub rsp, 40\n    mov edi, ecx\n    call qword ptr GOT_exit\nrt_exit endp",
@@ -1751,9 +1995,9 @@ brasa_start endp
                             "rt_write proc\n    push rdi\n    push rsi\n    mov rsi, rcx\n",
                             "rt_write proc\n    push rdi\n    push rsi\n    push rcx\n    push rdx\n    sub rsp, 8\n    xor edi, edi\n    call qword ptr GOT_fflush\n    add rsp, 8\n    pop rdx\n    pop rcx\n    mov rsi, rcx\n",
                         ),
-                );
+                ));
             } else {
-                out.push_str(RUNTIME_LINUX);
+                out.push_str(&heap_runtime(RUNTIME_LINUX.to_string()));
             }
             out.push('\n');
             if self.procs.iter().any(|p| p.contains("rt_map_")) {
@@ -1761,14 +2005,18 @@ brasa_start endp
                 out.push('\n');
             }
         } else {
-            out.push_str(RUNTIME_COMMON);
-            out.push_str(RUNTIME_WIN);
+            out.push_str(&common);
+            out.push_str(&heap_runtime(RUNTIME_WIN.to_string()));
             out.push('\n');
             if self.procs.iter().any(|p| p.contains("rt_map_")) {
                 out.push_str(RUNTIME_MAP);
                 out.push('\n');
             }
             out.push_str(&start);
+        }
+        if self.procs.iter().any(|p| p.contains("rt_dv_")) {
+            out.push_str(RUNTIME_DERIVE);
+            out.push('\n');
         }
         for p in &self.procs {
             out.push_str(p);
@@ -1801,13 +2049,18 @@ brasa_start endp
             }
         }
         out.push_str(RUNTIME_DATA_COMMON);
-        out.push_str(if bare {
+        let data = if bare {
             RUNTIME_DATA_BARE
         } else if linux {
             RUNTIME_DATA_LINUX
         } else {
             RUNTIME_DATA_WIN
-        });
+        };
+        if custom.is_some() {
+            out.push_str(&strip_heap_data(data));
+        } else {
+            out.push_str(data);
+        }
         let mut globals: Vec<&Global> = self.globals.values().filter(|g| g.konst.is_none()).collect();
         globals.sort_by(|a, b| a.sym.cmp(&b.sym));
         for g in globals {
@@ -1831,6 +2084,9 @@ E_{}_{} dq {}
         if linux {
             // the heap starts on the page after this
             out.push_str("rt_image_end dq 0\n");
+        }
+        if self.threads {
+            out = lock_counts(&out);
         }
         out.push_str("
 end
@@ -1930,17 +2186,41 @@ end
         };
         let rl = self.lbl("ret");
         self.fs = FnState::new(sig.ret.clone(), rl);
-        let main_mod = self.modules[0].name.clone();
-        self.fs.allow_await = fd.is_async || (fd.name == "main" && m == main_mod);
+        for p in &fd.params {
+            if matches!(p.ty, Some(Type::Shared(_))) {
+                self.fs.shared_locals.insert(p.name.clone());
+            }
+        }
+        let has_await = fd_has_await(fd);
+        if has_await && fd.name == "drop" && fd.receiver.is_some() {
+            return self.err("`await` cannot be used in a `drop` method");
+        }
+        if has_await && self.exported.contains(&sig.sym) {
+            return self.err("`await` cannot be used in a function called from C");
+        }
         if self.opt && !naked && self.target != Target::Bare {
             self.fs.regs = crate::regalloc::plan(fd);
         }
         let mut incoming: Vec<(String, Ty, bool)> = Vec::new();
         if let (Some(r), Some(rt)) = (&fd.receiver, &sig.receiver) {
-            incoming.push((r.name.clone(), rt.clone(), r.by_ref));
+            incoming.push((r.name.clone(), rt.clone(), r.by_ref && !matches!(rt, Ty::List(_) | Ty::Map(..))));
         }
         for p in &sig.params {
-            incoming.push((p.name.clone(), p.ty.clone(), true));
+            incoming.push((p.name.clone(), p.ty.clone(), p.by_ref));
+        }
+        if !naked {
+            let mut refs: Vec<(String, bool)> = Vec::new();
+            if let (Some(r), Some(rt)) = (&fd.receiver, &sig.receiver) {
+                if r.by_ref {
+                    refs.push((r.name.clone(), plain_scalar(rt)));
+                }
+            }
+            for p in &sig.params {
+                if p.by_ref {
+                    refs.push((p.name.clone(), plain_scalar(&p.ty)));
+                }
+            }
+            self.check_refs(&refs, &fd.body)?;
         }
         let prologue = self.bind_params(&incoming, None);
         if fd.is_async {
@@ -1976,7 +2256,9 @@ end
         if let Some(es) = env_slot {
             pro.push(format!("    mov qword ptr [rbp - {}], r10", es));
         }
-        for (i, (name, ty, _)) in params.iter().enumerate() {
+        for (i, (name, ty, by_ref)) in params.iter().enumerate() {
+            // a `ref` list or map is passed as the address of the caller's slot (copy on write)
+            let ind = *by_ref && matches!(ty, Ty::List(_) | Ty::Map(..));
             let off = self.slot();
             if i < 4 {
                 pro.push(format!("    mov qword ptr [rbp - {}], {}", off, ARG_REGS[i]));
@@ -1984,7 +2266,7 @@ end
                 pro.push(format!("    mov rax, qword ptr [rbp + {}]", 16 + 8 * i));
                 pro.push(format!("    mov qword ptr [rbp - {}], rax", off));
             }
-            let reg = self.reg_for(name, ty);
+            let reg = if ind { None } else { self.reg_for(name, ty) };
             if let Some(n) = norm_insn(ty) {
                 pro.push(format!("    mov rax, qword ptr [rbp - {}]", off));
                 pro.push(format!("    {}", n));
@@ -1993,9 +2275,9 @@ end
             if let Some(r) = reg {
                 pro.push(format!("    mov {}, qword ptr [rbp - {}]", r, off));
             }
-            let rc = self.is_rc(ty);
+            let rc = self.is_rc(ty) && !ind;
             let sc = &mut self.fs.scopes[0];
-            sc.vars.insert(name.clone(), Local { off, ty: ty.clone(), mutable: true, captured: false, reg, imm: None });
+            sc.vars.insert(name.clone(), Local { off, ty: ty.clone(), mutable: true, captured: false, reg, imm: None, is_ref: *by_ref, ind });
             if rc {
                 sc.owned.push((off, ty.clone()));
                 self.fs.may_own = true;
@@ -2004,7 +2286,7 @@ end
         pro
     }
 
-    /// Per-record `B_drop_*` (releases heap fields) and `B_copy_*` (deep copy).
+    /// Per-record `B_drop_*` (releases heap fields) and `B_copy_*` (shallow copy: nested plain records are copied, lists, maps and text are retained, so they are copied by their first write).
     fn gen_record_helpers(&mut self, q: &str) {
         let info = &self.records[q];
         let size = info.size;
@@ -2047,6 +2329,89 @@ end
             "    mov rax, qword ptr [rbp - 16]\nLend_{s}:\n    mov rsp, rbp\n    pop rbp\n    ret\nB_copy_{s} endp\n"
         ));
         self.procs.push(c);
+    }
+
+    /// `B_rcdrop_*`: the drop of an object made by `new`. The weak cell is cleared first (so `upgrade()`
+    /// is `nil` from here on, also inside `drop`), then the record's own drop runs (user `drop`, heap fields).
+    fn gen_rc_drop(&mut self, q: &str) {
+        let s = sym_of(q);
+        let cell = self.cell_off(q);
+        let inner = self.rec_drop(q);
+        let mut d = format!(
+            "B_rcdrop_{s} proc\n    push rbp\n    mov rbp, rsp\n    sub rsp, 48\n    mov qword ptr [rbp - 8], rcx\n    mov rcx, qword ptr [rcx + {cell}]\n    test rcx, rcx\n    jz Lrcd_{s}\n    mov qword ptr [rcx], 0\n    call rt_release\nLrcd_{s}:\n    mov rcx, qword ptr [rbp - 8]\n"
+        );
+        if inner != "0" {
+            d.push_str(&format!("    call {}\n", inner));
+        }
+        d.push_str(&format!("    mov rsp, rbp\n    pop rbp\n    ret\nB_rcdrop_{s} endp\n"));
+        self.procs.push(d);
+    }
+
+    /// `weak(x)`: rax = the weak cell of the `Rc<T>` `x` (made on first use, one reference for the caller).
+    fn weak_of(&mut self, args: &[Arg]) -> R<Ty> {
+        if args.len() != 1 {
+            return self.err("weak() takes one argument, an Rc<T>");
+        }
+        let (t, own) = self.operand(&args[0].value, None)?;
+        let Ty::Rc(inner) = &t else {
+            return self.err(format!("weak() takes an Rc<T> (made with `new`), found {}", t.show()));
+        };
+        let Ty::Rec(r) = &**inner else {
+            return self.err(format!("weak() takes an Rc<T> of a record, found {}", t.show()));
+        };
+        let cell = self.cell_off(r);
+        let (have, done) = (self.lbl("wkhave"), self.lbl("wkdone"));
+        let slot = self.temp();
+        self.e(format!("mov qword ptr [rbp - {}], rax", slot));
+        self.e("test rax, rax");
+        self.e(format!("jz {}", done));
+        self.e(format!("mov rdx, qword ptr [rax + {}]", cell));
+        self.e("test rdx, rdx");
+        self.e(format!("jnz {}", have));
+        self.e("mov ecx, 8");
+        self.e("xor edx, edx");
+        self.e("call rt_alloc");
+        self.e(format!("mov rcx, qword ptr [rbp - {}]", slot));
+        self.e("mov qword ptr [rax], rcx");
+        self.e(format!("mov qword ptr [rcx + {}], rax", cell));
+        self.e("mov rdx, rax");
+        self.label(&have);
+        self.e("mov rax, rdx");
+        self.retain();
+        self.label(&done);
+        if own {
+            let keep = self.temp();
+            self.e(format!("mov qword ptr [rbp - {}], rax", keep));
+            self.release_slot(slot);
+            self.e(format!("mov rax, qword ptr [rbp - {}]", keep));
+            self.free(keep);
+        }
+        self.free(slot);
+        Ok(Ty::Weak(inner.clone()))
+    }
+
+    /// `w.upgrade()` with the weak cell in rax (owned): rax = a new strong reference or nil.
+    fn weak_upgrade(&mut self, inner: &Ty, args: &[Arg]) -> R<Ty> {
+        if !args.is_empty() {
+            return self.err("upgrade() takes no arguments");
+        }
+        let nil = self.lbl("upnil");
+        let slot = self.temp();
+        self.e(format!("mov qword ptr [rbp - {}], rax", slot));
+        self.e("test rax, rax");
+        self.e(format!("jz {}", nil));
+        self.e("mov rax, qword ptr [rax]");
+        self.e("test rax, rax");
+        self.e(format!("jz {}", nil));
+        self.retain();
+        self.label(&nil);
+        let keep = self.temp();
+        self.e(format!("mov qword ptr [rbp - {}], rax", keep));
+        self.release_slot(slot);
+        self.e(format!("mov rax, qword ptr [rbp - {}]", keep));
+        self.free(keep);
+        self.free(slot);
+        Ok(Ty::Rc(Box::new(inner.clone())))
     }
 
     /// Per-enum `B_edrop_*`: releases the heap fields of the active variant.
@@ -2169,7 +2534,7 @@ end
     fn zero_value(&mut self, t: &Ty) -> R<()> {
         match t {
             Ty::List(el) => self.new_list(&el.clone()),
-            Ty::Map(..) => self.new_map(&t.clone()),
+            Ty::Map(..) => self.new_map(&t.clone())?,
             Ty::Rec(r) => self.record_literal(&r.clone(), &[])?,
             Ty::Text => {
                 let l = self.string_lit("");
@@ -2226,6 +2591,10 @@ end
             Ty::Int { .. } => {
                 self.e("mov rcx, rax");
                 self.e("call rt_text_from_int");
+            }
+            Ty::Char => {
+                self.e("mov rcx, rax");
+                self.e("call rt_text_from_char");
             }
             Ty::Float { bits } => {
                 let sig = match self.funcs.get(&("float".to_string(), "to_text".to_string())) {
@@ -2335,6 +2704,14 @@ end
                 };
                 self.norm(&ty);
                 let off = self.declare_local(&vd.name, ty, vd.mutable);
+                let is_shared = matches!(vd.ty, Some(Type::Shared(_)))
+                    || matches!(&vd.value, Some(Expr { kind: ExprKind::Shared(_), .. }))
+                    || matches!(&vd.value, Some(Expr { kind: ExprKind::Ident(n), .. }) if self.fs.shared_locals.contains(n));
+                if is_shared {
+                    self.fs.shared_locals.insert(vd.name.clone());
+                } else {
+                    self.fs.shared_locals.remove(&vd.name);
+                }
                 match self.lookup(&vd.name).and_then(|l| l.reg) {
                     Some(r) => self.e(format!("mov {}, rax", r)),
                     None => self.e(format!("mov qword ptr [rbp - {}], rax", off)),
@@ -2384,6 +2761,7 @@ end
                 let l = self.fs.ret_label.clone();
                 self.e(format!("jmp {}", l));
             }
+            StmtKind::Block { name, .. } => return self.err(format!("block '{}' was not expanded", name)),
             StmtKind::Break | StmtKind::Continue => {
                 let Some((cont, brk, depth)) = self.fs.loops.last().map(|l| (l.cont.clone(), l.brk.clone(), l.depth)) else {
                     return self.err("'break'/'continue' outside a loop");
@@ -2453,7 +2831,353 @@ end
         Ok(())
     }
 
+    // ---------------- copy on write ----------------
+    //
+    // A list or map is shared by reference counting, so a write first makes sure the writer's own
+    // place holds the only reference (`rt_list_unique`, `rt_map_unique`): when someone else holds it
+    // too, it is copied one level and the place gets the copy. Writes therefore work on the place
+    // (the address of the slot that owns the list), never on a retained temporary.
+
+    /// The static type of a variable, field or element path, or `None` for anything else.
+    fn path_ty(&self, e: &Expr) -> Option<Ty> {
+        match &e.kind {
+            ExprKind::Ident(n) => {
+                if let Some(l) = self.lookup(n) {
+                    return Some(l.ty);
+                }
+                let g = self.globals.get(&(self.cur_mod.clone(), n.clone()))?;
+                if g.konst.is_some() {
+                    None
+                } else {
+                    Some(g.ty.clone())
+                }
+            }
+            ExprKind::Field { expr, name, safe: false } => {
+                let Ty::Rec(r) = rc_view(&self.path_ty(expr)?) else { return None };
+                self.field_of(&r, name).map(|f| f.0)
+            }
+            ExprKind::Index { expr, .. } => match self.path_ty(expr)? {
+                Ty::List(el) => Some(*el),
+                Ty::Map(_, v) => Some(*v),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// `lea rdx, <copy function>` for the elements of a list or the values of a map, or `xor edx, edx`
+    /// when they are retained as they are.
+    fn clone_fn_for(&self, el: &Ty) -> String {
+        match el {
+            Ty::Rec(r) if !self.shared_recs.contains(r) => format!("lea rdx, B_copy_{}", sym_of(r)),
+            _ => "xor edx, edx".to_string(),
+        }
+    }
+
+    /// rax = the address of a slot holding a list or map of type `ty`  ->  rax = that list or map,
+    /// copied into the slot first when it is shared.
+    fn unique_rax(&mut self, ty: &Ty) {
+        self.e("mov rcx, rax");
+        match ty {
+            Ty::List(el) => {
+                let c = self.clone_fn_for(el);
+                self.e(c);
+                self.e("call rt_list_unique");
+            }
+            Ty::Map(_, v) => {
+                let c = self.clone_fn_for(v);
+                self.e(c);
+                self.e("call rt_map_unique");
+            }
+            _ => {}
+        }
+    }
+
+    /// Keeps the owned value in rax alive until the end of the statement and leaves the address of
+    /// the slot that holds it in rax.
+    fn temp_place(&mut self) {
+        let keep = self.slot();
+        self.e(format!("mov qword ptr [rbp - {}], rax", keep));
+        self.fs.stmt_temps.push(keep);
+        self.fs.may_own = true;
+        self.e(format!("lea rax, [rbp - {}]", keep));
+    }
+
+    /// rax = the address of the element `obj[index]` (a list or map element slot), after the
+    /// container was made unique. A bad index stops the program before anything is copied.
+    fn index_place(&mut self, obj: &Expr, index: &Expr) -> R<Ty> {
+        let Some(ct) = self.path_ty(obj) else { return self.err("invalid assignment target") };
+        match ct {
+            Ty::List(el) => {
+                let ity = self.expr(index, Some(&Ty::i64()))?;
+                if !ity.is_int() {
+                    return self.err(format!("list index must be a number, found {}", ity.show()));
+                }
+                let (it, st) = (self.temp(), self.temp());
+                self.e(format!("mov qword ptr [rbp - {}], rax", it));
+                let lt = self.write_place(obj)?;
+                self.e(format!("mov qword ptr [rbp - {}], rax", st));
+                let ok = self.lbl("cowok");
+                self.e("mov rcx, qword ptr [rax]");
+                self.e(format!("mov rdx, qword ptr [rbp - {}]", it));
+                self.e("cmp rdx, qword ptr [rcx]");
+                self.e(format!("jb {}", ok));
+                self.at("r9");
+                self.e("jmp rt_index_oob");
+                self.label(&ok);
+                self.e(format!("mov rax, qword ptr [rbp - {}]", st));
+                self.unique_rax(&lt);
+                self.e(format!("mov rdx, qword ptr [rbp - {}]", it));
+                self.e("mov rax, qword ptr [rax + 16]");
+                self.e("lea rax, [rax + rdx * 8]");
+                self.free(st);
+                self.free(it);
+                Ok(*el)
+            }
+            Ty::Map(k, v) => {
+                let kt = self.value(index, Some(&k))?;
+                self.check(&k, &kt, "map key")?;
+                let (ks, st) = (self.temp(), self.temp());
+                self.e(format!("mov qword ptr [rbp - {}], rax", ks));
+                let mt = self.write_place(obj)?;
+                self.e(format!("mov qword ptr [rbp - {}], rax", st));
+                // a missing key stops the program before anything is copied
+                self.e("mov rcx, qword ptr [rax]");
+                self.e(format!("mov rdx, qword ptr [rbp - {}]", ks));
+                self.at("r8");
+                self.e("call rt_map_get");
+                self.e(format!("mov rax, qword ptr [rbp - {}]", st));
+                self.unique_rax(&mt);
+                self.e("mov rcx, rax");
+                self.e(format!("mov rdx, qword ptr [rbp - {}]", ks));
+                self.e("call rt_map_find");
+                self.e("add rax, 24");
+                if self.is_rc(&k) {
+                    self.release_slot(ks);
+                }
+                self.free(st);
+                self.free(ks);
+                Ok(*v)
+            }
+            Ty::Text => self.err(TEXT_INDEX_MSG),
+            _ => self.err("invalid assignment target"),
+        }
+    }
+
+    /// rax = the address of the slot that owns the list or map `e`; every list and map on the way
+    /// there has been made unique, the one in the slot itself has not.
+    fn write_place(&mut self, e: &Expr) -> R<Ty> {
+        match &e.kind {
+            ExprKind::Ident(n) => {
+                if let Some(l) = self.lookup(n) {
+                    if l.ind {
+                        self.e(format!("mov rax, qword ptr [rbp - {}]", l.off));
+                    } else {
+                        self.e(format!("lea rax, [rbp - {}]", l.off));
+                    }
+                    return Ok(l.ty);
+                }
+                let key = (self.cur_mod.clone(), n.clone());
+                if let Some(g) = self.globals.get(&key) {
+                    let (sym, ty) = (g.sym.clone(), g.ty.clone());
+                    self.e(format!("lea rax, {}", sym));
+                    return Ok(ty);
+                }
+            }
+            ExprKind::Field { expr: obj, name, safe: false } if self.path_ty(e).is_some() => {
+                let ot = self.rec_ptr(obj)?;
+                if let Ty::Rec(r) = &rc_view(&ot) {
+                    if let Some((fty, off)) = self.field_of(r, name) {
+                        self.e(format!("add rax, {}", off));
+                        return Ok(fty);
+                    }
+                }
+            }
+            ExprKind::Index { expr: obj, index } if self.path_ty(e).is_some() => {
+                return self.index_place(obj, index);
+            }
+            _ => {}
+        }
+        // anything else is a value of its own: a temporary holds it
+        let t = self.expr(e, None)?;
+        if !matches!(t, Ty::List(_) | Ty::Map(..)) {
+            return self.err(format!("cannot write to a {}", t.show()));
+        }
+        self.temp_place();
+        Ok(t)
+    }
+
+    /// rax = the record that the path `e` names (a pointer), reached for a write: lists and maps on
+    /// the way are made unique first.
+    fn rec_ptr(&mut self, e: &Expr) -> R<Ty> {
+        match &e.kind {
+            ExprKind::Ident(n) => {
+                if let Some(l) = self.lookup(n) {
+                    self.load_local("rax", &l);
+                    return Ok(l.ty);
+                }
+                let key = (self.cur_mod.clone(), n.clone());
+                if let Some(g) = self.globals.get(&key) {
+                    let (sym, ty) = (g.sym.clone(), g.ty.clone());
+                    self.e(format!("mov rax, qword ptr {}", sym));
+                    return Ok(ty);
+                }
+            }
+            ExprKind::Field { expr: obj, name, safe: false } if self.path_ty(e).is_some() => {
+                let ot = self.rec_ptr(obj)?;
+                if let Ty::Rec(r) = &rc_view(&ot) {
+                    if let Some((fty, off)) = self.field_of(r, name) {
+                        self.e(format!("mov rax, qword ptr [rax + {}]", off));
+                        return Ok(fty);
+                    }
+                }
+            }
+            ExprKind::Index { expr: obj, index } if self.path_ty(e).is_some() => {
+                let el = self.index_place(obj, index)?;
+                self.e("mov rax, qword ptr [rax]");
+                return Ok(el);
+            }
+            _ => {}
+        }
+        let (t, own) = self.operand(e, None)?;
+        if own {
+            let keep = self.slot();
+            self.e(format!("mov qword ptr [rbp - {}], rax", keep));
+            self.fs.stmt_temps.push(keep);
+            self.fs.may_own = true;
+        }
+        Ok(t)
+    }
+
+    /// `xs.push(v)`, `xs.clear()`, `xs.take()` on a list and `m.remove(k)`, `m.clear()` on a map,
+    /// where the receiver is a variable, field or element path: the write goes to the receiver's own
+    /// place. `Ok(None)` when the call is not one of these.
+    fn cow_method(&mut self, obj: &Expr, pt: &Ty, name: &str, args: &[Arg]) -> R<Option<Ty>> {
+        if matches!(name, "push" | "add" | "clear" | "take" | "remove" | "insert" | "pop") && !self.methods.contains_key(&(method_key(pt), name.to_string())) {
+            self.shared_write_check(obj, true)?;
+        }
+        if self.methods.contains_key(&(method_key(pt), name.to_string())) {
+            return Ok(None);
+        }
+        match (pt, name) {
+            (Ty::List(el), "push" | "add") => {
+                if args.len() != 1 {
+                    return self.err(format!("'{}' takes one argument", name));
+                }
+                let vt = self.value(&args[0].value, Some(el))?;
+                self.check(el, &vt, "list element")?;
+                let v = self.temp();
+                self.e(format!("mov qword ptr [rbp - {}], rax", v));
+                let lt = self.write_place(obj)?;
+                self.unique_rax(&lt);
+                self.e("mov rcx, rax");
+                self.e(format!("mov rdx, qword ptr [rbp - {}]", v));
+                self.e("call rt_list_push");
+                self.free(v);
+                Ok(Some(Ty::Void))
+            }
+            (Ty::List(_), "clear") | (Ty::Map(..), "clear") => {
+                if !args.is_empty() {
+                    return self.err("'clear' takes no arguments");
+                }
+                let lt = self.write_place(obj)?;
+                self.unique_rax(&lt);
+                self.e("mov rcx, rax");
+                self.e(if matches!(pt, Ty::List(_)) { "call rt_list_clear" } else { "call rt_map_clear" });
+                Ok(Some(Ty::Void))
+            }
+            (Ty::List(el), "take") => {
+                let lt = self.write_place(obj)?;
+                self.unique_rax(&lt);
+                self.e("mov rcx, rax");
+                self.at("rdx");
+                self.e("call rt_list_take");
+                Ok(Some((**el).clone()))
+            }
+            (Ty::Map(k, _), "remove") => {
+                if args.len() != 1 {
+                    return self.err("'remove' takes 1 argument(s)");
+                }
+                let kt = self.value(&args[0].value, Some(k))?;
+                self.check(k, &kt, "map key")?;
+                let ks = self.temp();
+                self.e(format!("mov qword ptr [rbp - {}], rax", ks));
+                let mt = self.write_place(obj)?;
+                self.unique_rax(&mt);
+                self.e("mov rcx, rax");
+                self.e(format!("mov rdx, qword ptr [rbp - {}]", ks));
+                self.e("call rt_map_remove");
+                if self.is_rc(k) {
+                    self.release_slot(ks);
+                }
+                self.free(ks);
+                Ok(Some(Ty::Void))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    /// `obj[index] = rhs` where `obj` is a list or map path.
+    fn assign_index_cow(&mut self, obj: &Expr, index: &Expr, rhs: &Expr, ct: &Ty) -> R<()> {
+        match ct {
+            Ty::List(el) => {
+                let ity = self.expr(index, Some(&Ty::i64()))?;
+                if !ity.is_int() {
+                    return self.err(format!("list index must be a number, found {}", ity.show()));
+                }
+                let (it, v, st) = (self.temp(), self.temp(), self.temp());
+                self.e(format!("mov qword ptr [rbp - {}], rax", it));
+                let vt = self.value(rhs, Some(el))?;
+                self.check(el, &vt, "list element")?;
+                self.e(format!("mov qword ptr [rbp - {}], rax", v));
+                let lt = self.write_place(obj)?;
+                self.e(format!("mov qword ptr [rbp - {}], rax", st));
+                let ok = self.lbl("cowok");
+                self.e("mov rcx, qword ptr [rax]");
+                self.e(format!("mov rdx, qword ptr [rbp - {}]", it));
+                self.e("cmp rdx, qword ptr [rcx]");
+                self.e(format!("jb {}", ok));
+                self.at("r9");
+                self.e("jmp rt_index_oob");
+                self.label(&ok);
+                self.e(format!("mov rax, qword ptr [rbp - {}]", st));
+                self.unique_rax(&lt);
+                self.e("mov rcx, rax");
+                self.e(format!("mov rdx, qword ptr [rbp - {}]", it));
+                self.e(format!("mov r8, qword ptr [rbp - {}]", v));
+                self.at("r9");
+                self.e("call rt_list_set");
+                self.free(st);
+                self.free(v);
+                self.free(it);
+            }
+            Ty::Map(k, v) => {
+                let kt = self.value(index, Some(k))?;
+                self.check(k, &kt, "map key")?;
+                let (ks, vs) = (self.temp(), self.temp());
+                self.e(format!("mov qword ptr [rbp - {}], rax", ks));
+                let vt = self.value(rhs, Some(v))?;
+                self.check(v, &vt, "map value")?;
+                self.e(format!("mov qword ptr [rbp - {}], rax", vs));
+                let mt = self.write_place(obj)?;
+                self.unique_rax(&mt);
+                self.e("mov rcx, rax");
+                self.e(format!("mov rdx, qword ptr [rbp - {}]", ks));
+                self.e(format!("mov r8, qword ptr [rbp - {}]", vs));
+                self.e("call rt_map_set");
+                if self.is_rc(k) {
+                    self.release_slot(ks);
+                }
+                self.free(vs);
+                self.free(ks);
+            }
+            _ => unreachable!(),
+        }
+        Ok(())
+    }
+
     fn assign(&mut self, target: &Expr, op: &str, value: &Expr) -> R<()> {
+        self.shared_write_check(target, false)?;
         // `a op= b` is compiled as `a = a op b`.
         let rhs_owned;
         let rhs = if op == "=" {
@@ -2477,7 +3201,13 @@ end
                     let t = self.value(rhs, Some(&l.ty))?;
                     self.check(&l.ty, &t, &format!("'{}'", name))?;
                     self.norm(&l.ty);
-                    if self.is_rc(&l.ty) {
+                    if l.ind {
+                        // a `ref` list or map: the caller's own variable is replaced
+                        self.e(format!("mov rdx, qword ptr [rbp - {}]", l.off));
+                        self.e("mov rcx, qword ptr [rdx]");
+                        self.e("mov qword ptr [rdx], rax");
+                        self.e("call rt_release");
+                    } else if self.is_rc(&l.ty) {
                         self.e(format!("mov rcx, qword ptr [rbp - {}]", l.off));
                         self.e(format!("mov qword ptr [rbp - {}], rax", l.off));
                         self.e("call rt_release");
@@ -2504,8 +3234,9 @@ end
                 }
             }
             ExprKind::Field { expr: obj, name, .. } => {
-                let (ot, own) = self.operand(obj, None)?;
-                let r = match &ot {
+                // a path into lists and maps makes each of them unique before the store
+                let (ot, own) = if matches!(self.path_ty(obj).map(|t| rc_view(&t)), Some(Ty::Rec(_))) { (self.rec_ptr(obj)?, false) } else { self.operand(obj, None)? };
+                let r = match &rc_view(&ot) {
                     Ty::Rec(r) => r.clone(),
                     Ty::Ptr(p) => match &**p {
                         Ty::Rec(r) => r.clone(),
@@ -2559,11 +3290,14 @@ end
                 self.free(t);
             }
             ExprKind::Index { expr: obj, index } => {
+                if let Some(ct @ (Ty::List(_) | Ty::Map(..))) = self.path_ty(obj) {
+                    return self.assign_index_cow(obj, index, rhs, &ct);
+                }
                 let (ot, own) = self.operand(obj, None)?;
                 let t = self.temp();
                 self.e(format!("mov qword ptr [rbp - {}], rax", t));
                 let key_want = if let Ty::Map(k, _) = &ot { Some((**k).clone()) } else { None };
-                let ity = self.expr(index, key_want.as_ref())?;
+                let ity = if key_want.is_some() { self.value(index, key_want.as_ref())? } else { self.expr(index, key_want.as_ref())? };
                 let it = self.temp();
                 self.e(format!("mov qword ptr [rbp - {}], rax", it));
                 match &ot {
@@ -2575,7 +3309,7 @@ end
                         self.e(format!("mov rcx, qword ptr [rbp - {}]", t));
                         self.e(format!("mov rdx, qword ptr [rbp - {}]", it));
                         self.e("call rt_map_set");
-                        if **k == Ty::Text {
+                        if self.is_rc(k) {
                             self.release_slot(it);
                         }
                     }
@@ -2710,6 +3444,35 @@ end
                 self.fs.loops.pop();
                 self.label(&cont);
                 self.e(format!("inc qword ptr [rbp - {}]", idx));
+                self.e(format!("jmp {}", start));
+                self.label(&end);
+                self.pop_scope();
+                return Ok(());
+            }
+            if lt == Ty::Text {
+                if vars.len() != 1 {
+                    return self.err("a loop over a text has one variable: the character");
+                }
+                // the text is held for the whole loop, so the body may reassign the variable that named it
+                let txt = self.hidden_local(lt);
+                self.e(format!("mov qword ptr [rbp - {}], rax", txt));
+                let off = self.slot();
+                self.e(format!("mov qword ptr [rbp - {}], 0", off));
+                let cv = self.declare_local(&vars[0], Ty::Char, false);
+                self.e(format!("mov qword ptr [rbp - {}], 0", cv));
+                self.label(&start);
+                self.e(format!("mov rcx, qword ptr [rbp - {}]", txt));
+                self.e(format!("mov rdx, qword ptr [rbp - {}]", off));
+                self.e("cmp rdx, qword ptr [rcx]");
+                self.e(format!("jae {}", end));
+                self.e("call rt_text_next_char");
+                self.e(format!("mov qword ptr [rbp - {}], rdx", off));
+                self.e(format!("mov qword ptr [rbp - {}], rax", cv));
+                let depth = self.fs.scopes.len();
+                self.fs.loops.push(LoopCtx { cont: cont.clone(), brk: end.clone(), depth });
+                self.block(body)?;
+                self.fs.loops.pop();
+                self.label(&cont);
                 self.e(format!("jmp {}", start));
                 self.label(&end);
                 self.pop_scope();
@@ -2879,7 +3642,7 @@ end
             }
             ExprKind::Char(c) => {
                 self.e(format!("mov eax, {}", *c as u32));
-                Ok(Ty::Int { bits: 32, signed: false })
+                Ok(Ty::Char)
             }
             ExprKind::Bool(b) => {
                 self.e(format!("mov eax, {}", *b as i32));
@@ -2956,7 +3719,7 @@ end
                 let mut created = false;
                 if let (Some(k), Some(v)) = (&kt, &vt) {
                     let t = self.map_type(k.clone(), v.clone())?;
-                    self.new_map(&t);
+                    self.new_map(&t)?;
                     self.e(format!("mov qword ptr [rbp - {}], rax", mt));
                     created = true;
                 }
@@ -2979,7 +3742,7 @@ end
                         let t = self.map_type(kt.clone().unwrap(), vt.clone().unwrap())?;
                         let vs = self.temp();
                         self.e(format!("mov qword ptr [rbp - {}], rax", vs));
-                        self.new_map(&t);
+                        self.new_map(&t)?;
                         self.e(format!("mov qword ptr [rbp - {}], rax", mt));
                         self.e(format!("mov rax, qword ptr [rbp - {}]", vs));
                         self.free(vs);
@@ -2989,7 +3752,7 @@ end
                     self.e(format!("mov rdx, qword ptr [rbp - {}]", ks));
                     self.e(format!("mov rcx, qword ptr [rbp - {}]", mt));
                     self.e("call rt_map_set");
-                    if kt == Some(Ty::Text) {
+                    if kt.as_ref().map_or(false, |k| self.is_rc(k)) {
                         self.release_slot(ks);
                     }
                     self.free(ks);
@@ -3012,12 +3775,24 @@ end
             ExprKind::Lambda { params, body } => self.lambda(params, body, want),
             ExprKind::If { branches, else_body } => self.if_chain(branches, else_body.as_ref(), want, true),
             ExprKind::Match { scrutinee, arms } => self.match_expr(scrutinee, arms, want, true),
-            ExprKind::New(_) => self.err("'new' is not supported by the native backend yet"),
+            ExprKind::Shared(inner) => self.shared_expr(inner, want),
+            ExprKind::SpawnThread(call) => self.spawn_thread(call, e.line),
+            ExprKind::New(inner) => {
+                let ExprKind::Record { path, fields } = &inner.kind else {
+                    return self.err("'new' needs a record literal such as `new Node{ ... }`");
+                };
+                let want_rec = want.map(rc_view);
+                let r = match self.generic_literal(path, want_rec.as_ref())? {
+                    Some(r) => r,
+                    None => self.record_name(path, &self.cur_mod.clone())?,
+                };
+                self.rc_recs.insert(r.clone());
+                self.record_alloc(&r, fields, true)?;
+                Ok(Ty::Rc(Box::new(Ty::Rec(r))))
+            }
+            ExprKind::Block { name, .. } => self.err(format!("block '{}' was not expanded", name)),
             ExprKind::Propagate(inner) => self.try_expr(inner),
             ExprKind::Await(inner) => {
-                if !self.fs.allow_await {
-                    return self.err("`await` can only be used inside an `async func` or inside `main`");
-                }
                 if let ExprKind::Call { callee, args, .. } = &inner.kind {
                     if let ExprKind::Ident(n) = &callee.kind {
                         if (n == "all" || n == "race")
@@ -3105,7 +3880,7 @@ end
                         self.at("r8");
                         self.e("call rt_map_get");
                         self.retain_if(v);
-                        if **k == Ty::Text {
+                        if self.is_rc(k) {
                             self.release_slot(ks);
                         }
                         self.free(ks);
@@ -3119,13 +3894,7 @@ end
                         self.retain_if(el);
                         (**el).clone()
                     }
-                    Ty::Text => {
-                        self.e("mov rdx, rax");
-                        self.e(format!("mov rcx, qword ptr [rbp - {}]", t));
-                        self.at("r9");
-                        self.e("call rt_text_byte");
-                        Ty::Int { bits: 8, signed: false }
-                    }
+                    Ty::Text => return self.err(TEXT_INDEX_MSG),
                     Ty::Ptr(el) => {
                         self.require_unsafe("reading through a raw pointer")?;
                         let el = (**el).clone();
@@ -3225,6 +3994,9 @@ end
                 return self.err(format!("extern function '{}' cannot be used as a value", name));
             }
             let ext = matches!(want, Some(Ty::Func { ext: true, .. }));
+            if ext && self.await_syms.contains(&sig.sym) {
+                return self.err("`await` cannot be used in a function called from C");
+            }
             if ext && self.target == Target::Linux {
                 // C calls with the System V convention: the thunk moves the arguments to ours
                 let kind = |t: &Ty| match t {
@@ -3290,6 +4062,9 @@ end
         match &inner.kind {
             ExprKind::Ident(name) => {
                 if let Some(l) = self.lookup(name) {
+                    if l.is_ref && self.fs.unsafe_depth == 0 {
+                        return self.ref_escape(name);
+                    }
                     if let Ty::Rec(_) = &l.ty {
                         self.e(format!("mov rax, qword ptr [rbp - {}]", l.off));
                     } else {
@@ -3349,6 +4124,23 @@ end
         Ok(*el)
     }
 
+    /// A number literal (or arithmetic on literals) on the left adapts to an integer type on the
+    /// right (`0 - x` with `x: u32`): that type, when it applies.
+    fn literal_side_type(&mut self, op: &str, lhs: &Expr, rhs: &Expr, want: Option<&Ty>) -> Option<Ty> {
+        let is_cmp = matches!(op, "==" | "!=" | "<" | "<=" | ">" | ">=");
+        if is_const_int_expr(lhs) && !is_const_int_expr(rhs) && op != "<<" && op != ">>" && (is_cmp || !want.is_some_and(|w| w.is_int())) {
+            let snap = self.snapshot();
+            let r = self.expr(rhs, None);
+            self.restore(snap);
+            if let Ok(t) = r {
+                if t.is_int() {
+                    return Some(t);
+                }
+            }
+        }
+        None
+    }
+
     fn binary(&mut self, op: &str, lhs: &Expr, rhs: &Expr, want: Option<&Ty>) -> R<Ty> {
         match op {
             "and" | "or" => {
@@ -3398,7 +4190,8 @@ end
                 }
             }
         }
-        let (lt, lown) = self.operand(lhs, if is_cmp { None } else { want })?;
+        let lit_ty = self.literal_side_type(op, lhs, rhs, want);
+        let (lt, lown) = self.operand(lhs, if lit_ty.is_some() { lit_ty.as_ref() } else if is_cmp { None } else { want })?;
         // a literal or a plain local on the right needs no temporary: load it straight into rcx
         if self.opt && !(lown && self.is_rc(&lt)) {
             if let Some(rt) = self.simple_rhs(rhs, &lt) {
@@ -3493,6 +4286,10 @@ end
                 self.e(format!("mov rcx, {}", imm64(*n as i64)));
                 Some(t)
             }
+            ExprKind::Char(c) => {
+                self.e(format!("mov ecx, {}", *c as u32));
+                Some(Ty::Char)
+            }
             ExprKind::Float(f) => {
                 if matches!(lt, Ty::Float { bits: 32 }) {
                     self.e(format!("mov ecx, {}", imm64((*f as f32).to_bits() as i64)));
@@ -3525,6 +4322,28 @@ end
     }
 
     fn binary_core(&mut self, op: &str, lt: &Ty, rt: &Ty, is_cmp: bool) -> R<Ty> {
+        if op == "+" && ((*lt == Ty::Text && *rt == Ty::Char) || (*lt == Ty::Char && *rt == Ty::Text)) {
+            // a char joins a text as its UTF-8 bytes
+            let (a, b, c) = (self.temp(), self.temp(), self.temp());
+            self.e(format!("mov qword ptr [rbp - {}], rax", a));
+            self.e(format!("mov qword ptr [rbp - {}], rcx", b));
+            let (cs, other) = if *lt == Ty::Char { (a, b) } else { (b, a) };
+            self.e(format!("mov rcx, qword ptr [rbp - {}]", cs));
+            self.e("call rt_text_from_char");
+            self.e(format!("mov qword ptr [rbp - {}], rax", cs));
+            self.e(format!("mov rcx, qword ptr [rbp - {}]", a));
+            self.e(format!("mov rdx, qword ptr [rbp - {}]", b));
+            self.e("call rt_concat");
+            self.e(format!("mov qword ptr [rbp - {}], rax", c));
+            let _ = other;
+            self.e(format!("mov rcx, qword ptr [rbp - {}]", cs));
+            self.e("call rt_release");
+            self.e(format!("mov rax, qword ptr [rbp - {}]", c));
+            self.free(c);
+            self.free(b);
+            self.free(a);
+            return Ok(Ty::Text);
+        }
         if *lt == Ty::Text && *rt == Ty::Text {
             match op {
                 "+" => {
@@ -3542,7 +4361,25 @@ end
                     }
                     return Ok(Ty::Bool);
                 }
+                "<" | "<=" | ">" | ">=" => {
+                    self.emit_std(Cap::Ord, &Ty::Text)?;
+                    self.e("test rax, rax");
+                    let cc = match op {
+                        "<" => "l",
+                        "<=" => "le",
+                        ">" => "g",
+                        _ => "ge",
+                    };
+                    self.e(format!("set{} al", cc));
+                    self.e("movzx eax, al");
+                    return Ok(Ty::Bool);
+                }
                 _ => return self.err(format!("operator '{}' is not defined for text", op)),
+            }
+        }
+        if is_cmp {
+            if let Some(t) = self.std_operator(op, lt, rt)? {
+                return Ok(t);
             }
         }
         if matches!(lt, Ty::Param { .. }) || matches!(rt, Ty::Param { .. }) {
@@ -3558,6 +4395,9 @@ end
             return self.float_binary(op, lt, rt, is_cmp);
         }
         if is_cmp {
+            if (matches!(lt, Ty::Rc(_) | Ty::Weak(_)) || matches!(rt, Ty::Rc(_) | Ty::Weak(_))) && !matches!(op, "==" | "!=") {
+                return self.err(format!("operator '{}' is not defined for {}: references only compare with == and !=", op, if matches!(lt, Ty::Rc(_) | Ty::Weak(_)) { lt.show() } else { rt.show() }));
+            }
             if !(compatible(lt, rt) || compatible(rt, lt)) {
                 return self.err(format!("cannot compare {} with {}", lt.show(), rt.show()));
             }
@@ -3739,6 +4579,8 @@ end
             self.e("test rax, rax");
             self.e(format!("jz {}", end));
         }
+        let ot_rc = ot.clone();
+        let ot = rc_view(&ot);
         let res = match &ot {
             Ty::Rec(r) => self.rec_field(&r.clone(), name, own)?,
             Ty::Ptr(p) if matches!(&**p, Ty::Rec(_)) => {
@@ -3761,6 +4603,7 @@ end
                 self.e("mov rax, qword ptr [rax + 48]");
                 Ty::int()
             }
+            Ty::Char if name == "code" => Ty::int(),
             Ty::Err if name == "message" => {
                 self.e("mov rax, qword ptr [rax]");
                 self.retain();
@@ -3789,6 +4632,7 @@ end
         };
         // property getters consume their receiver themselves
         let consumed = matches!(&ot, Ty::Rec(r) if self.field_of(r, name).is_none());
+        let ot = ot_rc;
         if own && self.is_rc(&ot) && !consumed {
             let keep = self.temp();
             self.e(format!("mov qword ptr [rbp - {}], rax", keep));
@@ -3828,8 +4672,17 @@ end
 
     /// Allocates a record and initializes it from `fields`.
     fn record_literal(&mut self, r: &str, fields: &[(String, Expr)]) -> R<()> {
-        let size = self.rec_size(r);
-        let drop = self.rec_drop(r);
+        self.record_alloc(r, fields, false)
+    }
+
+    /// Offset of the weak-cell word of a shared object (after the fields).
+    fn cell_off(&self, r: &str) -> u32 {
+        (self.rec_size(r) + 7) & !7
+    }
+
+    /// `rc`: the object of a `new` (an extra word for the weak cell, dropped by `B_rcdrop_*`).
+    fn record_alloc(&mut self, r: &str, fields: &[(String, Expr)], rc: bool) -> R<()> {
+        let (size, drop) = if rc { (self.cell_off(r) + 8, format!("B_rcdrop_{}", sym_of(r))) } else { (self.rec_size(r), self.rec_drop(r)) };
         self.alloc(size, &drop);
         let t = self.temp();
         self.e(format!("mov qword ptr [rbp - {}], rax", t));
@@ -4095,8 +4948,9 @@ end
                     _ => self.const_eval(lit, &self.cur_mod.clone()),
                 };
                 let Some(v) = v else { return self.err(format!("this pattern cannot be matched against {}", st.show())) };
-                if !(st.is_int() || *st == Ty::Bool) {
-                    return self.err(format!("a number pattern cannot match {}", st.show()));
+                let is_char = matches!(&lit.kind, ExprKind::Char(_));
+                if is_char != (*st == Ty::Char) || !(st.is_int() || *st == Ty::Bool || *st == Ty::Char) {
+                    return self.err(format!("a {} pattern cannot match {}", if is_char { "char" } else { "number" }, st.show()));
                 }
                 self.e(format!("mov rax, qword ptr [rbp - {}]", s));
                 self.e(format!("mov rcx, {}", v));
@@ -4161,7 +5015,6 @@ end
     // ---------------- closures ----------------
 
     fn lambda(&mut self, params: &[Param], body: &[Stmt], want: Option<&Ty>) -> R<Ty> {
-        let allow_await = std::mem::take(&mut self.next_lambda_await);
         let share_records = std::mem::take(&mut self.next_lambda_share);
         let ignore_result = std::mem::take(&mut self.next_lambda_ignore_result);
         let (wparams, wret) = match want {
@@ -4180,13 +5033,17 @@ end
                 (None, Some(wp)) if i < wp.len() => wp[i].clone(),
                 _ => return self.err(format!("cannot infer the type of lambda parameter '{}'", p.name)),
             };
-            ptys.push((p.name.clone(), t, true));
+            let by_ref = p.by_ref && !matches!(t, Ty::List(_) | Ty::Map(..));
+            ptys.push((p.name.clone(), t, by_ref));
         }
         if let Some(wp) = &wparams {
             if wp.len() != params.len() {
                 return self.err(format!("expected a function with {} parameter(s), found {}", wp.len(), params.len()));
             }
         }
+        let own_refs: Vec<(String, bool)> =
+            ptys.iter().filter(|p| p.2).map(|p| (p.0.clone(), plain_scalar(&p.1))).collect();
+        self.check_refs(&own_refs, body)?;
         // Free variables that are locals of the enclosing function.
         let mut used = Vec::new();
         collect_block(body, &mut used);
@@ -4227,7 +5084,6 @@ end
         let rl = self.lbl("ret");
         let saved = std::mem::replace(&mut self.fs, FnState::new(wret.clone(), rl));
         self.fs.unsafe_depth = saved.unsafe_depth;
-        self.fs.allow_await = allow_await;
         self.fs.allow_ignored_result = ignore_result;
         let env_slot = self.slot();
         let mut pro = self.bind_params(&ptys, Some(env_slot));
@@ -4242,7 +5098,7 @@ end
             pro.push(format!("    mov qword ptr [rbp - {}], rax", off));
             let rc = self.is_rc(&l.ty);
             let sc = &mut self.fs.scopes[0];
-            sc.vars.insert(n.clone(), Local { off, ty: l.ty.clone(), mutable: false, captured: true, reg: None, imm: None });
+            sc.vars.insert(n.clone(), Local { off, ty: l.ty.clone(), mutable: false, captured: true, reg: None, imm: None, is_ref: false, ind: false });
             if rc {
                 sc.owned.push((off, l.ty.clone()));
                 self.fs.may_own = true;
@@ -4363,6 +5219,18 @@ end
 
     fn call(&mut self, callee: &Expr, args: &[Arg], targs: &[Type], want: Option<&Ty>) -> R<Ty> {
         match &callee.kind {
+            // test hook: lowers the element ceiling of lists, maps and texts so a test can reach it
+            ExprKind::Ident(name) if self.lookup(name).is_none() && name == "__set_max_len" && args.len() == 1 => {
+                let at = self.expr(&args[0].value, Some(&Ty::i64()))?;
+                if !at.is_int() {
+                    return self.err("__set_max_len() takes a number");
+                }
+                self.e("mov qword ptr rt_max_len, rax");
+                Ok(Ty::Void)
+            }
+            ExprKind::Ident(name) if self.lookup(name).is_none() && matches!(name.as_str(), "__eq" | "__cmp" | "__hash" | "__tag" | "__payload" | "__mix") => {
+                self.std_intrinsic(name, args)
+            }
             ExprKind::Ident(name) if self.lookup(name).is_none() && matches!(name.as_str(), "__from_bits" | "__bits") => {
                 if args.len() != 1 {
                     return self.err(format!("{}() takes one argument", name));
@@ -4584,14 +5452,26 @@ end
                     self.free(k);
                     return Ok(Ty::Err);
                 }
-                if name == "chr" && args.len() == 1 {
+                if name == "char" && args.len() == 1 && !self.funcs.contains_key(&(self.cur_mod.clone(), name.clone())) {
                     let t = self.expr(&args[0].value, None)?;
                     if !t.is_int() {
-                        return self.err(format!("chr() needs a number, found {}", t.show()));
+                        return self.err(format!("char() needs an integer code point, found {}", t.show()));
                     }
-                    self.e("mov rcx, rax");
-                    self.e("call rt_text_chr");
-                    return Ok(Ty::Text);
+                    let (bad, ok) = (self.lbl("charbad"), self.lbl("charok"));
+                    self.e("cmp rax, 1114111");
+                    self.e(format!("ja {}", bad));
+                    self.e("lea rcx, [rax - 55296]");
+                    self.e("cmp rcx, 2047");
+                    self.e(format!("ja {}", ok));
+                    self.label(&bad);
+                    self.e("mov rdx, rax");
+                    self.e("lea rcx, rt_msg_char1");
+                    self.e("lea r8, rt_msg_char2");
+                    self.at("r9");
+                    self.e("call rt_abort_val");
+                    self.label(&ok);
+                    self.e("mov eax, eax");
+                    return Ok(Ty::Char);
                 }
                 if name == "heap_bytes" && args.is_empty() {
                     if self.custom_allocator.is_some() {
@@ -4603,6 +5483,9 @@ end
                     self.e("mov rax, qword ptr rt_brk");
                     self.e("sub rax, 2097152");
                     return Ok(Ty::i64());
+                }
+                if name == "weak" && !self.funcs.contains_key(&(self.cur_mod.clone(), name.clone())) {
+                    return self.weak_of(args);
                 }
                 if name == "live_objects" && args.is_empty() {
                     self.e("mov rax, qword ptr rt_live");
@@ -4639,6 +5522,9 @@ end
                 if self.globals.contains_key(&key) {
                     let t = self.expr(callee, None)?;
                     return self.call_value(t, args);
+                }
+                if name == "chr" {
+                    return self.err("unknown function chr: use char(n).to_text() to make a text from a code point");
                 }
                 self.err(format!("undefined function '{}'", name))
             }
@@ -4688,12 +5574,28 @@ end
                         return self.enum_construct(&q, idx, args);
                     }
                 }
+                if let Some(pt) = self.path_ty(obj) {
+                    if let Some(res) = self.cow_method(obj, &pt, name, args)? {
+                        return Ok(res);
+                    }
+                }
                 let ot = self.expr(obj, None)?;
+                if let Ty::Weak(inner) = &ot {
+                    if name == "upgrade" {
+                        return self.weak_upgrade(inner, args);
+                    }
+                    return self.err(format!("{} has no method '{}'; use upgrade()", ot.show(), name));
+                }
+                let ot = rc_view(&ot);
                 if let Ty::Param { name: tname, bound } = &ot {
                     return self.param_method_call("", bound, tname, name, args);
                 }
                 if !matches!(ot, Ty::Rec(_)) {
-                    if let Some(sig) = self.methods.get(&(method_key(&ot), name.clone())).cloned() {
+                    let mut found = self.methods.get(&(method_key(&ot), name.clone())).cloned();
+                    if found.is_none() {
+                        found = self.std_sig(&ot, name)?;
+                    }
+                    if let Some(sig) = found {
                         let t = self.temp();
                         self.e(format!("mov qword ptr [rbp - {}], rax", t));
                         let res = self.call_sig(&sig, Some(t), args);
@@ -4706,7 +5608,11 @@ end
                     _ => None,
                 };
                 if let Some(r) = r {
-                    if let Some(sig) = self.methods.get(&(r.clone(), name.clone())).cloned() {
+                    let mut found = self.methods.get(&(r.clone(), name.clone())).cloned();
+                    if found.is_none() {
+                        found = self.std_sig(&ot, name)?;
+                    }
+                    if let Some(sig) = found {
                         // the method owns its receiver, which expr() handed over
                         let t = self.temp();
                         self.e(format!("mov qword ptr [rbp - {}], rax", t));
@@ -4727,7 +5633,73 @@ end
                     }
                     return self.err(format!("{} has no method '{}'", r, name));
                 }
-                if ot == Ty::Text && name == "slice" {
+                if ot == Ty::Char && matches!(name.as_str(), "to_text" | "len_utf8" | "is_ascii") {
+                    if !args.is_empty() {
+                        return self.err(format!("{}() takes no arguments", name));
+                    }
+                    match name.as_str() {
+                        "to_text" => {
+                            self.e("mov rcx, rax");
+                            self.e("call rt_text_from_char");
+                            return Ok(Ty::Text);
+                        }
+                        "len_utf8" => {
+                            self.e("mov ecx, eax");
+                            self.e("mov eax, 1");
+                            for (lim, n) in [(128, 2), (2048, 3), (65536, 4)] {
+                                self.e(format!("mov edx, {}", n));
+                                self.e(format!("cmp ecx, {}", lim));
+                                self.e("cmovae eax, edx");
+                            }
+                            return Ok(Ty::int());
+                        }
+                        _ => {
+                            self.e("cmp eax, 128");
+                            self.e("setb al");
+                            self.e("movzx eax, al");
+                            return Ok(Ty::Bool);
+                        }
+                    }
+                }
+                if ot == Ty::Text && matches!(name.as_str(), "bytes" | "char_count") {
+                    if !args.is_empty() {
+                        return self.err(format!("{}() takes no arguments", name));
+                    }
+                    let t = self.temp();
+                    self.e(format!("mov qword ptr [rbp - {}], rax", t));
+                    self.e("mov rcx, rax");
+                    self.e(format!("call {}", if name == "bytes" { "rt_text_bytes" } else { "rt_text_char_count" }));
+                    let keep = self.temp();
+                    self.e(format!("mov qword ptr [rbp - {}], rax", keep));
+                    self.release_slot(t);
+                    self.e(format!("mov rax, qword ptr [rbp - {}]", keep));
+                    self.free(keep);
+                    self.free(t);
+                    return Ok(if name == "bytes" { Ty::List(Box::new(Ty::Int { bits: 8, signed: false })) } else { Ty::int() });
+                }
+                if ot == Ty::Text && name == "byte" {
+                    if args.len() != 1 {
+                        return self.err("byte(i) takes one position");
+                    }
+                    let t = self.temp();
+                    self.e(format!("mov qword ptr [rbp - {}], rax", t));
+                    let it = self.expr(&args[0].value, Some(&Ty::i64()))?;
+                    if !it.is_int() {
+                        return self.err(format!("byte position must be a number, found {}", it.show()));
+                    }
+                    self.e("mov rdx, rax");
+                    self.e(format!("mov rcx, qword ptr [rbp - {}]", t));
+                    self.at("r9");
+                    self.e("call rt_text_byte_at");
+                    let keep = self.temp();
+                    self.e(format!("mov qword ptr [rbp - {}], rax", keep));
+                    self.release_slot(t);
+                    self.e(format!("mov rax, qword ptr [rbp - {}]", keep));
+                    self.free(keep);
+                    self.free(t);
+                    return Ok(Ty::Int { bits: 8, signed: false });
+                }
+                if ot == Ty::Text && (name == "slice" || name == "__raw_slice") {
                     if args.len() != 2 {
                         return self.err("slice(start, end) takes two numbers");
                     }
@@ -4740,7 +5712,8 @@ end
                     self.e("mov r8, rax");
                     self.e(format!("mov rdx, qword ptr [rbp - {}]", a));
                     self.e(format!("mov rcx, qword ptr [rbp - {}]", t));
-                    self.e("call rt_text_slice");
+                    self.at("r9");
+                    self.e(if name == "slice" { "call rt_text_slice" } else { "call rt_text_slice_raw" });
                     let keep = self.temp();
                     self.e(format!("mov qword ptr [rbp - {}], rax", keep));
                     self.release_slot(t);
@@ -4936,7 +5909,7 @@ end
                 v.clone()
             }
         };
-        if *k == Ty::Text {
+        if self.is_rc(k) {
             self.release_slot(ks);
         }
         self.free(ks);
@@ -5049,7 +6022,16 @@ end
             }
             let at = match (slots[i], &p.default) {
                 (Some(x), _) => {
-                    if p.by_ref {
+                    if p.by_ref && matches!(p.ty, Ty::List(_) | Ty::Map(..)) {
+                        // the callee gets the address of the caller's own slot and writes through it
+                        if self.path_ty(x).is_some() {
+                            self.write_place(x)?
+                        } else {
+                            let vt = self.expr(x, Some(&p.ty))?;
+                            self.temp_place();
+                            vt
+                        }
+                    } else if p.by_ref {
                         self.expr(x, Some(&p.ty))?
                     } else {
                         self.value(x, Some(&p.ty))?
@@ -5146,7 +6128,7 @@ end
         for (i, p) in sig.params.iter().enumerate() {
             let Some(x) = slots[i] else { return self.err(format!("missing argument '{}'", p.name)) };
             let aliased = if let Some(v) = literal_bits(x, &p.ty) {
-                Some(Local { off: 0, ty: p.ty.clone(), mutable: false, captured: false, reg: None, imm: Some(v) })
+                Some(Local { off: 0, ty: p.ty.clone(), mutable: false, captured: false, reg: None, imm: Some(v), is_ref: false, ind: false })
             } else if let ExprKind::Ident(n) = &x.kind {
                 // a later argument that could change the variable forces a copy
                 let later_ok = slots[i + 1..].iter().flatten().all(|y| reads_only(y));
@@ -5166,7 +6148,7 @@ end
                     let t = self.temp();
                     self.e(format!("mov qword ptr [rbp - {}], rax", t));
                     temps.push(t);
-                    Local { off: t, ty: p.ty.clone(), mutable: false, captured: false, reg: None, imm: None }
+                    Local { off: t, ty: p.ty.clone(), mutable: false, captured: false, reg: None, imm: None, is_ref: false, ind: false }
                 }
             };
             scope.vars.insert(p.name.clone(), local);
@@ -5345,7 +6327,6 @@ end
     fn emit_async_launch(&mut self, inner: &Ty, body: &[Stmt]) -> R<()> {
         let inner = Box::new(inner.clone());
         let want = Ty::Func { params: vec![], ret: inner.clone(), ext: false };
-        self.next_lambda_await = true;
         self.lambda(&[], body, Some(&want))?;
         let c = self.temp();
         self.e(format!("mov qword ptr [rbp - {}], rax", c));
@@ -5564,6 +6545,8 @@ fn ty_full(t: &Ty) -> String {
         Ty::Ptr(e) => format!("*{}", ty_full(e)),
         Ty::Chan(e) => format!("Channel<{}>", ty_full(e)),
         Ty::Future(e) => format!("Future<{}>", ty_full(e)),
+        Ty::Rc(e) => format!("Rc<{}>", ty_full(e)),
+        Ty::Weak(e) => format!("Weak<{}>", ty_full(e)),
         Ty::Result(e) => format!("{}!", ty_full(e)),
         other => other.show(),
     }
@@ -5575,7 +6558,7 @@ fn mentions_param(t: &Type, names: &[String]) -> bool {
         Type::Named { path, args } => {
             (path.len() == 1 && args.is_empty() && names.contains(&path[0])) || args.iter().any(|a| mentions_param(a, names))
         }
-        Type::Optional(i) | Type::Pointer(i) | Type::Slice(i) | Type::Array(_, i) => mentions_param(i, names),
+        Type::Optional(i) | Type::Shared(i) | Type::Pointer(i) | Type::Slice(i) | Type::Array(_, i) => mentions_param(i, names),
         Type::Func { params, ret, .. } => {
             params.iter().any(|p| mentions_param(p, names))
                 || ret.as_ref().map_or(false, |r| r.ty.as_ref().map_or(false, |t| mentions_param(t, names)))
@@ -5615,6 +6598,8 @@ impl Compiler {
             bindings: self.bindings.clone(),
             cur_mod: self.cur_mod.clone(),
             line: self.line,
+            derived: self.derived.clone(),
+            map_thunks: self.map_thunks.clone(),
         }
     }
 
@@ -5635,6 +6620,8 @@ impl Compiler {
         self.bindings = s.bindings;
         self.cur_mod = s.cur_mod;
         self.line = s.line;
+        self.derived = s.derived;
+        self.map_thunks = s.map_thunks;
     }
 
     fn resolve_ret(&mut self, r: &Option<RetType>, m: &str) -> R<Ty> {
@@ -5659,14 +6646,18 @@ impl Compiler {
             Ok(q)
         } else if self.rec_decls.contains_key(&q) || self.enum_decls.contains_key(&q) || self.tmpl_recs.contains_key(&q) {
             self.err(format!("the bound '{}' must be an interface", bound.join(".")))
+        } else if bound.len() == 1 && matches!(bound[0].as_str(), "Eq" | "Ord" | "Hash") {
+            Ok(format!("std.{}", bound[0]))
         } else {
             self.err(format!("unknown interface '{}'", bound.join(".")))
         }
     }
 
-    /// Parameter and result types of the interface method `sg`.
-    fn interface_method(&mut self, iface_mod: &str, sg: &MethodSig) -> R<(Vec<Ty>, Ty)> {
-        let saved = std::mem::take(&mut self.bindings);
+    /// Parameter and result types of the interface method `sg`; `Self` is `self_ty`.
+    fn interface_method(&mut self, iface_mod: &str, sg: &MethodSig, self_ty: &Ty) -> R<(Vec<Ty>, Ty)> {
+        let mut b = HashMap::new();
+        b.insert("Self".to_string(), self_ty.clone());
+        let saved = std::mem::replace(&mut self.bindings, b);
         let mut ps = Vec::new();
         let mut result = Ok(());
         for p in &sg.params {
@@ -5684,33 +6675,57 @@ impl Compiler {
         Ok((ps, ret?))
     }
 
+    /// The method `mname` a bound provides: its own, or `eq` when the bound is `Ord` or `Hash`.
+    fn bound_sig(&self, bound: &str, mname: &str) -> Option<(String, MethodSig)> {
+        let (bm, bsigs) = self.interfaces.get(bound)?;
+        if let Some(x) = bsigs.iter().find(|x| x.name == mname) {
+            return Some((bm.clone(), x.clone()));
+        }
+        if mname == "eq" && matches!(bound, "std.Ord" | "std.Hash") {
+            let (em, esigs) = self.interfaces.get("std.Eq")?;
+            return esigs.iter().find(|x| x.name == "eq").map(|x| (em.clone(), x.clone()));
+        }
+        None
+    }
+
     /// Checks that `ty` has every method of the interface `iface`, with the same signature.
     fn satisfies(&mut self, ty: &Ty, iface: &str) -> R<()> {
         let (im, sigs) = self.interfaces[iface].clone();
         let iname = display_name(iface);
+        let standard = matches!(iface, "std.Eq" | "std.Ord" | "std.Hash");
         for sg in &sigs {
-            let (want_params, want_ret) = self.interface_method(&im, sg)?;
+            let (want_params, want_ret) = self.interface_method(&im, sg, ty)?;
             let have: Option<(Vec<Ty>, Ty)> = match ty {
-                Ty::Param { bound: Some(b), .. } => {
-                    let (bm, bsigs) = self.interfaces[b].clone();
-                    match bsigs.iter().find(|x| x.name == sg.name) {
-                        Some(x) => Some(self.interface_method(&bm, x)?),
-                        None => None,
-                    }
-                }
+                Ty::Param { bound: Some(b), .. } => match self.bound_sig(b, &sg.name) {
+                    Some((bm, x)) => Some(self.interface_method(&bm, &x, ty)?),
+                    None => None,
+                },
                 Ty::Param { .. } => None,
-                _ => self.methods.get(&(method_key(ty), sg.name.clone())).map(|m| (m.params.iter().map(|p| p.ty.clone()).collect(), m.ret.clone())),
+                _ => {
+                    let found = self.methods.get(&(method_key(ty), sg.name.clone())).cloned();
+                    let found = match found {
+                        Some(m) => Some(m),
+                        None => self.std_sig(ty, &sg.name)?,
+                    };
+                    found.map(|m| (m.params.iter().map(|p| p.ty.clone()).collect(), m.ret.clone()))
+                }
             };
             let Some((have_params, have_ret)) = have else {
+                if standard {
+                    let cap = Cap::of(&sg.name);
+                    let why = self.lacks(ty, cap).map(|(_, w)| format!(": {}", w)).unwrap_or_default();
+                    return self.err(format!("{} does not satisfy {}{}", ty.show(), iname, why));
+                }
                 return self.err(format!("{} does not satisfy {}: it has no method '{}'", ty.show(), iname, sg.name));
             };
             if have_params != want_params {
                 let show = |v: &[Ty]| v.iter().map(|t| t.show()).collect::<Vec<_>>().join(", ");
                 return self.err(format!(
-                    "{} does not satisfy {}: method '{}' takes ({}) where {} needs ({})",
+                    "{} does not satisfy {}: method '{}' {}takes ({}) where {} needs ({})",
                     ty.show(),
                     iname,
                     sg.name,
+                    if standard { "has the wrong signature for the interface: it " } else { "" },
                     show(&have_params),
                     iname,
                     show(&want_params)
@@ -5719,10 +6734,11 @@ impl Compiler {
             if have_ret != want_ret {
                 let r = |t: &Ty| if *t == Ty::Void { "nothing".to_string() } else { t.show() };
                 return self.err(format!(
-                    "{} does not satisfy {}: method '{}' returns {} where {} needs {}",
+                    "{} does not satisfy {}: method '{}' {}returns {} where {} needs {}",
                     ty.show(),
                     iname,
                     sg.name,
+                    if standard { "has the wrong signature for the interface: it " } else { "" },
                     r(&have_ret),
                     iname,
                     r(&want_ret)
@@ -5745,12 +6761,12 @@ impl Compiler {
         let Some(b) = bound else {
             return self.err(format!("{} has no method '{}': add a bound, for example <{}: Printable>", tname, mname, tname));
         };
-        let (im, sigs) = self.interfaces[b].clone();
-        let Some(sg) = sigs.iter().find(|s| s.name == mname) else {
+        let Some((im, sg)) = self.bound_sig(b, mname) else {
             return self.err(format!("{} has no method '{}': its bound {} does not list it", tname, mname, display_name(b)));
         };
         let _ = name;
-        let (ps, ret) = self.interface_method(&im, sg)?;
+        let self_ty = Ty::Param { name: tname.to_string(), bound: bound.clone() };
+        let (ps, ret) = self.interface_method(&im, &sg, &self_ty)?;
         if args.len() != ps.len() {
             return self.err(format!("'{}' takes {} argument{}", mname, ps.len(), if ps.len() == 1 { "" } else { "s" }));
         }
@@ -5875,6 +6891,7 @@ impl Compiler {
 
     fn unify(&mut self, pat: &Type, actual: &Ty, params: &[String], b: &mut HashMap<String, Ty>, m: &str) -> R<()> {
         match pat {
+            Type::Shared(inner) => return self.unify(inner, actual, params, b, m),
             Type::Named { path, args } => {
                 if path.len() == 1 && args.is_empty() && params.contains(&path[0]) {
                     match b.get(&path[0]) {
@@ -5902,6 +6919,7 @@ impl Compiler {
                         }
                         ("Channel", Ty::Chan(el)) if args.len() == 1 => return self.unify(&args[0], el, params, b, m),
                         ("Future", Ty::Future(el)) if args.len() == 1 => return self.unify(&args[0], el, params, b, m),
+                        ("Rc", Ty::Rc(el)) | ("Weak", Ty::Weak(el)) if args.len() == 1 => return self.unify(&args[0], el, params, b, m),
                         _ => {}
                     }
                 }
@@ -6244,7 +7262,7 @@ impl Compiler {
                 let is_cmp = matches!(*op, "==" | "!=" | "<" | "<=" | ">" | ">=");
                 if is_cmp {
                     // comparison operands are typed on their own: literals are plain `int`s
-                    let i64t = Ty::i64();
+                    let i64t = Ty::int();
                     let (a, b) = (self.fold(lhs, &i64t, fbits)?, self.fold(rhs, &i64t, fbits)?);
                     let r = match (a, b) {
                         (Const::Int(a), Const::Int(b)) => cmp_op(*op, a.cmp(&b)),
@@ -6440,7 +7458,8 @@ impl Compiler {
                     return Ok(());
                 }
                 ExprKind::Binary { op, lhs, rhs } if is_cmp_op(op) && self.rhs_is_simple(rhs) => {
-                    let (lt, lown) = self.operand(lhs, None)?;
+                    let lit = self.literal_side_type(op, lhs, rhs, None);
+                    let (lt, lown) = self.operand(lhs, lit.as_ref())?;
                     if lown && self.is_rc(&lt) {
                         // an owned heap value on the left: the general path releases it
                         let t1 = self.temp();
@@ -6477,7 +7496,7 @@ impl Compiler {
     /// With the operands in rax and rcx, compares them and jumps. Returns false, having emitted
     /// nothing, when the types need the general code (text, enums, results, type errors).
     fn fuse_compare(&mut self, op: &str, lt: &Ty, rt: &Ty, label: &str, jump_if: bool) -> bool {
-        let intlike = |t: &Ty| t.is_int() || matches!(t, Ty::Bool | Ty::Ptr(_));
+        let intlike = |t: &Ty| t.is_int() || matches!(t, Ty::Char | Ty::Bool | Ty::Ptr(_));
         if intlike(lt) && intlike(rt) && (compatible(lt, rt) || compatible(rt, lt)) {
             let unsigned = cmp_unsigned(lt, rt);
             let cc = match (op, unsigned) {
@@ -6574,6 +7593,10 @@ fn peephole(code: &[String], ret_label: &str) -> Vec<String> {
             if dead {
                 continue;
             }
+            // sign-extending twice in a row is the same as once
+            if (t == "movsxd rax, eax" || t == "movsx rax, al" || t == "movsx rax, ax") && out.last().is_some_and(|p| p.trim() == t) {
+                continue;
+            }
             // `mov [X], r` then `mov r, [X]`: the register already holds the value
             if let Some(rest) = t.strip_prefix("mov ") {
                 if let Some((dst, src)) = rest.split_once(", ") {
@@ -6629,7 +7652,7 @@ fn norm_insn(t: &Ty) -> Option<&'static str> {
         Ty::Int { bits: 16, signed: true } => "movsx rax, ax",
         Ty::Int { bits: 16, signed: false } => "movzx eax, ax",
         Ty::Int { bits: 32, signed: true } => "movsxd rax, eax",
-        Ty::Int { bits: 32, signed: false } => "mov eax, eax",
+        Ty::Int { bits: 32, signed: false } | Ty::Char => "mov eax, eax",
         _ => return None,
     })
 }
@@ -6701,6 +7724,12 @@ fn file_uses_floats(f: &File) -> bool {
     d.contains("Float(") || d.contains("\"float\"") || d.contains("\"f32\"") || d.contains("\"f64\"")
 }
 
+fn fd_has_await(fd: &FuncDecl) -> bool {
+    let mut names = Vec::new();
+    collect_block(&fd.body, &mut names);
+    names.iter().any(|n| n == "$await")
+}
+
 fn file_uses_concurrency(f: &File) -> bool {
     let mut names = Vec::new();
     for d in &f.decls {
@@ -6712,6 +7741,18 @@ fn file_uses_concurrency(f: &File) -> bool {
         }
     }
     names.iter().any(|n| n == "$spawn" || n == "$await" || n == "channel" || n == "sleep" || n == "timeout")
+}
+
+/// Whether a file uses `shared` or `spawn_thread` (the runtime then counts references atomically).
+fn file_uses_threads(f: &File) -> (bool, bool) {
+    let mut names = Vec::new();
+    for d in &f.decls {
+        if let DeclKind::Func(fd) = &d.kind {
+            collect_block(&fd.body, &mut names);
+        }
+    }
+    let spawn = names.iter().any(|n| n == "$spawn_thread");
+    (spawn || names.iter().any(|n| n == "$shared"), spawn)
 }
 
 fn collect_block(b: &[Stmt], out: &mut Vec<String>) {
@@ -6782,6 +7823,15 @@ fn collect_expr(e: &Expr, out: &mut Vec<String>) {
                 collect_block(&a.body, out);
             }
         }
+        ExprKind::Shared(expr) => {
+            out.push("$shared".into());
+            collect_expr(expr, out)
+        }
+        ExprKind::SpawnThread(expr) => {
+            out.push("$spawn_thread".into());
+            collect_expr(expr, out)
+        }
+        ExprKind::New(expr) => collect_expr(expr, out),
         ExprKind::Await(expr) => {
             out.push("$await".into());
             collect_expr(expr, out)
@@ -7043,6 +8093,8 @@ rt_text_alloc proc
     mov rbp, rsp
     sub rsp, 48
     mov qword ptr [rbp - 8], rcx
+    cmp rcx, qword ptr rt_max_len
+    ja rt_too_long
     add rcx, 9
     xor edx, edx
     call rt_alloc
@@ -7110,38 +8162,70 @@ rt_teq_done:
     ret
 rt_text_eq endp
 
-; rax = byte rdx of text rcx
-rt_text_byte proc
+; rax = byte rdx of text rcx (r9 = location); aborts out of range
+rt_text_byte_at proc
     cmp rdx, qword ptr [rcx]
-    jae rt_index_oob
+    jae rt_tba_oob
     movzx eax, byte ptr [rcx + rdx + 8]
     ret
-rt_text_byte endp
+rt_tba_oob:
+    lea rcx, rt_msg_bytepos
+    lea r8, rt_msg_outofrange
+    jmp rt_abort_val
+rt_text_byte_at endp
 
-; rax = new text: bytes [rdx, r8) of text rcx (indexes are clamped)
+; abort "<text rcx><number rdx><text r8>" at location r9
+rt_abort_val proc
+    push rbp
+    mov rbp, rsp
+    sub rsp, 64
+    mov qword ptr [rbp - 8], rcx
+    mov qword ptr [rbp - 16], r8
+    mov qword ptr [rbp - 24], r9
+    mov rcx, rdx
+    call rt_text_from_int
+    mov rdx, rax
+    mov rcx, qword ptr [rbp - 8]
+    call rt_concat
+    mov rcx, rax
+    mov rdx, qword ptr [rbp - 16]
+    call rt_concat
+    mov rcx, rax
+    mov rdx, qword ptr [rbp - 24]
+    jmp rt_abort
+rt_abort_val endp
+
+; rax = new text: bytes [rdx, r8) of text rcx (r9 = location); aborts when a position is out of
+; range, when rdx > r8 or when one is inside a multibyte character
 rt_text_slice proc
     push rbp
     mov rbp, rsp
     sub rsp, 64
     mov qword ptr [rbp - 8], rcx
-    mov rax, qword ptr [rcx]
-    cmp r8, rax
-    jle rt_ts_e1
-    mov r8, rax
-rt_ts_e1:
-    test r8, r8
-    jns rt_ts_e2
-    xor r8d, r8d
-rt_ts_e2:
-    test rdx, rdx
-    jns rt_ts_s1
-    xor edx, edx
-rt_ts_s1:
-    cmp rdx, r8
-    jle rt_ts_s2
-    mov rdx, r8
-rt_ts_s2:
     mov qword ptr [rbp - 16], rdx
+    mov qword ptr [rbp - 24], r8
+    mov qword ptr [rbp - 48], r9
+    mov rax, qword ptr [rcx]
+    cmp rdx, rax
+    ja rt_ts_oob1
+    cmp r8, rax
+    ja rt_ts_oob2
+    cmp rdx, r8
+    ja rt_ts_order
+    cmp rdx, rax
+    jae rt_ts_b1
+    movzx r10d, byte ptr [rcx + rdx + 8]
+    and r10d, 192
+    cmp r10d, 128
+    je rt_ts_cut1
+rt_ts_b1:
+    cmp r8, rax
+    jae rt_ts_ok
+    movzx r10d, byte ptr [rcx + r8 + 8]
+    and r10d, 192
+    cmp r10d, 128
+    je rt_ts_cut2
+rt_ts_ok:
     sub r8, rdx
     mov qword ptr [rbp - 24], r8
     mov rcx, r8
@@ -7157,22 +8241,247 @@ rt_ts_s2:
     mov rsp, rbp
     pop rbp
     ret
+rt_ts_oob1:
+    lea rcx, rt_msg_textpos
+    lea r8, rt_msg_outofrange
+    jmp rt_ts_fail
+rt_ts_oob2:
+    lea rcx, rt_msg_textpos
+    lea r8, rt_msg_outofrange
+    mov rdx, qword ptr [rbp - 24]
+    jmp rt_ts_fail
+rt_ts_order:
+    lea rcx, rt_msg_slicestart
+    lea r8, rt_msg_afterend
+    jmp rt_ts_fail
+rt_ts_cut1:
+    lea rcx, rt_msg_textpos
+    lea r8, rt_msg_notboundary
+    jmp rt_ts_fail
+rt_ts_cut2:
+    lea rcx, rt_msg_textpos
+    lea r8, rt_msg_notboundary
+    mov rdx, qword ptr [rbp - 24]
+rt_ts_fail:
+    mov r9, qword ptr [rbp - 48]
+    jmp rt_abort_val
 rt_text_slice endp
 
-; rax = one-byte text for the byte in rcx
-rt_text_chr proc
+; like rt_text_slice without the character-boundary check: for protocol and buffer code that
+; cuts bytes, not characters (the result may be invalid UTF-8)
+rt_text_slice_raw proc
+    push rbp
+    mov rbp, rsp
+    sub rsp, 64
+    mov qword ptr [rbp - 8], rcx
+    mov qword ptr [rbp - 16], rdx
+    mov qword ptr [rbp - 24], r8
+    mov qword ptr [rbp - 48], r9
+    mov rax, qword ptr [rcx]
+    cmp rdx, rax
+    ja rt_ts_oob1
+    cmp r8, rax
+    ja rt_ts_oob2
+    cmp rdx, r8
+    ja rt_ts_order
+    jmp rt_ts_ok
+rt_text_slice_raw endp
+
+; rax = new text holding the UTF-8 bytes of code point rcx
+rt_text_from_char proc
     push rbp
     mov rbp, rsp
     sub rsp, 48
     mov qword ptr [rbp - 8], rcx
-    mov ecx, 1
+    mov eax, 1
+    cmp ecx, 128
+    jb rt_tchr_len
+    mov eax, 2
+    cmp ecx, 2048
+    jb rt_tchr_len
+    mov eax, 3
+    cmp ecx, 65536
+    jb rt_tchr_len
+    mov eax, 4
+rt_tchr_len:
+    mov qword ptr [rbp - 16], rax
+    mov rcx, rax
     call rt_text_alloc
     mov rcx, qword ptr [rbp - 8]
+    mov rdx, qword ptr [rbp - 16]
+    cmp rdx, 1
+    jne rt_tchr_2
     mov byte ptr [rax + 8], cl
+    jmp rt_tchr_done
+rt_tchr_2:
+    cmp rdx, 2
+    jne rt_tchr_3
+    mov r8d, ecx
+    shr r8d, 6
+    or r8d, 192
+    mov byte ptr [rax + 8], r8b
+    and ecx, 63
+    or ecx, 128
+    mov byte ptr [rax + 9], cl
+    jmp rt_tchr_done
+rt_tchr_3:
+    cmp rdx, 3
+    jne rt_tchr_4
+    mov r8d, ecx
+    shr r8d, 12
+    or r8d, 224
+    mov byte ptr [rax + 8], r8b
+    mov r8d, ecx
+    shr r8d, 6
+    and r8d, 63
+    or r8d, 128
+    mov byte ptr [rax + 9], r8b
+    and ecx, 63
+    or ecx, 128
+    mov byte ptr [rax + 10], cl
+    jmp rt_tchr_done
+rt_tchr_4:
+    mov r8d, ecx
+    shr r8d, 18
+    or r8d, 240
+    mov byte ptr [rax + 8], r8b
+    mov r8d, ecx
+    shr r8d, 12
+    and r8d, 63
+    or r8d, 128
+    mov byte ptr [rax + 9], r8b
+    mov r8d, ecx
+    shr r8d, 6
+    and r8d, 63
+    or r8d, 128
+    mov byte ptr [rax + 10], r8b
+    and ecx, 63
+    or ecx, 128
+    mov byte ptr [rax + 11], cl
+rt_tchr_done:
     mov rsp, rbp
     pop rbp
     ret
-rt_text_chr endp
+rt_text_from_char endp
+
+; eax = the code point of text rcx at offset rdx (rdx < length), rdx = the offset after it.
+; Bytes that are not valid UTF-8 decode as U+FFFD, one per byte. Clobbers rcx, r8-r11.
+rt_text_next_char proc
+    mov r8, qword ptr [rcx]
+    lea r9, [rcx + rdx + 8]
+    sub r8, rdx
+    movzx eax, byte ptr [r9]
+    cmp eax, 128
+    jb rt_nc_1
+    cmp eax, 194
+    jb rt_nc_bad
+    cmp eax, 224
+    jb rt_nc_2
+    cmp eax, 240
+    jb rt_nc_3
+    cmp eax, 244
+    ja rt_nc_bad
+    cmp r8, 4
+    jb rt_nc_bad
+    and eax, 7
+    mov r10d, 4
+    mov r11d, 65536
+    jmp rt_nc_cont
+rt_nc_3:
+    cmp r8, 3
+    jb rt_nc_bad
+    and eax, 15
+    mov r10d, 3
+    mov r11d, 2048
+    jmp rt_nc_cont
+rt_nc_2:
+    cmp r8, 2
+    jb rt_nc_bad
+    and eax, 31
+    mov r10d, 2
+    mov r11d, 128
+rt_nc_cont:
+    mov ecx, 1
+rt_nc_loop:
+    movzx r8d, byte ptr [r9 + rcx]
+    xor r8d, 128
+    test r8d, 192
+    jnz rt_nc_bad
+    shl eax, 6
+    or eax, r8d
+    inc rcx
+    cmp rcx, r10
+    jb rt_nc_loop
+    cmp eax, r11d
+    jb rt_nc_bad
+    cmp eax, 1114111
+    ja rt_nc_bad
+    lea r8d, [rax - 55296]
+    cmp r8d, 2047
+    jbe rt_nc_bad
+    add rdx, r10
+    ret
+rt_nc_bad:
+    mov eax, 65533
+rt_nc_1:
+    inc rdx
+    ret
+rt_text_next_char endp
+
+; rax = number of characters of text rcx (an invalid byte counts as one)
+rt_text_char_count proc
+    push rbp
+    mov rbp, rsp
+    push rsi
+    push rdi
+    sub rsp, 16
+    mov rsi, rcx
+    mov qword ptr [rbp - 24], 0
+    xor edi, edi
+rt_cc_loop:
+    mov rdx, rdi
+    mov rcx, rsi
+    cmp rdx, qword ptr [rsi]
+    jae rt_cc_done
+    call rt_text_next_char
+    mov rdi, rdx
+    inc qword ptr [rbp - 24]
+    jmp rt_cc_loop
+rt_cc_done:
+    mov rax, qword ptr [rbp - 24]
+    add rsp, 16
+    pop rdi
+    pop rsi
+    pop rbp
+    ret
+rt_text_char_count endp
+
+; rax = new []byte holding the bytes of text rcx
+rt_text_bytes proc
+    push rbp
+    mov rbp, rsp
+    sub rsp, 64
+    mov qword ptr [rbp - 8], rcx
+    xor ecx, ecx
+    call rt_list_new
+    mov qword ptr [rbp - 16], rax
+    mov qword ptr [rbp - 24], 0
+rt_tb_loop:
+    mov rcx, qword ptr [rbp - 8]
+    mov rax, qword ptr [rbp - 24]
+    cmp rax, qword ptr [rcx]
+    jae rt_tb_done
+    movzx edx, byte ptr [rcx + rax + 8]
+    mov rcx, qword ptr [rbp - 16]
+    call rt_list_push
+    inc qword ptr [rbp - 24]
+    jmp rt_tb_loop
+rt_tb_done:
+    mov rax, qword ptr [rbp - 16]
+    mov rsp, rbp
+    pop rbp
+    ret
+rt_text_bytes endp
 
 ; rax = new text holding the rdx bytes at rcx
 rt_text_from_bytes proc
@@ -7328,6 +8637,8 @@ rt_list_push proc
     mov qword ptr [rbp - 8], rcx
     mov qword ptr [rbp - 16], rdx
     mov rax, qword ptr [rcx]
+    cmp rax, qword ptr rt_max_len
+    jae rt_too_long
     cmp rax, qword ptr [rcx + 8]
     jb rt_lp_store
     mov rax, qword ptr [rcx + 8]
@@ -7448,14 +8759,260 @@ rt_lc_done:
     ret
 rt_list_clear endp
 
+; rax = a new list with the elements of list rcx (rdx = function that copies a heap element, or 0 to retain it)
+rt_list_clone proc
+    push rbp
+    mov rbp, rsp
+    sub rsp, 96
+    mov qword ptr [rbp - 8], rcx
+    mov qword ptr [rbp - 16], rdx
+    mov rcx, qword ptr [rcx + 24]
+    call rt_list_new
+    mov qword ptr [rbp - 24], rax
+    mov rcx, qword ptr [rbp - 8]
+    mov rcx, qword ptr [rcx]
+    test rcx, rcx
+    jz rt_lcl_done
+    mov qword ptr [rbp - 32], rcx
+    shl rcx, 3
+    xor edx, edx
+    call rt_alloc
+    mov rcx, qword ptr [rbp - 24]
+    mov qword ptr [rcx + 16], rax
+    mov rdx, qword ptr [rbp - 32]
+    mov qword ptr [rcx + 8], rdx
+    mov qword ptr [rcx], rdx
+    mov qword ptr [rbp - 40], 0
+rt_lcl_loop:
+    mov rax, qword ptr [rbp - 40]
+    cmp rax, qword ptr [rbp - 32]
+    jae rt_lcl_done
+    mov rcx, qword ptr [rbp - 8]
+    mov rcx, qword ptr [rcx + 16]
+    mov rcx, qword ptr [rcx + rax * 8]
+    mov rdx, qword ptr [rbp - 24]
+    cmp qword ptr [rdx + 24], 0
+    je rt_lcl_store
+    mov rax, qword ptr [rbp - 16]
+    test rax, rax
+    jz rt_lcl_retain
+    call rax
+    mov rcx, rax
+    jmp rt_lcl_store
+rt_lcl_retain:
+    call rt_retain
+rt_lcl_store:
+    mov rax, qword ptr [rbp - 24]
+    mov rax, qword ptr [rax + 16]
+    mov rdx, qword ptr [rbp - 40]
+    mov qword ptr [rax + rdx * 8], rcx
+    inc qword ptr [rbp - 40]
+    jmp rt_lcl_loop
+rt_lcl_done:
+    mov rax, qword ptr [rbp - 24]
+    mov rsp, rbp
+    pop rbp
+    ret
+rt_list_clone endp
+
+; copy on write: rax = the list in the slot at rcx, copied into the slot first when someone else holds it
+; (rdx = the element copy function for rt_list_clone)
+rt_list_unique proc
+    mov rax, qword ptr [rcx]
+    test rax, rax
+    jz rt_lu_ret
+    cmp qword ptr [rax - 16], 1
+    jbe rt_lu_ret
+    push rbp
+    mov rbp, rsp
+    sub rsp, 48
+    mov qword ptr [rbp - 8], rcx
+    mov rcx, rax
+    call rt_list_clone
+    mov rcx, qword ptr [rbp - 8]
+    mov rdx, qword ptr [rcx]
+    mov qword ptr [rcx], rax
+    mov rcx, rdx
+    call rt_release
+    mov rsp, rbp
+    pop rbp
+rt_lu_ret:
+    ret
+rt_list_unique endp
+
 rt_index_oob proc
     lea rcx, rt_msg_oob
     mov rdx, r9
     jmp rt_abort
 rt_index_oob endp
+
+; a list, map or text would hold more than rt_max_len elements (2,147,483,647 bytes for a text)
+rt_too_long proc
+    lea rcx, rt_msg_toolong
+    xor edx, edx
+    jmp rt_abort
+rt_too_long endp
 "#;
 
+/// Removes the `name proc` ... `name endp` block from runtime text.
+fn strip_proc(rt: &str, name: &str) -> String {
+    let start = format!("\n{} proc\n", name);
+    let end = format!("\n{} endp\n", name);
+    match (rt.find(&start), rt.find(&end)) {
+        (Some(a), Some(b)) if b > a => format!("{}{}", &rt[..a], &rt[b + end.len()..]),
+        _ => rt.to_string(),
+    }
+}
+
+/// The built-in heap procedures, left out when the program declares an allocator.
+fn strip_heap(rt: &str) -> String {
+    strip_proc(&strip_proc(rt, "rt_alloc"), "rt_free_obj")
+}
+
+/// The built-in heap's data, left out when the program declares an allocator.
+fn strip_heap_data(data: &str) -> String {
+    let mut out = String::new();
+    let mut skip_table = false;
+    for line in data.lines() {
+        let t = line.trim();
+        if skip_table {
+            skip_table = false;
+            if t.starts_with("times") {
+                continue;
+            }
+        }
+        if t.starts_with("rt_heap ") || t.starts_with("rt_brk ") || t.starts_with("rt_heap_end ") {
+            continue;
+        }
+        if t == "rt_freelists:" {
+            skip_table = true;
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
+
+/// `rt_alloc` and `rt_free_obj` on top of the program's `#[allocator]` functions (and `rt_realloc_obj`
+/// when it declares `realloc`). The runtime keeps the header: [total size][refcount][drop], 24 bytes.
+fn custom_runtime(c: &crate::noalloc::CustomAllocatorInfo) -> String {
+    let mut s = RUNTIME_CUSTOM.replace("ALLOC_FN", &c.alloc_sym).replace("FREE_FN", &c.free_sym);
+    if let Some(r) = &c.realloc_sym {
+        s.push_str(&RUNTIME_CUSTOM_REALLOC.replace("REALLOC_FN", r));
+    }
+    s
+}
+
+const RUNTIME_CUSTOM: &str = r#"
+; ---- the program's allocator: rt_alloc asks for payload + 24 bytes (rounded up to 16), aligned to 16 ----
+; rax = zeroed heap object of rcx bytes; rdx = drop procedure (or 0).
+rt_alloc proc
+    push rbp
+    mov rbp, rsp
+    sub rsp, 48
+    lea rax, [rcx + 39]
+    and rax, -16
+    mov qword ptr [rbp - 8], rax
+    mov qword ptr [rbp - 16], rdx
+    mov rcx, rax
+    mov edx, 16
+    call ALLOC_FN
+    test rax, rax
+    jz rt_alloc_fail
+    mov rcx, qword ptr [rbp - 8]
+    lea r9, [rax + 8]
+    lea r10, [rax + rcx]
+rt_alloc_zero:
+    mov qword ptr [r9], 0
+    add r9, 8
+    cmp r9, r10
+    jb rt_alloc_zero
+    mov qword ptr [rax], rcx
+    mov qword ptr [rax + 8], 1
+    mov rcx, qword ptr [rbp - 16]
+    mov qword ptr [rax + 16], rcx
+    add rax, 24
+    inc qword ptr rt_live
+    mov rsp, rbp
+    pop rbp
+    ret
+rt_alloc_fail:
+    lea rcx, rt_msg_oom
+    xor edx, edx
+    call rt_abort
+rt_alloc endp
+
+; frees the object whose payload is at rcx
+rt_free_obj proc
+    sub rsp, 40
+    sub rcx, 24
+    mov rdx, qword ptr [rcx]
+    mov r8d, 16
+    dec qword ptr rt_live
+    call FREE_FN
+    add rsp, 40
+    ret
+rt_free_obj endp
+"#;
+
+const RUNTIME_CUSTOM_REALLOC: &str = r#"
+; rax = the object at payload rcx grown to rdx payload bytes (the new tail is zeroed); its refcount must be 1
+rt_realloc_obj proc
+    push rbp
+    mov rbp, rsp
+    sub rsp, 48
+    lea rax, [rdx + 39]
+    and rax, -16
+    mov qword ptr [rbp - 8], rax
+    sub rcx, 24
+    mov rdx, qword ptr [rcx]
+    mov qword ptr [rbp - 16], rdx
+    mov r8, rax
+    mov r9d, 16
+    call REALLOC_FN
+    test rax, rax
+    jz rt_alloc_fail
+    mov rcx, qword ptr [rbp - 8]
+    mov rdx, qword ptr [rbp - 16]
+    mov qword ptr [rax], rcx
+    lea r9, [rax + rdx]
+    lea r10, [rax + rcx]
+rt_realloc_zero:
+    cmp r9, r10
+    jae rt_realloc_done
+    mov qword ptr [r9], 0
+    add r9, 8
+    jmp rt_realloc_zero
+rt_realloc_done:
+    add rax, 24
+    mov rsp, rbp
+    pop rbp
+    ret
+rt_realloc_obj endp
+"#;
+
+/// In `rt_list_push`: grow the element buffer with the program's `realloc` when it is not shared.
+const RUNTIME_LIST_REALLOC: &str = "    mov rcx, qword ptr [rbp - 8]
+    mov rcx, qword ptr [rcx + 16]
+    test rcx, rcx
+    jz rt_lp_slow
+    cmp qword ptr [rcx - 16], 1
+    jne rt_lp_slow
+    mov rdx, qword ptr [rbp - 24]
+    shl rdx, 3
+    call rt_realloc_obj
+    mov rcx, qword ptr [rbp - 8]
+    mov qword ptr [rcx + 16], rax
+    mov rdx, qword ptr [rbp - 24]
+    mov qword ptr [rcx + 8], rdx
+    jmp rt_lp_store
+rt_lp_slow:
+    mov rax, qword ptr [rbp - 24]
+";
+
 const RUNTIME_MAP: &str = include_str!("runtime_map.asm");
+const RUNTIME_DERIVE: &str = include_str!("runtime_derive.asm");
 
 const RUNTIME_WIN: &str = r#"
 ; rax = zeroed heap object of rcx bytes; rdx = drop procedure (or 0).
@@ -7693,8 +9250,36 @@ dq 4611686018427387904, 0
 rt_msg_oom dq 13
     db "out of memory", 0
 dq 4611686018427387904, 0
+rt_max_len dq 2147483647
+rt_msg_toolong dq 29
+    db "list, map or text is too long", 0
+dq 4611686018427387904, 0
 rt_msg_oob dq 19
     db "index out of bounds", 0
+dq 4611686018427387904, 0
+rt_msg_bytepos dq 14
+    db "byte position ", 0
+dq 4611686018427387904, 0
+rt_msg_textpos dq 14
+    db "text position ", 0
+dq 4611686018427387904, 0
+rt_msg_slicestart dq 12
+    db "slice start ", 0
+dq 4611686018427387904, 0
+rt_msg_outofrange dq 16
+    db " is out of range", 0
+dq 4611686018427387904, 0
+rt_msg_notboundary dq 31
+    db " is not on a character boundary", 0
+dq 4611686018427387904, 0
+rt_msg_afterend dq 23
+    db " is after the slice end", 0
+dq 4611686018427387904, 0
+rt_msg_char1 dq 5
+    db "char(", 0
+dq 4611686018427387904, 0
+rt_msg_char2 dq 26
+    db ") is not a valid character", 0
 dq 4611686018427387904, 0
 rt_msg_take dq 23
     db "take from an empty list", 0
@@ -7772,7 +9357,7 @@ pub fn build_os(boot: &File, kernel: &File) -> Result<Vec<u8>, String> {
             kernel.package
         ));
     }
-    let asm = c.generate()?;
+    let asm = c.generate().map_err(crate::comptime::map_error)?;
     let k = crate::asm_x86::assemble(&asm, KERNEL_BASE, 64).map_err(|e| format!("kernel: {}", e))?;
     let mut kernel_bytes = k.bytes;
     while kernel_bytes.len() % 512 != 0 {
@@ -7812,9 +9397,9 @@ pub fn generate_asm_with(file: &File, options: &CompileOptions) -> Result<String
     let mut c = Compiler::new(Target::Windows);
     c.opt = options.optimize;
     c.test_mode = options.test_mode;
-    c.load(file)?;
-    c.declare()?;
-    c.generate()
+    c.load(file).map_err(crate::comptime::map_error)?;
+    c.declare().map_err(crate::comptime::map_error)?;
+    c.generate().map_err(crate::comptime::map_error)
 }
 
 const RUNTIME_LINUX: &str = r#"
@@ -8029,9 +9614,9 @@ pub fn generate_asm_for(file: &File, options: &CompileOptions, target: Target) -
     let mut c = Compiler::new(target);
     c.opt = options.optimize;
     c.test_mode = options.test_mode;
-    c.load(file)?;
-    c.declare()?;
-    c.generate()
+    c.load(file).map_err(crate::comptime::map_error)?;
+    c.declare().map_err(crate::comptime::map_error)?;
+    c.generate().map_err(crate::comptime::map_error)
 }
 
 /// The entry C uses to call Brasa function `name`: its System V arguments (integers in rdi, rsi,
@@ -8281,9 +9866,270 @@ pub fn compile_to_native_with(file: &File, output_exe: &str, options: &CompileOp
     let mut c = Compiler::new(Target::Windows);
     c.opt = options.optimize;
     c.test_mode = options.test_mode;
-    c.load(file)?;
-    c.declare()?;
-    let asm = c.generate()?;
+    c.load(file).map_err(crate::comptime::map_error)?;
+    c.declare().map_err(crate::comptime::map_error)?;
+    let asm = c.generate().map_err(crate::comptime::map_error)?;
     let image = crate::pe::pe_image(&asm, &c.win_imports, c.uses_ui)?;
     std::fs::write(output_exe, &image).map_err(|e| format!("cannot write {}: {}", output_exe, e))
+}
+
+/// The reference-count and live-object instructions of the runtime, made atomic (`lock` prefix)
+/// for programs that use `shared` or `spawn_thread`.
+fn lock_counts(asm: &str) -> String {
+    let mut out = String::with_capacity(asm.len() + 1024);
+    for line in asm.lines() {
+        let t = line.trim_start();
+        let atomic = matches!(t, "inc qword ptr [rcx - 16]" | "dec qword ptr [rcx - 16]" | "inc qword ptr rt_live" | "dec qword ptr rt_live");
+        if atomic {
+            out.push_str("    lock ");
+            out.push_str(t);
+        } else {
+            out.push_str(line);
+        }
+        out.push('\n');
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
+// Threads: transferable types, `shared`, `spawn_thread`
+// ---------------------------------------------------------------------------
+
+/// Names declared by `let`/`var`/`for` in a block (at any depth).
+fn declared_names(b: &[Stmt], out: &mut HashSet<String>) {
+    for s in b {
+        match &s.kind {
+            StmtKind::Var(vd) => {
+                out.insert(vd.name.clone());
+            }
+            StmtKind::For { vars, body, .. } => {
+                out.extend(vars.iter().cloned());
+                declared_names(body, out);
+            }
+            StmtKind::While { body, .. } | StmtKind::Unsafe(body) => declared_names(body, out),
+            StmtKind::Expr(e) => {
+                if let ExprKind::If { branches, else_body } = &e.kind {
+                    for (_, b) in branches {
+                        declared_names(b, out);
+                    }
+                    if let Some(b) = else_body {
+                        declared_names(b, out);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+impl Compiler {
+    /// The first part of `ty` that cannot cross a thread boundary, as (path, type as written).
+    /// Numbers, bool, text, char, enums, closures and `Thread` are transferable; records, lists,
+    /// maps, channels and results are when everything inside is; `new T`, weak references,
+    /// raw pointers and futures are not. Recursive types are visited once.
+    fn transfer_problem(&self, ty: &Ty, path: &str, seen: &mut HashSet<String>) -> Option<(String, String)> {
+        match ty {
+            Ty::Rc(inner) => Some((path.to_string(), format!("new {}", inner.show()))),
+            Ty::Weak(inner) => Some((path.to_string(), format!("a weak reference to new {}", inner.show()))),
+            Ty::Ptr(_) | Ty::Future(_) => Some((path.to_string(), ty.show())),
+            Ty::List(t) => self.transfer_problem(t, &format!("{}[]", path), seen),
+            Ty::Map(k, v) => self
+                .transfer_problem(k, &format!("{}[key]", path), seen)
+                .or_else(|| self.transfer_problem(v, &format!("{}[]", path), seen)),
+            Ty::Chan(t) | Ty::Result(t) => self.transfer_problem(t, path, seen),
+            Ty::Rec(name) => {
+                if !seen.insert(name.clone()) {
+                    return None;
+                }
+                let info = self.records.get(name)?;
+                for (f, fty, _) in &info.fields {
+                    if let Some(p) = self.transfer_problem(fty, &format!("{}.{}", path, f), seen) {
+                        return Some(p);
+                    }
+                }
+                None
+            }
+            Ty::Enum(name) => {
+                if !seen.insert(name.clone()) {
+                    return None;
+                }
+                let info = self.enums.get(name)?;
+                for (v, tys) in &info.variants {
+                    for t in tys {
+                        if let Some(p) = self.transfer_problem(t, &format!("{}.{}", path, v), seen) {
+                            return Some(p);
+                        }
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    /// An error naming `what` (an argument or a captured variable) when `ty` is not transferable.
+    fn transfer_check(&self, what: &str, root: &str, ty: &Ty) -> R<()> {
+        let root = if root.starts_with('$') { "value" } else { root };
+        if let Some((path, shown)) = self.transfer_problem(ty, root, &mut HashSet::new()) {
+            let hint = "it cannot be used by another thread; share data between threads with `shared`, `Mutex<T>` or `Atomic`";
+            if path == root {
+                return self.err(format!("{} has type '{}', which is not transferable between threads: {}", what, shown, hint));
+            }
+            return self.err(format!("{}: field '{}' has type '{}', which is not transferable between threads: {}", what, path, shown, hint));
+        }
+        Ok(())
+    }
+
+    fn thread_safe_global(&self, ty: &Ty) -> bool {
+        matches!(ty, Ty::Rec(n) if n.contains("sync.Mutex") || n.contains("sync.Atomic"))
+    }
+
+    /// A mutable global `var` that the function started with `spawn_thread` (or a function it calls
+    /// by name) uses must be a `Mutex` or an `Atomic`. Calls through function values, methods and
+    /// qualified names are not followed; library code keeps its own per-thread state.
+    fn check_thread_globals(&self, callee: &Expr) -> R<()> {
+        let ExprKind::Ident(start) = &callee.kind else { return Ok(()) };
+        let mut todo = vec![(self.cur_mod.clone(), start.clone())];
+        let mut done = HashSet::new();
+        while let Some((m, f)) = todo.pop() {
+            if !done.insert((m.clone(), f.clone())) || crate::comptime::package_source(&m, self.target).is_some() {
+                continue;
+            }
+            let Some(module) = self.modules.iter().find(|x| x.name == m) else { continue };
+            let Some(fd) = module.file.decls.iter().find_map(|d| match &d.kind {
+                DeclKind::Func(fd) if fd.name == f && fd.receiver.is_none() => Some(fd),
+                _ => None,
+            }) else {
+                continue;
+            };
+            let mut names = Vec::new();
+            collect_block(&fd.body, &mut names);
+            let mut locals = HashSet::new();
+            declared_names(&fd.body, &mut locals);
+            locals.extend(fd.params.iter().map(|p| p.name.clone()));
+            for n in names {
+                if locals.contains(&n) {
+                    continue;
+                }
+                if let Some(g) = self.globals.get(&(m.clone(), n.clone())) {
+                    if g.mutable && g.konst.is_none() && !self.thread_safe_global(&g.ty) {
+                        return self.err(format!(
+                            "global variable '{}' is mutable and is used by '{}', which runs on another thread: threads cannot share a plain global; use `shared Atomic` or `shared Mutex<{}>` instead",
+                            n,
+                            f,
+                            g.ty.show()
+                        ));
+                    }
+                } else if self.funcs.contains_key(&(m.clone(), n.clone())) {
+                    todo.push((m.clone(), n));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The `shared` local that the place `e` is rooted at.
+    fn shared_root(&self, e: &Expr, include_root: bool) -> Option<String> {
+        match &e.kind {
+            ExprKind::Ident(n) if include_root && self.fs.shared_locals.contains(n) && self.lookup(n).is_some() => Some(n.clone()),
+            ExprKind::Field { expr, .. } | ExprKind::Index { expr, .. } => self.shared_root(expr, true),
+            _ => None,
+        }
+    }
+
+    /// Writing through a `shared` value is an error: its content is immutable.
+    fn shared_write_check(&self, target: &Expr, include_root: bool) -> R<()> {
+        if let Some(n) = self.shared_root(target, include_root) {
+            let ty = self.lookup(&n).map(|l| l.ty.show()).unwrap_or_default();
+            return self.err(format!(
+                "'{}' is a `shared` value: its content is immutable; to change it from several threads put it in a `Mutex<{}>`",
+                n, ty
+            ));
+        }
+        Ok(())
+    }
+
+    /// `shared e`: the value of `e`, which every thread may read (atomic counts, immutable content).
+    fn shared_expr(&mut self, inner: &Expr, want: Option<&Ty>) -> R<Ty> {
+        let t = self.value(inner, want)?;
+        if !matches!(t, Ty::Rec(_) | Ty::List(_) | Ty::Map(..) | Ty::Text) {
+            return self.err(format!("`shared` needs a record, list, map or text, found {}", t.show()));
+        }
+        self.transfer_check("the value after `shared`", "value", &t)?;
+        Ok(t)
+    }
+
+    /// `spawn_thread f(args)`: the arguments are evaluated here, then the call runs on a new thread.
+    fn spawn_thread(&mut self, call: &Expr, line: u32) -> R<Ty> {
+        let Some(sig) = self.funcs.get(&("thread".to_string(), "start".to_string())).cloned() else {
+            return self.err("'spawn_thread' needs the thread library");
+        };
+        let ExprKind::Call { callee, args, targs } = &call.kind else {
+            return self.err("'spawn_thread' needs a function call, like `spawn_thread work(x)`");
+        };
+        self.push_scope();
+        let mut new_args: Vec<Arg> = Vec::new();
+        let mut labels: HashMap<String, String> = HashMap::new();
+        for (i, a) in args.iter().enumerate() {
+            if a.by_ref {
+                return self.err("'spawn_thread' cannot pass an argument by reference");
+            }
+            if let ExprKind::Lambda { params, body } = &a.value.kind {
+                // what the closure captures must be transferable too
+                let mut names = Vec::new();
+                collect_block(body, &mut names);
+                let own: HashSet<&String> = params.iter().map(|p| &p.name).collect();
+                let mut seen_caps = HashSet::new();
+                for n in names {
+                    if own.contains(&n) || !seen_caps.insert(n.clone()) {
+                        continue;
+                    }
+                    if let Some(l) = self.lookup(&n) {
+                        self.transfer_check(&format!("captured variable '{}'", n), &n, &l.ty)?;
+                    }
+                }
+            }
+            let plain = matches!(
+                a.value.kind,
+                ExprKind::Ident(_) | ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Char(_) | ExprKind::Bool(_) | ExprKind::Nil
+            );
+            if plain {
+                if let ExprKind::Ident(n) = &a.value.kind {
+                    labels.insert(n.clone(), format!("argument '{}'", n));
+                }
+                new_args.push(a.clone());
+                continue;
+            }
+            let name = format!("$thr{}", i);
+            let decl = VarDecl { name: name.clone(), ty: None, value: Some(a.value.clone()), mutable: false };
+            self.stmt_inner(&Stmt { kind: StmtKind::Var(decl), line })?;
+            labels.insert(name.clone(), format!("argument {}", i + 1));
+            let mut na = a.clone();
+            na.value = Expr { kind: ExprKind::Ident(name), line };
+            new_args.push(na);
+        }
+        let rewritten = Expr { kind: ExprKind::Call { callee: callee.clone(), args: new_args, targs: targs.clone() }, line };
+        let mut used = Vec::new();
+        collect_expr(&rewritten, &mut used);
+        let mut seen = HashSet::new();
+        for n in used {
+            if !seen.insert(n.clone()) {
+                continue;
+            }
+            if let Some(l) = self.lookup(&n) {
+                let what = labels.get(&n).cloned().unwrap_or_else(|| format!("captured variable '{}'", n));
+                self.transfer_check(&what, &n, &l.ty)?;
+            }
+        }
+        self.check_thread_globals(callee)?;
+        let body = vec![Stmt { kind: StmtKind::Expr(rewritten), line }];
+        let want = Ty::Func { params: vec![], ret: Box::new(Ty::Void), ext: false };
+        self.lambda(&[], &body, Some(&want))?;
+        let t = self.temp();
+        self.e(format!("mov qword ptr [rbp - {}], rax", t));
+        self.emit_call(&[t], &format!("call {}", sig.sym), None);
+        self.free(t);
+        self.pop_scope();
+        Ok(sig.ret.clone())
+    }
 }

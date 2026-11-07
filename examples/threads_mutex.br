@@ -1,0 +1,36 @@
+// Threads: a counter shared by eight threads, once with a Mutex and once with an Atomic.
+//
+//   brasa-parse examples/threads_mutex.br -o threads_mutex.exe
+
+package main
+
+use thread
+use sync
+
+func count_locked(counter: shared sync.Mutex<int>, times: int)
+    for i in 0..times
+        counter.update(func(n: int) n + 1 end)
+    end
+end
+
+func count_atomic(counter: shared sync.Atomic, times: int)
+    for i in 0..times
+        counter.add(1)
+    end
+end
+
+func main() -> error
+    let locked = shared sync.Mutex(0)
+    let lockless = shared sync.Atomic{ value: 0 }
+    var workers: []thread.Thread = []
+    for w in 0..8
+        workers.add(spawn_thread count_locked(locked, 10000))
+        workers.add(spawn_thread count_atomic(lockless, 10000))
+    end
+    for t in workers
+        t.join()
+    end
+    print("mutex  = {locked.get()}")
+    print("atomic = {lockless.load()}")
+    return
+end

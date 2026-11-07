@@ -116,8 +116,8 @@ pub const SORT: &str = r#"package main
 use list
 
 func main()
-    var seed = 12345
-    let xs: []int = []
+    var seed: long = 12345
+    let xs: []long = []
     for i in 0..100000
         seed = (seed * 1103515245 + 12345) % 2147483648
         xs.add(seed)
@@ -217,7 +217,8 @@ true
 #[test]
 fn integer_folding_wraps_like_the_program() {
     let Some(out) = same(&main_of(
-        r#"print(9223372036854775807 + 1)
+        r#"let big: long = 9223372036854775807
+print(big + 1)
 let a: u8 = 200 + 100
 let b: i8 = 100 + 100
 let c: u32 = 0 - 1
@@ -282,8 +283,9 @@ true true false false true false
 fn condition_program() -> String {
     let mut src = String::from("package main\n\n");
     let ops = ["==", "!=", "<", "<=", ">", ">="];
-    let types: [(&str, &str, &str); 7] = [
-        ("int", "[0, 1, 3, 4, 0 - 1, 0 - 5, 9223372036854775807, 0 - 9223372036854775807]", "3"),
+    let types: [(&str, &str, &str); 8] = [
+        ("int", "[0, 1, 3, 4, 0 - 1, 0 - 5, 2147483647, 0 - 2147483647]", "3"),
+        ("long", "[0, 1, 3, 4, 0 - 1, 0 - 5, 9223372036854775807, 0 - 9223372036854775807]", "3"),
         ("u8", "[0, 1, 3, 4, 200, 255]", "3"),
         ("u32", "[0, 1, 3, 4, 4000000000, 4294967295]", "3"),
         ("i32", "[0, 1, 3, 4, 0 - 1, 2147483647, 0 - 2147483647]", "3"),
@@ -916,8 +918,8 @@ func unused(a: int, b: int, c: int) -> int
     return a
 end
 
-func small(a: i8, b: u32) -> int
-    return int(a) + int(b)
+func small(a: i8, b: u32) -> long
+    return long(a) + long(b)
 end
 
 func widen(a: i8) -> i8

@@ -11,6 +11,7 @@ fn usage() -> ! {
     eprintln!("       brasa-parse --fmt | --fmt-check <file.br>...");
     eprintln!("       brasa-parse --test <file.br>... [--no-opt]");
     eprintln!("       brasa-parse <file.br> --target linux -o <program>");
+    eprintln!("       comptime: [--comptime-timeout <seconds>] [--no-comptime-cache] [--comptime-dump]");
     exit(2);
 }
 
@@ -66,6 +67,15 @@ fn main() {
     if mode == Mode::Lsp {
         exit(brasa::lsp::run());
     }
+    if let Some(secs) = opts.comptime_timeout {
+        brasa::comptime::set_timeout_secs(secs);
+    }
+    if opts.no_comptime_cache {
+        brasa::comptime::set_cache_enabled(false);
+    }
+    if opts.comptime_dump {
+        brasa::comptime::set_dump(true);
+    }
     let path = opts.path.clone().unwrap_or_else(|| usage());
     if mode == Mode::Fmt || mode == Mode::FmtCheck {
         let mut files = vec![path];
@@ -101,6 +111,7 @@ fn main() {
             exit(2);
         }
     };
+    brasa::comptime::register_siblings(std::path::Path::new(&path), &src);
 
     if mode == Mode::Tokens {
         match Lexer::new(&src).tokenize() {
@@ -234,6 +245,7 @@ fn run_fmt(files: &[String], check: bool) -> ! {
                 continue;
             }
         };
+        brasa::comptime::register_siblings(std::path::Path::new(path), &src);
         match brasa::fmt::format_source(&src) {
             Err(e) => {
                 eprintln!("{}:{}", path, e);

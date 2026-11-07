@@ -68,6 +68,12 @@ cargo test</code></pre>
         <dt>--docs</dt>
         <dd>Rewrites the example blocks of this documentation site from <code>examples/*.br</code>. Run it after changing an example; <code>cargo test</code> fails when the pages are out of date.</dd>
 
+        <dt>--fmt file.br ...</dt>
+        <dd>Rewrites the files in the standard style and prints the names of the ones it changed. Only whitespace changes: four spaces per block level (<code>end</code> and <code>else</code> line up with the line that opens the block), one space after commas, no trailing spaces, at most one blank line in a row, comments kept. It refuses to write a file whose tokens would differ from the original's, and leaves a file with a syntax error alone.</dd>
+
+        <dt>--fmt-check file.br ...</dt>
+        <dd>Changes nothing: lists the files that are not in the standard style and exits with status 1 when there are any (and 0 otherwise), so a build can check formatting.</dd>
+
         <dt>--os boot.br kernel.br -o disk.img</dt>
         <dd>Builds a bootable disk image from a boot sector and a kernel, both written in Brasa (see <code>os/</code> in the repository). Run it with QEMU.</dd>
       </dl>

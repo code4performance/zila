@@ -8,6 +8,7 @@ fn usage() -> ! {
     eprintln!("usage: brasa-parse <file.br> [-o output.exe] [--build] [--ast | --tokens | --asm | --run]");
     eprintln!("       brasa-parse --os <boot.br> <kernel.br> -o <disk.img>");
     eprintln!("       brasa-parse --docs");
+    eprintln!("       brasa-parse --fmt | --fmt-check <file.br>...");
     exit(2);
 }
 
@@ -61,6 +62,11 @@ fn main() {
         return;
     }
     let path = opts.path.clone().unwrap_or_else(|| usage());
+    if mode == Mode::Fmt || mode == Mode::FmtCheck {
+        let mut files = vec![path];
+        files.extend(opts.extra.iter().cloned());
+        run_fmt(&files, mode == Mode::FmtCheck);
+    }
     if mode == Mode::Os {
         build_os_image(&path, &opts.extra, out_exe);
         return;
@@ -192,6 +198,40 @@ fn build_os_image(boot_path: &str, extra: &[String], out: Option<String>) {
             exit(1);
         }
     }
+}
+
+/// `--fmt` and `--fmt-check`: formats the files, or lists the ones that are not formatted.
+fn run_fmt(files: &[String], check: bool) -> ! {
+    let mut failed = false;
+    for path in files {
+        let src = match std::fs::read_to_string(path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("cannot read {}: {}", path, e);
+                failed = true;
+                continue;
+            }
+        };
+        match brasa::fmt::format_source(&src) {
+            Err(e) => {
+                eprintln!("{}:{}", path, e);
+                failed = true;
+            }
+            Ok(out) if out == src => {}
+            Ok(out) => {
+                if check {
+                    println!("not formatted: {}", path);
+                    failed = true;
+                } else if let Err(e) = std::fs::write(path, out) {
+                    eprintln!("cannot write {}: {}", path, e);
+                    failed = true;
+                } else {
+                    println!("formatted {}", path);
+                }
+            }
+        }
+    }
+    exit(if failed { 1 } else { 0 });
 }
 
 /// `--docs`: rewrites the example blocks of the documentation from `examples/`.

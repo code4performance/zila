@@ -268,7 +268,7 @@ impl Interpreter {
     pub fn load_uses(&mut self, file: &File) -> InterpResult<()> {
         for u in &file.uses {
             let name = u[0].clone();
-            if self.loaded.contains(&name) || !matches!(name.as_str(), "text" | "list" | "float" | "math" | "format" | "set") {
+            if self.loaded.contains(&name) || !matches!(name.as_str(), "text" | "list" | "float" | "math" | "format" | "set" | "sorted" | "bufio") {
                 continue;
             }
             let Some(src) = crate::codegen_x64::std_source(&name) else { continue };
@@ -287,7 +287,10 @@ impl Interpreter {
                             // a method of a type the module declares (`Set<T>`)
                             if let Type::Named { path, .. } = &rec.ty {
                                 if let Some(t) = path.last() {
-                                    self.methods.insert((t.clone(), fd.name.clone()), fd.clone());
+                                    // a method runs in the module that declares its type
+                                    let mut m = fd.clone();
+                                    m.name = format!("{}.{}", name, fd.name);
+                                    self.methods.insert((t.clone(), fd.name.clone()), m);
                                 }
                             }
                         }
@@ -1116,10 +1119,22 @@ impl Interpreter {
                     let val = args.get(i).cloned().unwrap_or(Value::Nil);
                     env.borrow_mut().define(param.name.clone(), val);
                 }
-                match self.run_body(&fd.body, &env)? {
+                let module = fd.name.split_once('.').map(|(m, _)| m.to_string()).unwrap_or_default();
+                let saved = std::mem::replace(&mut self.module, module);
+                let r = self.run_body(&fd.body, &env);
+                self.module = saved;
+                match r? {
                     Flow::Return(v) => return Ok(v),
                     _ => return Ok(Value::Nil),
                 }
+            }
+        }
+
+        // a function stored in a record field: `t.less(a, b)`
+        if let Value::Record { fields, .. } = &target {
+            let found = fields.borrow().get(method).cloned();
+            if let Some(Value::Func(fd)) = found {
+                return self.call_func(&fd, args);
             }
         }
 

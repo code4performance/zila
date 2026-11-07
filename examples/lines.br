@@ -1,0 +1,34 @@
+// Buffered files: write lines without a system call each, read them back one at a time.
+//
+//   brasa-parse examples/lines.br -o lines.exe
+//
+// `fs.create` gives a writer that collects text and writes it in 64 KiB pieces (call `close()`
+// or `flush()` when you are done); `fs.open` gives a reader with `read_line()`.
+package main
+
+use fs
+
+func main() -> error
+    let path = "lines-example.txt"
+    let w = try await fs.create(path)
+    try await w.write_line("alpha")
+    try await w.write_line("beta")
+    try await w.write_line("ação")
+    try await w.close()
+
+    let r = try await fs.open(path)
+    var count = 0
+    var longest = ""
+    while not try await r.at_end()
+        let line = try await r.read_line()
+        count += 1
+        if line.len > longest.len
+            longest = line
+        end
+        print("  {line}")
+    end
+    await r.close()
+    print("lines: {count}")
+    print("longest: {longest}")
+    return
+end

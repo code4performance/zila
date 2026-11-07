@@ -6,6 +6,7 @@ pub mod ast;
 pub mod cli;
 pub mod codegen_x64;
 pub mod docs;
+pub mod fmt;
 pub mod interp;
 pub mod lexer;
 pub mod parser;

@@ -1,0 +1,167 @@
+// =====================================================================
+// Brasa standard library: buffers for input and output (`use bufio`)
+//
+//     use bufio
+//     let b = bufio.input()
+//     b.feed("ab")
+//     b.feed("c\nd")
+//     print(b.has_line())      // true
+//     print(b.take_line())     // abc
+//
+// No system calls here: these are the buffers that the readers and writers of `fs` and `net`
+// are built on, and they are handy on their own, for example to cut text that arrives in
+// pieces into lines.
+// =====================================================================
+
+package bufio
+
+use text
+
+// Text that has arrived and has not been taken yet.
+#[shared]
+type InBuf = record
+    data: text
+    pos: int
+    scan: int
+    done: bool
+end
+
+// Text waiting to be written.
+#[shared]
+type OutBuf = record
+    pieces: []text
+    size: int
+end
+
+// An empty input buffer.
+func input() -> InBuf
+    return InBuf { data: "", pos: 0, scan: 0, done: false }
+end
+
+// An empty output buffer.
+func output() -> OutBuf
+    return OutBuf { pieces: [], size: 0 }
+end
+
+// Adds text that arrived.
+func (b: InBuf) feed(chunk: text)
+    if b.pos > 0
+        b.data = b.data.slice(b.pos, b.data.len) + chunk
+        b.scan = b.scan - b.pos
+        b.pos = 0
+    else
+        b.data = b.data + chunk
+    end
+    if b.scan < 0
+        b.scan = 0
+    end
+end
+
+// No more text will arrive: what is left counts as the last line.
+func (b: InBuf) finish()
+    b.done = true
+end
+
+// True once `finish` was called.
+func (b: InBuf) finished() -> bool
+    return b.done
+end
+
+// The number of bytes that have arrived and not been taken.
+func (b: InBuf) unread() -> int
+    return b.data.len - b.pos
+end
+
+// True when a whole line is ready (after `finish`, the last piece of text is a line too).
+func (b: InBuf) has_line() -> bool
+    if b.scan < b.pos
+        b.scan = b.pos
+    end
+    let i = text.index_from(b.data, "\n", b.scan)
+    if i >= 0
+        return true
+    end
+    b.scan = b.data.len
+    return b.done and b.pos < b.data.len
+end
+
+// The next line without its `\n` or `\r\n`; empty text when no line is ready.
+func (b: InBuf) take_line() -> text
+    if b.scan < b.pos
+        b.scan = b.pos
+    end
+    let i = text.index_from(b.data, "\n", b.scan)
+    var line = ""
+    if i < 0
+        if not b.done
+            return ""
+        end
+        line = b.data.slice(b.pos, b.data.len)
+        b.pos = b.data.len
+    else
+        var end_at = i
+        if end_at > b.pos and int(b.data[end_at - 1]) == 13
+            end_at -= 1
+        end
+        line = b.data.slice(b.pos, end_at)
+        b.pos = i + 1
+    end
+    b.scan = b.pos
+    b.release()
+    return line
+end
+
+// Up to `max` bytes, empty text when nothing is left.
+func (b: InBuf) take(max: int) -> text
+    var n = b.data.len - b.pos
+    if n > max
+        n = max
+    end
+    if n <= 0
+        return ""
+    end
+    let out = b.data.slice(b.pos, b.pos + n)
+    b.pos += n
+    b.scan = b.pos
+    b.release()
+    return out
+end
+
+// Everything that is left.
+func (b: InBuf) take_all() -> text
+    let out = b.data.slice(b.pos, b.data.len)
+    b.pos = b.data.len
+    b.scan = b.pos
+    b.release()
+    return out
+end
+
+// Forgets the text that was taken once everything has been.
+func (b: InBuf) release()
+    if b.pos >= b.data.len
+        b.data = ""
+        b.pos = 0
+        b.scan = 0
+    end
+end
+
+// Adds text to be written.
+func (o: OutBuf) add(s: text)
+    if s.len > 0
+        o.pieces.add(s)
+        o.size += s.len
+    end
+end
+
+// The number of bytes waiting.
+func (o: OutBuf) len() -> int
+    return o.size
+end
+
+// Everything that is waiting, in order; the buffer is empty afterwards.
+func (o: OutBuf) take() -> text
+    let out = text.join(o.pieces, "")
+    o.pieces = []
+    o.size = 0
+    return out
+end

@@ -55,6 +55,8 @@ pub fn std_source(name: &str) -> Option<&'static str> {
         "list" => Some(include_str!("../std/list.br")),
         "format" => Some(include_str!("../std/format.br")),
         "set" => Some(include_str!("../std/set.br")),
+        "sorted" => Some(include_str!("../std/sorted.br")),
+        "bufio" => Some(include_str!("../std/bufio.br")),
         _ => None,
     }
 }

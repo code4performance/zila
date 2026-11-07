@@ -10,7 +10,7 @@ extern "C" func sqrt(x: f64) -> f64
 extern "C" func printf(fmt: *c.char, ...) -> c.int
 
 extern "C" func qsort(base: *c.void, n: c.size_t, size: c.size_t,
-                      cmp: extern "C" func(*c.void, *c.void) -> c.int)
+    cmp: extern "C" func(*c.void, *c.void) -> c.int)
 
 #[link_src("vendor/crc.c")]
 extern "C" func crc32(data: *u8, len: usize) -> u32

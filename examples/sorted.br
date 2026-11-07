@@ -1,0 +1,53 @@
+// Sorted maps and sets: entries come out in key order, and the nearest key is one lookup away.
+//
+//   brasa-parse examples/sorted.br --run
+package main
+
+use sorted
+
+type Event = record
+    at: int
+    what: text
+end
+
+func main()
+    // a leaderboard: scores, highest first (the order is a function)
+    let board: sorted.SortedMap<int, text> = sorted.map_by(func(a, b) a > b end)
+    board.put(70, "carla")
+    board.put(95, "ana")
+    board.put(82, "bruno")
+    board.put(70, "carla (retry)")
+    print("leaderboard")
+    for e in board.entries()
+        print("  {e.key} {e.value}")
+    end
+
+    // a word index ordered alphabetically, with a range query
+    let words: sorted.SortedSet<text> = sorted.text_set()
+    for w in ["pear", "apple", "fig", "banana", "cherry", "date"]
+        words.add(w)
+    end
+    print("words:")
+    for w in words.range("b", "e")
+        print("  {w}")
+    end
+    print("first word: {words.min() ?? "none"}")
+    print("last word: {words.max() ?? "none"}")
+
+    // a timeline of events keyed by a record field
+    let timeline: sorted.SortedMap<Event, int> = sorted.map_by(func(a, b) a.at < b.at end)
+    timeline.put(Event { at: 30, what: "deploy" }, 1)
+    timeline.put(Event { at: 10, what: "start" }, 2)
+    timeline.put(Event { at: 20, what: "test" }, 3)
+    print("timeline")
+    for e in timeline.entries()
+        print("  t={e.key.at} {e.key.what}")
+    end
+
+    // the nearest numbers
+    let marks: sorted.SortedSet<int> = sorted.int_set()
+    for n in [10, 20, 30, 40]
+        marks.add(n)
+    end
+    print("floor(25) = {marks.floor(25) ?? 0}, ceil(25) = {marks.ceil(25) ?? 0}")
+end

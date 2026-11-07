@@ -43,6 +43,17 @@ pub struct Token {
     pub tok: Tok,
     pub line: u32,
     pub col: u32,
+    /// Where the token is in the source, as character offsets (start, end).
+    pub span: (usize, usize),
+}
+
+/// A `//` or `/* */` comment, kept for tools that rewrite source (the formatter).
+#[derive(Debug, Clone)]
+pub struct Comment {
+    pub start: usize,
+    pub end: usize,
+    pub line: u32,
+    pub block: bool,
 }
 
 pub const KEYWORDS: &[&str] = &[
@@ -67,6 +78,9 @@ pub struct Lexer {
     out: Vec<Token>,
     /// Inside an `asm` block: its lines are assembly, read as they are.
     in_asm: bool,
+    /// Offset where the token being read starts.
+    tok_start: usize,
+    comments: Vec<Comment>,
 }
 
 impl Lexer {
@@ -76,7 +90,7 @@ impl Lexer {
 
     /// Start counting from a given position (used for interpolations).
     pub fn at(src: &str, line: u32, col: u32) -> Self {
-        Lexer { chars: src.chars().collect(), pos: 0, line, col, out: Vec::new(), in_asm: false }
+        Lexer { chars: src.chars().collect(), pos: 0, line, col, out: Vec::new(), in_asm: false, tok_start: 0, comments: Vec::new() }
     }
 
     fn peek(&self) -> Option<char> {
@@ -104,11 +118,17 @@ impl Lexer {
     }
 
     fn push(&mut self, tok: Tok, line: u32, col: u32) {
-        self.out.push(Token { tok, line, col });
+        self.out.push(Token { tok, line, col, span: (self.tok_start, self.pos) });
     }
 
-    pub fn tokenize(mut self) -> Result<Vec<Token>, Diag> {
+    pub fn tokenize(self) -> Result<Vec<Token>, Diag> {
+        self.tokenize_all().map(|(toks, _)| toks)
+    }
+
+    /// The tokens and the comments (which `tokenize` leaves out), with source positions.
+    pub fn tokenize_all(mut self) -> Result<(Vec<Token>, Vec<Comment>), Diag> {
         while let Some(c) = self.peek() {
+            self.tok_start = self.pos;
             let (line, col) = (self.line, self.col);
             match c {
                 ' ' | '\t' | '\r' => {
@@ -130,6 +150,7 @@ impl Lexer {
                         }
                         self.bump();
                     }
+                    self.comments.push(Comment { start: self.tok_start, end: self.pos, line, block: false });
                 }
                 '/' if self.peek_at(1) == Some('*') => {
                     self.bump();
@@ -146,6 +167,7 @@ impl Lexer {
                             _ => {}
                         }
                     }
+                    self.comments.push(Comment { start: self.tok_start, end: self.pos, line, block: true });
                 }
                 '"' => {
                     let t = self.text()?;
@@ -186,11 +208,12 @@ impl Lexer {
             }
         }
         let (line, col) = (self.line, self.col);
+        self.tok_start = self.pos;
         if !matches!(self.out.last().map(|t| &t.tok), None | Some(Tok::Newline)) {
             self.push(Tok::Newline, line, col);
         }
         self.push(Tok::Eof, line, col);
-        Ok(self.out)
+        Ok((self.out, self.comments))
     }
 
     /// Only blanks or a `//` comment follow on this line.
@@ -232,6 +255,10 @@ impl Lexer {
                 return Ok(());
             }
             if text.is_empty() || text.starts_with("//") {
+                if !text.is_empty() {
+                    let line = self.line;
+                    self.comments.push(Comment { start, end: start + text.chars().count(), line, block: false });
+                }
                 skip_line(self);
                 if i >= self.chars.len() {
                     return Ok(());
@@ -279,6 +306,7 @@ impl Lexer {
             while self.pos < i {
                 self.bump();
             }
+            self.tok_start = start;
             self.push(Tok::Text(vec![StrPart::Lit(line_text)]), line, col);
             return Ok(());
         }

@@ -1,0 +1,320 @@
+//! The formatter (`--fmt`, `--fmt-check`) and the block layout the parser records for it.
+
+use brasa::fmt::format_source;
+use brasa::lexer::Tok;
+use brasa::parser::parse_with_layout;
+use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+static N: AtomicUsize = AtomicUsize::new(0);
+
+fn fmt(src: &str) -> String {
+    format_source(src).unwrap_or_else(|e| panic!("format error: {}", e))
+}
+
+// ---- the layout the parser records ----
+
+#[test]
+fn the_parser_records_every_kind_of_block_and_no_function_types() {
+    let src = r#"package t
+
+type Shape = interface
+    func area(self) -> float
+end
+
+type Color = enum
+    Red, Green
+end
+
+type Box = record
+    cb: func(int) -> bool
+    n: int
+end
+
+extern "C" func puts(s: *u8) -> i32
+
+func f(n: int)
+    if n > 0
+        print(1)
+    else if n < 0
+        print(2)
+    else
+        print(3)
+    end
+    while n > 0
+        n -= 1
+    end
+    for i in 0..3
+        print(i)
+    end
+    unsafe
+        print(0)
+    end
+    let g = func(a) a + 1 end
+    match n
+        1 -> print(1)
+        2 ->
+            print(2)
+            print(3)
+        _ -> print(4)
+    end
+end
+"#;
+    let (_, layout, toks, _) = parse_with_layout(src).unwrap();
+    let openers: Vec<&str> = layout
+        .blocks
+        .keys()
+        .map(|i| match &toks[*i].tok {
+            Tok::Kw(k) => *k,
+            other => panic!("block opens at {:?}", other),
+        })
+        .collect();
+    assert_eq!(openers, ["interface", "enum", "record", "func", "if", "while", "for", "unsafe", "func", "match"]);
+    for end in layout.blocks.values() {
+        assert_eq!(toks[*end].tok, Tok::Kw("end"));
+    }
+    assert_eq!(layout.elses.len(), 2);
+    for e in &layout.elses {
+        assert_eq!(toks[*e].tok, Tok::Kw("else"));
+    }
+    assert_eq!(layout.arms.len(), 1, "one match arm has its body on the following lines");
+}
+
+#[test]
+fn asm_blocks_are_recorded() {
+    let src = "package t\nfunc f()\n    asm\n        cli\n        hlt\n    end\nend\n";
+    let (_, layout, toks, _) = parse_with_layout(src).unwrap();
+    assert!(layout.blocks.keys().any(|i| toks[*i].tok == Tok::Kw("asm")));
+}
+
+// ---- the style ----
+
+#[test]
+fn nested_blocks_are_indented_and_end_and_else_line_up() {
+    let src = "package t\nfunc f(n: int)\nwhile n > 0\nif n % 2 == 0\nprint(\"even\")\nelse\nprint(\"odd\")\nend\nn -= 1\nend\nend\n";
+    let want = "package t\nfunc f(n: int)\n    while n > 0\n        if n % 2 == 0\n            print(\"even\")\n        else\n            print(\"odd\")\n        end\n        n -= 1\n    end\nend\n";
+    assert_eq!(fmt(src), want);
+}
+
+#[test]
+fn function_types_and_lambdas_do_not_change_the_indentation() {
+    let src = "package t\ntype H = record\ncb: func(int) -> bool\nn: int\nend\nfunc main()\nlet xs = sort(xs, func(a, b) a < b end)\nprint(1)\nend\n";
+    let want = "package t\ntype H = record\n    cb: func(int) -> bool\n    n: int\nend\nfunc main()\n    let xs = sort(xs, func(a, b) a < b end)\n    print(1)\nend\n";
+    assert_eq!(fmt(src), want);
+}
+
+#[test]
+fn match_arms_indent_their_bodies() {
+    let src = "package t\nfunc f(n: int)\nmatch n\n1 -> print(1)\n2 ->\nprint(2)\nprint(3)\n_ -> print(4)\nend\nend\n";
+    let want = "package t\nfunc f(n: int)\n    match n\n        1 -> print(1)\n        2 ->\n            print(2)\n            print(3)\n        _ -> print(4)\n    end\nend\n";
+    assert_eq!(fmt(src), want);
+}
+
+#[test]
+fn continuation_lines_are_one_level_deeper() {
+    let src = "package t\nfunc main()\nlet r = call(1,\n2,\n3\n)\nlet s = 1 +\n2\nfoo.bar()\n.baz()\nend\n";
+    let want = "package t\nfunc main()\n    let r = call(1,\n        2,\n        3\n    )\n    let s = 1 +\n        2\n    foo.bar()\n        .baz()\nend\n";
+    assert_eq!(fmt(src), want);
+}
+
+#[test]
+fn a_block_that_ends_a_call_is_not_pushed_in_twice() {
+    let src = "package t\nfunc main()\nlet ys = map(xs, func(x)\nx * 2\nend)\nprint(1)\nend\n";
+    let want = "package t\nfunc main()\n    let ys = map(xs, func(x)\n        x * 2\n    end)\n    print(1)\nend\n";
+    assert_eq!(fmt(src), want);
+}
+
+#[test]
+fn generic_types_at_the_end_of_a_line_do_not_continue_it() {
+    let src = "package t\ntype U<T> = record\na: Map<T, bool>\nend\ntype Table = Map<text, List<i32>>\nfunc f()\nreturn\nend\n";
+    let want = "package t\ntype U<T> = record\n    a: Map<T, bool>\nend\ntype Table = Map<text, List<i32>>\nfunc f()\n    return\nend\n";
+    assert_eq!(fmt(src), want);
+}
+
+#[test]
+fn commas_and_brackets_are_spaced() {
+    let src = "package t\nfunc main()\n    foo( a ,b )\n    let xs = [ 1,2 , 3 ]\nend\n";
+    let want = "package t\nfunc main()\n    foo(a, b)\n    let xs = [1, 2, 3]\nend\n";
+    assert_eq!(fmt(src), want);
+}
+
+#[test]
+fn spacing_used_for_alignment_is_kept() {
+    let src = "package t\nfunc f(s: Shape)\n    match s\n        Circle(r)  -> print(1)\n        Empty      -> print(2)\n    end\nend\n";
+    assert_eq!(fmt(src), src);
+}
+
+#[test]
+fn blank_lines_are_limited_and_removed_at_block_edges() {
+    let src = "\n\npackage t\n\n\n\nfunc a()\n\nprint(1)\n\n\nprint(2)\n\nend\n\n\n\nfunc main()\nend\n\n\n";
+    let want = "package t\n\nfunc a()\n    print(1)\n\n    print(2)\nend\n\nfunc main()\nend\n";
+    assert_eq!(fmt(src), want);
+}
+
+#[test]
+fn trailing_spaces_and_tabs_are_removed() {
+    let src = "package t   \nfunc main()  \n\tprint(1)  \nend";
+    let want = "package t\nfunc main()\n    print(1)\nend\n";
+    assert_eq!(fmt(src), want);
+}
+
+#[test]
+fn comments_are_kept_and_aligned_with_the_code() {
+    let src = "package t\n// top\nfunc main()\n// own line\nlet x = 1 // trailing\nlet y = 2          // aligned\n        // before end\nend\n";
+    let want = "package t\n// top\nfunc main()\n    // own line\n    let x = 1  // trailing\n    let y = 2          // aligned\n    // before end\nend\n";
+    assert_eq!(fmt(src), want);
+}
+
+#[test]
+fn block_comments_keep_their_inside() {
+    let src = "package t\nfunc main()\n/* one\n   two\n*/\nprint(1)\nend\n";
+    let want = "package t\nfunc main()\n    /* one\n   two\n*/\n    print(1)\nend\n";
+    assert_eq!(fmt(src), want);
+}
+
+#[test]
+fn literals_are_copied_exactly() {
+    let src = "package t\nfunc main()\n    let a = 0xFF\n    let b = \"a\\tb {x}\"\n    let c = 1_000\n    let d = 'x'\nend\n";
+    assert_eq!(fmt(src), src);
+}
+
+#[test]
+fn interpolations_survive_reindenting() {
+    let src = "package t\nfunc main()\nprint(\"a {x} b {y + 1}\")\nend\n";
+    let want = "package t\nfunc main()\n    print(\"a {x} b {y + 1}\")\nend\n";
+    assert_eq!(fmt(src), want);
+}
+
+#[test]
+fn asm_lines_sit_inside_the_block_and_keep_their_relative_indentation() {
+    let src = "package t\nfunc f()\nasm\nstart:\n    cli\n    in al, dx\n    // a comment\n    mov ax, 1 // note\nend\nend\n";
+    let want = "package t\nfunc f()\n    asm\n        start:\n            cli\n            in al, dx\n            // a comment\n            mov ax, 1 // note\n    end\nend\n";
+    assert_eq!(fmt(src), want);
+}
+
+#[test]
+fn asm_operands_and_clobbers_are_indented_with_the_block() {
+    let src = "package t\nfunc f(p: int)\nunsafe\nasm\nout dx, al\nin rdx = p\nclobber cc\nend\nend\nend\n";
+    let want = "package t\nfunc f(p: int)\n    unsafe\n        asm\n            out dx, al\n            in rdx = p\n            clobber cc\n        end\n    end\nend\n";
+    assert_eq!(fmt(src), want);
+}
+
+#[test]
+fn the_files_line_ending_is_kept() {
+    let src = "package t\r\nfunc main()\r\nprint(1)\r\nend\r\n";
+    assert_eq!(fmt(src), "package t\r\nfunc main()\r\n    print(1)\r\nend\r\n");
+}
+
+#[test]
+fn a_file_with_a_syntax_error_is_reported_and_not_formatted() {
+    let e = format_source("package t\nfunc f(\n").unwrap_err();
+    assert!(e.starts_with("2:") || e.starts_with("3:"), "{}", e);
+}
+
+#[test]
+fn formatting_twice_changes_nothing() {
+    let messy = "package t\nfunc main()\nlet r = call(1,\n2)\nif r\nprint( r )\nelse\n// no\nprint(0)\nend\nend\n";
+    let once = fmt(messy);
+    assert_eq!(fmt(&once), once);
+}
+
+// ---- the repository's own files ----
+
+fn repo_files() -> Vec<String> {
+    let mut out = Vec::new();
+    for dir in ["std", "examples", "os"] {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let p = entry.unwrap().path();
+            if p.extension().map_or(false, |e| e == "br") {
+                out.push(p.to_str().unwrap().to_string());
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+#[test]
+fn every_repository_file_formats_idempotently_with_the_same_tokens() {
+    let files = repo_files();
+    assert!(files.len() > 30, "only {} files", files.len());
+    for f in &files {
+        let src = std::fs::read_to_string(f).unwrap();
+        let once = format_source(&src).unwrap_or_else(|e| panic!("{}: {}", f, e));
+        let twice = format_source(&once).unwrap_or_else(|e| panic!("{} (second pass): {}", f, e));
+        assert_eq!(once, twice, "{} is not idempotent", f);
+    }
+}
+
+#[test]
+fn scrambled_indentation_formats_back_to_the_same_text() {
+    let mut tested = 0;
+    for f in repo_files() {
+        let src = std::fs::read_to_string(&f).unwrap();
+        if src.contains("asm\n") || src.contains("asm\r\n") || src.contains("/*") {
+            continue;
+        }
+        let formatted = format_source(&src).unwrap();
+        let scrambled: String = formatted
+            .lines()
+            .enumerate()
+            .map(|(i, l)| format!("{}{}\n", " ".repeat((i * 5) % 9), l.trim_start()))
+            .collect();
+        // only files whose text has no line that a changed indentation could alter
+        let toks = |s: &str| brasa::lexer::Lexer::new(s).tokenize().unwrap().into_iter().map(|t| t.tok).collect::<Vec<_>>();
+        let (a, b) = (toks(&scrambled), toks(&formatted));
+        assert!(a.len() == b.len() && a.iter().zip(&b).all(|(x, y)| brasa::fmt::tok_eq(x, y)), "scrambling changed the tokens of {}", f);
+        assert_eq!(format_source(&scrambled).unwrap().replace("\r\n", "\n"), formatted.replace("\r\n", "\n"), "{}", f);
+        tested += 1;
+    }
+    assert!(tested > 25, "only {} files tested", tested);
+}
+
+#[test]
+fn the_repository_is_formatted() {
+    let unformatted: Vec<String> =
+        repo_files().into_iter().filter(|f| format_source(&std::fs::read_to_string(f).unwrap()).unwrap() != std::fs::read_to_string(f).unwrap()).collect();
+    assert!(unformatted.is_empty(), "not formatted: {:?} (run `brasa-parse --fmt std/*.br examples/*.br os/*.br`)", unformatted);
+}
+
+// ---- the command line ----
+
+fn temp_file(name: &str, text: &str) -> std::path::PathBuf {
+    let p = std::env::temp_dir().join(format!("brasa-fmt-test-{}-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst), name));
+    std::fs::write(&p, text).unwrap();
+    p
+}
+
+fn run(args: &[&std::path::Path], flag: &str) -> (String, String, i32) {
+    let out = Command::new(env!("CARGO_BIN_EXE_brasa-parse")).arg(flag).args(args).output().unwrap();
+    (String::from_utf8_lossy(&out.stdout).replace('\r', ""), String::from_utf8_lossy(&out.stderr).replace('\r', ""), out.status.code().unwrap())
+}
+
+#[test]
+fn fmt_rewrites_files_and_check_lists_them() {
+    let bad = temp_file("bad.br", "package t\nfunc main()\nprint(1)\nend\n");
+    let good = temp_file("good.br", "package t\nfunc main()\n    print(1)\nend\n");
+    let (out, _, code) = run(&[&bad, &good], "--fmt-check");
+    assert_eq!(code, 1);
+    assert!(out.contains("not formatted") && out.contains("bad.br") && !out.contains("good.br"), "{}", out);
+    assert_eq!(std::fs::read_to_string(&bad).unwrap(), "package t\nfunc main()\nprint(1)\nend\n", "--fmt-check must not write");
+    let (out, _, code) = run(&[&bad, &good], "--fmt");
+    assert_eq!(code, 0);
+    assert!(out.contains("formatted") && out.contains("bad.br") && !out.contains("good.br"), "{}", out);
+    assert_eq!(std::fs::read_to_string(&bad).unwrap(), "package t\nfunc main()\n    print(1)\nend\n");
+    let (out, _, code) = run(&[&bad, &good], "--fmt-check");
+    assert_eq!((out.as_str(), code), ("", 0));
+    let (out, _, code) = run(&[&bad], "--fmt");
+    assert_eq!((out.as_str(), code), ("", 0), "formatting again changes nothing");
+    let _ = (std::fs::remove_file(&bad), std::fs::remove_file(&good));
+}
+
+#[test]
+fn fmt_leaves_a_broken_file_alone() {
+    let broken = temp_file("broken.br", "package t\nfunc f(\n");
+    let (_, err, code) = run(&[&broken], "--fmt");
+    assert_eq!(code, 1);
+    assert!(err.contains("broken.br"), "{}", err);
+    assert_eq!(std::fs::read_to_string(&broken).unwrap(), "package t\nfunc f(\n");
+    let _ = std::fs::remove_file(&broken);
+}

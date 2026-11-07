@@ -9,6 +9,7 @@
 
 use crate::ast::*;
 use crate::lexer::*;
+use std::collections::{BTreeMap, BTreeSet};
 
 type R<T> = Result<T, Diag>;
 
@@ -17,9 +18,29 @@ pub fn parse_source(src: &str) -> R<File> {
     Parser::new(toks).parse_file()
 }
 
+/// Where the blocks of a file are, by token index, for tools that rewrite source.
+#[derive(Debug, Clone, Default)]
+pub struct Layout {
+    /// The token that opens a block -> the `end` token that closes it.
+    pub blocks: BTreeMap<usize, usize>,
+    /// The `else` tokens of `if` chains.
+    pub elses: BTreeSet<usize>,
+    /// Multi-line bodies of `match` arms: (the `->` token, the token after the body).
+    pub arms: Vec<(usize, usize)>,
+}
+
+/// Parses `src` and also returns the tokens, the comments and where the blocks are.
+pub fn parse_with_layout(src: &str) -> R<(File, Layout, Vec<Token>, Vec<Comment>)> {
+    let (toks, comments) = Lexer::new(src).tokenize_all()?;
+    let mut p = Parser::new(toks.clone());
+    let file = p.parse_file()?;
+    Ok((file, p.layout, toks, comments))
+}
+
 pub struct Parser {
     toks: Vec<Token>,
     pos: usize,
+    layout: Layout,
 }
 
 const ASSIGN_OPS: &[&str] = &["=", "+=", "-=", "*=", "/=", "%="];
@@ -27,7 +48,27 @@ const CMP_OPS: &[&str] = &["==", "!=", "<", "<=", ">", ">="];
 
 impl Parser {
     pub fn new(toks: Vec<Token>) -> Self {
-        Parser { toks, pos: 0 }
+        Parser { toks, pos: 0, layout: Layout::default() }
+    }
+
+    /// Consumes the `end` that closes the block opened at token `open`.
+    fn end_block(&mut self, open: usize) -> R<()> {
+        let at = self.pos;
+        self.expect_kw("end")?;
+        self.layout.blocks.insert(open, at);
+        Ok(())
+    }
+
+    /// Like `end_block`, when the next token is `end`.
+    fn eat_end(&mut self, open: usize) -> bool {
+        if self.is_kw("end") {
+            let at = self.pos;
+            self.bump();
+            self.layout.blocks.insert(open, at);
+            true
+        } else {
+            false
+        }
     }
 
     // ---------- token helpers ----------
@@ -395,11 +436,12 @@ impl Parser {
         self.expect_op("=")?;
         let body = match self.kw() {
             Some("record") => {
+                let open = self.pos;
                 self.bump();
                 let mut fields = Vec::new();
                 loop {
                     self.skip_nl();
-                    if self.eat_kw("end") {
+                    if self.eat_end(open) {
                         break;
                     }
                     let attrs = self.attrs()?;
@@ -413,11 +455,12 @@ impl Parser {
                 TypeBody::Record(fields)
             }
             Some("enum") => {
+                let open = self.pos;
                 self.bump();
                 let mut variants = Vec::new();
                 loop {
                     self.skip_nl();
-                    if self.eat_kw("end") {
+                    if self.eat_end(open) {
                         break;
                     }
                     let name = self.expect_ident()?;
@@ -439,11 +482,12 @@ impl Parser {
                 TypeBody::Enum(variants)
             }
             Some("interface") => {
+                let open = self.pos;
                 self.bump();
                 let mut sigs = Vec::new();
                 loop {
                     self.skip_nl();
-                    if self.eat_kw("end") {
+                    if self.eat_end(open) {
                         break;
                     }
                     self.expect_kw("func")?;
@@ -467,6 +511,7 @@ impl Parser {
     }
 
     fn func_decl(&mut self, is_async: bool) -> R<FuncDecl> {
+        let open = self.pos;
         self.expect_kw("func")?;
         let receiver = if self.eat_op("(") {
             let by_ref = self.eat_kw("ref");
@@ -485,7 +530,7 @@ impl Parser {
         self.expect_op(")")?;
         let ret = if self.eat_op("->") { Some(self.result()?) } else { None };
         let body = self.block()?;
-        self.expect_kw("end")?;
+        self.end_block(open)?;
         Ok(FuncDecl { receiver, name, generics, params, ret, body, is_async })
     }
 
@@ -652,13 +697,15 @@ impl Parser {
                 StmtKind::Spawn(e)
             }
             Some("unsafe") => {
+                let open = self.pos;
                 self.bump();
                 let b = self.block()?;
-                self.expect_kw("end")?;
+                self.end_block(open)?;
                 StmtKind::Unsafe(b)
             }
             Some("asm") => StmtKind::Asm(self.asm_block()?),
             Some("for") => {
+                let open = self.pos;
                 self.bump();
                 let mut vars = vec![self.expect_ident()?];
                 if self.eat_op(",") {
@@ -667,14 +714,15 @@ impl Parser {
                 self.expect_kw("in")?;
                 let iter = self.expr()?;
                 let body = self.block()?;
-                self.expect_kw("end")?;
+                self.end_block(open)?;
                 StmtKind::For { vars, iter, body }
             }
             Some("while") => {
+                let open = self.pos;
                 self.bump();
                 let cond = self.expr()?;
                 let body = self.block()?;
-                self.expect_kw("end")?;
+                self.end_block(open)?;
                 StmtKind::While { cond, body }
             }
             Some("break") => {
@@ -710,11 +758,12 @@ impl Parser {
 
     /// `asm` block: text lines, then `in|out|inout name = expr` and `clobber "reg", ...`.
     fn asm_block(&mut self) -> R<AsmBlock> {
+        let open = self.pos;
         self.expect_kw("asm")?;
         let (mut lines, mut operands, mut clobbers) = (Vec::new(), Vec::new(), Vec::new());
         loop {
             self.skip_nl();
-            if self.eat_kw("end") {
+            if self.eat_end(open) {
                 break;
             }
             match self.cur().clone() {
@@ -1085,6 +1134,7 @@ impl Parser {
 
     fn lambda(&mut self) -> R<Expr> {
         let line = self.line();
+        let open = self.pos;
         self.expect_kw("func")?;
         self.expect_op("(")?;
         let params = self.params(true)?;
@@ -1093,12 +1143,13 @@ impl Parser {
             return self.err("lambdas do not use '->'; write `func(x) x * 2 end`");
         }
         let body = self.block()?;
-        self.expect_kw("end")?;
+        self.end_block(open)?;
         Ok(Expr { kind: ExprKind::Lambda { params, body }, line })
     }
 
     fn if_expr(&mut self) -> R<Expr> {
         let line = self.line();
+        let open = self.pos;
         self.expect_kw("if")?;
         let mut branches = Vec::new();
         let mut else_body = None;
@@ -1106,7 +1157,9 @@ impl Parser {
         let body = self.block()?;
         branches.push((cond, body));
         loop {
+            let else_at = self.pos;
             if self.eat_kw("else") {
+                self.layout.elses.insert(else_at);
                 if self.eat_kw("if") {
                     let c = self.expr()?;
                     let b = self.block()?;
@@ -1114,10 +1167,10 @@ impl Parser {
                     continue;
                 }
                 else_body = Some(self.block()?);
-                self.expect_kw("end")?;
+                self.end_block(open)?;
                 break;
             } else {
-                self.expect_kw("end")?;
+                self.end_block(open)?;
                 break;
             }
         }
@@ -1126,21 +1179,25 @@ impl Parser {
 
     fn match_expr(&mut self) -> R<Expr> {
         let line = self.line();
+        let open = self.pos;
         self.expect_kw("match")?;
         let scrutinee = Box::new(self.expr()?);
         let mut arms = Vec::new();
         loop {
             self.skip_nl();
-            if self.eat_kw("end") {
+            if self.eat_end(open) {
                 break;
             }
             if matches!(self.cur(), Tok::Eof) {
                 return self.err("unterminated 'match': expected 'end'");
             }
             let pattern = self.pattern()?;
+            let arrow = self.pos;
             self.expect_op("->")?;
             let body = if matches!(self.cur(), Tok::Newline) {
-                self.arm_block()?
+                let b = self.arm_block()?;
+                self.layout.arms.push((arrow, self.pos));
+                b
             } else {
                 let s = self.stmt()?;
                 self.stmt_end()?;

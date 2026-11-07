@@ -5,7 +5,7 @@
 //! entry and nothing else.
 
 /// Every option `brasa-parse` accepts.
-pub const FLAGS: &[&str] = &["--ast", "--tokens", "--asm", "--run", "--build", "-o", "--os", "--docs", "--no-opt"];
+pub const FLAGS: &[&str] = &["--ast", "--tokens", "--asm", "--run", "--build", "-o", "--os", "--docs", "--no-opt", "--fmt", "--fmt-check"];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Mode {
@@ -20,6 +20,10 @@ pub enum Mode {
     Os,
     /// Regenerate the example blocks of the documentation site.
     Docs,
+    /// Rewrite the files in the standard style.
+    Fmt,
+    /// List the files that are not in the standard style (exit 1 when there are any).
+    FmtCheck,
 }
 
 #[derive(Debug)]
@@ -48,6 +52,8 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
             "--run" => o.mode = Mode::Run,
             "--os" => o.mode = Mode::Os,
             "--docs" => o.mode = Mode::Docs,
+            "--fmt" => o.mode = Mode::Fmt,
+            "--fmt-check" => o.mode = Mode::FmtCheck,
             "--no-opt" => o.optimize = false,
             "--build" | "build" => o.mode = Mode::Build,
             "-o" => {

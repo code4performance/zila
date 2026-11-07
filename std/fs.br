@@ -19,6 +19,7 @@ package fs
 use c
 use sys
 use task
+use bufio
 
 #[link("kernel32")]
 extern "system" func CreateFileW(name: *u8, access: u32, share: u32, security: usize, disposition: u32, flags: u32, template: usize) -> usize
@@ -36,11 +37,20 @@ let CHUNK = 65536
 #[shared]
 type File = record
     handle: usize
+    open: bool
 end
 
 func (ref f: File) drop()
-    unsafe
-        CloseHandle(f.handle)
+    f.close()
+end
+
+// Closes the handle now (once).
+func (f: File) close()
+    if f.open
+        f.open = false
+        unsafe
+            CloseHandle(f.handle)
+        end
     end
 end
 
@@ -58,12 +68,24 @@ func wide(path: text) -> sys.Buf
 end
 
 func open_file(path: text, write: bool) -> File or error
+    if write
+        return open_file_mode(path, 1)
+    end
+    return open_file_mode(path, 0)
+end
+
+// mode 0: an existing file to read; 1: create or replace for writing; 2: open or create for writing
+func open_file_mode(path: text, mode: int) -> File or error
     let w = wide(path)
     var access: u32 = 0x80000000
     var disposition: u32 = 3
-    if write
+    if mode == 1
         access = 0x40000000
         disposition = 2
+    end
+    if mode == 2
+        access = 0x40000000
+        disposition = 4
     end
     var h: usize = 0
     unsafe
@@ -73,7 +95,7 @@ func open_file(path: text, write: bool) -> File or error
         return error(sys.describe(task.last_error(), path))
     end
     task.io_attach(h)
-    return File{ handle: h }
+    return File{ handle: h, open: true }
 end
 
 func file_size(f: File, path: text) -> int or error
@@ -159,5 +181,158 @@ async func write(path: text, data: text) -> error
         let put = try transfer(f, c.cstr(data) + done, count, done, true, path)
         done += put
     end
+    return
+end
+
+// ---- buffered reading and writing ----
+
+// Reads a file in pieces of 64 KiB and hands it out by lines or bytes.
+#[shared]
+type Reader = record
+    file: File
+    path: text
+    offset: int
+    buf: bufio.InBuf
+    reads: int
+end
+
+// Collects writes and gives them to the system in large pieces.
+#[shared]
+type Writer = record
+    file: File
+    path: text
+    offset: int
+    buf: bufio.OutBuf
+    writes: int
+end
+
+// Opens an existing file for reading by lines or bytes.
+async func open(path: text) -> Reader or error
+    task.io_init()
+    let f = try open_file_mode(path, 0)
+    return Reader{ file: f, path: path, offset: 0, buf: bufio.input(), reads: 0 }
+end
+
+// Creates the file (or replaces it) for buffered writing.
+async func create(path: text) -> Writer or error
+    task.io_init()
+    let f = try open_file_mode(path, 1)
+    return Writer{ file: f, path: path, offset: 0, buf: bufio.output(), writes: 0 }
+end
+
+// Opens the file (creating it when it does not exist) for buffered writing at its end.
+async func append(path: text) -> Writer or error
+    task.io_init()
+    let f = try open_file_mode(path, 2)
+    let size = try file_size(f, path)
+    return Writer{ file: f, path: path, offset: size, buf: bufio.output(), writes: 0 }
+end
+
+// Brings in the next piece of the file; the end of the file finishes the buffer.
+async func (r: Reader) fill() -> error
+    if r.buf.finished()
+        return
+    end
+    let b = sys.buffer(CHUNK)
+    let got = try transfer(r.file, b.ptr, CHUNK, r.offset, false, r.path)
+    r.reads += 1
+    if got == 0
+        r.buf.finish()
+        return
+    end
+    r.offset += got
+    r.buf.feed(c.from_bytes(b.ptr, got))
+    return
+end
+
+// The next line without its `\n` or `\r\n`, or the error `end of file`.
+async func (r: Reader) read_line() -> text or error
+    while not r.buf.has_line()
+        if r.buf.finished()
+            break
+        end
+        try await r.fill()
+    end
+    if not r.buf.has_line()
+        return error("end of file")
+    end
+    return r.buf.take_line()
+end
+
+// Up to `max` bytes; empty text at the end of the file.
+async func (r: Reader) read(max: int) -> text or error
+    if r.buf.unread() == 0
+        try await r.fill()
+    end
+    return r.buf.take(max)
+end
+
+// Everything that is left.
+async func (r: Reader) read_all() -> text or error
+    while not r.buf.finished()
+        try await r.fill()
+    end
+    return r.buf.take_all()
+end
+
+// True when nothing is left to read.
+async func (r: Reader) at_end() -> bool or error
+    if r.buf.unread() == 0 and not r.buf.finished()
+        try await r.fill()
+    end
+    return r.buf.unread() == 0
+end
+
+// Closes the file now.
+async func (r: Reader) close()
+    r.buf.finish()
+    r.file.close()
+end
+
+// Hands everything that is buffered to the system.
+async func (w: Writer) drain() -> error
+    if w.buf.len() == 0
+        return
+    end
+    let data = w.buf.take()
+    var done = 0
+    while done < data.len
+        let put = try transfer(w.file, c.cstr(data) + done, data.len - done, w.offset + done, true, w.path)
+        w.writes += 1
+        done += put
+    end
+    w.offset += data.len
+    return
+end
+
+// Adds `data` to the file (the system sees it once 64 KiB have gathered, or on `flush`).
+async func (w: Writer) write(data: text) -> error
+    w.buf.add(data)
+    if w.buf.len() >= CHUNK
+        try await w.drain()
+    end
+    return
+end
+
+// Adds `data` and a newline.
+async func (w: Writer) write_line(data: text) -> error
+    w.buf.add(data)
+    w.buf.add("\n")
+    if w.buf.len() >= CHUNK
+        try await w.drain()
+    end
+    return
+end
+
+// Writes out whatever is buffered.
+async func (w: Writer) flush() -> error
+    try await w.drain()
+    return
+end
+
+// Flushes and closes the file.
+async func (w: Writer) close() -> error
+    try await w.drain()
+    w.file.close()
     return
 end

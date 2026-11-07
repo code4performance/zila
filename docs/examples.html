@@ -565,7 +565,7 @@
 <span class="kw">extern</span> <span class="str">"C"</span> <span class="kw">func</span> printf(fmt: *c.char, ...) -&gt; c.int
 
 <span class="kw">extern</span> <span class="str">"C"</span> <span class="kw">func</span> qsort(base: *c.void, n: c.size_t, size: c.size_t,
-                      cmp: <span class="kw">extern</span> <span class="str">"C"</span> <span class="kw">func</span>(*c.void, *c.void) -&gt; c.int)
+    cmp: <span class="kw">extern</span> <span class="str">"C"</span> <span class="kw">func</span>(*c.void, *c.void) -&gt; c.int)
 
 #[link_src(<span class="str">"vendor/crc.c"</span>)]
 <span class="kw">extern</span> <span class="str">"C"</span> <span class="kw">func</span> crc32(data: *u8, len: usize) -&gt; u32

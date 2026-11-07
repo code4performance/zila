@@ -125,12 +125,60 @@ print(format.float(3.14159, 2))                                           <span 
       </table>
     </section>
 
+    <section id="bufio">
+      <h2>bufio</h2>
+      <pre><code><span class="kw">use</span> bufio
+
+<span class="kw">let</span> b = bufio.input()
+b.feed(<span class="str">"ab"</span>)
+b.feed(<span class="str">"c\nd"</span>)
+print(b.take_line())        <span class="cm">// abc</span></code></pre>
+      <p>The buffers behind the readers and writers of <code>fs</code> and <code>net</code> (see <a href="async.html#buffered">Reading by lines and buffered writing</a>), with no system calls, so they also work in the interpreter. An input buffer takes text in pieces and hands it out as lines or bytes; an output buffer collects pieces.</p>
+      <table>
+        <thead><tr><th>Function</th><th>What it gives</th></tr></thead>
+        <tbody>
+          <tr><td><code>bufio.input()</code>, <code>b.feed(text)</code>, <code>b.finish()</code></td><td>An empty input buffer, add text that arrived, and say that no more will come (the last piece of text then counts as a line).</td></tr>
+          <tr><td><code>b.has_line()</code>, <code>b.take_line()</code></td><td>Whether a whole line is ready, and the next line without its <code>\n</code> or <code>\r\n</code> (empty text when none is ready).</td></tr>
+          <tr><td><code>b.take(max)</code>, <code>b.take_all()</code>, <code>b.unread()</code></td><td>Up to <code>max</code> bytes, everything that is left, and how many bytes are waiting.</td></tr>
+          <tr><td><code>bufio.output()</code>, <code>o.add(text)</code>, <code>o.len()</code>, <code>o.take()</code></td><td>An empty output buffer, add text, the bytes waiting, and everything collected in order (the buffer is empty afterwards).</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="sorted">
+      <h2>sorted</h2>
+      <pre><code><span class="kw">use</span> sorted
+
+<span class="kw">let</span> scores: sorted.SortedMap&lt;text, int&gt; = sorted.text_map()
+scores.put(<span class="str">"carla"</span>, 70)
+scores.put(<span class="str">"ana"</span>, 90)
+<span class="kw">for</span> e <span class="kw">in</span> scores.entries()          <span class="cm">// ana first: keys come out in order</span>
+    print(<span class="str">"{e.key} {e.value}"</span>)
+<span class="kw">end</span>
+<span class="kw">let</span> late: sorted.SortedSet&lt;int&gt; = sorted.set_by(<span class="kw">func</span>(a, b) a &gt; b <span class="kw">end</span>)   <span class="cm">// largest first</span></code></pre>
+      <p>A <code>SortedMap&lt;K, V&gt;</code> and a <code>SortedSet&lt;T&gt;</code> keep their entries in key order. They are balanced (AVL) trees, so adding, finding and removing take time proportional to the logarithm of the number of entries, even when keys arrive in order. The order comes from a function <code>less(a, b)</code> (true when <code>a</code> goes before <code>b</code>; write <code>a &lt; b</code>, not <code>a &lt;= b</code>), so keys can be any type you can compare, such as records. Two keys are the same key when neither is less than the other. Both are shared references, like a map.</p>
+      <table>
+        <thead><tr><th>Function</th><th>What it gives</th></tr></thead>
+        <tbody>
+          <tr><td><code>sorted.int_map()</code>, <code>sorted.text_map()</code>, <code>sorted.map_by(less)</code></td><td>An empty map ordered by integers (smallest first), by text bytes, or by your function. The types come from the variable's type.</td></tr>
+          <tr><td><code>sorted.int_set()</code>, <code>sorted.text_set()</code>, <code>sorted.set_by(less)</code></td><td>The same for sets.</td></tr>
+          <tr><td><code>m.put(k, v)</code>, <code>m.get(k, default)</code>, <code>m.has(k)</code>, <code>m.remove(k)</code></td><td>Add or replace (true when the key was new), read with a default, test, remove (true when it was there).</td></tr>
+          <tr><td><code>m.len</code>, <code>m.clear()</code></td><td>The number of entries, and emptying the map.</td></tr>
+          <tr><td><code>m.keys()</code>, <code>m.values()</code>, <code>m.entries()</code></td><td>New lists in key order; an entry has <code>key</code> and <code>value</code>.</td></tr>
+          <tr><td><code>m.min()</code>, <code>m.max()</code>, <code>m.floor(k)</code>, <code>m.ceil(k)</code></td><td>The smallest and largest key, the largest key at most <code>k</code> and the smallest key at least <code>k</code>. Each gives an error when there is none, so write <code>m.min() ?? 0</code>.</td></tr>
+          <tr><td><code>m.range(lo, hi)</code></td><td>The keys from <code>lo</code> up to but not including <code>hi</code>.</td></tr>
+          <tr><td><code>s.add(x)</code>, <code>s.has(x)</code>, <code>s.remove(x)</code>, <code>s.len</code>, <code>s.to_list()</code>, <code>s.min()</code>, <code>s.max()</code>, <code>s.floor(x)</code>, <code>s.ceil(x)</code>, <code>s.range(lo, hi)</code></td><td>The same operations on a set; <code>to_list()</code> is in order.</td></tr>
+          <tr><td><code>sorted.union(a, b)</code>, <code>sorted.intersect(a, b)</code>, <code>sorted.difference(a, b)</code>, <code>sorted.is_subset(a, b)</code></td><td>New sets ordered like <code>a</code> (the arguments do not change), and the subset test.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
     <section id="limits">
       <h2>Good to know</h2>
       <ul>
         <li>The modules are compiled with your program, so only the functions you use add to its size. They need the Windows target (<code>use text</code> also brings in the float printing library, which is why it is not available in a bare-metal kernel).</li>
         <li>The interpreter behind <code>--run</code> runs them too. It handles errors only through <code>??</code> (it has no <code>match</code> on results), and a lambda in it cannot use variables of the function around it.</li>
-        <li>Not here yet: regular expressions, Unicode case mapping, placeholders that format values of any type (<code>format.text</code> takes texts), and sorted maps and sets.</li>
+        <li>Not here yet: regular expressions, Unicode case mapping, placeholders that format values of any type (<code>format.text</code> takes texts).</li>
       </ul>
     </section>
   </main>

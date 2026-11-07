@@ -27,6 +27,7 @@ use bufio
 
 let AF_INET = 2
 let SOCK_STREAM = 1
+let NS_DNS = 12
 let SOCK_DGRAM = 2
 let IPPROTO_UDP = 17
 let SIO_UDP_CONNRESET = 0x9800000C
@@ -197,35 +198,64 @@ func parse_ip(host: text) -> int
     return ip
 end
 
-// The IPv4 address of `host`: numeric addresses are parsed, names are resolved
-// with the (blocking) Windows resolver.
-func resolve(host: text) -> int or error
-    let numeric = parse_ip(host)
-    if numeric >= 0
-        return numeric
+// The first IPv4 address of `host` as "a.b.c.d". A numeric address is returned as it is; a
+// name goes through the asynchronous Windows resolver: the task waits and the others run.
+async func lookup(host: text) -> text or error
+    if parse_ip(host) >= 0
+        return host
     end
-    let hints = sys.buffer(48)
+    try net_init()
+    let name = sys.wide(host)
+    let hints = sys.buffer(80)
     unsafe
         hints.ptr[4] = AF_INET
         hints.ptr[8] = SOCK_STREAM
     end
-    let out = sys.Scratch{}
+    let res = sys.Scratch{}
+    let op = task.op_new()
     var rc = 0
     unsafe
-        rc = ws.getaddrinfo(c.cstr(host), 0, hints.ptr, &out.a)
+        rc = ws.GetAddrInfoExW(name.ptr, 0, NS_DNS, 0, hints.ptr, &res.a, 0, &op, task.dns_done, 0)
     end
+    if rc == ERROR_IO_PENDING
+        task.op_submit(op)
+        task.op_wait(op)
+        rc = op.status
+    end
+    task.op_release(op)
     if rc != 0
         return error("cannot resolve '{host}'")
     end
-    let info = out.a
-    let slot: *int = info + 32
-    var ip = 0
-    unsafe
-        let addr: *u8 = slot[0]
-        ip = (int(addr[4]) << 24) bitor (int(addr[5]) << 16) bitor (int(addr[6]) << 8) bitor int(addr[7])
-        ws.freeaddrinfo(info)
+    // the first AF_INET entry of the list (ADDRINFOEXW: family at 4, address at 32, next at 64)
+    var found = ""
+    var info = res.a
+    var guard = 0
+    while info != 0 and guard < 32
+        let node: *u8 = info
+        let slot: *int = info + 32
+        let next: *int = info + 64
+        unsafe
+            if node[4] == AF_INET and found == ""
+                let addr: *u8 = slot[0]
+                found = "{int(addr[4])}.{int(addr[5])}.{int(addr[6])}.{int(addr[7])}"
+            end
+            info = next[0]
+        end
+        guard += 1
     end
-    return ip
+    unsafe
+        ws.FreeAddrInfoExW(res.a)
+    end
+    if found == ""
+        return error("cannot resolve '{host}'")
+    end
+    return found
+end
+
+// The IPv4 address of `host` as a number, for building a socket address.
+async func resolve(host: text) -> int or error
+    let text_ip = try await lookup(host)
+    return parse_ip(text_ip)
 end
 
 // Waits for an operation the system accepted (or finished at once) and
@@ -249,7 +279,7 @@ end
 // Connects to a TCP server.
 async func connect(host: text, port: int) -> Conn or error
     try net_init()
-    let ip = try resolve(host)
+    let ip = try await resolve(host)
     let s = new_socket()
     if s == INVALID_SOCKET
         return error(sys.describe(task.last_error(), "cannot create a socket"))
@@ -597,7 +627,7 @@ async func (sock: UdpSocket) send_to(host: text, port: int, data: text) -> error
     if not sock.open
         return error("the socket is closed")
     end
-    let ip = try resolve(host)
+    let ip = try await resolve(host)
     let addr = make_addr(ip, port)
     let wb = ws.Wsabuf{ len: u32(data.len), ptr: c.cstr(data) }
     let op = task.op_new()

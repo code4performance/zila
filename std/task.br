@@ -35,7 +35,9 @@ extern "system" func GetTickCount64() -> u64
 extern "system" func Sleep(ms: u32)
 extern "system" func GetLastError() -> u32
 extern "system" func CreateIoCompletionPort(file: usize, port: usize, key: usize, threads: u32) -> usize
-extern "system" func GetQueuedCompletionStatus(port: usize, bytes: *usize, key: *usize, ov: *usize, ms: u32) -> i32
+extern "system" func GetQueuedCompletionStatusEx(port: usize, entries: *u8, count: u32, removed: *usize, ms: u32, alertable: i32) -> i32
+#[link("ntdll")]
+extern "system" func RtlNtStatusToDosError(status: u32) -> u32
 
 type Task = record
     fiber: usize
@@ -62,11 +64,19 @@ type Op = record
     done: bool
 end
 
-// Scratch memory for GetQueuedCompletionStatus.
-type IoOut = record
-    bytes: usize
+// One OVERLAPPED_ENTRY, as GetQueuedCompletionStatusEx fills it in.
+#[c_layout]
+type IoEntry = record
     key: usize
     ov: usize
+    internal: usize
+    bytes: u32
+    pad: u32
+end
+
+// Scratch memory for GetQueuedCompletionStatusEx.
+type IoOut = record
+    removed: usize
 end
 
 // Words in transit are plain integers: ownership of a value moves into the
@@ -252,33 +262,64 @@ func op_wait(op: Op)
     end
 end
 
-// Collects completed operations, waiting up to `ms` milliseconds for the first.
+// Completion routine of a name lookup (see `net.lookup`). The system calls it, on this thread,
+// while `poll_io` waits (the wait is alertable): it finishes the operation like a completion
+// from the port does. It allocates nothing and never switches tasks.
+func dns_done(error: u32, bytes: u32, overlapped: usize)
+    let idp: *int = overlapped + 32
+    var id = 0
+    unsafe
+        id = idp[0]
+    end
+    let op = ops[id]
+    op.bytes = int(bytes)
+    op.status = int(error)
+    op.done = true
+    pending_io -= 1
+    wake(op.task)
+end
+
+// Collects completed operations, waiting up to `ms` milliseconds for the first. The wait is
+// alertable, so completion routines queued by the system (name lookups) run inside it.
 func poll_io(ms: int)
     if iocp == 0
         return
     end
+    let entry = IoEntry{}
     let out = IoOut{}
     var wait = ms
     while pending_io > 0
-        out.ov = 0
+        entry.ov = 0
+        out.removed = 0
         var ok = 0
         unsafe
-            ok = GetQueuedCompletionStatus(iocp, &out.bytes, &out.key, &out.ov, u32(wait))
+            ok = GetQueuedCompletionStatusEx(iocp, &entry, 1, &out.removed, u32(wait), 1)
         end
-        if out.ov == 0
+        if ok == 0
+            // 192 (WAIT_IO_COMPLETION): a completion routine ran; anything else: nothing arrived
+            if last_error() != 192
+                return
+            end
+            wait = 0
+            continue
+        end
+        if out.removed == 0 or entry.ov == 0
             return
         end
-        var status = 0
-        if ok == 0
-            status = last_error()
-        end
-        let idp: *int = out.ov + 32
+        let idp: *int = entry.ov + 32
         var id = 0
         unsafe
             id = idp[0]
         end
         let op = ops[id]
-        op.bytes = int(out.bytes)
+        // the operation's own status (an NTSTATUS in its OVERLAPPED) as a Windows error code
+        var status = 0
+        if op.internal != 0
+            unsafe
+                status = int(RtlNtStatusToDosError(u32(op.internal)))
+            end
+        end
+        op.bytes = int(entry.bytes)
         op.status = status
         op.done = true
         pending_io -= 1

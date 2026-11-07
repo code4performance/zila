@@ -26,5 +26,7 @@ extern "system" func WSARecv(s: usize, buffers: *Wsabuf, count: u32, received: u
 extern "system" func WSASend(s: usize, buffers: *Wsabuf, count: u32, sent: usize, flags: u32, overlapped: *task.Op, completion: usize) -> i32
 extern "system" func WSARecvFrom(s: usize, buffers: *Wsabuf, count: u32, received: usize, flags: *int, from: *u8, fromlen: *int, overlapped: *task.Op, completion: usize) -> i32
 extern "system" func WSASendTo(s: usize, buffers: *Wsabuf, count: u32, sent: usize, flags: u32, to: *u8, tolen: i32, overlapped: *task.Op, completion: usize) -> i32
+extern "system" func GetAddrInfoExW(name: *u8, service: usize, namespace: u32, provider: usize, hints: *u8, result: *int, timeout: usize, overlapped: *task.Op, completion: extern "system" func(u32, u32, usize), handle: usize) -> i32
+extern "system" func FreeAddrInfoExW(info: usize)
 extern "system" func getaddrinfo(node: *u8, service: usize, hints: *u8, result: *int) -> i32
 extern "system" func freeaddrinfo(info: usize)

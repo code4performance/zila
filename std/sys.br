@@ -10,6 +10,7 @@ use c
 
 #[link("kernel32")]
 extern "system" func FormatMessageA(flags: u32, source: usize, message: u32, language: u32, buffer: *u8, size: u32, args: usize) -> u32
+extern "system" func MultiByteToWideChar(codepage: u32, flags: u32, source: *u8, source_len: i32, dest: *u8, dest_len: i32) -> i32
 
 // Owns a block of raw memory; frees it when the last reference goes away.
 #[shared]
@@ -30,6 +31,19 @@ end
 // A zeroed block of `bytes` bytes.
 func buffer(bytes: int) -> Buf
     return Buf{ ptr: c.alloc(usize(bytes)) }
+end
+
+// `s` as a NUL-terminated UTF-16 string.
+func wide(s: text) -> Buf
+    var n = 0
+    unsafe
+        n = MultiByteToWideChar(65001, 0, c.cstr(s), -1, 0, 0)
+    end
+    let b = buffer(n * 2 + 2)
+    unsafe
+        MultiByteToWideChar(65001, 0, c.cstr(s), -1, b.ptr, n)
+    end
+    return b
 end
 
 func trim_end(s: text) -> text

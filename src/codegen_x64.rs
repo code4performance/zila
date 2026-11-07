@@ -2788,7 +2788,7 @@ end
             },
             ExprKind::Deref(inner) => self.deref(inner),
             ExprKind::Binary { op, lhs, rhs } => self.binary(op, lhs, rhs, want),
-            ExprKind::Field { expr: obj, name, safe } => self.field(obj, name, *safe),
+            ExprKind::Field { expr: obj, name, safe } => self.field(obj, name, *safe, want),
             ExprKind::Index { expr: obj, index } => {
                 let (ot, own) = self.operand(obj, None)?;
                 let t = self.temp();
@@ -3351,13 +3351,14 @@ end
         Ok(lt)
     }
 
-    fn field(&mut self, obj: &Expr, name: &str, safe: bool) -> R<Ty> {
+    fn field(&mut self, obj: &Expr, name: &str, safe: bool, want: Option<&Ty>) -> R<Ty> {
         if let ExprKind::Ident(m) = &obj.kind {
             if self.is_module(m) {
                 if m == "c" {
                     return self.err(format!("'c.{}' must be called", name));
                 }
-                return self.member(&m.clone(), name, None);
+                // `want` lets a function of the module be passed where the system wants a callback
+                return self.member(&m.clone(), name, want);
             }
             if let Some(q) = self.enum_type_named(m) {
                 let Some(idx) = self.enums[&q].variants.iter().position(|v| v.0 == name) else {

@@ -48,13 +48,14 @@ pub fn std_linux_source(name: &str) -> Option<&'static str> {
         "fs" => Some(include_str!("../std/fs.linux.br")),
         "net" => Some(include_str!("../std/net.linux.br")),
         "tls" => Some(include_str!("../std/tls.linux.br")),
+        "ui" => Some(include_str!("../std/ui.linux.br")),
         _ => None,
     }
 }
 
 /// Libraries that are written on the Windows API and need a Linux layer to be used on Linux.
-/// `ui` and `ws` never get one (see the Linux target's documentation).
-const OS_LIBRARIES: &[&str] = &["task", "fs", "net", "sys", "tls"];
+/// `ws` never gets one: it is internal to `net` on Windows.
+const OS_LIBRARIES: &[&str] = &["task", "fs", "net", "sys", "tls", "ui"];
 
 /// The source of library `name` for a target: the Linux layer on Linux when there is one.
 pub fn std_source_for(name: &str, target: Target) -> Option<&'static str> {
@@ -1038,11 +1039,14 @@ impl Compiler {
                 wanted.push("float".into());
             }
             for m in wanted {
+                if m == "ws" && name == main.package {
+                    return Err("'ws' is internal to 'net' and cannot be used by programs; use 'net' instead".into());
+                }
                 if self.target == Target::Bare && (matches!(m.as_str(), "ui" | "task" | "future" | "fs" | "net" | "sys" | "ws" | "tls")) {
                     return Err(format!("'{}' needs Windows and cannot be used in a bare-metal kernel", m));
                 }
                 if self.target == Target::Linux
-                    && (matches!(m.as_str(), "ui" | "ws") || (OS_LIBRARIES.contains(&m.as_str()) && std_linux_source(&m).is_none()))
+                    && (m == "ws" || (OS_LIBRARIES.contains(&m.as_str()) && std_linux_source(&m).is_none()))
                 {
                     return Err(format!("'{}' is not available on Linux yet (it uses the Windows API)", m));
                 }

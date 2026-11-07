@@ -1,9 +1,10 @@
 // =====================================================================
 // Brasa standard library: `use ui`
 //
-// Native Windows widgets, written in Brasa directly on top of the Win32
-// API. The compiler embeds this file and compiles it together with the
-// program; nothing here is implemented in Rust or C.
+// Windows and controls, written in Brasa. The compiler embeds this file and compiles it
+// together with the program; nothing here is implemented in Rust or C. This is the Windows
+// layer (native Win32 controls); std/ui.linux.br is the Linux layer (controls drawn on X11).
+// Both have the same public API: the shared region is the same text in both files.
 //
 //   var win = ui.Window("Title", 640, 480)
 //   var name = ui.TextBox()
@@ -13,15 +14,20 @@
 //   win.show()
 //   ui.run()
 //
-// Widgets are plain records holding a window handle, so copying one is
-// cheap and every copy refers to the same native control. Controls are
-// created immediately, parked inside a hidden window, and moved into
-// their real window by `layout`.
+// Widgets are plain records holding an opaque id, so copying one is cheap and every copy
+// refers to the same control. Controls are created immediately, parked inside a hidden
+// window, and moved into their real window by `layout`.
+//
+// With the environment variable BRASA_UI_SCRIPT naming a file, `run` applies its steps
+// (click N, type TEXT, key NAME, select N, close) to the first window instead of waiting
+// for a person; this is how the tests drive programs.
 // =====================================================================
 
 package ui
 
 use c
+use sys
+use text
 
 // ---------- Win32 bindings ----------
 
@@ -57,6 +63,12 @@ extern "system" func SetBkMode(hdc: usize, mode: i32) -> i32
 
 #[link("kernel32")]
 extern "system" func GetModuleHandleA(name: usize) -> usize
+extern "system" func GetEnvironmentVariableA(name: *u8, buffer: *u8, size: u32) -> u32
+extern "system" func CreateFileA(name: *u8, access: u32, share: u32, security: usize, disposition: u32, flags: u32, template: usize) -> usize
+extern "system" func ReadFile(file: usize, buffer: *u8, count: u32, read: *int, overlapped: usize) -> i32
+extern "system" func GetFileSize(file: usize, high: usize) -> u32
+extern "system" func CloseHandle(file: usize) -> i32
+extern "system" func ExitProcess(code: u32)
 
 #[c_layout]
 type WndClass = record
@@ -119,6 +131,7 @@ let LB_DELETESTRING = 0x0182
 let LB_RESETCONTENT = 0x0184
 let LB_GETCURSEL = 0x0188
 let LB_GETCOUNT = 0x018B
+let LB_SETCURSEL = 0x0186
 let BN_CLICKED = 0
 let EN_CHANGE = 0x0300
 let LBN_SELCHANGE = 1
@@ -126,6 +139,12 @@ let IDOK = 1
 let COLOR_WINDOW = 5
 let SW_SHOW = 5
 let GA_ROOT = 2
+
+// ---- shared begin ----
+// Everything from here to "shared end" is the same text in std/ui.br (Windows) and
+// std/ui.linux.br (Linux); tests/ui.rs checks that. It holds the whole public API, the layout
+// and the scripted input. The two files differ only in the `be_*` functions below it, which
+// are the backend: the native controls of Win32 on Windows, controls drawn on X11 on Linux.
 
 // ---------- widget model ----------
 
@@ -137,94 +156,71 @@ let WINDOW = 5
 let VSTACK = 6
 let HSTACK = 7
 
+// What a handler waits for.
+let EV_CLICK = 0
+let EV_CHANGE = 1
+let EV_SELECT = 2
+
 // Logical pixels; scaled by the window's DPI.
 let PAD = 12
 let GAP = 8
 
 type Control = record
-    hwnd: usize
+    id: usize
     kind: i32
     children: []Control
 end
 
+// A control's state at the moment its window closed.
+type Frozen = record
+    id: usize
+    text: text
+    count: i32
+    selected: i32
+end
+
 type Handler = record
-    hwnd: usize
+    id: usize
     code: i32
     action: func()
 end
 
 // An open top-level window and the layout tree it arranges.
 type Frame = record
-    hwnd: usize
+    id: usize
     root: Control?
-    font: usize
 end
 
-let CLASS = "BrasaWindow"
-
-var ready = false
-var instance: usize = 0
-var parking: usize = 0
 var handlers: []Handler
 var frames: []Frame
-
-func ensure_init()
-    if ready
-        return
-    end
-    ready = true
-    unsafe
-        instance = GetModuleHandleA(0)
-        var wc = WndClass{
-            size: 80,
-            proc: wndproc,
-            instance: instance,
-            cursor: LoadCursorA(0, 32512),
-            background: GetSysColorBrush(COLOR_WINDOW),
-            class_name: c.cstr(CLASS)
-        }
-        RegisterClassExA(&wc)
-        // Hidden window that owns controls until `layout` moves them.
-        parking = CreateWindowExA(0, c.cstr(CLASS), c.cstr(""), 0, 0, 0, 0, 0, 0, 0, instance, 0)
-    end
-end
-
-func make(class: text, label: text, ex: u32, style: u32, kind: i32) -> Control
-    ensure_init()
-    var h: usize = 0
-    unsafe
-        h = CreateWindowExA(ex, c.cstr(class), c.cstr(label), WS_CHILD bitor WS_VISIBLE bitor style, 0, 0, 10, 10, parking, 0, instance, 0)
-    end
-    return Control{ hwnd: h, kind: kind }
-end
+var scripted = false
+// What a window's controls held when it closed; they keep answering with it afterwards.
+var frozen: []Frozen
+// While the library itself sets a text, the backend must not report it as typing.
+var muted = 0
 
 // ---------- constructors ----------
 
 func Window(title: text, width: i32 = 640, height: i32 = 480) -> Control
-    ensure_init()
-    var h: usize = 0
-    unsafe
-        let dpi = i32(GetDpiForSystem())
-        h = CreateWindowExA(WS_EX_CONTROLPARENT, c.cstr(CLASS), c.cstr(title), WS_OVERLAPPEDWINDOW bitor WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT, scale(width, dpi), scale(height, dpi), 0, 0, instance, 0)
-    end
-    frames.add(Frame{ hwnd: h })
-    return Control{ hwnd: h, kind: WINDOW }
+    let id = be_window(title, width, height)
+    frames.add(Frame{ id: id })
+    return Control{ id: id, kind: WINDOW }
 end
 
 func TextBox(value: text = "") -> Control
-    return make("EDIT", value, WS_EX_CLIENTEDGE, WS_TABSTOP bitor ES_AUTOHSCROLL, TEXTBOX)
+    return Control{ id: be_create(TEXTBOX, value), kind: TEXTBOX }
 end
 
 func Button(label: text) -> Control
-    return make("BUTTON", label, 0, WS_TABSTOP, BUTTON)
+    return Control{ id: be_create(BUTTON, label), kind: BUTTON }
 end
 
 func ListView() -> Control
-    return make("LISTBOX", "", WS_EX_CLIENTEDGE, WS_TABSTOP bitor WS_VSCROLL bitor LBS_NOTIFY bitor LBS_NOINTEGRALHEIGHT, LISTVIEW)
+    return Control{ id: be_create(LISTVIEW, ""), kind: LISTVIEW }
 end
 
 func Label(value: text) -> Control
-    return make("STATIC", value, 0, SS_CENTERIMAGE, LABEL)
+    return Control{ id: be_create(LABEL, value), kind: LABEL }
 end
 
 func vstack(items: ...Control) -> Control
@@ -238,161 +234,133 @@ end
 // ---------- properties: `w.text`, `w.text = ...`, `w.count`, `w.selected` ----------
 
 func (w: Control) text() -> text
-    unsafe
-        let n = GetWindowTextLengthA(w.hwnd)
-        let buf = c.alloc(usize(n + 1))
-        GetWindowTextA(w.hwnd, buf, n + 1)
-        let s = c.from_cstr(buf)
-        c.free(buf)
-        return s
+    for z in frozen
+        if z.id == w.id
+            return z.text
+        end
     end
+    return be_text(w.id)
 end
 
 func (w: Control) set_text(value: text)
-    unsafe
-        SetWindowTextA(w.hwnd, c.cstr(value))
-    end
+    change_text(w.id, value)
 end
 
 func (w: Control) count() -> i32
-    unsafe
-        return i32(SendMessageA(w.hwnd, LB_GETCOUNT, 0, 0))
+    for z in frozen
+        if z.id == w.id
+            return z.count
+        end
     end
+    return be_list_count(w.id)
 end
 
 // Index of the selected list item, or -1.
 func (w: Control) selected() -> i32
-    unsafe
-        return i32(SendMessageA(w.hwnd, LB_GETCURSEL, 0, 0))
+    for z in frozen
+        if z.id == w.id
+            return z.selected
+        end
     end
+    return be_list_selected(w.id)
 end
 
 // ---------- methods ----------
 
 func (w: Control) add(item: text)
-    unsafe
-        SendMessageA(w.hwnd, LB_ADDSTRING, 0, isize(c.cstr(item)))
-    end
+    be_list_add(w.id, item)
 end
 
 func (w: Control) remove(index: i32)
-    unsafe
-        SendMessageA(w.hwnd, LB_DELETESTRING, usize(index), 0)
-    end
+    be_list_remove(w.id, index)
 end
 
 func (w: Control) clear()
     if w.kind == LISTVIEW
-        unsafe
-            SendMessageA(w.hwnd, LB_RESETCONTENT, 0, 0)
-        end
+        be_list_clear(w.id)
     else
         w.set_text("")
     end
 end
 
 func (w: Control) onClick(action: func())
-    handlers.add(Handler{ hwnd: w.hwnd, code: BN_CLICKED, action: action })
+    handlers.add(Handler{ id: w.id, code: EV_CLICK, action: action })
 end
 
 func (w: Control) onChange(action: func())
-    handlers.add(Handler{ hwnd: w.hwnd, code: EN_CHANGE, action: action })
+    handlers.add(Handler{ id: w.id, code: EV_CHANGE, action: action })
 end
 
 func (w: Control) onSelect(action: func())
-    handlers.add(Handler{ hwnd: w.hwnd, code: LBN_SELCHANGE, action: action })
+    handlers.add(Handler{ id: w.id, code: EV_SELECT, action: action })
 end
 
 func (w: Control) layout(root: Control)
-    adopt(root, w.hwnd)
+    adopt(root, w.id)
     for i in 0..frames.len
-        if frames[i].hwnd == w.hwnd
-            let font = make_font(dpi_of(w.hwnd))
+        if frames[i].id == w.id
             frames[i].root = root
-            frames[i].font = font
-            set_font(root, font)
         end
     end
-    relayout(w.hwnd)
+    be_style(w.id, root)
+    relayout(w.id)
 end
 
 func (w: Control) show()
-    unsafe
-        ShowWindow(w.hwnd, SW_SHOW)
-        SetForegroundWindow(w.hwnd)
-    end
-    relayout(w.hwnd)
+    be_show(w.id)
+    relayout(w.id)
 end
 
 func (w: Control) close()
-    unsafe
-        DestroyWindow(w.hwnd)
-    end
+    be_close(w.id)
 end
 
 // Runs the event loop until the last window is closed.
 func run()
-    var m = Msg{}
-    unsafe
-        while GetMessageA(&m, 0, 0, 0) > 0
-            let top = GetAncestor(m.hwnd, GA_ROOT)
-            // IsDialogMessage gives Tab navigation and Enter = default button.
-            if top == 0 or IsDialogMessageA(top, &m) == 0
-                TranslateMessage(&m)
-                DispatchMessageA(&m)
-            end
-        end
-    end
+    run_script()
+    be_run()
 end
 
 func alert(message: text, title: text = "Brasa")
-    unsafe
-        MessageBoxA(0, c.cstr(message), c.cstr(title), 0x40)
+    // a scripted run has nobody to dismiss it
+    if be_script().len > 0
+        return
     end
+    be_alert(message, title)
 end
 
 // ---------- internals ----------
 
-func adopt(node: Control, parent: usize)
-    if node.kind == VSTACK or node.kind == HSTACK
-        for ch in node.children
-            adopt(ch, parent)
-        end
+// Sets the text of a control; onChange runs once when the text really changed.
+func change_text(id: usize, value: text)
+    if be_text(id) == value
         return
     end
-    unsafe
-        SetParent(node.hwnd, parent)
-    end
+    muted += 1
+    be_set_text(id, value)
+    muted -= 1
+    fire(id, EV_CHANGE)
 end
 
-func set_font(node: Control, font: usize)
+// The windows and controls (not the stacks) under a node, in order.
+func leaves(node: Control) -> []usize
+    var out: []usize
     if node.kind == VSTACK or node.kind == HSTACK
         for ch in node.children
-            set_font(ch, font)
+            for l in leaves(ch)
+                out.add(l)
+            end
         end
-        return
+        return out
     end
-    unsafe
-        SendMessageA(node.hwnd, WM_SETFONT, font, 1)
-    end
+    out.add(node.id)
+    return out
 end
 
-func make_font(dpi: i32) -> usize
-    unsafe
-        // Segoe UI 9pt, ClearType
-        return CreateFontA(-((9 * dpi + 36) / 72), 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, c.cstr("Segoe UI"))
+func adopt(node: Control, window: usize)
+    for l in leaves(node)
+        be_adopt(window, l)
     end
-end
-
-func dpi_of(hwnd: usize) -> i32
-    var d = 0
-    unsafe
-        d = i32(GetDpiForWindow(hwnd))
-    end
-    if d == 0
-        return 96
-    end
-    return d
 end
 
 func scale(v: i32, dpi: i32) -> i32
@@ -404,12 +372,6 @@ func max(a: i32, b: i32) -> i32
         return a
     end
     return b
-end
-
-func text_len(hwnd: usize) -> i32
-    unsafe
-        return GetWindowTextLengthA(hwnd)
-    end
 end
 
 // Preferred size along one axis in logical pixels; -1 means "stretch".
@@ -424,13 +386,13 @@ func pref(w: Control, vertical: bool) -> i32
         if vertical
             return 32
         end
-        return max(text_len(w.hwnd) * 8 + 32, 88)
+        return max(be_text_len(w.id) * 8 + 32, 88)
     end
     if w.kind == LABEL
         if vertical
             return 22
         end
-        return text_len(w.hwnd) * 7 + 8
+        return be_text_len(w.id) * 7 + 8
     end
     if w.kind == VSTACK or w.kind == HSTACK
         let along = (w.kind == VSTACK) == vertical
@@ -456,9 +418,7 @@ end
 
 func place(w: Control, x: i32, y: i32, width: i32, height: i32, dpi: i32)
     if w.kind != VSTACK and w.kind != HSTACK
-        unsafe
-            MoveWindow(w.hwnd, x, y, width, height, 1)
-        end
+        be_move(w.id, x, y, width, height)
         return
     end
     let vertical = w.kind == VSTACK
@@ -504,26 +464,22 @@ func place(w: Control, x: i32, y: i32, width: i32, height: i32, dpi: i32)
     end
 end
 
-func relayout(hwnd: usize)
+func relayout(window: usize)
     for f in frames
-        if f.hwnd == hwnd and f.root != nil
-            var r = Rect{}
-            unsafe
-                GetClientRect(hwnd, &r)
-            end
-            let dpi = dpi_of(hwnd)
+        if f.id == window and f.root != nil
+            let dpi = be_dpi(window)
             let pad = scale(PAD, dpi)
-            place(f.root, pad, pad, r.right - 2 * pad, r.bottom - 2 * pad, dpi)
+            place(f.root, pad, pad, be_client_width(window) - 2 * pad, be_client_height(window) - 2 * pad, dpi)
         end
     end
 end
 
-func first_button(node: Control) -> usize
-    if node.kind == BUTTON
-        return node.hwnd
+func first_of(node: Control, kind: i32) -> usize
+    if node.kind == kind
+        return node.id
     end
     for ch in node.children
-        let b = first_button(ch)
+        let b = first_of(ch, kind)
         if b != 0
             return b
         end
@@ -531,28 +487,428 @@ func first_button(node: Control) -> usize
     return 0
 end
 
-func fire(hwnd: usize, code: i32)
+// Enter in a field clicks the window's first button.
+func enter_pressed(window: usize)
+    for f in frames
+        if f.id == window and f.root != nil
+            let b = first_of(f.root, BUTTON)
+            if b != 0
+                fire(b, EV_CLICK)
+            end
+        end
+    end
+end
+
+func fire(id: usize, code: i32)
     for h in handlers
-        if h.hwnd == hwnd and h.code == code
+        if h.id == id and h.code == code
             h.action()
         end
     end
 end
 
-func closed(hwnd: usize)
+// A window went away; the loop ends with the last one.
+func closed(window: usize)
+    for f in frames
+        if f.id == window and f.root != nil
+            for l in leaves(f.root)
+                frozen.add(Frozen{ id: l, text: be_text(l), count: be_list_count(l), selected: be_list_selected(l) })
+            end
+        end
+    end
     var open = 0
     for i in 0..frames.len
-        if frames[i].hwnd == hwnd
-            frames[i].hwnd = 0
+        if frames[i].id == window
+            frames[i].id = 0
         end
-        if frames[i].hwnd != 0
+        if frames[i].id != 0
             open += 1
         end
     end
     if open == 0
-        unsafe
-            PostQuitMessage(0)
+        be_quit()
+    end
+end
+
+// ---------- display failure ----------
+
+func no_display(reason: text)
+    print("error: ui: cannot open a display: {reason}")
+    be_exit(1)
+end
+
+// ---------- scripted input (BRASA_UI_SCRIPT, for tests) ----------
+// Setting a text box's text runs its onChange handlers, as typing does, so the script only sets it.
+
+// The buttons under a node, in order.
+func buttons_of(node: Control) -> []usize
+    var out: []usize
+    if node.kind == BUTTON
+        out.add(node.id)
+    end
+    for ch in node.children
+        for b in buttons_of(ch)
+            out.add(b)
         end
+    end
+    return out
+end
+
+func script_move(list: usize, delta: i32)
+    let n = be_list_count(list)
+    if n == 0
+        return
+    end
+    var to = be_list_selected(list) + delta
+    if to < 0
+        to = 0
+    end
+    if to > n - 1
+        to = n - 1
+    end
+    if to != be_list_selected(list)
+        be_list_select(list, to)
+        fire(list, EV_SELECT)
+    end
+end
+
+func script_step(window: Frame, line: text)
+    let root = window.root
+    if root == nil
+        return
+    end
+    var word = line
+    var rest = ""
+    let space = text.index_of(line, " ")
+    if space >= 0
+        word = line.slice(0, space)
+        rest = line.slice(space + 1, line.len)
+    end
+    let box = first_of(root, TEXTBOX)
+    let list = first_of(root, LISTVIEW)
+    if word == "click"
+        let which = text.parse_int(rest) ?? 0
+        let all = buttons_of(root)
+        if which >= 0 and which < i32(all.len)
+            fire(all[which], EV_CLICK)
+        end
+    end
+    if word == "type" and box != 0
+        for i in 0..rest.len
+            change_text(box, be_text(box) + rest.slice(i, i + 1))
+        end
+    end
+    if word == "select" and list != 0
+        let which = text.parse_int(rest) ?? 0
+        if which >= 0 and which < be_list_count(list)
+            be_list_select(list, which)
+            fire(list, EV_SELECT)
+        end
+    end
+    if word == "key"
+        if rest == "backspace" and box != 0
+            let now = be_text(box)
+            if now.len > 0
+                change_text(box, now.slice(0, now.len - 1))
+            end
+        end
+        if rest == "enter"
+            enter_pressed(window.id)
+        end
+        if rest == "up" and list != 0
+            script_move(list, -1)
+        end
+        if rest == "down" and list != 0
+            script_move(list, 1)
+        end
+    end
+    if word == "close"
+        be_close(window.id)
+    end
+end
+
+// Applies the steps of the script file to the first window, then closes it.
+func run_script()
+    let script = be_script()
+    if script.len == 0 or scripted
+        return
+    end
+    scripted = true
+    var first = Frame{}
+    for f in frames
+        if first.id == 0 and f.id != 0
+            first = f
+        end
+    end
+    if first.id == 0
+        return
+    end
+    for line in text.lines(script)
+        let step = text.trim(line)
+        if step.len > 0
+            script_step(first, step)
+        end
+    end
+    be_close(first.id)
+end
+// ---- shared end ----
+
+// ---------- backend: Win32 ----------
+
+let CLASS = "BrasaWindow"
+
+type Font = record
+    window: usize
+    font: usize
+end
+
+var ready = false
+var instance: usize = 0
+var parking: usize = 0
+var fonts: []Font
+
+func be_init()
+    if ready
+        return
+    end
+    ready = true
+    unsafe
+        instance = GetModuleHandleA(0)
+        var wc = WndClass{
+            size: 80,
+            proc: wndproc,
+            instance: instance,
+            cursor: LoadCursorA(0, 32512),
+            background: GetSysColorBrush(COLOR_WINDOW),
+            class_name: c.cstr(CLASS)
+        }
+        RegisterClassExA(&wc)
+        // Hidden window that owns controls until `layout` moves them.
+        parking = CreateWindowExA(0, c.cstr(CLASS), c.cstr(""), 0, 0, 0, 0, 0, 0, 0, instance, 0)
+    end
+    if parking == 0
+        no_display("the window system refused a window")
+    end
+end
+
+func make(class: text, label: text, ex: u32, style: u32) -> usize
+    be_init()
+    var h: usize = 0
+    unsafe
+        h = CreateWindowExA(ex, c.cstr(class), c.cstr(label), WS_CHILD bitor WS_VISIBLE bitor style, 0, 0, 10, 10, parking, 0, instance, 0)
+    end
+    return h
+end
+
+func be_create(kind: i32, label: text) -> usize
+    if kind == TEXTBOX
+        return make("EDIT", label, WS_EX_CLIENTEDGE, WS_TABSTOP bitor ES_AUTOHSCROLL)
+    end
+    if kind == BUTTON
+        return make("BUTTON", label, 0, WS_TABSTOP)
+    end
+    if kind == LISTVIEW
+        return make("LISTBOX", "", WS_EX_CLIENTEDGE, WS_TABSTOP bitor WS_VSCROLL bitor LBS_NOTIFY bitor LBS_NOINTEGRALHEIGHT)
+    end
+    return make("STATIC", label, 0, SS_CENTERIMAGE)
+end
+
+func be_window(title: text, width: i32, height: i32) -> usize
+    be_init()
+    var h: usize = 0
+    unsafe
+        let dpi = i32(GetDpiForSystem())
+        h = CreateWindowExA(WS_EX_CONTROLPARENT, c.cstr(CLASS), c.cstr(title), WS_OVERLAPPEDWINDOW bitor WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT, scale(width, dpi), scale(height, dpi), 0, 0, instance, 0)
+    end
+    return h
+end
+
+func be_text(id: usize) -> text
+    unsafe
+        let n = GetWindowTextLengthA(id)
+        let buf = c.alloc(usize(n + 1))
+        GetWindowTextA(id, buf, n + 1)
+        let s = c.from_cstr(buf)
+        c.free(buf)
+        return s
+    end
+end
+
+func be_set_text(id: usize, value: text)
+    unsafe
+        SetWindowTextA(id, c.cstr(value))
+    end
+end
+
+func be_text_len(id: usize) -> i32
+    unsafe
+        return GetWindowTextLengthA(id)
+    end
+end
+
+func be_list_count(id: usize) -> i32
+    unsafe
+        return i32(SendMessageA(id, LB_GETCOUNT, 0, 0))
+    end
+end
+
+func be_list_selected(id: usize) -> i32
+    unsafe
+        return i32(SendMessageA(id, LB_GETCURSEL, 0, 0))
+    end
+end
+
+func be_list_select(id: usize, index: i32)
+    unsafe
+        SendMessageA(id, LB_SETCURSEL, usize(index), 0)
+    end
+end
+
+func be_list_add(id: usize, item: text)
+    unsafe
+        SendMessageA(id, LB_ADDSTRING, 0, isize(c.cstr(item)))
+    end
+end
+
+func be_list_remove(id: usize, index: i32)
+    unsafe
+        SendMessageA(id, LB_DELETESTRING, usize(index), 0)
+    end
+end
+
+func be_list_clear(id: usize)
+    unsafe
+        SendMessageA(id, LB_RESETCONTENT, 0, 0)
+    end
+end
+
+func be_adopt(window: usize, id: usize)
+    unsafe
+        SetParent(id, window)
+    end
+end
+
+func be_move(id: usize, x: i32, y: i32, width: i32, height: i32)
+    unsafe
+        MoveWindow(id, x, y, width, height, 1)
+    end
+end
+
+func be_client_width(window: usize) -> i32
+    var r = Rect{}
+    unsafe
+        GetClientRect(window, &r)
+    end
+    return r.right
+end
+
+func be_client_height(window: usize) -> i32
+    var r = Rect{}
+    unsafe
+        GetClientRect(window, &r)
+    end
+    return r.bottom
+end
+
+func be_dpi(window: usize) -> i32
+    var d = 0
+    unsafe
+        d = i32(GetDpiForWindow(window))
+    end
+    if d == 0
+        return 96
+    end
+    return d
+end
+
+func make_font(dpi: i32) -> usize
+    unsafe
+        // Segoe UI 9pt, ClearType
+        return CreateFontA(-((9 * dpi + 36) / 72), 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, c.cstr("Segoe UI"))
+    end
+end
+
+func apply_font(root: Control, font: usize)
+    for l in leaves(root)
+        unsafe
+            SendMessageA(l, WM_SETFONT, font, 1)
+        end
+    end
+end
+
+// A new layout tree: give its controls the window's font.
+func be_style(window: usize, root: Control)
+    let font = make_font(be_dpi(window))
+    apply_font(root, font)
+end
+
+func be_show(window: usize)
+    unsafe
+        ShowWindow(window, SW_SHOW)
+        SetForegroundWindow(window)
+    end
+end
+
+func be_close(window: usize)
+    unsafe
+        DestroyWindow(window)
+    end
+end
+
+func be_quit()
+    unsafe
+        PostQuitMessage(0)
+    end
+end
+
+func be_exit(code: i32)
+    unsafe
+        ExitProcess(u32(code))
+    end
+end
+
+func be_run()
+    var m = Msg{}
+    unsafe
+        while GetMessageA(&m, 0, 0, 0) > 0
+            let top = GetAncestor(m.hwnd, GA_ROOT)
+            // IsDialogMessage gives Tab navigation and Enter = default button.
+            if top == 0 or IsDialogMessageA(top, &m) == 0
+                TranslateMessage(&m)
+                DispatchMessageA(&m)
+            end
+        end
+    end
+end
+
+func be_alert(message: text, title: text)
+    unsafe
+        MessageBoxA(0, c.cstr(message), c.cstr(title), 0x40)
+    end
+end
+
+// The contents of the file named by BRASA_UI_SCRIPT, or empty text.
+func be_script() -> text
+    unsafe
+        let name = c.alloc(usize(520))
+        let n = GetEnvironmentVariableA(c.cstr("BRASA_UI_SCRIPT"), name, 512)
+        if n == 0 or n > 512
+            c.free(name)
+            return ""
+        end
+        let h = CreateFileA(name, 0x80000000, 1, 0, 3, 0x80, 0)
+        c.free(name)
+        if h == 0xFFFFFFFFFFFFFFFF
+            return ""
+        end
+        let size = i32(GetFileSize(h, 0))
+        let buf = c.alloc(usize(size + 1))
+        let got = sys.Scratch{}
+        ReadFile(h, buf, u32(size), &got.a, 0)
+        CloseHandle(h)
+        let s = c.from_bytes(buf, got.a)
+        c.free(buf)
+        return s
     end
 end
 
@@ -562,18 +918,18 @@ func wndproc(hwnd: usize, msg: u32, wp: usize, lp: isize) -> isize
         let id = wp bitand 0xFFFF
         let code = i32((wp >> 16) bitand 0xFFFF)
         if id == IDOK
-            // Enter in a field clicks the window's first button.
-            for f in frames
-                if f.hwnd == hwnd and f.root != nil
-                    let b = first_button(f.root)
-                    if b != 0
-                        fire(b, BN_CLICKED)
-                    end
-                end
-            end
+            enter_pressed(hwnd)
             return 0
         end
-        fire(usize(lp), code)
+        if code == BN_CLICKED
+            fire(usize(lp), EV_CLICK)
+        end
+        if code == EN_CHANGE and muted == 0
+            fire(usize(lp), EV_CHANGE)
+        end
+        if code == LBN_SELCHANGE
+            fire(usize(lp), EV_SELECT)
+        end
         return 0
     end
     if msg == WM_SIZE
@@ -581,11 +937,10 @@ func wndproc(hwnd: usize, msg: u32, wp: usize, lp: isize) -> isize
         return 0
     end
     if msg == WM_DPICHANGED
-        for i in 0..frames.len
-            if frames[i].hwnd == hwnd and frames[i].root != nil
-                let font = make_font(i32(wp bitand 0xFFFF))
-                frames[i].font = font
-                set_font(frames[i].root, font)
+        let font = make_font(i32(wp bitand 0xFFFF))
+        for f in frames
+            if f.id == hwnd and f.root != nil
+                apply_font(f.root, font)
             end
         end
         relayout(hwnd)

@@ -1,0 +1,1869 @@
+// =====================================================================
+// Brasa standard library: `use ui` (Linux layer)
+//
+// The Linux counterpart of std/ui.br, with the same functions and behavior: the shared region
+// below is the same text in both files. Windows and controls are drawn by this library on an
+// X11 display: it speaks the X11 protocol itself over the server's Unix socket, so the program
+// is still a static executable with no C library, GTK or Xlib. It works on any X server,
+// including XWayland and WSLg; `DISPLAY` picks the display. X11 has no controls, so text boxes,
+// buttons, lists and labels are drawn here with the server's built-in "fixed" font.
+//
+//   var win = ui.Window("Title", 640, 480)
+//   var name = ui.TextBox()
+//   var add = ui.Button("Add")
+//   add.onClick(func() ... end)
+//   win.layout(ui.vstack(name, add))
+//   win.show()
+//   ui.run()
+//
+// With the environment variable BRASA_UI_SCRIPT naming a file, `run` applies its steps
+// (click N, type TEXT, key NAME, select N, close) to the first window instead of waiting
+// for a person; this is how the tests drive programs.
+// =====================================================================
+
+package ui
+
+use c
+use sys
+use text
+
+// ---- shared begin ----
+// Everything from here to "shared end" is the same text in std/ui.br (Windows) and
+// std/ui.linux.br (Linux); tests/ui.rs checks that. It holds the whole public API, the layout
+// and the scripted input. The two files differ only in the `be_*` functions below it, which
+// are the backend: the native controls of Win32 on Windows, controls drawn on X11 on Linux.
+
+// ---------- widget model ----------
+
+let TEXTBOX = 1
+let BUTTON = 2
+let LISTVIEW = 3
+let LABEL = 4
+let WINDOW = 5
+let VSTACK = 6
+let HSTACK = 7
+
+// What a handler waits for.
+let EV_CLICK = 0
+let EV_CHANGE = 1
+let EV_SELECT = 2
+
+// Logical pixels; scaled by the window's DPI.
+let PAD = 12
+let GAP = 8
+
+type Control = record
+    id: usize
+    kind: i32
+    children: []Control
+end
+
+// A control's state at the moment its window closed.
+type Frozen = record
+    id: usize
+    text: text
+    count: i32
+    selected: i32
+end
+
+type Handler = record
+    id: usize
+    code: i32
+    action: func()
+end
+
+// An open top-level window and the layout tree it arranges.
+type Frame = record
+    id: usize
+    root: Control?
+end
+
+var handlers: []Handler
+var frames: []Frame
+var scripted = false
+// What a window's controls held when it closed; they keep answering with it afterwards.
+var frozen: []Frozen
+// While the library itself sets a text, the backend must not report it as typing.
+var muted = 0
+
+// ---------- constructors ----------
+
+func Window(title: text, width: i32 = 640, height: i32 = 480) -> Control
+    let id = be_window(title, width, height)
+    frames.add(Frame{ id: id })
+    return Control{ id: id, kind: WINDOW }
+end
+
+func TextBox(value: text = "") -> Control
+    return Control{ id: be_create(TEXTBOX, value), kind: TEXTBOX }
+end
+
+func Button(label: text) -> Control
+    return Control{ id: be_create(BUTTON, label), kind: BUTTON }
+end
+
+func ListView() -> Control
+    return Control{ id: be_create(LISTVIEW, ""), kind: LISTVIEW }
+end
+
+func Label(value: text) -> Control
+    return Control{ id: be_create(LABEL, value), kind: LABEL }
+end
+
+func vstack(items: ...Control) -> Control
+    return Control{ kind: VSTACK, children: items }
+end
+
+func hstack(items: ...Control) -> Control
+    return Control{ kind: HSTACK, children: items }
+end
+
+// ---------- properties: `w.text`, `w.text = ...`, `w.count`, `w.selected` ----------
+
+func (w: Control) text() -> text
+    for z in frozen
+        if z.id == w.id
+            return z.text
+        end
+    end
+    return be_text(w.id)
+end
+
+func (w: Control) set_text(value: text)
+    change_text(w.id, value)
+end
+
+func (w: Control) count() -> i32
+    for z in frozen
+        if z.id == w.id
+            return z.count
+        end
+    end
+    return be_list_count(w.id)
+end
+
+// Index of the selected list item, or -1.
+func (w: Control) selected() -> i32
+    for z in frozen
+        if z.id == w.id
+            return z.selected
+        end
+    end
+    return be_list_selected(w.id)
+end
+
+// ---------- methods ----------
+
+func (w: Control) add(item: text)
+    be_list_add(w.id, item)
+end
+
+func (w: Control) remove(index: i32)
+    be_list_remove(w.id, index)
+end
+
+func (w: Control) clear()
+    if w.kind == LISTVIEW
+        be_list_clear(w.id)
+    else
+        w.set_text("")
+    end
+end
+
+func (w: Control) onClick(action: func())
+    handlers.add(Handler{ id: w.id, code: EV_CLICK, action: action })
+end
+
+func (w: Control) onChange(action: func())
+    handlers.add(Handler{ id: w.id, code: EV_CHANGE, action: action })
+end
+
+func (w: Control) onSelect(action: func())
+    handlers.add(Handler{ id: w.id, code: EV_SELECT, action: action })
+end
+
+func (w: Control) layout(root: Control)
+    adopt(root, w.id)
+    for i in 0..frames.len
+        if frames[i].id == w.id
+            frames[i].root = root
+        end
+    end
+    be_style(w.id, root)
+    relayout(w.id)
+end
+
+func (w: Control) show()
+    be_show(w.id)
+    relayout(w.id)
+end
+
+func (w: Control) close()
+    be_close(w.id)
+end
+
+// Runs the event loop until the last window is closed.
+func run()
+    run_script()
+    be_run()
+end
+
+func alert(message: text, title: text = "Brasa")
+    // a scripted run has nobody to dismiss it
+    if be_script().len > 0
+        return
+    end
+    be_alert(message, title)
+end
+
+// ---------- internals ----------
+
+// Sets the text of a control; onChange runs once when the text really changed.
+func change_text(id: usize, value: text)
+    if be_text(id) == value
+        return
+    end
+    muted += 1
+    be_set_text(id, value)
+    muted -= 1
+    fire(id, EV_CHANGE)
+end
+
+// The windows and controls (not the stacks) under a node, in order.
+func leaves(node: Control) -> []usize
+    var out: []usize
+    if node.kind == VSTACK or node.kind == HSTACK
+        for ch in node.children
+            for l in leaves(ch)
+                out.add(l)
+            end
+        end
+        return out
+    end
+    out.add(node.id)
+    return out
+end
+
+func adopt(node: Control, window: usize)
+    for l in leaves(node)
+        be_adopt(window, l)
+    end
+end
+
+func scale(v: i32, dpi: i32) -> i32
+    return v * dpi / 96
+end
+
+func max(a: i32, b: i32) -> i32
+    if a > b
+        return a
+    end
+    return b
+end
+
+// Preferred size along one axis in logical pixels; -1 means "stretch".
+func pref(w: Control, vertical: bool) -> i32
+    if w.kind == TEXTBOX
+        if vertical
+            return 28
+        end
+        return -1
+    end
+    if w.kind == BUTTON
+        if vertical
+            return 32
+        end
+        return max(be_text_len(w.id) * 8 + 32, 88)
+    end
+    if w.kind == LABEL
+        if vertical
+            return 22
+        end
+        return be_text_len(w.id) * 7 + 8
+    end
+    if w.kind == VSTACK or w.kind == HSTACK
+        let along = (w.kind == VSTACK) == vertical
+        var total = 0
+        for ch in w.children
+            let p = pref(ch, vertical)
+            if p < 0
+                return -1
+            end
+            if along
+                total += p
+            else
+                total = max(total, p)
+            end
+        end
+        if along and w.children.len > 0
+            total += GAP * (i32(w.children.len) - 1)
+        end
+        return total
+    end
+    return -1
+end
+
+func place(w: Control, x: i32, y: i32, width: i32, height: i32, dpi: i32)
+    if w.kind != VSTACK and w.kind != HSTACK
+        be_move(w.id, x, y, width, height)
+        return
+    end
+    let vertical = w.kind == VSTACK
+    let n = i32(w.children.len)
+    if n == 0
+        return
+    end
+    let gap = scale(GAP, dpi)
+    var fixed = 0
+    var flex = 0
+    for ch in w.children
+        let p = pref(ch, vertical)
+        if p < 0
+            flex += 1
+        else
+            fixed += scale(p, dpi)
+        end
+    end
+    var main = width
+    if vertical
+        main = height
+    end
+    var each = 0
+    if flex > 0
+        each = max(main - fixed - gap * (n - 1), 0) / flex
+    end
+    var pos = x
+    if vertical
+        pos = y
+    end
+    for ch in w.children
+        var len = each
+        let p = pref(ch, vertical)
+        if p >= 0
+            len = scale(p, dpi)
+        end
+        if vertical
+            place(ch, x, pos, width, len, dpi)
+        else
+            place(ch, pos, y, len, height, dpi)
+        end
+        pos += len + gap
+    end
+end
+
+func relayout(window: usize)
+    for f in frames
+        if f.id == window and f.root != nil
+            let dpi = be_dpi(window)
+            let pad = scale(PAD, dpi)
+            place(f.root, pad, pad, be_client_width(window) - 2 * pad, be_client_height(window) - 2 * pad, dpi)
+        end
+    end
+end
+
+func first_of(node: Control, kind: i32) -> usize
+    if node.kind == kind
+        return node.id
+    end
+    for ch in node.children
+        let b = first_of(ch, kind)
+        if b != 0
+            return b
+        end
+    end
+    return 0
+end
+
+// Enter in a field clicks the window's first button.
+func enter_pressed(window: usize)
+    for f in frames
+        if f.id == window and f.root != nil
+            let b = first_of(f.root, BUTTON)
+            if b != 0
+                fire(b, EV_CLICK)
+            end
+        end
+    end
+end
+
+func fire(id: usize, code: i32)
+    for h in handlers
+        if h.id == id and h.code == code
+            h.action()
+        end
+    end
+end
+
+// A window went away; the loop ends with the last one.
+func closed(window: usize)
+    for f in frames
+        if f.id == window and f.root != nil
+            for l in leaves(f.root)
+                frozen.add(Frozen{ id: l, text: be_text(l), count: be_list_count(l), selected: be_list_selected(l) })
+            end
+        end
+    end
+    var open = 0
+    for i in 0..frames.len
+        if frames[i].id == window
+            frames[i].id = 0
+        end
+        if frames[i].id != 0
+            open += 1
+        end
+    end
+    if open == 0
+        be_quit()
+    end
+end
+
+// ---------- display failure ----------
+
+func no_display(reason: text)
+    print("error: ui: cannot open a display: {reason}")
+    be_exit(1)
+end
+
+// ---------- scripted input (BRASA_UI_SCRIPT, for tests) ----------
+// Setting a text box's text runs its onChange handlers, as typing does, so the script only sets it.
+
+// The buttons under a node, in order.
+func buttons_of(node: Control) -> []usize
+    var out: []usize
+    if node.kind == BUTTON
+        out.add(node.id)
+    end
+    for ch in node.children
+        for b in buttons_of(ch)
+            out.add(b)
+        end
+    end
+    return out
+end
+
+func script_move(list: usize, delta: i32)
+    let n = be_list_count(list)
+    if n == 0
+        return
+    end
+    var to = be_list_selected(list) + delta
+    if to < 0
+        to = 0
+    end
+    if to > n - 1
+        to = n - 1
+    end
+    if to != be_list_selected(list)
+        be_list_select(list, to)
+        fire(list, EV_SELECT)
+    end
+end
+
+func script_step(window: Frame, line: text)
+    let root = window.root
+    if root == nil
+        return
+    end
+    var word = line
+    var rest = ""
+    let space = text.index_of(line, " ")
+    if space >= 0
+        word = line.slice(0, space)
+        rest = line.slice(space + 1, line.len)
+    end
+    let box = first_of(root, TEXTBOX)
+    let list = first_of(root, LISTVIEW)
+    if word == "click"
+        let which = text.parse_int(rest) ?? 0
+        let all = buttons_of(root)
+        if which >= 0 and which < i32(all.len)
+            fire(all[which], EV_CLICK)
+        end
+    end
+    if word == "type" and box != 0
+        for i in 0..rest.len
+            change_text(box, be_text(box) + rest.slice(i, i + 1))
+        end
+    end
+    if word == "select" and list != 0
+        let which = text.parse_int(rest) ?? 0
+        if which >= 0 and which < be_list_count(list)
+            be_list_select(list, which)
+            fire(list, EV_SELECT)
+        end
+    end
+    if word == "key"
+        if rest == "backspace" and box != 0
+            let now = be_text(box)
+            if now.len > 0
+                change_text(box, now.slice(0, now.len - 1))
+            end
+        end
+        if rest == "enter"
+            enter_pressed(window.id)
+        end
+        if rest == "up" and list != 0
+            script_move(list, -1)
+        end
+        if rest == "down" and list != 0
+            script_move(list, 1)
+        end
+    end
+    if word == "close"
+        be_close(window.id)
+    end
+end
+
+// Applies the steps of the script file to the first window, then closes it.
+func run_script()
+    let script = be_script()
+    if script.len == 0 or scripted
+        return
+    end
+    scripted = true
+    var first = Frame{}
+    for f in frames
+        if first.id == 0 and f.id != 0
+            first = f
+        end
+    end
+    if first.id == 0
+        return
+    end
+    for line in text.lines(script)
+        let step = text.trim(line)
+        if step.len > 0
+            script_step(first, step)
+        end
+    end
+    be_close(first.id)
+end
+// ---- shared end ----
+
+// ---------- backend: X11 ----------
+//
+// The X11 core protocol spoken directly over the X server's Unix socket (no Xlib, no C
+// library). X11 has no controls, so this layer keeps the widgets itself and draws them into
+// an off-screen pixmap that is copied to the window. All sizes below are in pixels.
+
+// The font is the server's built-in "fixed" (6x13), so text widths are exact.
+let CHAR_W = 6
+let CHAR_H = 13
+let ASCENT = 11
+let ROW = 16
+
+// Colors (24-bit RGB).
+let C_BG = 0xF0F0F0
+let C_FIELD = 0xFFFFFF
+let C_TEXT = 0x000000
+let C_BORDER = 0x7A7A7A
+let C_FOCUS = 0x0078D7
+let C_FACE = 0xE1E1E1
+let C_PRESSED = 0xB8B8B8
+let C_SELECT = 0x0078D7
+let C_SELECT_TEXT = 0xFFFFFF
+let C_TRACK = 0xD0D0D0
+
+// Event masks and keysyms.
+let EM_KEY = 0x1
+let EM_BUTTON = 0xC
+let EM_EXPOSE = 0x8000
+let EM_STRUCTURE = 0x20000
+let KS_BACKSPACE = 0xFF08
+let KS_TAB = 0xFF09
+let KS_RETURN = 0xFF0D
+let KS_ESCAPE = 0xFF1B
+let KS_HOME = 0xFF50
+let KS_LEFT = 0xFF51
+let KS_UP = 0xFF52
+let KS_RIGHT = 0xFF53
+let KS_DOWN = 0xFF54
+let KS_END = 0xFF57
+let KS_DELETE = 0xFFFF
+
+type Widget = record
+    id: int
+    kind: int
+    win: int
+    text: text
+    items: []text
+    selected: int
+    scroll: int
+    x: int
+    y: int
+    w: int
+    h: int
+    caret: int
+end
+
+type Win = record
+    id: int
+    pixmap: int
+    w: int
+    h: int
+    dirty: bool
+    mapped: bool
+    focus: int
+    pressed: int
+    open: bool
+end
+
+var connected = false
+var sock = 0
+var out: sys.Buf
+var out_len = 0
+var next_rid = 0
+var rid_base = 0
+var rid_mask = 0
+var root = 0
+var root_visual = 0
+var root_depth = 24
+var screen_dpi = 96
+var gc = 0
+var font = 0
+var current_fg: int = -1
+var current_bg: int = -1
+var atom_protocols = 0
+var atom_delete = 0
+var min_keycode = 8
+var keysyms_per = 0
+var keysyms: sys.Buf
+var widgets: []Widget
+var wins: []Win
+var next_control = 1
+var quit = false
+var alert_window = 0
+var script_text = ""
+var script_read = false
+
+// ---------- raw memory and the socket ----------
+
+func put16(addr: int, v: int)
+    sys.put8(addr, v bitand 255)
+    sys.put8(addr + 1, (v >> 8) bitand 255)
+end
+
+func put32(addr: int, v: int)
+    put16(addr, v bitand 65535)
+    put16(addr + 2, (v >> 16) bitand 65535)
+end
+
+func get16(addr: int) -> int
+    return sys.get8(addr) + sys.get8(addr + 1) * 256
+end
+
+func get32(addr: int) -> int
+    return get16(addr) + get16(addr + 2) * 65536
+end
+
+func get16s(addr: int) -> int
+    let v = get16(addr)
+    if v >= 32768
+        return v - 65536
+    end
+    return v
+end
+
+func put_text(addr: int, s: text)
+    for i in 0..s.len
+        sys.put8(addr + i, int(s[i]))
+    end
+end
+
+func pad4(n: int) -> int
+    return (n + 3) / 4 * 4
+end
+
+// Reads exactly `n` bytes; false when the server went away.
+func read_full(addr: int, n: int) -> bool
+    var got = 0
+    while got < n
+        let r = sys.syscall(0, sock, addr + got, n - got, 0, 0, 0)
+        if r == -4
+            continue
+        end
+        if r <= 0
+            return false
+        end
+        got += r
+    end
+    return true
+end
+
+func write_all(addr: int, n: int)
+    var done = 0
+    while done < n
+        let r = sys.syscall(1, sock, addr + done, n - done, 0, 0, 0)
+        if r == -4
+            continue
+        end
+        if r <= 0
+            return
+        end
+        done += r
+    end
+end
+
+func flush_x()
+    if out_len > 0
+        write_all(int(out.ptr), out_len)
+        out_len = 0
+    end
+end
+
+// Starts a request of `words` 4-byte units and returns where to write it.
+func req(opcode: int, data: int, words: int) -> int
+    if out_len + words * 4 > 200000
+        flush_x()
+    end
+    let at = int(out.ptr) + out_len
+    out_len += words * 4
+    for i in 0..words * 4
+        sys.put8(at + i, 0)
+    end
+    sys.put8(at, opcode)
+    sys.put8(at + 1, data)
+    put16(at + 2, words)
+    return at
+end
+
+func new_rid() -> int
+    next_rid += 1
+    return rid_base + (next_rid bitand rid_mask)
+end
+
+// ---------- environment ----------
+
+// The value of an environment variable, from the initial environment of the process.
+func env(name: text) -> text
+    let fd = sys.syscall(2, int(c.cstr("/proc/self/environ")), 0, 0, 0, 0, 0)
+    if fd < 0
+        return ""
+    end
+    let size = 262144
+    let b = sys.buffer(size)
+    var n = 0
+    while n < size
+        let r = sys.syscall(0, fd, int(b.ptr) + n, size - n, 0, 0, 0)
+        if r <= 0
+            break
+        end
+        n += r
+    end
+    sys.syscall(3, fd, 0, 0, 0, 0, 0)
+    var start = 0
+    while start < n
+        var stop = start
+        while stop < n and sys.get8(int(b.ptr) + stop) != 0
+            stop += 1
+        end
+        var same = stop - start > name.len
+        var i = 0
+        while same and i < name.len
+            if sys.get8(int(b.ptr) + start + i) != int(name[i])
+                same = false
+            end
+            i += 1
+        end
+        if same and sys.get8(int(b.ptr) + start + name.len) == 61
+            return c.from_bytes(b.ptr + start + name.len + 1, stop - start - name.len - 1)
+        end
+        start = stop + 1
+    end
+    return ""
+end
+
+func read_file(path: text) -> text
+    let fd = sys.syscall(2, int(c.cstr(path)), 0, 0, 0, 0, 0)
+    if fd < 0
+        return ""
+    end
+    let size = 1048576
+    let b = sys.buffer(size)
+    var n = 0
+    while n < size
+        let r = sys.syscall(0, fd, int(b.ptr) + n, size - n, 0, 0, 0)
+        if r <= 0
+            break
+        end
+        n += r
+    end
+    sys.syscall(3, fd, 0, 0, 0, 0, 0)
+    return c.from_bytes(b.ptr, n)
+end
+
+// The MIT-MAGIC-COOKIE-1 of a display from ~/.Xauthority (or $XAUTHORITY), or empty text.
+func read_cookie(number: text) -> text
+    var path = env("XAUTHORITY")
+    if path.len == 0
+        let home = env("HOME")
+        if home.len == 0
+            return ""
+        end
+        path = home + "/.Xauthority"
+    end
+    let f = read_file(path)
+    var at = 0
+    while at + 4 <= f.len
+        // family (2), then four length-prefixed strings: address, number, name, data
+        var p = at + 2
+        var fields: []text
+        var ok = true
+        for k in 0..4
+            if p + 2 > f.len
+                ok = false
+                break
+            end
+            let n = int(f[p]) * 256 + int(f[p + 1])
+            if p + 2 + n > f.len
+                ok = false
+                break
+            end
+            fields.add(f.slice(p + 2, p + 2 + n))
+            p += 2 + n
+        end
+        if not ok
+            return ""
+        end
+        if fields[1] == number and fields[2] == "MIT-MAGIC-COOKIE-1"
+            return fields[3]
+        end
+        at = p
+    end
+    return ""
+end
+
+// ---------- connecting ----------
+
+// Connects and sets up; returns "" or the reason it failed.
+func x_connect() -> text
+    let disp = env("DISPLAY")
+    if disp.len == 0
+        return "DISPLAY is not set"
+    end
+    let colon = text.index_of(disp, ":")
+    if colon < 0
+        return "DISPLAY '{disp}' has no display number"
+    end
+    if colon > 0 and disp.slice(0, colon) != "unix"
+        return "only local displays are supported (DISPLAY is '{disp}')"
+    end
+    var number = disp.slice(colon + 1, disp.len)
+    let dot = text.index_of(number, ".")
+    if dot >= 0
+        number = number.slice(0, dot)
+    end
+    let path = "/tmp/.X11-unix/X" + number
+    let fd = sys.syscall(41, 1, 1, 0, 0, 0, 0)
+    if fd < 0
+        return sys.describe(fd, "cannot create a socket")
+    end
+    sock = fd
+    let addr = sys.buffer(112)
+    put16(int(addr.ptr), 1)
+    put_text(int(addr.ptr) + 2, path)
+    let rc = sys.syscall(42, fd, int(addr.ptr), 2 + path.len + 1, 0, 0, 0)
+    if rc < 0
+        return sys.describe(rc, "cannot connect to {path}")
+    end
+    out = sys.buffer(200064)
+    let cookie = read_cookie(number)
+    let name = "MIT-MAGIC-COOKIE-1"
+    var name_len = 0
+    if cookie.len > 0
+        name_len = name.len
+    end
+    let total = 12 + pad4(name_len) + pad4(cookie.len)
+    let b = sys.buffer(total + 8)
+    sys.put8(int(b.ptr), 108)
+    put16(int(b.ptr) + 2, 11)
+    put16(int(b.ptr) + 4, 0)
+    put16(int(b.ptr) + 6, name_len)
+    put16(int(b.ptr) + 8, cookie.len)
+    if cookie.len > 0
+        put_text(int(b.ptr) + 12, name)
+        put_text(int(b.ptr) + 12 + pad4(name_len), cookie)
+    end
+    write_all(int(b.ptr), total)
+    let head = sys.buffer(8)
+    if not read_full(int(head.ptr), 8)
+        return "the server closed the connection during setup"
+    end
+    let extra = get16(int(head.ptr) + 6) * 4
+    let body = sys.buffer(extra + 8)
+    if not read_full(int(body.ptr), extra)
+        return "the server closed the connection during setup"
+    end
+    if sys.get8(int(head.ptr)) != 1
+        let n = sys.get8(int(head.ptr) + 1)
+        return "the server refused the connection: " + c.from_bytes(body.ptr, n)
+    end
+    let p = int(body.ptr)
+    rid_base = get32(p + 4)
+    rid_mask = get32(p + 8)
+    let vendor = get16(p + 16)
+    let formats = sys.get8(p + 21)
+    min_keycode = sys.get8(p + 26)
+    let max_keycode = sys.get8(p + 27)
+    let s = p + 32 + pad4(vendor) + formats * 8
+    root = get32(s)
+    let width_px = get16(s + 20)
+    let width_mm = get16(s + 24)
+    root_visual = get32(s + 32)
+    root_depth = sys.get8(s + 38)
+    if width_mm > 0
+        screen_dpi = width_px * 254 / (width_mm * 10)
+    end
+    connected = true
+    // fonts, graphics context, atoms, keyboard map
+    font = new_rid()
+    let ofont = req(45, 0, 3 + pad4(5) / 4)
+    put32(ofont + 4, font)
+    put16(ofont + 8, 5)
+    put_text(ofont + 12, "fixed")
+    gc = new_rid()
+    let cg = req(55, 0, 8)
+    put32(cg + 4, gc)
+    put32(cg + 8, root)
+    put32(cg + 12, 0x4 + 0x8 + 0x4000 + 0x10000)
+    put32(cg + 16, 0)
+    put32(cg + 20, 0xFFFFFF)
+    put32(cg + 24, font)
+    put32(cg + 28, 0)
+    atom_protocols = intern("WM_PROTOCOLS")
+    atom_delete = intern("WM_DELETE_WINDOW")
+    let count = max_keycode - min_keycode + 1
+    let gk = req(101, 0, 2)
+    sys.put8(gk + 4, min_keycode)
+    sys.put8(gk + 5, count)
+    flush_x()
+    let reply = sys.buffer(32)
+    if read_full(int(reply.ptr), 32)
+        keysyms_per = sys.get8(int(reply.ptr) + 1)
+        let words = get32(int(reply.ptr) + 4)
+        keysyms = sys.buffer(words * 4 + 8)
+        read_full(int(keysyms.ptr), words * 4)
+    end
+    read_dpi()
+    return ""
+end
+
+// Replies are 32 bytes plus `length` words; events cannot arrive before a window is mapped.
+func intern(name: text) -> int
+    let r = req(16, 0, 2 + pad4(name.len) / 4)
+    put16(r + 4, name.len)
+    put_text(r + 8, name)
+    flush_x()
+    let reply = sys.buffer(32)
+    if not read_full(int(reply.ptr), 32)
+        return 0
+    end
+    return get32(int(reply.ptr) + 8)
+end
+
+// Xft.dpi from the root window's RESOURCE_MANAGER property, when the desktop sets it.
+func read_dpi()
+    let r = req(20, 0, 6)
+    put32(r + 4, root)
+    put32(r + 8, 23)
+    put32(r + 12, 31)
+    put32(r + 16, 0)
+    put32(r + 20, 4096)
+    flush_x()
+    let head = sys.buffer(32)
+    if not read_full(int(head.ptr), 32)
+        return
+    end
+    let words = get32(int(head.ptr) + 4)
+    let len = get32(int(head.ptr) + 16)
+    let body = sys.buffer(words * 4 + 8)
+    read_full(int(body.ptr), words * 4)
+    if len == 0
+        return
+    end
+    let props = c.from_bytes(body.ptr, len)
+    for line in text.lines(props)
+        if text.starts_with(line, "Xft.dpi:")
+            let v = text.trim(line.slice(8, line.len))
+            let n = text.parse_int(v) ?? 0
+            if n >= 48 and n <= 480
+                screen_dpi = n
+            end
+        end
+    end
+end
+
+func ensure_connected()
+    if connected
+        return
+    end
+    let reason = x_connect()
+    if reason.len > 0
+        no_display(reason)
+    end
+end
+
+// ---------- widget and window tables ----------
+
+func widget_index(id: int) -> int
+    for i in 0..widgets.len
+        if widgets[i].id == id
+            return i
+        end
+    end
+    return -1
+end
+
+func win_index(id: int) -> int
+    for i in 0..wins.len
+        if wins[i].id == id
+            return i
+        end
+    end
+    return -1
+end
+
+func mark_dirty(window: int)
+    let w = win_index(window)
+    if w >= 0
+        wins[w].dirty = true
+    end
+end
+
+func be_init()
+    ensure_connected()
+end
+
+func be_create(kind: i32, label: text) -> usize
+    ensure_connected()
+    let id = next_control
+    next_control += 1
+    var items: []text
+    widgets.add(Widget{ id: id, kind: int(kind), win: 0, text: label, items: items, selected: -1, caret: label.len })
+    return usize(id)
+end
+
+func be_window(title: text, width: i32, height: i32) -> usize
+    ensure_connected()
+    // a new window means there is something to wait for again
+    quit = false
+    let id = new_rid()
+    let w = scale(width, screen_dpi)
+    let h = scale(height, screen_dpi)
+    // CreateWindow: depth 0 copies the parent's; two values follow (background pixel, event mask)
+    let cw = req(1, 0, 10)
+    put32(cw + 4, id)
+    put32(cw + 8, root)
+    put16(cw + 12, 0)
+    put16(cw + 14, 0)
+    put16(cw + 16, w)
+    put16(cw + 18, h)
+    put16(cw + 20, 0)
+    put16(cw + 22, 1)
+    put32(cw + 24, 0)
+    put32(cw + 28, 0x2 + 0x800)
+    put32(cw + 32, C_BG)
+    put32(cw + 36, EM_KEY + EM_BUTTON + EM_EXPOSE + EM_STRUCTURE)
+    wins.add(Win{ id: id, pixmap: 0, w: w, h: h, open: true })
+    set_title(id, title)
+    let wm = req(18, 0, 7)
+    put32(wm + 4, id)
+    put32(wm + 8, atom_protocols)
+    put32(wm + 12, 4)
+    sys.put8(wm + 16, 32)
+    put32(wm + 20, 1)
+    put32(wm + 24, atom_delete)
+    flush_x()
+    return usize(id)
+end
+
+func set_title(id: int, title: text)
+    let r = req(18, 0, 6 + pad4(title.len) / 4)
+    put32(r + 4, id)
+    put32(r + 8, 39)
+    put32(r + 12, 31)
+    sys.put8(r + 16, 8)
+    put32(r + 20, title.len)
+    put_text(r + 24, title)
+end
+
+// ---------- the backend functions the shared code calls ----------
+
+func be_text(id: usize) -> text
+    let i = widget_index(int(id))
+    if i < 0
+        return ""
+    end
+    return widgets[i].text
+end
+
+// Sets the text without telling anyone; the shared code runs the change handlers.
+func be_set_text(id: usize, value: text)
+    let i = widget_index(int(id))
+    if i < 0
+        return
+    end
+    widgets[i].text = value
+    widgets[i].caret = value.len
+    mark_dirty(widgets[i].win)
+end
+
+func be_text_len(id: usize) -> i32
+    return i32(be_text(id).len)
+end
+
+func be_list_count(id: usize) -> i32
+    let i = widget_index(int(id))
+    if i < 0
+        return 0
+    end
+    return i32(widgets[i].items.len)
+end
+
+func be_list_selected(id: usize) -> i32
+    let i = widget_index(int(id))
+    if i < 0
+        return -1
+    end
+    return i32(widgets[i].selected)
+end
+
+func be_list_select(id: usize, index: i32)
+    let i = widget_index(int(id))
+    if i < 0
+        return
+    end
+    widgets[i].selected = int(index)
+    keep_visible(i)
+    mark_dirty(widgets[i].win)
+end
+
+func be_list_add(id: usize, item: text)
+    let i = widget_index(int(id))
+    if i < 0
+        return
+    end
+    widgets[i].items.add(item)
+    mark_dirty(widgets[i].win)
+end
+
+func be_list_remove(id: usize, index: i32)
+    let i = widget_index(int(id))
+    if i < 0
+        return
+    end
+    let at = int(index)
+    if at < 0 or at >= widgets[i].items.len
+        return
+    end
+    var rest: []text
+    for k in 0..widgets[i].items.len
+        if k != at
+            rest.add(widgets[i].items[k])
+        end
+    end
+    widgets[i].items = rest
+    if widgets[i].selected == at
+        widgets[i].selected = -1
+    end
+    if widgets[i].selected > at
+        widgets[i].selected -= 1
+    end
+    mark_dirty(widgets[i].win)
+end
+
+func be_list_clear(id: usize)
+    let i = widget_index(int(id))
+    if i < 0
+        return
+    end
+    var none: []text
+    widgets[i].items = none
+    widgets[i].selected = -1
+    widgets[i].scroll = 0
+    mark_dirty(widgets[i].win)
+end
+
+func be_adopt(window: usize, id: usize)
+    let i = widget_index(int(id))
+    if i >= 0
+        widgets[i].win = int(window)
+        if wins[win_index(int(window))].focus == 0 and widgets[i].kind != LABEL
+            wins[win_index(int(window))].focus = int(id)
+        end
+    end
+end
+
+func be_move(id: usize, x: i32, y: i32, width: i32, height: i32)
+    let i = widget_index(int(id))
+    if i < 0
+        return
+    end
+    widgets[i].x = int(x)
+    widgets[i].y = int(y)
+    widgets[i].w = int(width)
+    widgets[i].h = int(height)
+    mark_dirty(widgets[i].win)
+end
+
+func be_client_width(window: usize) -> i32
+    let w = win_index(int(window))
+    if w < 0
+        return 0
+    end
+    return i32(wins[w].w)
+end
+
+func be_client_height(window: usize) -> i32
+    let w = win_index(int(window))
+    if w < 0
+        return 0
+    end
+    return i32(wins[w].h)
+end
+
+func be_dpi(window: usize) -> i32
+    return i32(screen_dpi)
+end
+
+// The font is fixed, so a new layout tree only needs a repaint.
+func be_style(window: usize, root: Control)
+    mark_dirty(int(window))
+end
+
+func be_show(window: usize)
+    let m = req(8, 0, 2)
+    put32(m + 4, int(window))
+    flush_x()
+    let w = win_index(int(window))
+    if w >= 0
+        wins[w].mapped = true
+        wins[w].dirty = true
+    end
+end
+
+func be_close(window: usize)
+    let w = win_index(int(window))
+    if w < 0 or not wins[w].open
+        return
+    end
+    wins[w].open = false
+    if wins[w].pixmap != 0
+        let fp = req(54, 0, 2)
+        put32(fp + 4, wins[w].pixmap)
+        wins[w].pixmap = 0
+    end
+    let d = req(4, 0, 2)
+    put32(d + 4, int(window))
+    flush_x()
+    closed(window)
+end
+
+func be_quit()
+    quit = true
+end
+
+func be_exit(code: i32)
+    sys.syscall(231, int(code), 0, 0, 0, 0, 0)
+end
+
+// The contents of the file named by BRASA_UI_SCRIPT, or empty text.
+func be_script() -> text
+    let path = env("BRASA_UI_SCRIPT")
+    if path.len == 0
+        return ""
+    end
+    return read_file(path)
+end
+
+// ---------- drawing ----------
+
+func set_colors(fg: int, bg: int)
+    if fg != current_fg or bg != current_bg
+        let r = req(56, 0, 5)
+        put32(r + 4, gc)
+        put32(r + 8, 0x4 + 0x8)
+        put32(r + 12, fg)
+        put32(r + 16, bg)
+        current_fg = fg
+        current_bg = bg
+    end
+end
+
+func fill(target: int, x: int, y: int, w: int, h: int, color: int)
+    if w <= 0 or h <= 0
+        return
+    end
+    set_colors(color, current_bg)
+    let r = req(70, 0, 5)
+    put32(r + 4, target)
+    put32(r + 8, gc)
+    put16(r + 12, x)
+    put16(r + 14, y)
+    put16(r + 16, w)
+    put16(r + 18, h)
+end
+
+func frame(target: int, x: int, y: int, w: int, h: int, color: int)
+    if w <= 1 or h <= 1
+        return
+    end
+    set_colors(color, current_bg)
+    let r = req(67, 0, 5)
+    put32(r + 4, target)
+    put32(r + 8, gc)
+    put16(r + 12, x)
+    put16(r + 14, y)
+    put16(r + 16, w - 1)
+    put16(r + 18, h - 1)
+end
+
+func draw_text(target: int, x: int, baseline: int, s: text, fg: int, bg: int)
+    var shown = s
+    if shown.len > 255
+        shown = s.slice(0, 255)
+    end
+    if shown.len == 0
+        return
+    end
+    set_colors(fg, bg)
+    let r = req(76, shown.len, 4 + pad4(shown.len) / 4)
+    put32(r + 4, target)
+    put32(r + 8, gc)
+    put16(r + 12, x)
+    put16(r + 14, baseline)
+    put_text(r + 16, shown)
+end
+
+// Limits drawing to a rectangle (width 0 removes the limit).
+func clip(x: int, y: int, w: int, h: int)
+    if w == 0
+        let r = req(56, 0, 4)
+        put32(r + 4, gc)
+        put32(r + 8, 0x80000)
+        put32(r + 12, 0)
+        return
+    end
+    let r = req(59, 0, 5)
+    put32(r + 4, gc)
+    put16(r + 8, 0)
+    put16(r + 10, 0)
+    put16(r + 12, x)
+    put16(r + 14, y)
+    put16(r + 16, w)
+    put16(r + 18, h)
+end
+
+func rows_visible(i: int) -> int
+    var n = (widgets[i].h - 4) / ROW
+    if n < 1
+        n = 1
+    end
+    return n
+end
+
+func keep_visible(i: int)
+    let sel = widgets[i].selected
+    if sel < 0
+        return
+    end
+    let rows = rows_visible(i)
+    if sel < widgets[i].scroll
+        widgets[i].scroll = sel
+    end
+    if sel >= widgets[i].scroll + rows
+        widgets[i].scroll = sel - rows + 1
+    end
+end
+
+func baseline_in(y: int, h: int) -> int
+    return y + (h - CHAR_H) / 2 + ASCENT
+end
+
+func paint_widget(target: int, i: int, win: Win)
+    let x = widgets[i].x
+    let y = widgets[i].y
+    let w = widgets[i].w
+    let h = widgets[i].h
+    let focused = win.focus == widgets[i].id
+    clip(x, y, w, h)
+    if widgets[i].kind == LABEL
+        fill(target, x, y, w, h, C_BG)
+        draw_text(target, x, baseline_in(y, h), widgets[i].text, C_TEXT, C_BG)
+    end
+    if widgets[i].kind == BUTTON
+        var face = C_FACE
+        if win.pressed == widgets[i].id
+            face = C_PRESSED
+        end
+        fill(target, x, y, w, h, face)
+        var border = C_BORDER
+        if focused
+            border = C_FOCUS
+        end
+        frame(target, x, y, w, h, border)
+        let tw = widgets[i].text.len * CHAR_W
+        draw_text(target, x + (w - tw) / 2, baseline_in(y, h), widgets[i].text, C_TEXT, face)
+    end
+    if widgets[i].kind == TEXTBOX
+        fill(target, x, y, w, h, C_FIELD)
+        var border = C_BORDER
+        if focused
+            border = C_FOCUS
+        end
+        frame(target, x, y, w, h, border)
+        // keep the caret visible: show the tail of long text
+        let room = (w - 8) / CHAR_W
+        var first = 0
+        if widgets[i].caret > room
+            first = widgets[i].caret - room
+        end
+        draw_text(target, x + 4, baseline_in(y, h), widgets[i].text.slice(first, widgets[i].text.len), C_TEXT, C_FIELD)
+        if focused
+            fill(target, x + 4 + (widgets[i].caret - first) * CHAR_W, y + 4, 1, h - 8, C_TEXT)
+        end
+    end
+    if widgets[i].kind == LISTVIEW
+        fill(target, x, y, w, h, C_FIELD)
+        var border = C_BORDER
+        if focused
+            border = C_FOCUS
+        end
+        frame(target, x, y, w, h, border)
+        let rows = rows_visible(i)
+        for r in 0..rows
+            let at = widgets[i].scroll + r
+            if at < widgets[i].items.len
+                let ry = y + 2 + r * ROW
+                var fg = C_TEXT
+                var bg = C_FIELD
+                if at == widgets[i].selected
+                    fg = C_SELECT_TEXT
+                    bg = C_SELECT
+                    fill(target, x + 2, ry, w - 4, ROW, bg)
+                end
+                draw_text(target, x + 4, ry + (ROW - CHAR_H) / 2 + ASCENT, widgets[i].items[at], fg, bg)
+            end
+        end
+        if widgets[i].items.len > rows
+            fill(target, x + w - 7, y + 2, 5, h - 4, C_TRACK)
+            let total = widgets[i].items.len
+            let thumb = max(i32((h - 4) * rows / total), 8)
+            let top = (h - 4 - int(thumb)) * widgets[i].scroll / (total - rows)
+            fill(target, x + w - 7, y + 2 + top, 5, int(thumb), C_BORDER)
+        end
+    end
+end
+
+func paint(w: int)
+    let wi = win_index(w)
+    if wi < 0 or not wins[wi].open or not wins[wi].mapped
+        return
+    end
+    wins[wi].dirty = false
+    if wins[wi].pixmap == 0
+        wins[wi].pixmap = new_rid()
+        let cp = req(53, root_depth, 4)
+        put32(cp + 4, wins[wi].pixmap)
+        put32(cp + 8, w)
+        put16(cp + 12, wins[wi].w)
+        put16(cp + 14, wins[wi].h)
+    end
+    let target = wins[wi].pixmap
+    clip(0, 0, 0, 0)
+    fill(target, 0, 0, wins[wi].w, wins[wi].h, C_BG)
+    for i in 0..widgets.len
+        if widgets[i].win == w
+            paint_widget(target, i, wins[wi])
+        end
+    end
+    clip(0, 0, 0, 0)
+    let ca = req(62, 0, 7)
+    put32(ca + 4, target)
+    put32(ca + 8, w)
+    put32(ca + 12, gc)
+    put16(ca + 16, 0)
+    put16(ca + 18, 0)
+    put16(ca + 20, 0)
+    put16(ca + 22, 0)
+    put16(ca + 24, wins[wi].w)
+    put16(ca + 26, wins[wi].h)
+    flush_x()
+end
+
+func paint_dirty()
+    for i in 0..wins.len
+        if wins[i].dirty
+            paint(wins[i].id)
+        end
+    end
+end
+
+// ---------- input ----------
+
+// The keysym of a key press (the shifted column when Shift or Caps Lock changes the letter).
+func keysym_of(code: int, state: int) -> int
+    if keysyms_per == 0 or code < min_keycode
+        return 0
+    end
+    let base = int(keysyms.ptr) + (code - min_keycode) * keysyms_per * 4
+    let plain = get32(base)
+    var shifted = plain
+    if keysyms_per > 1
+        shifted = get32(base + 4)
+        if shifted == 0
+            shifted = plain
+        end
+    end
+    let shift = (state bitand 1) != 0
+    let caps = (state bitand 2) != 0
+    var letter = plain >= 97 and plain <= 122
+    if letter
+        if shift != caps
+            return shifted
+        end
+        return plain
+    end
+    if shift
+        return shifted
+    end
+    return plain
+end
+
+// The UTF-8 text of a printable keysym, or empty text.
+func char_of(sym: int) -> text
+    var cp = 0
+    if sym >= 32 and sym <= 126
+        cp = sym
+    end
+    if sym >= 160 and sym <= 255
+        cp = sym
+    end
+    if cp == 0
+        return ""
+    end
+    let b = sys.buffer(4)
+    if cp < 128
+        sys.put8(int(b.ptr), cp)
+        return c.from_bytes(b.ptr, 1)
+    end
+    sys.put8(int(b.ptr), 192 + (cp >> 6))
+    sys.put8(int(b.ptr) + 1, 128 + (cp bitand 63))
+    return c.from_bytes(b.ptr, 2)
+end
+
+func focusables(w: int) -> []int
+    var ids: []int
+    for i in 0..widgets.len
+        if widgets[i].win == w and widgets[i].kind != LABEL
+            ids.add(widgets[i].id)
+        end
+    end
+    return ids
+end
+
+func set_focus(w: int, id: int)
+    let wi = win_index(w)
+    if wi >= 0
+        wins[wi].focus = id
+        wins[wi].dirty = true
+    end
+end
+
+// The text box edit keys. Changes go through the library's change handlers.
+func edit_key(i: int, sym: int, typed: text)
+    let id = usize(widgets[i].id)
+    let old = widgets[i].text
+    let caret = widgets[i].caret
+    if sym == KS_BACKSPACE and caret > 0
+        user_text(i, old.slice(0, caret - 1) + old.slice(caret, old.len), caret - 1)
+    end
+    if sym == KS_DELETE and caret < old.len
+        user_text(i, old.slice(0, caret) + old.slice(caret + 1, old.len), caret)
+    end
+    if sym == KS_LEFT and caret > 0
+        widgets[i].caret = caret - 1
+        mark_dirty(widgets[i].win)
+    end
+    if sym == KS_RIGHT and caret < old.len
+        widgets[i].caret = caret + 1
+        mark_dirty(widgets[i].win)
+    end
+    if sym == KS_HOME
+        widgets[i].caret = 0
+        mark_dirty(widgets[i].win)
+    end
+    if sym == KS_END
+        widgets[i].caret = old.len
+        mark_dirty(widgets[i].win)
+    end
+    if typed.len > 0
+        user_text(i, old.slice(0, caret) + typed + old.slice(caret, old.len), caret + typed.len)
+    end
+end
+
+func user_text(i: int, value: text, caret: int)
+    widgets[i].text = value
+    widgets[i].caret = caret
+    mark_dirty(widgets[i].win)
+    fire(usize(widgets[i].id), EV_CHANGE)
+end
+
+func list_key(i: int, delta: int)
+    let n = widgets[i].items.len
+    if n == 0
+        return
+    end
+    var to = widgets[i].selected + delta
+    if to < 0
+        to = 0
+    end
+    if to > n - 1
+        to = n - 1
+    end
+    if to != widgets[i].selected
+        widgets[i].selected = to
+        keep_visible(i)
+        mark_dirty(widgets[i].win)
+        fire(usize(widgets[i].id), EV_SELECT)
+    end
+end
+
+func key_pressed(w: int, code: int, state: int)
+    let sym = keysym_of(code, state)
+    let wi = win_index(w)
+    if wi < 0
+        return
+    end
+    if sym == KS_ESCAPE and w == alert_window
+        be_close(usize(w))
+        return
+    end
+    if sym == KS_TAB
+        let ids = focusables(w)
+        if ids.len > 0
+            var at = 0
+            for k in 0..ids.len
+                if ids[k] == wins[wi].focus
+                    at = k + 1
+                end
+            end
+            if (state bitand 1) != 0
+                at = at - 2
+            end
+            set_focus(w, ids[(at + ids.len * 2) % ids.len])
+        end
+        return
+    end
+    let fi = widget_index(wins[wi].focus)
+    if sym == KS_RETURN
+        if fi >= 0 and widgets[fi].kind == BUTTON
+            fire(usize(widgets[fi].id), EV_CLICK)
+        else
+            enter_pressed(usize(w))
+        end
+        return
+    end
+    if fi < 0
+        return
+    end
+    if widgets[fi].kind == TEXTBOX
+        edit_key(fi, sym, char_of(sym))
+    end
+    if widgets[fi].kind == LISTVIEW
+        if sym == KS_UP
+            list_key(fi, -1)
+        end
+        if sym == KS_DOWN
+            list_key(fi, 1)
+        end
+    end
+    if widgets[fi].kind == BUTTON and sym == 32
+        fire(usize(widgets[fi].id), EV_CLICK)
+    end
+end
+
+func button_pressed(w: int, button: int, x: int, y: int)
+    let wi = win_index(w)
+    if wi < 0
+        return
+    end
+    var hit = -1
+    for i in 0..widgets.len
+        if widgets[i].win == w and x >= widgets[i].x and x < widgets[i].x + widgets[i].w and y >= widgets[i].y and y < widgets[i].y + widgets[i].h
+            hit = i
+        end
+    end
+    if hit < 0
+        return
+    end
+    if widgets[hit].kind == LISTVIEW and (button == 4 or button == 5)
+        var to = widgets[hit].scroll + 3
+        if button == 4
+            to = widgets[hit].scroll - 3
+        end
+        var most = widgets[hit].items.len - rows_visible(hit)
+        if most < 0
+            most = 0
+        end
+        if to < 0
+            to = 0
+        end
+        if to > most
+            to = most
+        end
+        widgets[hit].scroll = to
+        mark_dirty(w)
+        return
+    end
+    if button != 1
+        return
+    end
+    if widgets[hit].kind != LABEL
+        set_focus(w, widgets[hit].id)
+    end
+    if widgets[hit].kind == BUTTON
+        wins[wi].pressed = widgets[hit].id
+        wins[wi].dirty = true
+    end
+    if widgets[hit].kind == TEXTBOX
+        var at = (x - widgets[hit].x - 4) / CHAR_W
+        let room = (widgets[hit].w - 8) / CHAR_W
+        if widgets[hit].caret > room
+            at += widgets[hit].caret - room
+        end
+        if at < 0
+            at = 0
+        end
+        if at > widgets[hit].text.len
+            at = widgets[hit].text.len
+        end
+        widgets[hit].caret = at
+    end
+    if widgets[hit].kind == LISTVIEW
+        let at = widgets[hit].scroll + (y - widgets[hit].y - 2) / ROW
+        if at >= 0 and at < widgets[hit].items.len and at != widgets[hit].selected
+            widgets[hit].selected = at
+            fire(usize(widgets[hit].id), EV_SELECT)
+        end
+    end
+end
+
+func button_released(w: int, x: int, y: int)
+    let wi = win_index(w)
+    if wi < 0 or wins[wi].pressed == 0
+        return
+    end
+    let id = wins[wi].pressed
+    wins[wi].pressed = 0
+    wins[wi].dirty = true
+    let i = widget_index(id)
+    if i >= 0 and x >= widgets[i].x and x < widgets[i].x + widgets[i].w and y >= widgets[i].y and y < widgets[i].y + widgets[i].h
+        fire(usize(id), EV_CLICK)
+    end
+end
+
+// ---------- the event loop ----------
+
+func dispatch(ev: int)
+    let kind = sys.get8(ev) bitand 127
+    if kind == 2
+        key_pressed(get32(ev + 12), sys.get8(ev + 1), get16(ev + 28))
+    end
+    if kind == 4
+        button_pressed(get32(ev + 12), sys.get8(ev + 1), get16s(ev + 24), get16s(ev + 26))
+    end
+    if kind == 5
+        button_released(get32(ev + 12), get16s(ev + 24), get16s(ev + 26))
+    end
+    if kind == 12
+        mark_dirty(get32(ev + 4))
+    end
+    if kind == 22
+        let w = win_index(get32(ev + 4))
+        if w >= 0
+            let nw = get16(ev + 20)
+            let nh = get16(ev + 22)
+            if nw != wins[w].w or nh != wins[w].h
+                wins[w].w = nw
+                wins[w].h = nh
+                if wins[w].pixmap != 0
+                    let fp = req(54, 0, 2)
+                    put32(fp + 4, wins[w].pixmap)
+                    wins[w].pixmap = 0
+                end
+                relayout(usize(wins[w].id))
+                wins[w].dirty = true
+            end
+        end
+    end
+    if kind == 33
+        if get32(ev + 12) == atom_delete
+            be_close(usize(get32(ev + 4)))
+        end
+    end
+end
+
+// Handles events until `stop` is closed (0: until the last window is closed).
+func event_loop(stop: int)
+    let ev = sys.buffer(32)
+    paint_dirty()
+    while not quit
+        if stop != 0
+            let s = win_index(stop)
+            if s < 0 or not wins[s].open
+                return
+            end
+        end
+        flush_x()
+        if not read_full(int(ev.ptr), 32)
+            quit = true
+            return
+        end
+        // errors and replies are ignored
+        dispatch(int(ev.ptr))
+        paint_dirty()
+    end
+end
+
+func be_run()
+    if not connected
+        return
+    end
+    var open = 0
+    for w in wins
+        if w.open
+            open += 1
+        end
+    end
+    if open == 0
+        quit = true
+    end
+    event_loop(0)
+end
+
+// Makes a window the alert that Escape closes.
+func set_alert_window(id: int)
+    alert_window = id
+end
+
+// A small window with the message and an OK button; returns when it is dismissed.
+func be_alert(message: text, title: text)
+    ensure_connected()
+    var longest = message.len
+    if title.len + 4 > longest
+        longest = title.len + 4
+    end
+    let width = i32(max(i32(longest * CHAR_W * 96 / screen_dpi + 48), 240))
+    let win = Window(title, width, 120)
+    let label = Label(message)
+    let ok = Button("OK")
+    ok.onClick(func()
+        win.close()
+    end)
+    win.layout(vstack(label, ok))
+    alert_window = int(win.id)
+    win.show()
+    event_loop(int(win.id))
+    alert_window = 0
+end

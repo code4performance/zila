@@ -25,7 +25,7 @@ Most languages ask you to choose: simple *or* fast, safe *or* low-level, friendl
 
 - **Readable first.** Blocks end with `end`. No braces, no semicolons. A beginner can read a program top to bottom.
 - **Honest about failure.** There are no exceptions. A function that can fail says so in its type (`T or error`), and `try` is the one visible place where a failure travels up.
-- **Honest about cost.** Memory is freed by reference counting, the moment the last reference goes away. Unsafe code must say `unsafe`. Nothing allocates behind your back.
+- **Honest about cost.** Memory is freed by reference counting, the moment the last reference goes away. Unsafe code must say `unsafe`. Allocation only happens in known operations (text interpolation, list and map literals, closures that capture, `spawn`, `new`), and `#[no_alloc]` makes the compiler guarantee that a function does none of them. The allocator itself can be replaced with `#[allocator]`, which is what a kernel needs.
 - **One language from app to metal.** The same syntax writes an everyday program, a native window, a C library binding, and a kernel.
 - **A toolchain you can read.** Lexer, parser, code generator, assembler, standard library: all in this repository, all small enough to understand.
 - **Built in the open.** Every language change goes through a written proposal, a spec with testable scenarios, and tests. See [GOVERNANCE.md](GOVERNANCE.md).
@@ -96,6 +96,7 @@ Everything in this list is implemented and covered by tests.
 
 - Compiles to x86-64 machine code for Windows. A hello-world is about **6 KB**; a native window with a text box, a button and a list is about **23 KB**.
 - Needs no runtime on the target machine. The programs import only the Windows libraries they use.
+- Building on Windows currently needs Visual Studio's `ml64` and `link`; the goal is to remove that (see the roadmap).
 
 **A predictable memory model**
 
@@ -123,7 +124,7 @@ Everything in this list is implemented and covered by tests.
 
 **A standard library written in Brasa**
 
-- `ui` (native Windows controls), `task`, `future`, `fs`, `net`, `tls`. They talk to the operating system through Brasa's own `extern` declarations. No Rust or C glue.
+- `ui` (windows and controls: native on Windows, drawn on X11 on Linux, one API), `task`, `future`, `fs`, `net`, `tls`. They talk to the operating system through Brasa's own `extern` declarations. No Rust or C glue.
 
 **Systems programming**
 
@@ -169,7 +170,7 @@ Brasa is **pre-alpha**. The design is settling, but breaking changes are still p
 | Area | State |
 |---|---|
 | Lexer and parser | ✅ Complete for the grammar in [`brasa.ebnf`](brasa.ebnf) |
-| Native compiler (Windows x64) | ✅ Works for a large, useful subset |
+| Native compiler (Windows x64) | ✅ Works for a large, useful subset. 🔧 Still uses `ml64` and `link` from Visual Studio; direct PE output is planned |
 | Bare-metal target and Brasa OS | ✅ Boots and runs |
 | `async` / `await`, timers, files, TCP, UDP | ✅ Works |
 | Interpreter (`--run`) | 🔧 Runs plain programs; does not know the native-only features |
@@ -181,7 +182,7 @@ Brasa is **pre-alpha**. The design is settling, but breaking changes are still p
 | Formatter (`--fmt`, `--fmt-check`) | ✅ Standard style for `.br` files; only whitespace changes, comments kept |
 | Test runner (`--test`, `#[test]`, `assert`, `assert_eq`) | ✅ Runs the tests of a file natively and reports `ok`/`FAIL` with the line |
 | Package manager, language server | ⏳ Not started |
-| Linux x86-64 (`--target linux`) | ✅ ELF written by the compiler (no linker; static unless the program calls C): the language and every library except `ui`, with the same output as Windows (tasks, `async`, files, TCP/UDP, DNS, calling C) |
+| Linux x86-64 (`--target linux`) | ✅ ELF written by the compiler (no linker; static unless the program calls C): the language and every library, `ui` included (drawn on an X11 display), with the same output as Windows (tasks, `async`, files, TCP/UDP, DNS, calling C) |
 | macOS, ARM64, Android, iOS | ⏳ Not started |
 
 ---
@@ -192,10 +193,11 @@ This is the plan, in roughly the order we intend to do it. **Every item is a pla
 
 | # | Work | What it involves | Difficulty |
 |---|---|---|---|
-| 1 | Standard library, next steps | TLS for servers (`use tls` is a client on both Windows and Linux). Mostly written in Brasa. | ⭐ – ⭐⭐ |
-| 2 | Tooling | A package manager, a language server, a richer VS Code extension. | ⭐⭐ – ⭐⭐⭐ |
-| 3 | More platforms | A window toolkit for Linux (`ui`). Then macOS. Apple Silicon, Android and iOS need an ARM64 backend. WebAssembly later. | ⭐⭐⭐ – ⭐⭐⭐⭐ |
-| 4 | Self-hosting | A Brasa compiler written in Brasa. | long term |
+| 1 | Direct Windows PE output | Write the `.exe` (PE/COFF, imports, sections) straight from the compiler with the built-in assembler, like the Linux ELF path already does. Removes the dependency on Visual Studio's `ml64` and `link`, so Windows and Linux are equally self-contained. | ⭐⭐⭐ |
+| 2 | Standard library, next steps | TLS for servers (`use tls` is a client on both Windows and Linux). Mostly written in Brasa. | ⭐ – ⭐⭐ |
+| 3 | Tooling | A package manager, a language server, a richer VS Code extension. | ⭐⭐ – ⭐⭐⭐ |
+| 4 | More platforms | macOS (a `ui` for it, then the rest). Apple Silicon, Android and iOS need an ARM64 backend. WebAssembly later. | ⭐⭐⭐ – ⭐⭐⭐⭐ |
+| 5 | Self-hosting | A Brasa compiler written in Brasa. | long term |
 
 Beyond the compiler, contributions that make a big difference right now:
 **more example programs**, **bug reports with a tiny failing program**, **documentation and tutorials**, and **tests**.
@@ -217,7 +219,7 @@ The full rules are in [GOVERNANCE.md](GOVERNANCE.md) and [CONTRIBUTING.md](CONTR
 **You need**
 
 - A recent **Rust** toolchain (stable): <https://rustup.rs>
-- To compile Brasa programs on Windows: the **Visual Studio C++ Build Tools** (`ml64` and `link`). The compiler finds them on its own.
+- To compile Brasa programs on Windows, for now: the **Visual Studio C++ Build Tools** (`ml64` and `link`). The compiler finds them on its own. This is temporary: writing the Windows executable (PE) directly, with no Visual Studio dependency, is the top roadmap item below.
 - Optional: **QEMU** to run Brasa OS (`winget install SoftwareFreedomConservancy.QEMU`).
 
 **Build the compiler**
@@ -276,7 +278,7 @@ src/
   codegen_x64.rs   native compiler: type checks, x86-64 code, runtime, linker driver
   asm_x86.rs       the x86 assembler (16, 32 and 64-bit) used for bare-metal images
   cli.rs, docs.rs  command-line options; the documentation generator
-std/               standard library, written in Brasa: ui, task, future, fs, net, sys, ws
+std/               standard library, written in Brasa: ui, task, future, fs, net, tls, sys (and ws, internal to net)
 os/                Brasa OS: boot.br (boot sector) and kernel.br
 examples/          example programs
 docs/              the documentation site (static HTML)

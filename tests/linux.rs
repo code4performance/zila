@@ -112,15 +112,27 @@ fn the_target_option_is_checked() {
 }
 
 #[test]
-fn windows_only_libraries_are_rejected_with_a_clear_message() {
-    let build = |src: &str| {
-        let file = parse_source(src).unwrap();
-        generate_asm_for(&file, &CompileOptions::default(), Target::Linux).unwrap_err()
-    };
-    for lib in ["ui", "ws"] {
-        let e = build(&format!("package main\n\nuse {}\n\nfunc main()\nend\n", lib));
-        assert!(e.contains(&format!("'{}' is not available on Linux", lib)), "{}", e);
+fn ws_is_internal_to_net_on_both_targets() {
+    for target in [Target::Linux, Target::Windows] {
+        let file = parse_source("package main
+
+use ws
+
+func main()
+end
+").unwrap();
+        let e = generate_asm_for(&file, &CompileOptions::default(), target).unwrap_err();
+        assert!(e.contains("'ws' is internal to 'net'"), "{}", e);
     }
+    // `net` itself still builds on Windows, where it uses `ws`
+    let file = parse_source("package main
+
+use net
+
+func main()
+end
+").unwrap();
+    assert!(generate_asm_for(&file, &CompileOptions::default(), Target::Windows).is_ok());
 }
 
 #[test]
@@ -929,6 +941,19 @@ fn build_file(src: &str) -> Vec<u8> {
     let bytes = std::fs::read(&exe).unwrap();
     let _ = std::fs::remove_file(&exe);
     bytes
+}
+
+#[test]
+fn ui_builds_on_linux_and_stays_a_static_executable() {
+    let src = std::fs::read_to_string("examples/ui.br").unwrap();
+    let bytes = build_file(&src);
+    assert_eq!(&bytes[..4], b"\x7fELF");
+    // no interpreter and no dynamic section: the X11 protocol is spoken with system calls
+    let kinds: Vec<u32> = program_headers(&bytes).iter().map(|h| h.0).collect();
+    assert!(!kinds.contains(&3) && !kinds.contains(&2), "{:?}", kinds);
+    // and the Windows build of the same file still works
+    let file = parse_source(&src).unwrap();
+    assert!(generate_asm_for(&file, &CompileOptions::default(), Target::Windows).is_ok());
 }
 
 #[test]

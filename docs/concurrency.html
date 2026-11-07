@@ -75,7 +75,7 @@
       <h2>Limits</h2>
       <ul>
         <li>No parallelism: there is a single thread, so tasks never run at the same instant.</li>
-        <li>Windows x64 only (tasks are Windows fibers); a bare-metal kernel cannot use them.</li>
+        <li>Windows x64 and Linux x86-64 (tasks are fibers on Windows and stack switches on Linux); a bare-metal kernel cannot use them.</li>
         <li>The <code>ui</code> message loop does not yet run other tasks.</li>
       </ul>
       <p>For waiting on time, files and the network, use <a href="async.html">async/await</a>.</p>

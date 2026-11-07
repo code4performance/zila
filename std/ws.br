@@ -24,5 +24,7 @@ extern "system" func setsockopt(s: usize, level: i32, name: i32, value: *u8, len
 extern "system" func WSAIoctl(s: usize, code: u32, input: *u8, input_len: u32, output: *u8, output_len: u32, returned: *int, overlapped: usize, completion: usize) -> i32
 extern "system" func WSARecv(s: usize, buffers: *Wsabuf, count: u32, received: usize, flags: *int, overlapped: *task.Op, completion: usize) -> i32
 extern "system" func WSASend(s: usize, buffers: *Wsabuf, count: u32, sent: usize, flags: u32, overlapped: *task.Op, completion: usize) -> i32
+extern "system" func WSARecvFrom(s: usize, buffers: *Wsabuf, count: u32, received: usize, flags: *int, from: *u8, fromlen: *int, overlapped: *task.Op, completion: usize) -> i32
+extern "system" func WSASendTo(s: usize, buffers: *Wsabuf, count: u32, sent: usize, flags: u32, to: *u8, tolen: i32, overlapped: *task.Op, completion: usize) -> i32
 extern "system" func getaddrinfo(node: *u8, service: usize, hints: *u8, result: *int) -> i32
 extern "system" func freeaddrinfo(info: usize)

@@ -171,7 +171,7 @@ Brasa is **pre-alpha**. The design is settling, but breaking changes are still p
 | Lexer and parser | ✅ Complete for the grammar in [`brasa.ebnf`](brasa.ebnf) |
 | Native compiler (Windows x64) | ✅ Works for a large, useful subset |
 | Bare-metal target and Brasa OS | ✅ Boots and runs |
-| `async` / `await`, timers, files, TCP | ✅ Works |
+| `async` / `await`, timers, files, TCP, UDP | ✅ Works |
 | Interpreter (`--run`) | 🔧 Runs plain programs; does not know the native-only features |
 | Floating point | ✅ Works: `float`/`f64`/`f32`, `use math`, C calls; Windows x64 only |
 | Generics and interfaces | ✅ Works: generic functions and records, inferred type arguments, structural interfaces as bounds |
@@ -191,7 +191,7 @@ This is the plan, in roughly the order we intend to do it. **Every item is a pla
 
 | # | Work | What it involves | Difficulty |
 |---|---|---|---|
-| 1 | Standard library, next steps | UDP, TLS, async DNS. Mostly written in Brasa. | ⭐ – ⭐⭐ |
+| 1 | Standard library, next steps | TLS, async DNS. Mostly written in Brasa. | ⭐ – ⭐⭐ |
 | 2 | Tooling | A package manager, a language server, a richer VS Code extension. | ⭐⭐ – ⭐⭐⭐ |
 | 3 | More platforms | **Linux x86-64 first** (ELF and the System V ABI), then macOS. Apple Silicon, Android and iOS need an ARM64 backend. WebAssembly later. | ⭐⭐⭐ – ⭐⭐⭐⭐ |
 | 4 | Self-hosting | A Brasa compiler written in Brasa. | long term |

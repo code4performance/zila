@@ -27,6 +27,11 @@ use bufio
 
 let AF_INET = 2
 let SOCK_STREAM = 1
+let SOCK_DGRAM = 2
+let IPPROTO_UDP = 17
+let SIO_UDP_CONNRESET = 0x9800000C
+let WSAEMSGSIZE = 10040
+let ERROR_MORE_DATA = 234
 let IPPROTO_TCP = 6
 let WSA_FLAG_OVERLAPPED = 1
 let SOL_SOCKET = 0xFFFF
@@ -76,15 +81,19 @@ func (ref l: Listener) drop()
     end
 end
 
-func new_socket() -> usize
+func new_socket_of(kind: int, protocol: int) -> usize
     var s: usize = INVALID_SOCKET
     unsafe
-        s = ws.WSASocketW(AF_INET, SOCK_STREAM, IPPROTO_TCP, 0, 0, WSA_FLAG_OVERLAPPED)
+        s = ws.WSASocketW(AF_INET, kind, protocol, 0, 0, WSA_FLAG_OVERLAPPED)
     end
     if s != INVALID_SOCKET
         task.io_attach(s)
     end
     return s
+end
+
+func new_socket() -> usize
+    return new_socket_of(SOCK_STREAM, IPPROTO_TCP)
 end
 
 // Looks up a Winsock extension function (ConnectEx, AcceptEx) by its GUID.
@@ -501,4 +510,140 @@ end
 async func (w: Writer) close() -> error
     try await w.drain()
     return
+end
+
+// ---- UDP ----
+
+// A bound UDP socket. Closes when the last reference goes away.
+#[shared]
+type UdpSocket = record
+    sock: usize
+    open: bool
+    port: int
+end
+
+func (ref s: UdpSocket) drop()
+    if s.open
+        unsafe
+            ws.closesocket(s.sock)
+        end
+        s.open = false
+    end
+end
+
+// One received datagram and where it came from.
+type Packet = record
+    data: text
+    host: text
+    port: int
+end
+
+// Like `await_op`, for receiving a datagram: a datagram larger than the buffer is its own error.
+func await_dgram(op: task.Op, accepted: bool, err: int, what: text, max: int) -> int or error
+    if not accepted and err != ERROR_IO_PENDING
+        task.op_release(op)
+        if err == WSAEMSGSIZE or err == ERROR_MORE_DATA
+            return error("datagram larger than {max} bytes")
+        end
+        return error(sys.describe(err, what))
+    end
+    task.op_submit(op)
+    task.op_wait(op)
+    let status = op.status
+    let moved = op.bytes
+    task.op_release(op)
+    if status == WSAEMSGSIZE or status == ERROR_MORE_DATA
+        return error("datagram larger than {max} bytes")
+    end
+    if status != 0
+        return error(sys.describe(status, what))
+    end
+    return moved
+end
+
+// Binds a UDP socket to a port (0 picks a free one; see `.port`).
+async func udp(port: int) -> UdpSocket or error
+    try net_init()
+    let s = new_socket_of(SOCK_DGRAM, IPPROTO_UDP)
+    if s == INVALID_SOCKET
+        return error(sys.describe(task.last_error(), "cannot create a socket"))
+    end
+    let sock = UdpSocket{ sock: s, open: true, port: port }
+    // an ICMP "port unreachable" must not make a later receive fail
+    let off = sys.Scratch{}
+    let got = sys.Scratch{}
+    unsafe
+        ws.WSAIoctl(s, SIO_UDP_CONNRESET, &off.a, 4, 0, 0, &got.a, 0, 0)
+    end
+    let addr = make_addr(0, port)
+    var rc = 0
+    unsafe
+        rc = ws.bind(s, addr.ptr, 16)
+    end
+    if rc != 0
+        return error(sys.describe(task.last_error(), "cannot bind UDP port {port}"))
+    end
+    let bound = sys.buffer(16)
+    let size = sys.Scratch{ a: 16 }
+    unsafe
+        ws.getsockname(s, bound.ptr, &size.a)
+        sock.port = (int(bound.ptr[2]) << 8) bitor int(bound.ptr[3])
+    end
+    return sock
+end
+
+// Sends `data` as one datagram to `host` (an address or a name) and `port`.
+async func (sock: UdpSocket) send_to(host: text, port: int, data: text) -> error
+    if not sock.open
+        return error("the socket is closed")
+    end
+    let ip = try resolve(host)
+    let addr = make_addr(ip, port)
+    let wb = ws.Wsabuf{ len: u32(data.len), ptr: c.cstr(data) }
+    let op = task.op_new()
+    var rc = 0
+    var err = 0
+    unsafe
+        rc = ws.WSASendTo(sock.sock, &wb, 1, 0, 0, addr.ptr, 16, &op, 0)
+        err = task.last_error()
+    end
+    try await_op(op, rc == 0, err, "send to {host}:{port}")
+    return
+end
+
+// Waits for the next datagram (up to `max` bytes) and says who sent it.
+async func (sock: UdpSocket) recv(max: int = 65535) -> Packet or error
+    if not sock.open
+        return error("the socket is closed")
+    end
+    let b = sys.buffer(max + 1)
+    let wb = ws.Wsabuf{ len: u32(max), ptr: b.ptr }
+    let from = sys.buffer(16)
+    let size = sys.Scratch{ a: 16 }
+    let flags = sys.Scratch{}
+    let op = task.op_new()
+    var rc = 0
+    var err = 0
+    unsafe
+        rc = ws.WSARecvFrom(sock.sock, &wb, 1, 0, &flags.a, from.ptr, &size.a, &op, 0)
+        err = task.last_error()
+    end
+    let n = try await_dgram(op, rc == 0, err, "receive", max)
+    var host = ""
+    var port = 0
+    unsafe
+        host = "{int(from.ptr[4])}.{int(from.ptr[5])}.{int(from.ptr[6])}.{int(from.ptr[7])}"
+        port = (int(from.ptr[2]) << 8) bitor int(from.ptr[3])
+    end
+    return Packet{ data: c.from_bytes(b.ptr, n), host: host, port: port }
+end
+
+// Closes the socket now.
+async func (sock: UdpSocket) close()
+    if sock.open
+        unsafe
+            ws.closesocket(sock.sock)
+        end
+        sock.open = false
+    end
 end

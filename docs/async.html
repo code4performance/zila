@@ -124,6 +124,18 @@
       <p>This is <code>examples/async.br</code> in miniature; the full program also reads and writes a file and waits for three sleeps at once. Sockets close when the last reference goes away, or earlier with <code>close()</code>. The first <code>write</code> after the other side closed may still succeed (that is how TCP works); the next one fails with an error.</p>
     </section>
 
+    <section id="udp">
+      <h2>UDP</h2>
+      <p>UDP sends independent datagrams with no connection. <code>net.udp(port)</code> binds a socket (0 picks a free port, in <code>.port</code>); <code>send_to(host, port, data)</code> sends one datagram and <code>recv(max)</code> waits for the next one and returns a packet with <code>data</code>, the sender's <code>host</code> and <code>port</code>. <code>max</code> is 65,535 unless you say otherwise.</p>
+      <pre><code><span class="kw">use</span> net
+
+<span class="kw">let</span> sock = <span class="kw">try</span> <span class="kw">await</span> net.udp(0)
+<span class="kw">try</span> <span class="kw">await</span> sock.send_to(<span class="str">"127.0.0.1"</span>, 9000, <span class="str">"ping"</span>)
+<span class="kw">let</span> p = <span class="kw">try</span> <span class="kw">await</span> sock.recv()                     <span class="cm">// p.data, p.host, p.port</span>
+<span class="kw">try</span> <span class="kw">await</span> sock.send_to(p.host, p.port, <span class="str">"pong"</span>)   <span class="cm">// answer whoever sent it</span></code></pre>
+      <p>Each <code>recv</code> is exactly one datagram, so the boundaries you sent are the boundaries you get, and an empty datagram is a packet with empty <code>data</code>. A datagram larger than <code>max</code> is an error (<code>datagram larger than 10 bytes</code>) and the next <code>recv</code> works normally. Use <code>timeout(ms, sock.recv())</code> for a deadline; a receive that timed out keeps waiting in the background, so the next datagram that arrives goes to it. <code>close()</code> closes the socket now (using it afterwards is an error); sockets also close when the last reference goes away. See <code>examples/udp.br</code>.</p>
+    </section>
+
     <section id="buffered">
       <h2>Reading by lines and buffered writing</h2>
       <p><code>fs.read</code> and <code>fs.write</code> take a whole file. To work line by line, or to write many small pieces, open a reader or a writer: they move data in pieces of 64 KiB, so reading 100,000 lines costs about one system call per 64 KiB, not one per line.</p>
@@ -159,7 +171,7 @@
         <li>No parallelism (one thread) and no cancellation.</li>
         <li>A future is awaited once.</li>
         <li>Looking up a host name (not an address like <code>127.0.0.1</code>) uses the Windows resolver and blocks every task until it answers.</li>
-        <li>Only TCP over IPv4: no UDP, TLS, or directory operations, and the <code>ui</code> message loop does not yet run other tasks.</li>
+        <li>Only TCP and UDP over IPv4: no TLS, connected UDP sockets, broadcast, multicast or directory operations, and the <code>ui</code> message loop does not yet run other tasks.</li>
       </ul>
     </section>
   </main>

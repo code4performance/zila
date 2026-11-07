@@ -1,0 +1,44 @@
+// UDP: an echo server and a client in one program.
+//
+//   brasa-parse examples/udp.br -o udp.exe
+//
+// `net.udp(0)` binds a socket on a free port. `send_to` sends one datagram, `recv` waits for the
+// next one and says who sent it, so a server can answer whoever asked. Each datagram stands
+// alone: three sends are three receives, in the sizes they were sent.
+package main
+
+use net
+use task
+
+async func echo(server: net.UdpSocket, count: int) -> error
+    var i = 0
+    while i < count
+        let p = try await server.recv()
+        try await server.send_to(p.host, p.port, "echoed: {p.data}")
+        i += 1
+    end
+    return
+end
+
+func main() -> error
+    let server = try await net.udp(0)
+    let serving = echo(server, 3)
+    let client = try await net.udp(0)
+    print("server on a free port: {server.port > 0}")
+
+    try await client.send_to("127.0.0.1", server.port, "hello udp")
+    try await client.send_to("127.0.0.1", server.port, "")
+    try await client.send_to("127.0.0.1", server.port, "last")
+
+    var seen = 0
+    while seen < 3
+        let reply = try await client.recv()
+        print("  [{reply.data}]")
+        seen += 1
+    end
+    print("{seen} datagrams")
+    try await serving
+    await client.close()
+    await server.close()
+    return
+end

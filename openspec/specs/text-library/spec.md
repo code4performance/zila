@@ -16,7 +16,7 @@ Gives programs the everyday operations on text (searching, splitting, trimming, 
 - **THEN** the results are `true` and `false`
 
 ### Requirement: Splitting and joining
-`split(s, sep)` SHALL return a list of the pieces between non-overlapping occurrences of a non-empty `sep`, keeping empty pieces; with no occurrence it SHALL return a list holding `s`. An empty `sep` SHALL be a runtime error with the message `split needs a separator`. `join(parts, sep)` SHALL put `sep` between the items. `lines(s)` SHALL split on `\n`, drop a trailing `\r` from each line and not produce a final empty line when `s` ends with a newline.
+`split(s, sep)` SHALL return a list of the pieces between non-overlapping occurrences of a non-empty `sep`, keeping empty pieces; with no occurrence it SHALL return a list holding `s`. An empty `sep` SHALL abort the program with the message `split needs a separator`. `join(parts, sep)` SHALL put `sep` between the items. `lines(s)` SHALL split on `\n`, drop a trailing `\r` from each line and not produce a final empty line when `s` ends with a newline.
 
 #### Scenario: Split
 - **WHEN** a program splits `"a,b,,c"` on `","` and prints the length and the third piece
@@ -29,6 +29,10 @@ Gives programs the everyday operations on text (searching, splitting, trimming, 
 #### Scenario: Lines
 - **WHEN** a program takes `text.lines("one\r\ntwo\nthree\n")`
 - **THEN** it gets `["one", "two", "three"]`
+
+#### Scenario: Empty separator
+- **WHEN** a program splits on an empty separator
+- **THEN** it aborts with `split needs a separator` and exits with 101
 
 ### Requirement: Trimming, replacing and repeating
 `trim`, `trim_start` and `trim_end` SHALL remove spaces, tabs, carriage returns and newlines from the ends. `replace(s, from, to)` SHALL replace every non-overlapping occurrence of a non-empty `from`, scanning left to right; an empty `from` SHALL return `s` unchanged. `repeat(s, n)` SHALL return `s` `n` times, and an empty text for `n <= 0`.
@@ -84,10 +88,3 @@ Every function SHALL release the texts and lists it creates and does not return.
 #### Scenario: Repeated use
 - **WHEN** a program calls `split`, `join`, `replace` and `trim` on varying texts 1000 times
 - **THEN** `live_objects()` does not grow between iterations
-
-### Requirement: Interpreter
-`--run` SHALL support `use text` with the same results and messages as the native compiler for programs that handle errors with `??`.
-
-#### Scenario: Same output
-- **WHEN** `examples/words.br` runs natively and with `--run`
-- **THEN** the output is identical

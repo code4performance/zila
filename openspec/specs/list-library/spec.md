@@ -58,10 +58,3 @@ All functions SHALL follow the existing list rules for element ownership: lists 
 #### Scenario: No leaks
 - **WHEN** a program maps, filters, sorts and reverses a list of texts 500 times
 - **THEN** `live_objects()` does not grow between iterations
-
-### Requirement: Interpreter
-`--run` SHALL support `use list` with the same results as the native compiler.
-
-#### Scenario: Same output
-- **WHEN** `examples/words.br` runs natively and with `--run`
-- **THEN** the output is identical

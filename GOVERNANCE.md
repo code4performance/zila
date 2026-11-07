@@ -101,7 +101,9 @@ Small changes may combine steps, but never skip the principle behind them: *deci
 ## Compatibility and versions
 
 - **Before 1.0**, the language may change in ways that break programs. Every breaking change must be named as such in its proposal, include a migration note, and have the longer discussion period. We will keep such changes few and deliberate.
-- **From 1.0**, existing programs keep working across minor versions. Breaking changes need a deprecation period of at least one minor version with a clear warning, and are bundled into a new major version.
+- **While the standards are still being set**, all Brasa code lives in this repository, so a breaking change is paid for by rewriting that code (the standard library, `os/`, the examples and the tests) in the same change. There is no automatic migration tool yet. The rewritten code and its tests are the proof that the migration note is correct.
+- **Before 1.0**, a short list of foundational decisions is frozen (memory model, error model, visibility, concurrency and transfer rules). They cannot change without a new major version, because the package manager depends on them.
+- **From 1.0**, projects declare an `edition` in their manifest, so the compiler can evolve without breaking older libraries. Existing programs keep working across minor versions. Breaking changes need a deprecation period of at least one minor version with a clear warning, and are bundled into a new major version.
 - Versions follow `MAJOR.MINOR.PATCH`. The language specification, the compiler and the standard library are versioned together until there is a reason to split them.
 
 ---

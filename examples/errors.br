@@ -1,28 +1,62 @@
 package main
 
-func load(path: text) -> Config or error
-    let raw = try file.read(path)
-    let f = try file.open(path)
-    defer f.close()
-    return try json.parse(Config, raw)
+use errors
+use fs
+use math
+
+// A library makes its own kinds once, at package level.
+let Corrupt: ErrorKind = errors.kind("config.Corrupt") ?? errors.Other
+
+func parse(raw: text) -> int or error
+    if raw.len == 0
+        return error(Corrupt, "the file is empty")
+    end
+    return raw.len
+end
+
+// `try` passes an error on unchanged: its kind, message and cause. `context` adds a line of
+// explanation and keeps the kind.
+async func load(path: text) -> int or error
+    let raw = match await fs.read(path)
+        ok(t) -> t
+        err(e) -> return e.context("loading {path}")
+    end
+    return try parse(raw)
 end
 
 func main() -> error
-    let email: text? = c.email
-    let e = email ?? "no email"
-    let n = email?.len
-    let cfg = load("a.json") ?? Config{}
-
-    if email == nil
-        return
+    match await load("settings.txt")
+        ok(n) -> print("{n} bytes")
+        err(e) ->
+            // kinds are compared with == and is(); they are not matched
+            if e.kind == errors.NotFound
+                print("no settings file, using defaults")
+            else if e.is(Corrupt)
+                print("settings are damaged: {e.message}")
+            else
+                print("failed: {e.full_message}")
+            end
     end
 
-    match load("a.json")
-        ok(c)  -> use_config(c)
-        err(e) -> print("failed: {e.message}")
+    let slow = error(errors.Timeout, "no answer", error("connection lost"))
+    print(slow.kind.name)
+    print(slow.full_message)
+    print(slow.cause?.message)
+
+    // reading an element that may not be there, without the risk of an abort
+    let scores = [90, 75]
+    print(scores.get(1) ?? 0)
+    print(scores.get(5) ?? -1)
+
+    // arithmetic wraps; `checked_add` says when the exact result does not fit
+    let max: long = 9223372036854775807
+    match math.checked_add_long(max, 1)
+        ok(n) -> print(n)
+        err(e) -> print("{e.kind.name}: {e.message}")
     end
 
-    let ch = channel(i32)
-    spawn worker(ch)
-    print("got {ch.receive()}")
+    // a broken invariant has nothing to return: stop
+    if scores.len > 100
+        abort("too many scores")
+    end
 end

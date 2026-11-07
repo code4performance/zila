@@ -42,7 +42,7 @@ print(text.join([<span class="str">"a"</span>, <span class="str">"b"</span>, <sp
           <tr><td><code>index_of(s, part)</code></td><td>The byte position of the first <code>part</code>, or <code>-1</code>. An empty <code>part</code> is found at 0.</td></tr>
           <tr><td><code>contains(s, part)</code>, <code>starts_with(s, prefix)</code>, <code>ends_with(s, suffix)</code></td><td><code>true</code> or <code>false</code>.</td></tr>
           <tr><td><code>compare(a, b)</code></td><td><code>-1</code>, <code>0</code> or <code>1</code>, comparing byte by byte. Handy for sorting.</td></tr>
-          <tr><td><code>split(s, sep)</code></td><td>The pieces between the occurrences of <code>sep</code>, empty pieces included. An empty <code>sep</code> stops the program with <code>split needs a separator</code>.</td></tr>
+          <tr><td><code>split(s, sep)</code></td><td>The pieces between the occurrences of <code>sep</code>, empty pieces included. An empty <code>sep</code> aborts with <code>split needs a separator</code>.</td></tr>
           <tr><td><code>join(parts, sep)</code></td><td>The parts with <code>sep</code> between them.</td></tr>
           <tr><td><code>lines(s)</code></td><td>The lines of <code>s</code>: cut at a newline, a trailing carriage return removed, no empty last line after a final newline.</td></tr>
           <tr><td><code>trim(s)</code>, <code>trim_start(s)</code>, <code>trim_end(s)</code></td><td><code>s</code> without spaces, tabs, carriage returns and newlines at the ends.</td></tr>
@@ -80,6 +80,19 @@ print(text.join([<span class="str">"a"</span>, <span class="str">"b"</span>, <sp
           <tr><td><code>sort_by(xs, less)</code></td><td>A new list in order, where <code>less(a, b)</code> says whether <code>a</code> goes before <code>b</code>. It is a stable merge sort, so equal elements keep their order; sorting 100,000 numbers takes a fraction of a second. For texts use <code>text.compare(a, b) &lt; 0</code>.</td></tr>
         </tbody>
       </table>
+      <p>Every list also has the method <code>xs.get(i)</code>, which reads an element without the risk of an abort: it gives the element when <code>0 &lt;= i &lt; xs.len</code> and nothing otherwise (negative <code>i</code> included). For elements that can be <code>nil</code> (text, records, lists, maps) the result is <code>T?</code>, <code>nil</code> when there is no such element; for numbers, booleans and the like, which have no <code>nil</code>, it is <code>T or error</code> (kind <code>InvalidInput</code>), so <code>xs.get(i) ?? 0</code> reads naturally. It works on the lists that <code>list.slice</code> returns, too. <code>xs[i]</code> aborts when <code>i</code> is out of range.</p>
+    </section>
+
+    <section id="math">
+      <h2>math</h2>
+      <p>Integer <code>+</code>, <code>-</code> and <code>*</code> wrap at the width of the type and never fail. When a program needs to know whether the exact result fits, <code>use math</code> and call these; each returns <code>int or error</code>.</p>
+      <table>
+        <thead><tr><th>Function</th><th>What it gives</th></tr></thead>
+        <tbody>
+          <tr><td><code>math.checked_add(a, b)</code>, <code>checked_sub(a, b)</code>, <code>checked_mul(a, b)</code></td><td>The exact result, or an error of kind <code>errors.Overflow</code> when it does not fit in an <code>int</code>.</td></tr>
+          <tr><td><code>math.checked_div(a, b)</code></td><td>The quotient, an <code>errors.InvalidInput</code> error for a zero divisor, and an <code>errors.Overflow</code> error for <code>MIN / -1</code>.</td></tr>
+        </tbody>
+      </table>
     </section>
 
     <section id="format">
@@ -94,7 +107,7 @@ print(format.float(3.14159, 2))                                           <span 
         <thead><tr><th>Function</th><th>What it gives</th></tr></thead>
         <tbody>
           <tr><td><code>text(template, args)</code></td><td>The template with its placeholders replaced by the list of texts <code>args</code>. It returns a result: a missing argument, an unclosed <code>(</code> or an unknown layout is an error, never partial text.</td></tr>
-          <tr><td><code>fmt(template, a, b, ...)</code></td><td>Like <code>text</code>, but the values can be integers, floats, booleans or text, up to eight of them: <code>format.fmt("%(&lt;8)|%(&gt;8.2f)", name, price)</code>. A value of your own type is formatted through a method <code>to_value()</code> that returns a <code>format.Value</code>, usually <code>format.Text("...")</code>. Native compiler only; <code>text</code> and the helpers also run in the interpreter. Without a type letter a value shows the way <code>print</code> shows it.</td></tr>
+          <tr><td><code>fmt(template, a, b, ...)</code></td><td>Like <code>text</code>, but the values can be integers, floats, booleans or text, up to eight of them: <code>format.fmt("%(&lt;8)|%(&gt;8.2f)", name, price)</code>. A value of your own type is formatted through a method <code>to_value()</code> that returns a <code>format.Value</code>, usually <code>format.Text("...")</code>. Without a type letter a value shows the way <code>print</code> shows it.</td></tr>
           <tr><td><code>pad_left(s, width)</code>, <code>pad_right(s, width)</code>, <code>center(s, width)</code></td><td><code>s</code> filled with spaces to <code>width</code> characters. A third argument gives another fill: <code>pad_left("7", 3, "0")</code>.</td></tr>
           <tr><td><code>int(n)</code>, <code>hex(n)</code>, <code>bin(n)</code></td><td>The digits of an integer in base 10, 16 (lowercase) or 2, with no prefix. Negative numbers get a leading <code>-</code>.</td></tr>
           <tr><td><code>thousands(n)</code></td><td>The integer with <code>,</code> between groups of three digits: <code>1,234,567</code>.</td></tr>
@@ -136,7 +149,7 @@ print(format.float(3.14159, 2))                                           <span 
 b.feed(<span class="str">"ab"</span>)
 b.feed(<span class="str">"c\nd"</span>)
 print(b.take_line())        <span class="cm">// abc</span></code></pre>
-      <p>The buffers behind the readers and writers of <code>fs</code> and <code>net</code> (see <a href="async.html#buffered">Reading by lines and buffered writing</a>), with no system calls, so they also work in the interpreter. An input buffer takes text in pieces and hands it out as lines or bytes; an output buffer collects pieces.</p>
+      <p>The buffers behind the readers and writers of <code>fs</code> and <code>net</code> (see <a href="async.html#buffered">Reading by lines and buffered writing</a>), with no system calls. An input buffer takes text in pieces and hands it out as lines or bytes; an output buffer collects pieces.</p>
       <table>
         <thead><tr><th>Function</th><th>What it gives</th></tr></thead>
         <tbody>
@@ -176,12 +189,47 @@ scores.put(<span class="str">"ana"</span>, 90)
       </table>
     </section>
 
+    <section id="errors">
+      <h2>errors</h2>
+      <pre><code><span class="kw">use</span> errors
+
+<span class="kw">if</span> e.kind == errors.NotFound
+    print(<span class="str">"{e.message}"</span>)
+<span class="kw">end</span></code></pre>
+      <p>The error kinds (see <a href="syntax.html#errors">Error handling</a>). <code>use errors</code> is only needed to name a kind: <code>error("message")</code> and <code>e.kind</code> work without it.</p>
+      <table>
+        <thead><tr><th>Name</th><th>What it gives</th></tr></thead>
+        <tbody>
+          <tr><td><code>errors.NotFound</code>, <code>PermissionDenied</code>, <code>AlreadyExists</code></td><td>Something that is not there, that may not be touched, or that is already there.</td></tr>
+          <tr><td><code>errors.Unauthenticated</code>, <code>Unavailable</code></td><td>Who is asking is not known, and a service that cannot answer right now.</td></tr>
+          <tr><td><code>errors.Timeout</code>, <code>Cancelled</code></td><td>The time ran out (including <code>timeout(ms, f)</code>), or the system canceled the operation.</td></tr>
+          <tr><td><code>errors.ConnectionRefused</code>, <code>ConnectionReset</code>, <code>AddrInUse</code></td><td>Nobody listens on the port, the peer cut the connection, and the port is already taken.</td></tr>
+          <tr><td><code>errors.Overflow</code></td><td>An integer result that does not fit (<code>math.checked_*</code>).</td></tr>
+          <tr><td><code>errors.InvalidInput</code>, <code>UnexpectedEof</code>, <code>Closed</code>, <code>Unsupported</code></td><td>A bad argument or text to parse, the input ended too soon, use of something already closed, and a feature the platform lacks.</td></tr>
+          <tr><td><code>errors.Io</code>, <code>errors.Other</code></td><td>An operating-system failure with no more specific kind, and anything else (the kind of <code>error("message")</code>).</td></tr>
+          <tr><td><code>errors.kind(name)</code></td><td>A new kind, <code>ErrorKind or error</code>. The name is <code>package.Name</code> (letters, digits and <code>_</code>); anything else, and any name in the <code>std</code> namespace, is an <code>InvalidInput</code> error.</td></tr>
+        </tbody>
+      </table>
+      <p>Which kind comes from where, the same on Windows and on Linux:</p>
+      <table>
+        <thead><tr><th>Library</th><th>Failure</th><th>Kind</th></tr></thead>
+        <tbody>
+          <tr><td><code>fs</code></td><td>a path that does not exist, access denied, something that already exists, <code>read_line</code> at the end</td><td><code>NotFound</code>, <code>PermissionDenied</code>, <code>AlreadyExists</code>, <code>UnexpectedEof</code></td></tr>
+          <tr><td><code>net</code>, <code>tls</code></td><td>a port nobody listens on, a port in use, a host that does not resolve, a connection reset or cut off, a closed socket, an oversized datagram, a lost answer</td><td><code>ConnectionRefused</code>, <code>AddrInUse</code>, <code>NotFound</code>, <code>ConnectionReset</code>, <code>Closed</code>, <code>InvalidInput</code>, <code>Timeout</code></td></tr>
+          <tr><td><code>tls</code></td><td>handshake, certificate or record failures; renegotiation</td><td><code>Io</code>; <code>Unsupported</code></td></tr>
+          <tr><td><code>text</code>, <code>format</code></td><td><code>parse_int</code>, <code>parse_float</code>, templates and layouts that do not fit</td><td><code>InvalidInput</code></td></tr>
+          <tr><td><code>sorted</code></td><td><code>min</code>/<code>max</code> of an empty collection, no key at or below/above</td><td><code>NotFound</code></td></tr>
+          <tr><td><code>math</code></td><td><code>checked_add</code>, <code>checked_sub</code>, <code>checked_mul</code>, <code>checked_div</code>: a result that does not fit; a zero divisor</td><td><code>Overflow</code>; <code>InvalidInput</code></td></tr>
+        </tbody>
+      </table>
+      <p>Any other operating-system failure is <code>Io</code>; the message is always the text of the system. <code>sys.error_for(code, what)</code> does this mapping for the codes of the platform.</p>
+    </section>
+
     <section id="limits">
       <h2>Good to know</h2>
       <ul>
         <li>The modules are compiled with your program, so only the functions you use add to its size. They need a hosted target, Windows or Linux (<code>use text</code> also brings in the float printing library, which is why it is not available in a bare-metal kernel).</li>
-        <li>The interpreter behind <code>--run</code> runs them too. It handles errors only through <code>??</code> (it has no <code>match</code> on results), and a lambda in it cannot use variables of the function around it.</li>
-        <li>Not here yet: regular expressions, Unicode case mapping, and <code>format.fmt</code> in the interpreter.</li>
+        <li>Not here yet: regular expressions, and Unicode case mapping.</li>
       </ul>
     </section>
   </main>

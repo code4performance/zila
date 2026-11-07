@@ -93,11 +93,11 @@ On Linux, `extern` functions declared with `#[link("name")]` SHALL be callable w
 - **THEN** its ELF file has no interpreter and no dynamic section
 
 ### Requirement: Division by zero
-An integer division or remainder by zero SHALL behave the same on both targets: the program prints `panic: division by zero` and exits with status 101, like any other `panic`. (Today the Windows build ends with a hardware exception and the Linux build with a signal, and neither prints a message.)
+An integer division or remainder by zero SHALL behave the same on both targets: the program prints `abort: <file>.br:<line>: division by zero` to standard error and exits with status 101, like any other abort.
 
 #### Scenario: Divide by zero
 - **WHEN** a program divides an integer by a variable that is zero
-- **THEN** it prints `panic: division by zero` and exits with status 101 on both targets
+- **THEN** it prints `abort: <file>.br:<line>: division by zero` and exits with status 101 on both targets
 
 ### Requirement: The Windows build is unchanged
 Apart from the division check above, building for Windows SHALL produce the same code as before this change and the bare-metal image SHALL be byte-for-byte the same (the kernel keeps its own handling of division faults).

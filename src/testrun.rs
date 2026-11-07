@@ -21,8 +21,6 @@ pub enum Outcome {
     Passed,
     Failed,
     NoTests,
-    /// The program could not be built here (no Visual Studio tools).
-    NoToolchain(String),
 }
 
 /// The tests of `file`, in order, or a message about the first function that is not a valid test.
@@ -86,9 +84,8 @@ fn run_file(path: &str, optimize: bool) -> Result<Outcome, String> {
 
     println!("running {} test(s) in {}", tests.len(), path);
     let exe = std::env::temp_dir().join(format!("brasa-test-{}-{}.exe", std::process::id(), BUILD.fetch_add(1, Ordering::SeqCst)));
-    match compile_to_native_with(&file, exe.to_str().unwrap(), &CompileOptions { optimize }) {
+    match compile_to_native_with(&file, exe.to_str().unwrap(), &CompileOptions { optimize, test_mode: true }) {
         Ok(()) => {}
-        Err(e) if e.contains("could not find Visual Studio") => return Ok(Outcome::NoToolchain(e)),
         Err(e) => return Err(format!("{}: {}", path, e)),
     }
     let out = Command::new(&exe).output().map_err(|e| format!("cannot run the tests of {}: {}", path, e));
@@ -105,7 +102,8 @@ fn run_file(path: &str, optimize: bool) -> Result<Outcome, String> {
             let code = out.status.code().unwrap_or(-1);
             // Windows exception codes (a crash) read better in hexadecimal
             let shown = if code < 0 || code > 255 { format!("0x{:X}", code as u32) } else { code.to_string() };
-            println!("run stopped early (exit code {})", shown);
+            let how = if code == 101 { "by an abort, " } else { "" };
+            println!("run stopped early ({}exit code {})", how, shown);
             Ok(Outcome::Failed)
         }
     }
@@ -118,10 +116,6 @@ pub fn run(files: &[String], optimize: bool) -> i32 {
         match run_file(f, optimize) {
             Ok(Outcome::Passed) | Ok(Outcome::NoTests) => {}
             Ok(Outcome::Failed) => failed = true,
-            Ok(Outcome::NoToolchain(msg)) => {
-                eprintln!("error: {}", msg);
-                return 2;
-            }
             Err(e) => {
                 eprintln!("error: {}", e);
                 failed = true;

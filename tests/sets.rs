@@ -1,5 +1,5 @@
 //! The `set` library. Programs are compiled to native executables and run (skipped when the
-//! Visual Studio build tools are missing); the same programs run in the interpreter.
+//! Visual Studio build tools are missing).
 
 use brasa::{compile_to_native, parse_source};
 use std::process::Command;
@@ -24,15 +24,6 @@ fn native(src: &str) -> Result<Option<String>, String> {
     Ok(Some(String::from_utf8_lossy(&out.stdout).replace('\r', "")))
 }
 
-fn interpreted(src: &str) -> String {
-    let file = std::env::temp_dir().join(format!("brasa-sets-interp-{}-{}.br", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
-    std::fs::write(&file, src).unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_brasa-parse")).arg(&file).arg("--run").output().unwrap();
-    let _ = std::fs::remove_file(&file);
-    assert!(out.status.success(), "interpreter failed: {}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
-    String::from_utf8_lossy(&out.stdout).replace('\r', "")
-}
-
 fn main_of(extra: &str, body: &str) -> String {
     let indented: String = body.lines().map(|l| format!("    {}\n", l)).collect();
     format!("package main\n\nuse set\n\n{}\nfunc main()\n{}end\n", extra, indented)
@@ -43,7 +34,6 @@ fn expect(body: &str, want: &str) {
     if let Some(out) = native(&src).unwrap_or_else(|e| panic!("compile error: {}", e)) {
         assert_eq!(out, want, "native output");
     }
-    assert_eq!(interpreted(&src), want, "interpreter output");
 }
 
 #[test]
@@ -87,7 +77,6 @@ fn sets_are_shared_references() {
     if let Some(out) = native(&src).unwrap() {
         assert_eq!(out, "true\n");
     }
-    assert_eq!(interpreted(&src), "true\n");
 }
 
 #[test]
@@ -149,11 +138,9 @@ fn only_text_and_integers_are_elements() {
 }
 
 #[test]
-fn the_sets_example_agrees_with_the_interpreter() {
+fn the_sets_example_runs() {
     let src = std::fs::read_to_string("examples/sets.br").unwrap();
-    let interp = interpreted(&src);
-    assert!(interp.contains("in both: the lazy dog") && interp.contains("new: 3\nnew: 1\nnew: 2\n"), "{}", interp);
     if let Some(out) = native(&src).unwrap_or_else(|e| panic!("compile error: {}", e)) {
-        assert_eq!(out, interp);
+        assert!(out.contains("in both: the lazy dog") && out.contains("new: 3\nnew: 1\nnew: 2\n"), "{}", out);
     }
 }

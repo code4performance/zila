@@ -195,13 +195,38 @@
 
     <section id="errors">
       <h2>Error handling</h2>
-      <p>Brasa has no exceptions. A function that can fail ends its signature with <code>or error</code> (<code>-&gt; Config or error</code>), or just <code>-&gt; error</code> when it returns nothing. Inside it, writing <code>try</code> in front of a call hands a failure straight to the caller. <code>error("message")</code> creates an error; <code>match</code> reads a result with <code>ok(value)</code> and <code>err(e)</code>, and <code>call() ?? fallback</code> supplies a default. For a mistake in the program itself (not bad input), <code>panic("message")</code> stops it with that message and exit code 101, like an index out of bounds. <code>defer</code> schedules an expression to run when the enclosing function returns — commonly used to release a resource right after acquiring it.</p>
+      <p>Brasa has no exceptions. A function that can fail ends its signature with <code>or error</code> (<code>-&gt; Config or error</code>), or just <code>-&gt; error</code> when it returns nothing. Inside it, writing <code>try</code> in front of a call hands a failure straight to the caller. <code>error("message")</code> creates an error; <code>match</code> reads a result with <code>ok(value)</code> and <code>err(e)</code>, and <code>call() ?? fallback</code> supplies a default. Integer arithmetic never fails: <code>+</code>, <code>-</code> and <code>*</code> wrap at the width of the type, and <code>MIN / -1</code> is <code>MIN</code>; <code>math.checked_add</code>, <code>checked_sub</code>, <code>checked_mul</code> and <code>checked_div</code> return <code>int or error</code> (kind <code>Overflow</code>, or <code>InvalidInput</code> for a zero divisor) when you need to know. A failure the caller can handle is a value: <code>xs.get(i)</code> gives the element or nothing, <code>m.get(key, default)</code> a default. For a mistake in the program itself (not bad input), <code>abort("message")</code> writes <code>abort: file.br:line: message</code> to standard error and ends the process with exit code 101. An out-of-bounds index, an integer division or remainder by zero, a missing map key with <code>m[key]</code>, <code>take</code> on an empty list, <code>int(x)</code> of a float that does not fit, a failed <code>assert</code> outside <code>--test</code> and running out of memory abort the same way. An abort cannot be caught and runs no <code>defer</code>, no <code>drop</code> and no unwinding, and buffered writers are not flushed. <code>defer</code> schedules an expression to run when the enclosing function returns — commonly used to release a resource right after acquiring it.</p>
       <pre><code><span class="kw">func</span> load(path: text) -&gt; Config or error
     <span class="kw">let</span> raw = <span class="kw">try</span> file.read(path)
     <span class="kw">let</span> f = <span class="kw">try</span> file.open(path)
     <span class="kw">defer</span> f.close()
     <span class="kw">return</span> <span class="kw">try</span> json.parse(Config, raw)
 <span class="kw">end</span></code></pre>
+      <h3>Kinds, messages and causes</h3>
+      <p>An <code>error</code> carries three things: <code>e.kind</code> (an <code>ErrorKind</code>, what went wrong in a form a program can test), <code>e.message</code> (text for people) and <code>e.cause</code> (an <code>error?</code>, <code>nil</code> for a root error). <code>error("message")</code> has the kind <code>errors.Other</code>; <code>error(kind, "message")</code> picks one, and <code>error(kind, "message", cause)</code> also records what it was caused by. <code>e.context("message")</code> returns a new error with the kind of <code>e</code> and <code>e</code> as its cause, so a caller can say what it was doing without losing the reason; <code>e.is(kind)</code> is true when the error or any cause has that kind, and <code>e.full_message</code> joins the messages, outermost first, with <code>: </code>. <code>try</code> converts and wraps nothing: the kind, message and cause arrive exactly as they left. A function that returns an error as a value (a helper that builds errors) is written <code>-&gt; error?</code>, because plain <code>-&gt; error</code> means "fails or does not".</p>
+      <pre><code><span class="kw">use</span> errors
+
+<span class="kw">let</span> Corrupt: ErrorKind = errors.kind(<span class="str">"config.Corrupt"</span>) ?? errors.Other
+
+<span class="kw">async</span> <span class="kw">func</span> read_config(path: text) -&gt; text or error
+    <span class="kw">match</span> <span class="kw">await</span> fs.read(path)
+        ok(t) -&gt; <span class="kw">return</span> t
+        err(e) -&gt; <span class="kw">return</span> e.context(<span class="str">"reading {path}"</span>)
+    <span class="kw">end</span>
+<span class="kw">end</span>
+
+<span class="kw">func</span> main()
+    <span class="kw">match</span> <span class="kw">await</span> read_config(<span class="str">"app.cfg"</span>)
+        ok(t) -&gt; print(t)
+        err(e) -&gt;
+            <span class="kw">if</span> e.kind == errors.NotFound
+                print(<span class="str">"no config, using defaults"</span>)
+            <span class="kw">else</span>
+                print(<span class="str">"failed: {e.full_message}"</span>)
+            <span class="kw">end</span>
+    <span class="kw">end</span>
+<span class="kw">end</span></code></pre>
+      <p>Kinds are open: they are names of the form <code>package.Name</code>, equal when the names are equal, so any library can add its own with <code>errors.kind("mylib.Corrupt")</code> (do it once, at package level; the <code>std</code> namespace is reserved for the standard library). Because the set of kinds is open, a <code>match</code> over them could never be exhaustive: test with <code>if e.kind == ...</code> and <code>e.is(...)</code>. A text is never a kind: <code>error("NotFound", "x")</code> is a compile error, and <code>e.kind.name</code> gives the name as text. The standard kinds and the kinds each library returns are listed under <a href="stdlib.html#errors">errors</a> in the library.</p>
       <p>Optional values (<code>T?</code>) use the same idea for "maybe missing" rather than "maybe failed": <code>??</code> supplies a fallback, and <code>?.</code> safely accesses a field only when the value isn't <code>nil</code>.</p>
       <pre><code><span class="kw">func</span> main() -&gt; error
     <span class="kw">let</span> email: text? = c.email
@@ -261,7 +286,7 @@ s.push(<span class="str">"hello"</span>)</code></pre>
         <li><strong>Bounds:</strong> <code>func show&lt;T: Printable&gt;(x: T)</code> accepts only types that satisfy <code>Printable</code>, and inside the function <code>x.to_text()</code> is allowed. Otherwise the error names the type, the interface and the missing or mismatching method.</li>
         <li><strong>Checked once, at the definition.</strong> A generic body is checked with <code>T</code> as an unknown type that only has its bound's methods, so calling <code>x.to_text()</code> without a bound, or writing <code>a + b</code> on two <code>T</code> values, is an error where the function is written, even if it is never called. Putting a <code>T</code> in text with <code>"{x}"</code> is checked per instance.</li>
         <li><strong>Interfaces are only bounds.</strong> <code>func show(x: Printable)</code> is an error (it would need dynamic dispatch); write <code>func show&lt;T: Printable&gt;(x: T)</code>.</li>
-        <li><strong>Not supported yet:</strong> generic enums and type aliases, <code>async</code> generic functions, methods with their own type parameters, and interfaces with type parameters. They stop with a message naming the form. The interpreter behind <code>--run</code> ignores type parameters and bounds, so generic programs run there but are not checked.</li>
+        <li><strong>Not supported yet:</strong> generic enums and type aliases, <code>async</code> generic functions, methods with their own type parameters, and interfaces with type parameters. They stop with a message naming the form.</li>
       </ul>
     </section>
 
@@ -277,12 +302,12 @@ print(0.1 + 0.2)                          <span class="cm">// 0.3000000000000000
 print(1.0 / 0.0)                          <span class="cm">// inf</span></code></pre>
       <ul>
         <li><strong>No silent mixing.</strong> <code>int</code> and <code>float</code> (or <code>f32</code> and <code>f64</code>) never meet in one operation, and <code>let x: float = 3</code> is an error: write <code>3.0</code> or <code>float(3)</code>. <code>%</code> is not defined for floats.</li>
-        <li><strong>Conversions.</strong> <code>float(n)</code> turns an integer into a float. <code>int(x)</code> cuts the fraction off toward zero, and stops the program with <code>float out of range</code> for <code>NaN</code>, infinities and numbers too big for an <code>int</code>. <code>f32(x)</code> and <code>f64(x)</code> change the width.</li>
+        <li><strong>Conversions.</strong> <code>float(n)</code> turns an integer into a float. <code>int(x)</code> cuts the fraction off toward zero, and aborts with <code>float out of range</code> for <code>NaN</code>, infinities and numbers too big for an <code>int</code>. <code>f32(x)</code> and <code>f64(x)</code> change the width.</li>
         <li><strong>IEEE behavior.</strong> Dividing by zero does not stop the program: it gives <code>inf</code>, <code>-inf</code> or <code>NaN</code>. Every comparison with <code>NaN</code> is false, except <code>!=</code>.</li>
         <li><strong>Printing</strong> uses the shortest text that reads back as exactly the same number: <code>0.1</code>, <code>3.0</code>, <code>1e21</code>, <code>1.5e-7</code>. Numbers from <code>1e-4</code> up to <code>1e16</code> are written plainly; others use exponent form. <code>NaN</code>, <code>inf</code>, <code>-inf</code> and <code>-0.0</code> print as shown.</li>
         <li><strong>Math library.</strong> <code>use math</code> gives <code>math.sqrt</code>, <code>math.floor</code>, <code>math.ceil</code>, <code>math.trunc</code>, <code>math.round</code> (halves away from zero), <code>math.abs</code>, <code>math.min</code>, <code>math.max</code>, <code>math.pow(x, n)</code> with a whole-number power, and <code>math.fixed(x, digits)</code>, which writes a float with a fixed number of decimals (<code>math.fixed(3.14159, 2)</code> is <code>3.14</code>).</li>
         <li><strong>Calling C.</strong> <code>extern</code> functions take and return <code>f64</code> and <code>f32</code> the way Windows x64 expects, in the XMM registers.</li>
-        <li><strong>Not everywhere.</strong> Floats work in the native compiler. The interpreter behind <code>--run</code> handles <code>float</code> values but not <code>f32</code> as a separate type or <code>use math</code>, and the bare-metal target rejects floats. A float cannot be a map key.</li>
+        <li><strong>Not everywhere.</strong> Floats work in the native compiler. The bare-metal target rejects floats. A float cannot be a map key.</li>
       </ul>
     </section>
 
@@ -304,10 +329,10 @@ ages.remove(<span class="str">"alan"</span>)                      <span class="c
 <span class="kw">end</span></code></pre>
       <ul>
         <li><strong>Types are inferred</strong> from the expected type or from the first pair of a literal, and every other pair must match them. <code>{}</code> has nothing to infer from, so it needs a type annotation, just like an empty list.</li>
-        <li><strong>A missing key stops the program.</strong> <code>m[key]</code> on a key that was never stored panics with <code>map key not found</code>, like an index out of bounds. Use <code>has</code> or <code>get(key, default)</code> when the key may be missing.</li>
+        <li><strong>A missing key stops the program.</strong> <code>m[key]</code> on a key that was never stored aborts with <code>map key not found</code>, like an index out of bounds. Use <code>has</code> or <code>get(key, default)</code> when the key may be missing.</li>
         <li><strong>Methods:</strong> <code>has(key)</code>, <code>get(key, default)</code>, <code>remove(key)</code> and <code>clear()</code>. The number of entries is the property <code>len</code>, as for lists and text.</li>
         <li><strong>Iteration order is insertion order.</strong> <code>for key, value in m</code> and <code>for key in m</code> visit the keys in the order they were first added. Replacing a value keeps the key's place; removing a key and adding it again moves it to the end. Do not add or remove keys inside the loop.</li>
-        <li><strong>Only text and integer keys.</strong> A record, enum or other key type is a compile error. Maps work in the native compiler and in the interpreter, but not in the bare-metal target.</li>
+        <li><strong>Only text and integer keys.</strong> A record, enum or other key type is a compile error. Maps work in the native compiler, but not in the bare-metal target.</li>
       </ul>
     </section>
 
@@ -330,7 +355,7 @@ ages.remove(<span class="str">"alan"</span>)                      <span class="c
         <li><strong>Captured when it runs.</strong> The variables a deferred call uses have the values they had when the <code>defer</code> statement ran (<code>defer print("n = {n}")</code> prints the old <code>n</code> even if it changes later). Records are shared, not copied, so <code>defer c.report()</code> sees the record as it is when the function ends. Because the values are captured, a deferred call cannot assign to a variable.</li>
         <li><strong>Only calls.</strong> <code>defer</code> needs a call; <code>defer x + 1</code> is a compile error. If the call can fail (<code>or error</code>), its error is ignored and does not change what the function returns.</li>
         <li><strong>The return value is untouched</strong>, including a <code>T or error</code> result.</li>
-        <li><strong>Where it does not run.</strong> Not on <code>break</code> or <code>continue</code> (they leave a loop, not the function), and not when the program stops abruptly, as with an index out of bounds or <code>fatal</code>. Lambdas and async functions each have their own deferred calls.</li>
+        <li><strong>Where it does not run.</strong> Not on <code>break</code> or <code>continue</code> (they leave a loop, not the function), and not when the program aborts, as with an index out of bounds, a division by zero or a call to <code>abort</code>. Lambdas and async functions each have their own deferred calls.</li>
       </ul>
     </section>
 

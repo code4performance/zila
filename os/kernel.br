@@ -84,8 +84,8 @@ let ROWS = 25
 var cursor = 0
 var attr = 0x07
 
-func vga_cell(ch: int) -> int
-    return (attr << 8) bitor ch
+func vga_cell(ch: int) -> u16
+    return u16((attr << 8) bitor ch)
 end
 
 func scroll()
@@ -388,7 +388,7 @@ func exception_stub()
 end
 
 func set_gate(vector: int, handler: extern "C" func())
-    let h: int = usize(handler)
+    let h: usize = usize(handler)
     let gate: *u64 = IDT_BASE + vector * 16
     unsafe
         gate[0] = (h bitand 0xFFFF) bitor (0x18 << 16) bitor (0x8E00 << 32) bitor (((h >> 16) bitand 0xFFFF) << 48)

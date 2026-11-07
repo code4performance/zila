@@ -1,6 +1,6 @@
 //! Floating point: types, literals, arithmetic, comparison, conversion, printing. Programs are
 //! compiled to native executables and run (skipped when the Visual Studio build tools are
-//! missing); the interpreter is exercised through the command-line tool.
+//! missing).
 
 use brasa::{compile_to_native, parse_source};
 use std::process::Command;
@@ -179,11 +179,12 @@ end"#,
 }
 
 #[test]
-fn out_of_range_conversion_panics() {
+fn out_of_range_conversion_aborts() {
     for expr in ["1.0 / zero", "zero / zero", "-1.0 / zero", "1.0e19"] {
         let src = main_of(&format!("let zero = 0.0\nlet x = int({})\nprintln(\"unreachable {{x}}\")", expr));
         let Some((out, code)) = run(&src) else { return };
-        assert_eq!(out, "panic: float out of range\n", "{}", expr);
+        // main_of puts the statement with the conversion on line 10
+        assert_eq!(out, "abort: main.br:10: float out of range\n", "{}", expr);
         assert_eq!(code, 101);
     }
 }
@@ -416,14 +417,18 @@ fn a_bare_metal_kernel_rejects_floats() {
 }
 
 #[test]
-fn the_interpreter_agrees_with_the_native_compiler() {
+fn the_floats_example_prints_what_the_docs_say() {
     let src = std::fs::read_to_string("examples/floats.br").unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_brasa-parse")).arg("examples/floats.br").arg("--run").output().unwrap();
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    let interp = String::from_utf8_lossy(&out.stdout).replace('\r', "");
-    assert!(interp.contains("0.30000000000000004") && interp.contains("inf -inf NaN"), "{}", interp);
-    if let Some((native, code)) = run(&src) {
+    if let Some((out, code)) = run(&src) {
         assert_eq!(code, 0);
-        assert_eq!(native, interp);
+        assert_eq!(out, "average 20.625
+0.1 + 0.2 = 0.30000000000000004
+1 / 3 = 0.3333333333333333
+savings 1628.8946267774422
+half of 7 is 3.5
+cut off: 3 and -3
+inf -inf NaN
+false true true
+");
     }
 }

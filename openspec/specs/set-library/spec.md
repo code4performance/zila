@@ -43,10 +43,3 @@ A set SHALL provide `add(x)` (returns true when `x` was not yet in the set), `ha
 #### Scenario: Order
 - **WHEN** a program adds `"c"`, `"a"`, `"b"`, `"a"`
 - **THEN** `to_list()` is `["c", "a", "b"]`
-
-### Requirement: The interpreter agrees
-The interpreter SHALL provide the same `set` module with the same results.
-
-#### Scenario: Same output
-- **WHEN** `examples/sets.br` is run natively and with the interpreter
-- **THEN** both print the same lines

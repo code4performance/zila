@@ -18,6 +18,7 @@ package tls
 
 use c
 use sys
+use errors
 use net
 
 #[c_layout]
@@ -85,7 +86,7 @@ let SEC_E_OK = 0
 let SEC_I_CONTINUE_NEEDED = 0x00090312
 let SEC_I_CONTEXT_EXPIRED = 0x00090317
 let SEC_I_RENEGOTIATE = 0x00090321
-let SEC_E_INCOMPLETE_MESSAGE = 0x80090318
+let SEC_E_INCOMPLETE_MESSAGE: long = 0x80090318
 let SECBUFFER_EMPTY = 0
 let SECBUFFER_DATA = 1
 let SECBUFFER_TOKEN = 2
@@ -133,33 +134,33 @@ func release(conn: Conn)
     end
 end
 
-func code_of(rc: u32) -> int
-    return int(rc)
+func code_of(rc: u32) -> long
+    return long(rc)
 end
 
 // Copies `n` bytes of `data` starting at `from` into raw memory at `dest`.
-func put_text(dest: *u8, data: text, from: int, n: int)
+func put_text(dest: *u8, data: text, from: long, n: long)
     unsafe
         for i in 0..n
-            dest[i] = int(data[from + i])
+            dest[i] = data[from + i]
         end
     end
 end
 
 // Opens a TCP connection and runs the TLS handshake.
-async func connect(host: text, port: int) -> Conn or error
+async func connect(host: text, port: long) -> Conn or error
     let raw = try await net.connect(host, port)
     let conn = Conn{ raw: raw, cred: sys.Scratch{}, ctx: sys.Scratch{}, sizes: Sizes{}, pending: "", plain: "", ready: false, open: false }
     let cred = SchannelCred{}
     cred.version = u32(4)
     cred.flags = u32(CRED_FLAGS)
     let expiry = sys.Scratch{}
-    var rc = 0
+    var rc: long = 0
     unsafe
         rc = code_of(AcquireCredentialsHandleA(0, c.cstr(PACKAGE), u32(SECPKG_CRED_OUTBOUND), 0, &cred, 0, 0, &conn.cred, &expiry))
     end
     if rc != SEC_E_OK
-        return error(sys.describe(rc, "TLS: cannot acquire credentials"))
+        return sys.error_for(rc, "TLS: cannot acquire credentials")
     end
     conn.open = true
     var inbuf = ""
@@ -192,7 +193,7 @@ async func connect(host: text, port: int) -> Conn or error
         first = false
         // a token for the server
         if ob.cb0 > u32(0) and ob.p0 != 0
-            let token = c.from_bytes(ob.p0, int(ob.cb0))
+            let token = c.from_bytes(ob.p0, long(ob.cb0))
             unsafe
                 FreeContextBuffer(ob.p0)
             end
@@ -200,26 +201,26 @@ async func connect(host: text, port: int) -> Conn or error
         end
         if rc == SEC_E_OK
             if ib.kind1 == u32(SECBUFFER_EXTRA)
-                conn.pending = inbuf.slice(inbuf.len - int(ib.cb1), inbuf.len)
+                conn.pending = inbuf.slice(inbuf.len - long(ib.cb1), inbuf.len)
             end
             break
         end
         if rc == SEC_I_CONTINUE_NEEDED
             if ib.kind1 == u32(SECBUFFER_EXTRA)
-                inbuf = inbuf.slice(inbuf.len - int(ib.cb1), inbuf.len)
+                inbuf = inbuf.slice(inbuf.len - long(ib.cb1), inbuf.len)
             else
                 inbuf = ""
             end
         else
             if rc != SEC_E_INCOMPLETE_MESSAGE
                 release(conn)
-                return error(sys.describe(rc, "TLS handshake with {host} failed"))
+                return sys.error_for(rc, "TLS handshake with {host} failed")
             end
         end
         let more = try await raw.read(16384)
         if more.len == 0
             release(conn)
-            return error("TLS handshake with {host} failed: the connection was closed")
+            return error(errors.ConnectionReset, "TLS handshake with {host} failed: the connection was closed")
         end
         inbuf = inbuf + more
     end
@@ -228,7 +229,7 @@ async func connect(host: text, port: int) -> Conn or error
     end
     if rc != SEC_E_OK
         release(conn)
-        return error(sys.describe(rc, "TLS: cannot read the stream sizes"))
+        return sys.error_for(rc, "TLS: cannot read the stream sizes")
     end
     return conn
 end
@@ -236,12 +237,12 @@ end
 // Encrypts and sends all of `data`.
 async func (conn: Conn) write(data: text) -> error
     if not conn.ready
-        return error("write: the connection is closed")
+        return error(errors.Closed, "write: the connection is closed")
     end
-    let header = int(conn.sizes.header)
-    let trailer = int(conn.sizes.trailer)
-    let most = int(conn.sizes.max_message)
-    var done = 0
+    let header = long(conn.sizes.header)
+    let trailer = long(conn.sizes.trailer)
+    let most = long(conn.sizes.max_message)
+    var done: long = 0
     while done < data.len
         var n = data.len - done
         if n > most
@@ -262,15 +263,15 @@ async func (conn: Conn) write(data: text) -> error
         bufs.kind3 = u32(SECBUFFER_EMPTY)
         let desc = Desc{}
         desc.count = u32(4)
-        var rc = 0
+        var rc: long = 0
         unsafe
             desc.bufs = &bufs
             rc = code_of(EncryptMessage(&conn.ctx, u32(0), &desc, u32(0)))
         end
         if rc != SEC_E_OK
-            return error(sys.describe(rc, "TLS: cannot encrypt"))
+            return sys.error_for(rc, "TLS: cannot encrypt")
         end
-        let total = int(bufs.cb0) + int(bufs.cb1) + int(bufs.cb2)
+        let total = long(bufs.cb0) + long(bufs.cb1) + long(bufs.cb2)
         try await conn.raw.write(c.from_bytes(b.ptr, total))
         done += n
     end
@@ -278,12 +279,12 @@ async func (conn: Conn) write(data: text) -> error
 end
 
 // Receives up to `max` bytes; empty text means the server closed the connection.
-async func (conn: Conn) read(max: int) -> text or error
+async func (conn: Conn) read(max: long) -> text or error
     while true
         if conn.plain.len > 0
             var n = conn.plain.len
-            if n > max
-                n = max
+            if long(n) > max
+                n = int(max)
             end
             let out = conn.plain.slice(0, n)
             conn.plain = conn.plain.slice(n, conn.plain.len)
@@ -302,31 +303,31 @@ async func (conn: Conn) read(max: int) -> text or error
             bufs.p0 = b.ptr
             let desc = Desc{}
             desc.count = u32(4)
-            var rc = 0
+            var rc: long = 0
             unsafe
                 desc.bufs = &bufs
                 rc = code_of(DecryptMessage(&conn.ctx, &desc, u32(0), 0))
             end
             if rc == SEC_E_OK
                 need_more = false
-                var extra = 0
+                var extra: long = 0
                 if bufs.kind1 == u32(SECBUFFER_DATA)
-                    conn.plain = conn.plain + c.from_bytes(bufs.p1, int(bufs.cb1))
+                    conn.plain = conn.plain + c.from_bytes(bufs.p1, long(bufs.cb1))
                 end
                 if bufs.kind2 == u32(SECBUFFER_DATA)
-                    conn.plain = conn.plain + c.from_bytes(bufs.p2, int(bufs.cb2))
+                    conn.plain = conn.plain + c.from_bytes(bufs.p2, long(bufs.cb2))
                 end
                 if bufs.kind3 == u32(SECBUFFER_DATA)
-                    conn.plain = conn.plain + c.from_bytes(bufs.p3, int(bufs.cb3))
+                    conn.plain = conn.plain + c.from_bytes(bufs.p3, long(bufs.cb3))
                 end
                 if bufs.kind1 == u32(SECBUFFER_EXTRA)
-                    extra = int(bufs.cb1)
+                    extra = long(bufs.cb1)
                 end
                 if bufs.kind2 == u32(SECBUFFER_EXTRA)
-                    extra = int(bufs.cb2)
+                    extra = long(bufs.cb2)
                 end
                 if bufs.kind3 == u32(SECBUFFER_EXTRA)
-                    extra = int(bufs.cb3)
+                    extra = long(bufs.cb3)
                 end
                 conn.pending = conn.pending.slice(conn.pending.len - extra, conn.pending.len)
             else
@@ -336,10 +337,10 @@ async func (conn: Conn) read(max: int) -> text or error
                     need_more = false
                 else
                     if rc == SEC_I_RENEGOTIATE
-                        return error("TLS: renegotiation is not supported")
+                        return error(errors.Unsupported, "TLS: renegotiation is not supported")
                     end
                     if rc != SEC_E_INCOMPLETE_MESSAGE
-                        return error(sys.describe(rc, "TLS: cannot decrypt"))
+                        return sys.error_for(rc, "TLS: cannot decrypt")
                     end
                 end
             end
@@ -349,7 +350,7 @@ async func (conn: Conn) read(max: int) -> text or error
             if more.len == 0
                 conn.ready = false
                 if conn.pending.len > 0
-                    return error("TLS: the connection was cut off")
+                    return error(errors.ConnectionReset, "TLS: the connection was cut off")
                 end
                 return ""
             end

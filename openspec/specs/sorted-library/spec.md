@@ -64,10 +64,3 @@ A sorted collection SHALL free the memory of its nodes when it is no longer used
 #### Scenario: Leak check
 - **WHEN** a program builds, fills, partly empties and drops sorted maps and sets of text in a loop and then compares `live_objects()` with its value before the loop
 - **THEN** the count has not grown
-
-### Requirement: The interpreter agrees
-Programs using `sorted` SHALL print the same in the interpreter (`--run`) and as native executables, including the case of calling a function stored in a record field.
-
-#### Scenario: Same output
-- **WHEN** the same program using sorted maps and sets is run both ways
-- **THEN** the output is identical

@@ -1,4 +1,4 @@
-//! Buffered I/O: the `bufio` buffers (native and interpreted), line and byte readers and
+//! Buffered I/O: the `bufio` buffers (native), line and byte readers and
 //! buffered writers over files, and readers and writers over TCP connections. Programs are
 //! compiled to native executables and run (skipped when the Visual Studio build tools are
 //! missing).
@@ -24,15 +24,6 @@ fn native(src: &str) -> Option<String> {
     let _ = std::fs::remove_file(&exe);
     assert_eq!(out.status.code(), Some(0), "exit code; output: {}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
     Some(String::from_utf8_lossy(&out.stdout).replace('\r', ""))
-}
-
-fn interpreted(src: &str) -> String {
-    let file = std::env::temp_dir().join(format!("brasa-bio-interp-{}-{}.br", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
-    std::fs::write(&file, src).unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_brasa-parse")).arg(&file).arg("--run").output().unwrap();
-    let _ = std::fs::remove_file(&file);
-    assert!(out.status.success(), "interpreter failed: {}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
-    String::from_utf8_lossy(&out.stdout).replace('\r', "")
 }
 
 fn temp_path(name: &str) -> String {
@@ -89,9 +80,8 @@ end
 "#;
 
 #[test]
-fn buffers_cut_pieces_into_lines_and_agree_with_the_interpreter() {
+fn buffers_cut_pieces_into_lines() {
     let want = "false\ntrue\nabc\nfalse\n[de]\n[]\nfalse\n[]\nfalse\ntrue\n[last]\nfalse\n0\n[hé]\n[llo wörld]\n[]\n3\nabc\n0\n";
-    assert_eq!(interpreted(BUFFERS), want, "interpreter output");
     if let Some(out) = native(BUFFERS) {
         assert_eq!(out, want, "native output");
     }
@@ -101,7 +91,6 @@ fn buffers_cut_pieces_into_lines_and_agree_with_the_interpreter() {
 fn the_last_line_waits_for_finish() {
     let src = "package main\n\nuse bufio\n\nfunc main()\n    let b = bufio.input()\n    b.feed(\"tail\")\n    print(b.has_line())\n    b.finish()\n    print(b.has_line())\n    print(b.take_line())\n    print(b.has_line())\nend\n";
     let want = "false\ntrue\ntail\nfalse\n";
-    assert_eq!(interpreted(src), want);
     if let Some(out) = native(src) {
         assert_eq!(out, want);
     }

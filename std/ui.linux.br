@@ -84,7 +84,7 @@ var scripted = false
 // What a window's controls held when it closed; they keep answering with it afterwards.
 var frozen: []Frozen
 // While the library itself sets a text, the backend must not report it as typing.
-var muted = 0
+var muted: long = 0
 
 // ---------- constructors ----------
 
@@ -283,7 +283,7 @@ func pref(w: Control, vertical: bool) -> i32
     end
     if w.kind == VSTACK or w.kind == HSTACK
         let along = (w.kind == VSTACK) == vertical
-        var total = 0
+        var total: i32 = 0
         for ch in w.children
             let p = pref(ch, vertical)
             if p < 0
@@ -314,8 +314,8 @@ func place(w: Control, x: i32, y: i32, width: i32, height: i32, dpi: i32)
         return
     end
     let gap = scale(GAP, dpi)
-    var fixed = 0
-    var flex = 0
+    var fixed: i32 = 0
+    var flex: i32 = 0
     for ch in w.children
         let p = pref(ch, vertical)
         if p < 0
@@ -328,7 +328,7 @@ func place(w: Control, x: i32, y: i32, width: i32, height: i32, dpi: i32)
     if vertical
         main = height
     end
-    var each = 0
+    var each: i32 = 0
     if flex > 0
         each = max(main - fixed - gap * (n - 1), 0) / flex
     end
@@ -403,7 +403,7 @@ func closed(window: usize)
             end
         end
     end
-    var open = 0
+    var open: long = 0
     for i in 0..frames.len
         if frames[i].id == window
             frames[i].id = 0
@@ -582,81 +582,81 @@ let KS_END = 0xFF57
 let KS_DELETE = 0xFFFF
 
 type Widget = record
-    id: int
-    kind: int
-    win: int
+    id: long
+    kind: long
+    win: long
     text: text
     items: []text
-    selected: int
-    scroll: int
-    x: int
-    y: int
-    w: int
-    h: int
-    caret: int
+    selected: long
+    scroll: long
+    x: long
+    y: long
+    w: long
+    h: long
+    caret: long
 end
 
 type Win = record
-    id: int
-    pixmap: int
-    w: int
-    h: int
+    id: long
+    pixmap: long
+    w: long
+    h: long
     dirty: bool
     mapped: bool
-    focus: int
-    pressed: int
+    focus: long
+    pressed: long
     open: bool
 end
 
 var connected = false
-var sock = 0
+var sock: long = 0
 var out: sys.Buf
-var out_len = 0
-var next_rid = 0
-var rid_base = 0
-var rid_mask = 0
-var root = 0
-var root_visual = 0
-var root_depth = 24
-var screen_dpi = 96
-var gc = 0
-var font = 0
-var current_fg: int = -1
-var current_bg: int = -1
-var atom_protocols = 0
-var atom_delete = 0
-var min_keycode = 8
-var keysyms_per = 0
+var out_len: long = 0
+var next_rid: long = 0
+var rid_base: long = 0
+var rid_mask: long = 0
+var root: long = 0
+var root_visual: long = 0
+var root_depth: long = 24
+var screen_dpi: long = 96
+var gc: long = 0
+var font: long = 0
+var current_fg: long = -1
+var current_bg: long = -1
+var atom_protocols: long = 0
+var atom_delete: long = 0
+var min_keycode: long = 8
+var keysyms_per: long = 0
 var keysyms: sys.Buf
 var widgets: []Widget
 var wins: []Win
-var next_control = 1
+var next_control: long = 1
 var quit = false
-var alert_window = 0
+var alert_window: long = 0
 var script_text = ""
 var script_read = false
 
 // ---------- raw memory and the socket ----------
 
-func put16(addr: int, v: int)
+func put16(addr: long, v: long)
     sys.put8(addr, v bitand 255)
     sys.put8(addr + 1, (v >> 8) bitand 255)
 end
 
-func put32(addr: int, v: int)
+func put32(addr: long, v: long)
     put16(addr, v bitand 65535)
     put16(addr + 2, (v >> 16) bitand 65535)
 end
 
-func get16(addr: int) -> int
+func get16(addr: long) -> long
     return sys.get8(addr) + sys.get8(addr + 1) * 256
 end
 
-func get32(addr: int) -> int
+func get32(addr: long) -> long
     return get16(addr) + get16(addr + 2) * 65536
 end
 
-func get16s(addr: int) -> int
+func get16s(addr: long) -> long
     let v = get16(addr)
     if v >= 32768
         return v - 65536
@@ -664,19 +664,19 @@ func get16s(addr: int) -> int
     return v
 end
 
-func put_text(addr: int, s: text)
+func put_text(addr: long, s: text)
     for i in 0..s.len
-        sys.put8(addr + i, int(s[i]))
+        sys.put8(addr + i, long(s[i]))
     end
 end
 
-func pad4(n: int) -> int
+func pad4(n: long) -> long
     return (n + 3) / 4 * 4
 end
 
 // Reads exactly `n` bytes; false when the server went away.
-func read_full(addr: int, n: int) -> bool
-    var got = 0
+func read_full(addr: long, n: long) -> bool
+    var got: long = 0
     while got < n
         let r = sys.syscall(0, sock, addr + got, n - got, 0, 0, 0)
         if r == -4
@@ -690,8 +690,8 @@ func read_full(addr: int, n: int) -> bool
     return true
 end
 
-func write_all(addr: int, n: int)
-    var done = 0
+func write_all(addr: long, n: long)
+    var done: long = 0
     while done < n
         let r = sys.syscall(1, sock, addr + done, n - done, 0, 0, 0)
         if r == -4
@@ -706,17 +706,17 @@ end
 
 func flush_x()
     if out_len > 0
-        write_all(int(out.ptr), out_len)
+        write_all(long(out.ptr), out_len)
         out_len = 0
     end
 end
 
 // Starts a request of `words` 4-byte units and returns where to write it.
-func req(opcode: int, data: int, words: int) -> int
+func req(opcode: long, data: long, words: long) -> long
     if out_len + words * 4 > 200000
         flush_x()
     end
-    let at = int(out.ptr) + out_len
+    let at = long(out.ptr) + out_len
     out_len += words * 4
     for i in 0..words * 4
         sys.put8(at + i, 0)
@@ -727,7 +727,7 @@ func req(opcode: int, data: int, words: int) -> int
     return at
 end
 
-func new_rid() -> int
+func new_rid() -> long
     next_rid += 1
     return rid_base + (next_rid bitand rid_mask)
 end
@@ -736,36 +736,36 @@ end
 
 // The value of an environment variable, from the initial environment of the process.
 func env(name: text) -> text
-    let fd = sys.syscall(2, int(c.cstr("/proc/self/environ")), 0, 0, 0, 0, 0)
+    let fd = sys.syscall(2, long(c.cstr("/proc/self/environ")), 0, 0, 0, 0, 0)
     if fd < 0
         return ""
     end
     let size = 262144
     let b = sys.buffer(size)
-    var n = 0
+    var n: long = 0
     while n < size
-        let r = sys.syscall(0, fd, int(b.ptr) + n, size - n, 0, 0, 0)
+        let r = sys.syscall(0, fd, long(b.ptr) + n, size - n, 0, 0, 0)
         if r <= 0
             break
         end
         n += r
     end
     sys.syscall(3, fd, 0, 0, 0, 0, 0)
-    var start = 0
+    var start: long = 0
     while start < n
         var stop = start
-        while stop < n and sys.get8(int(b.ptr) + stop) != 0
+        while stop < n and sys.get8(long(b.ptr) + stop) != 0
             stop += 1
         end
         var same = stop - start > name.len
-        var i = 0
+        var i: long = 0
         while same and i < name.len
-            if sys.get8(int(b.ptr) + start + i) != int(name[i])
+            if sys.get8(long(b.ptr) + start + i) != long(name[i])
                 same = false
             end
             i += 1
         end
-        if same and sys.get8(int(b.ptr) + start + name.len) == 61
+        if same and sys.get8(long(b.ptr) + start + name.len) == 61
             return c.from_bytes(b.ptr + start + name.len + 1, stop - start - name.len - 1)
         end
         start = stop + 1
@@ -774,15 +774,15 @@ func env(name: text) -> text
 end
 
 func read_file(path: text) -> text
-    let fd = sys.syscall(2, int(c.cstr(path)), 0, 0, 0, 0, 0)
+    let fd = sys.syscall(2, long(c.cstr(path)), 0, 0, 0, 0, 0)
     if fd < 0
         return ""
     end
     let size = 1048576
     let b = sys.buffer(size)
-    var n = 0
+    var n: long = 0
     while n < size
-        let r = sys.syscall(0, fd, int(b.ptr) + n, size - n, 0, 0, 0)
+        let r = sys.syscall(0, fd, long(b.ptr) + n, size - n, 0, 0, 0)
         if r <= 0
             break
         end
@@ -803,7 +803,7 @@ func read_cookie(number: text) -> text
         path = home + "/.Xauthority"
     end
     let f = read_file(path)
-    var at = 0
+    var at: long = 0
     while at + 4 <= f.len
         // family (2), then four length-prefixed strings: address, number, name, data
         var p = at + 2
@@ -814,7 +814,7 @@ func read_cookie(number: text) -> text
                 ok = false
                 break
             end
-            let n = int(f[p]) * 256 + int(f[p + 1])
+            let n = long(f[p]) * 256 + long(f[p + 1])
             if p + 2 + n > f.len
                 ok = false
                 break
@@ -860,45 +860,45 @@ func x_connect() -> text
     end
     sock = fd
     let addr = sys.buffer(112)
-    put16(int(addr.ptr), 1)
-    put_text(int(addr.ptr) + 2, path)
-    let rc = sys.syscall(42, fd, int(addr.ptr), 2 + path.len + 1, 0, 0, 0)
+    put16(long(addr.ptr), 1)
+    put_text(long(addr.ptr) + 2, path)
+    let rc = sys.syscall(42, fd, long(addr.ptr), 2 + path.len + 1, 0, 0, 0)
     if rc < 0
         return sys.describe(rc, "cannot connect to {path}")
     end
     out = sys.buffer(200064)
     let cookie = read_cookie(number)
     let name = "MIT-MAGIC-COOKIE-1"
-    var name_len = 0
+    var name_len: long = 0
     if cookie.len > 0
         name_len = name.len
     end
     let total = 12 + pad4(name_len) + pad4(cookie.len)
     let b = sys.buffer(total + 8)
-    sys.put8(int(b.ptr), 108)
-    put16(int(b.ptr) + 2, 11)
-    put16(int(b.ptr) + 4, 0)
-    put16(int(b.ptr) + 6, name_len)
-    put16(int(b.ptr) + 8, cookie.len)
+    sys.put8(long(b.ptr), 108)
+    put16(long(b.ptr) + 2, 11)
+    put16(long(b.ptr) + 4, 0)
+    put16(long(b.ptr) + 6, name_len)
+    put16(long(b.ptr) + 8, cookie.len)
     if cookie.len > 0
-        put_text(int(b.ptr) + 12, name)
-        put_text(int(b.ptr) + 12 + pad4(name_len), cookie)
+        put_text(long(b.ptr) + 12, name)
+        put_text(long(b.ptr) + 12 + pad4(name_len), cookie)
     end
-    write_all(int(b.ptr), total)
+    write_all(long(b.ptr), total)
     let head = sys.buffer(8)
-    if not read_full(int(head.ptr), 8)
+    if not read_full(long(head.ptr), 8)
         return "the server closed the connection during setup"
     end
-    let extra = get16(int(head.ptr) + 6) * 4
+    let extra = get16(long(head.ptr) + 6) * 4
     let body = sys.buffer(extra + 8)
-    if not read_full(int(body.ptr), extra)
+    if not read_full(long(body.ptr), extra)
         return "the server closed the connection during setup"
     end
-    if sys.get8(int(head.ptr)) != 1
-        let n = sys.get8(int(head.ptr) + 1)
+    if sys.get8(long(head.ptr)) != 1
+        let n = sys.get8(long(head.ptr) + 1)
         return "the server refused the connection: " + c.from_bytes(body.ptr, n)
     end
-    let p = int(body.ptr)
+    let p = long(body.ptr)
     rid_base = get32(p + 4)
     rid_mask = get32(p + 8)
     let vendor = get16(p + 16)
@@ -938,27 +938,27 @@ func x_connect() -> text
     sys.put8(gk + 5, count)
     flush_x()
     let reply = sys.buffer(32)
-    if read_full(int(reply.ptr), 32)
-        keysyms_per = sys.get8(int(reply.ptr) + 1)
-        let words = get32(int(reply.ptr) + 4)
+    if read_full(long(reply.ptr), 32)
+        keysyms_per = sys.get8(long(reply.ptr) + 1)
+        let words = get32(long(reply.ptr) + 4)
         keysyms = sys.buffer(words * 4 + 8)
-        read_full(int(keysyms.ptr), words * 4)
+        read_full(long(keysyms.ptr), words * 4)
     end
     read_dpi()
     return ""
 end
 
 // Replies are 32 bytes plus `length` words; events cannot arrive before a window is mapped.
-func intern(name: text) -> int
+func intern(name: text) -> long
     let r = req(16, 0, 2 + pad4(name.len) / 4)
     put16(r + 4, name.len)
     put_text(r + 8, name)
     flush_x()
     let reply = sys.buffer(32)
-    if not read_full(int(reply.ptr), 32)
+    if not read_full(long(reply.ptr), 32)
         return 0
     end
-    return get32(int(reply.ptr) + 8)
+    return get32(long(reply.ptr) + 8)
 end
 
 // Xft.dpi from the root window's RESOURCE_MANAGER property, when the desktop sets it.
@@ -971,13 +971,13 @@ func read_dpi()
     put32(r + 20, 4096)
     flush_x()
     let head = sys.buffer(32)
-    if not read_full(int(head.ptr), 32)
+    if not read_full(long(head.ptr), 32)
         return
     end
-    let words = get32(int(head.ptr) + 4)
-    let len = get32(int(head.ptr) + 16)
+    let words = get32(long(head.ptr) + 4)
+    let len = get32(long(head.ptr) + 16)
     let body = sys.buffer(words * 4 + 8)
-    read_full(int(body.ptr), words * 4)
+    read_full(long(body.ptr), words * 4)
     if len == 0
         return
     end
@@ -1005,7 +1005,7 @@ end
 
 // ---------- widget and window tables ----------
 
-func widget_index(id: int) -> int
+func widget_index(id: long) -> long
     for i in 0..widgets.len
         if widgets[i].id == id
             return i
@@ -1014,7 +1014,7 @@ func widget_index(id: int) -> int
     return -1
 end
 
-func win_index(id: int) -> int
+func win_index(id: long) -> long
     for i in 0..wins.len
         if wins[i].id == id
             return i
@@ -1023,7 +1023,7 @@ func win_index(id: int) -> int
     return -1
 end
 
-func mark_dirty(window: int)
+func mark_dirty(window: long)
     let w = win_index(window)
     if w >= 0
         wins[w].dirty = true
@@ -1039,7 +1039,7 @@ func be_create(kind: i32, label: text) -> usize
     let id = next_control
     next_control += 1
     var items: []text
-    widgets.add(Widget{ id: id, kind: int(kind), win: 0, text: label, items: items, selected: -1, caret: label.len })
+    widgets.add(Widget{ id: id, kind: long(kind), win: 0, text: label, items: items, selected: -1, caret: label.len })
     return usize(id)
 end
 
@@ -1077,7 +1077,7 @@ func be_window(title: text, width: i32, height: i32) -> usize
     return usize(id)
 end
 
-func set_title(id: int, title: text)
+func set_title(id: long, title: text)
     let r = req(18, 0, 6 + pad4(title.len) / 4)
     put32(r + 4, id)
     put32(r + 8, 39)
@@ -1090,7 +1090,7 @@ end
 // ---------- the backend functions the shared code calls ----------
 
 func be_text(id: usize) -> text
-    let i = widget_index(int(id))
+    let i = widget_index(long(id))
     if i < 0
         return ""
     end
@@ -1099,7 +1099,7 @@ end
 
 // Sets the text without telling anyone; the shared code runs the change handlers.
 func be_set_text(id: usize, value: text)
-    let i = widget_index(int(id))
+    let i = widget_index(long(id))
     if i < 0
         return
     end
@@ -1113,7 +1113,7 @@ func be_text_len(id: usize) -> i32
 end
 
 func be_list_count(id: usize) -> i32
-    let i = widget_index(int(id))
+    let i = widget_index(long(id))
     if i < 0
         return 0
     end
@@ -1121,7 +1121,7 @@ func be_list_count(id: usize) -> i32
 end
 
 func be_list_selected(id: usize) -> i32
-    let i = widget_index(int(id))
+    let i = widget_index(long(id))
     if i < 0
         return -1
     end
@@ -1129,17 +1129,17 @@ func be_list_selected(id: usize) -> i32
 end
 
 func be_list_select(id: usize, index: i32)
-    let i = widget_index(int(id))
+    let i = widget_index(long(id))
     if i < 0
         return
     end
-    widgets[i].selected = int(index)
+    widgets[i].selected = long(index)
     keep_visible(i)
     mark_dirty(widgets[i].win)
 end
 
 func be_list_add(id: usize, item: text)
-    let i = widget_index(int(id))
+    let i = widget_index(long(id))
     if i < 0
         return
     end
@@ -1148,11 +1148,11 @@ func be_list_add(id: usize, item: text)
 end
 
 func be_list_remove(id: usize, index: i32)
-    let i = widget_index(int(id))
+    let i = widget_index(long(id))
     if i < 0
         return
     end
-    let at = int(index)
+    let at = long(index)
     if at < 0 or at >= widgets[i].items.len
         return
     end
@@ -1173,7 +1173,7 @@ func be_list_remove(id: usize, index: i32)
 end
 
 func be_list_clear(id: usize)
-    let i = widget_index(int(id))
+    let i = widget_index(long(id))
     if i < 0
         return
     end
@@ -1185,29 +1185,29 @@ func be_list_clear(id: usize)
 end
 
 func be_adopt(window: usize, id: usize)
-    let i = widget_index(int(id))
+    let i = widget_index(long(id))
     if i >= 0
-        widgets[i].win = int(window)
-        if wins[win_index(int(window))].focus == 0 and widgets[i].kind != LABEL
-            wins[win_index(int(window))].focus = int(id)
+        widgets[i].win = long(window)
+        if wins[win_index(long(window))].focus == 0 and widgets[i].kind != LABEL
+            wins[win_index(long(window))].focus = long(id)
         end
     end
 end
 
 func be_move(id: usize, x: i32, y: i32, width: i32, height: i32)
-    let i = widget_index(int(id))
+    let i = widget_index(long(id))
     if i < 0
         return
     end
-    widgets[i].x = int(x)
-    widgets[i].y = int(y)
-    widgets[i].w = int(width)
-    widgets[i].h = int(height)
+    widgets[i].x = long(x)
+    widgets[i].y = long(y)
+    widgets[i].w = long(width)
+    widgets[i].h = long(height)
     mark_dirty(widgets[i].win)
 end
 
 func be_client_width(window: usize) -> i32
-    let w = win_index(int(window))
+    let w = win_index(long(window))
     if w < 0
         return 0
     end
@@ -1215,7 +1215,7 @@ func be_client_width(window: usize) -> i32
 end
 
 func be_client_height(window: usize) -> i32
-    let w = win_index(int(window))
+    let w = win_index(long(window))
     if w < 0
         return 0
     end
@@ -1228,14 +1228,14 @@ end
 
 // The font is fixed, so a new layout tree only needs a repaint.
 func be_style(window: usize, root: Control)
-    mark_dirty(int(window))
+    mark_dirty(long(window))
 end
 
 func be_show(window: usize)
     let m = req(8, 0, 2)
-    put32(m + 4, int(window))
+    put32(m + 4, long(window))
     flush_x()
-    let w = win_index(int(window))
+    let w = win_index(long(window))
     if w >= 0
         wins[w].mapped = true
         wins[w].dirty = true
@@ -1243,7 +1243,7 @@ func be_show(window: usize)
 end
 
 func be_close(window: usize)
-    let w = win_index(int(window))
+    let w = win_index(long(window))
     if w < 0 or not wins[w].open
         return
     end
@@ -1254,7 +1254,7 @@ func be_close(window: usize)
         wins[w].pixmap = 0
     end
     let d = req(4, 0, 2)
-    put32(d + 4, int(window))
+    put32(d + 4, long(window))
     flush_x()
     closed(window)
 end
@@ -1264,7 +1264,7 @@ func be_quit()
 end
 
 func be_exit(code: i32)
-    sys.syscall(231, int(code), 0, 0, 0, 0, 0)
+    sys.syscall(231, long(code), 0, 0, 0, 0, 0)
 end
 
 // The contents of the file named by BRASA_UI_SCRIPT, or empty text.
@@ -1278,7 +1278,7 @@ end
 
 // ---------- drawing ----------
 
-func set_colors(fg: int, bg: int)
+func set_colors(fg: long, bg: long)
     if fg != current_fg or bg != current_bg
         let r = req(56, 0, 5)
         put32(r + 4, gc)
@@ -1290,7 +1290,7 @@ func set_colors(fg: int, bg: int)
     end
 end
 
-func fill(target: int, x: int, y: int, w: int, h: int, color: int)
+func fill(target: long, x: long, y: long, w: long, h: long, color: long)
     if w <= 0 or h <= 0
         return
     end
@@ -1304,7 +1304,7 @@ func fill(target: int, x: int, y: int, w: int, h: int, color: int)
     put16(r + 18, h)
 end
 
-func frame(target: int, x: int, y: int, w: int, h: int, color: int)
+func frame(target: long, x: long, y: long, w: long, h: long, color: long)
     if w <= 1 or h <= 1
         return
     end
@@ -1318,7 +1318,7 @@ func frame(target: int, x: int, y: int, w: int, h: int, color: int)
     put16(r + 18, h - 1)
 end
 
-func draw_text(target: int, x: int, baseline: int, s: text, fg: int, bg: int)
+func draw_text(target: long, x: long, baseline: long, s: text, fg: long, bg: long)
     var shown = s
     if shown.len > 255
         shown = s.slice(0, 255)
@@ -1336,7 +1336,7 @@ func draw_text(target: int, x: int, baseline: int, s: text, fg: int, bg: int)
 end
 
 // Limits drawing to a rectangle (width 0 removes the limit).
-func clip(x: int, y: int, w: int, h: int)
+func clip(x: long, y: long, w: long, h: long)
     if w == 0
         let r = req(56, 0, 4)
         put32(r + 4, gc)
@@ -1354,7 +1354,7 @@ func clip(x: int, y: int, w: int, h: int)
     put16(r + 18, h)
 end
 
-func rows_visible(i: int) -> int
+func rows_visible(i: long) -> long
     var n = (widgets[i].h - 4) / ROW
     if n < 1
         n = 1
@@ -1362,7 +1362,7 @@ func rows_visible(i: int) -> int
     return n
 end
 
-func keep_visible(i: int)
+func keep_visible(i: long)
     let sel = widgets[i].selected
     if sel < 0
         return
@@ -1376,11 +1376,11 @@ func keep_visible(i: int)
     end
 end
 
-func baseline_in(y: int, h: int) -> int
+func baseline_in(y: long, h: long) -> long
     return y + (h - CHAR_H) / 2 + ASCENT
 end
 
-func paint_widget(target: int, i: int, win: Win)
+func paint_widget(target: long, i: long, win: Win)
     let x = widgets[i].x
     let y = widgets[i].y
     let w = widgets[i].w
@@ -1414,7 +1414,7 @@ func paint_widget(target: int, i: int, win: Win)
         frame(target, x, y, w, h, border)
         // keep the caret visible: show the tail of long text
         let room = (w - 8) / CHAR_W
-        var first = 0
+        var first: long = 0
         if widgets[i].caret > room
             first = widgets[i].caret - room
         end
@@ -1449,13 +1449,13 @@ func paint_widget(target: int, i: int, win: Win)
             fill(target, x + w - 7, y + 2, 5, h - 4, C_TRACK)
             let total = widgets[i].items.len
             let thumb = max(i32((h - 4) * rows / total), 8)
-            let top = (h - 4 - int(thumb)) * widgets[i].scroll / (total - rows)
-            fill(target, x + w - 7, y + 2 + top, 5, int(thumb), C_BORDER)
+            let top = (h - 4 - long(thumb)) * widgets[i].scroll / (total - rows)
+            fill(target, x + w - 7, y + 2 + top, 5, long(thumb), C_BORDER)
         end
     end
 end
 
-func paint(w: int)
+func paint(w: long)
     let wi = win_index(w)
     if wi < 0 or not wins[wi].open or not wins[wi].mapped
         return
@@ -1502,11 +1502,11 @@ end
 // ---------- input ----------
 
 // The keysym of a key press (the shifted column when Shift or Caps Lock changes the letter).
-func keysym_of(code: int, state: int) -> int
+func keysym_of(code: long, state: long) -> long
     if keysyms_per == 0 or code < min_keycode
         return 0
     end
-    let base = int(keysyms.ptr) + (code - min_keycode) * keysyms_per * 4
+    let base = long(keysyms.ptr) + (code - min_keycode) * keysyms_per * 4
     let plain = get32(base)
     var shifted = plain
     if keysyms_per > 1
@@ -1531,8 +1531,8 @@ func keysym_of(code: int, state: int) -> int
 end
 
 // The UTF-8 text of a printable keysym, or empty text.
-func char_of(sym: int) -> text
-    var cp = 0
+func char_of(sym: long) -> text
+    var cp: long = 0
     if sym >= 32 and sym <= 126
         cp = sym
     end
@@ -1544,16 +1544,16 @@ func char_of(sym: int) -> text
     end
     let b = sys.buffer(4)
     if cp < 128
-        sys.put8(int(b.ptr), cp)
+        sys.put8(long(b.ptr), cp)
         return c.from_bytes(b.ptr, 1)
     end
-    sys.put8(int(b.ptr), 192 + (cp >> 6))
-    sys.put8(int(b.ptr) + 1, 128 + (cp bitand 63))
+    sys.put8(long(b.ptr), 192 + (cp >> 6))
+    sys.put8(long(b.ptr) + 1, 128 + (cp bitand 63))
     return c.from_bytes(b.ptr, 2)
 end
 
-func focusables(w: int) -> []int
-    var ids: []int
+func focusables(w: long) -> []long
+    var ids: []long
     for i in 0..widgets.len
         if widgets[i].win == w and widgets[i].kind != LABEL
             ids.add(widgets[i].id)
@@ -1562,7 +1562,7 @@ func focusables(w: int) -> []int
     return ids
 end
 
-func set_focus(w: int, id: int)
+func set_focus(w: long, id: long)
     let wi = win_index(w)
     if wi >= 0
         wins[wi].focus = id
@@ -1571,7 +1571,7 @@ func set_focus(w: int, id: int)
 end
 
 // The text box edit keys. Changes go through the library's change handlers.
-func edit_key(i: int, sym: int, typed: text)
+func edit_key(i: long, sym: long, typed: text)
     let id = usize(widgets[i].id)
     let old = widgets[i].text
     let caret = widgets[i].caret
@@ -1602,14 +1602,14 @@ func edit_key(i: int, sym: int, typed: text)
     end
 end
 
-func user_text(i: int, value: text, caret: int)
+func user_text(i: long, value: text, caret: long)
     widgets[i].text = value
     widgets[i].caret = caret
     mark_dirty(widgets[i].win)
     fire(usize(widgets[i].id), EV_CHANGE)
 end
 
-func list_key(i: int, delta: int)
+func list_key(i: long, delta: long)
     let n = widgets[i].items.len
     if n == 0
         return
@@ -1629,7 +1629,7 @@ func list_key(i: int, delta: int)
     end
 end
 
-func key_pressed(w: int, code: int, state: int)
+func key_pressed(w: long, code: long, state: long)
     let sym = keysym_of(code, state)
     let wi = win_index(w)
     if wi < 0
@@ -1642,7 +1642,7 @@ func key_pressed(w: int, code: int, state: int)
     if sym == KS_TAB
         let ids = focusables(w)
         if ids.len > 0
-            var at = 0
+            var at: long = 0
             for k in 0..ids.len
                 if ids[k] == wins[wi].focus
                     at = k + 1
@@ -1683,12 +1683,12 @@ func key_pressed(w: int, code: int, state: int)
     end
 end
 
-func button_pressed(w: int, button: int, x: int, y: int)
+func button_pressed(w: long, button: long, x: long, y: long)
     let wi = win_index(w)
     if wi < 0
         return
     end
-    var hit = -1
+    var hit: long = -1
     for i in 0..widgets.len
         if widgets[i].win == w and x >= widgets[i].x and x < widgets[i].x + widgets[i].w and y >= widgets[i].y and y < widgets[i].y + widgets[i].h
             hit = i
@@ -1749,7 +1749,7 @@ func button_pressed(w: int, button: int, x: int, y: int)
     end
 end
 
-func button_released(w: int, x: int, y: int)
+func button_released(w: long, x: long, y: long)
     let wi = win_index(w)
     if wi < 0 or wins[wi].pressed == 0
         return
@@ -1765,7 +1765,7 @@ end
 
 // ---------- the event loop ----------
 
-func dispatch(ev: int)
+func dispatch(ev: long)
     let kind = sys.get8(ev) bitand 127
     if kind == 2
         key_pressed(get32(ev + 12), sys.get8(ev + 1), get16(ev + 28))
@@ -1805,7 +1805,7 @@ func dispatch(ev: int)
 end
 
 // Handles events until `stop` is closed (0: until the last window is closed).
-func event_loop(stop: int)
+func event_loop(stop: long)
     let ev = sys.buffer(32)
     paint_dirty()
     while not quit
@@ -1816,12 +1816,12 @@ func event_loop(stop: int)
             end
         end
         flush_x()
-        if not read_full(int(ev.ptr), 32)
+        if not read_full(long(ev.ptr), 32)
             quit = true
             return
         end
         // errors and replies are ignored
-        dispatch(int(ev.ptr))
+        dispatch(long(ev.ptr))
         paint_dirty()
     end
 end
@@ -1830,7 +1830,7 @@ func be_run()
     if not connected
         return
     end
-    var open = 0
+    var open: long = 0
     for w in wins
         if w.open
             open += 1
@@ -1843,7 +1843,7 @@ func be_run()
 end
 
 // Makes a window the alert that Escape closes.
-func set_alert_window(id: int)
+func set_alert_window(id: long)
     alert_window = id
 end
 
@@ -1862,8 +1862,8 @@ func be_alert(message: text, title: text)
         win.close()
     end)
     win.layout(vstack(label, ok))
-    alert_window = int(win.id)
+    alert_window = long(win.id)
     win.show()
-    event_loop(int(win.id))
+    event_loop(long(win.id))
     alert_window = 0
 end

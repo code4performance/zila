@@ -1,6 +1,6 @@
 //! Native x86-64 back end for Brasa (Windows, Win64 ABI).
 //!
-//! Brasa source -> x86-64 assembly (MASM syntax) -> `ml64` + `link` -> PE .exe.
+//! Brasa source -> x86-64 assembly (MASM-style syntax) -> built-in assembler -> PE .exe (`pe.rs`) or ELF.
 //! No C, no LLVM, no C runtime: the executable only imports from the
 //! Windows DLLs the program uses (kernel32 always; user32/gdi32 via `#[link]`).
 //!
@@ -24,7 +24,8 @@
 //!   it is stored somewhere else. `ref` parameters and receivers share it.
 //! - `[]T`: `[len][cap][data*][elements_are_heap]`, shared by reference.
 //! - enums: a number when no variant has data, otherwise `[tag][fields...]`.
-//! - `T or error`: a box `[error][value]`; `error` is `[message]`.
+//! - `T or error`: a box `[error][value]`; `error` is `[message][kind][cause]` (the cause is an
+//!   `error` or 0). An `ErrorKind` is an interned text `package.Name`: equal names, same object.
 //! - `func(...)` values: `[code][env]` (a closure; captures by value).
 //!   `extern "C" func(...)` values are raw code addresses (C callbacks).
 //!
@@ -34,8 +35,6 @@
 use crate::ast::*;
 use crate::parser::parse_source;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::path::{Path, PathBuf};
-use std::process::Command;
 
 type R<T> = Result<T, String>;
 
@@ -81,6 +80,7 @@ pub fn std_source(name: &str) -> Option<&'static str> {
         "float" => Some(include_str!("../std/float.br")),
         "math" => Some(include_str!("../std/math.br")),
         "text" => Some(include_str!("../std/text.br")),
+        "errors" => Some(include_str!("../std/errors.br")),
         "list" => Some(include_str!("../std/list.br")),
         "format" => Some(include_str!("../std/format.br")),
         "set" => Some(include_str!("../std/set.br")),
@@ -113,6 +113,8 @@ enum Ty {
     Ptr(Box<Ty>),
     Func { params: Vec<Ty>, ret: Box<Ty>, ext: bool },
     Err,
+    /// `ErrorKind`: an interned text `package.Name` (equal kinds are the same object).
+    Kind,
     /// `T or error` (`T` is `Void` for `-> error`).
     Result(Box<Ty>),
     Chan(Box<Ty>),
@@ -126,6 +128,10 @@ enum Ty {
 impl Ty {
     fn i64() -> Ty {
         Ty::Int { bits: 64, signed: true }
+    }
+    /// `int`: the everyday name of `i32`; the default type of an integer literal and of lengths and indices.
+    fn int() -> Ty {
+        Ty::Int { bits: 32, signed: true }
     }
     fn is_int(&self) -> bool {
         matches!(self, Ty::Int { .. })
@@ -146,13 +152,15 @@ impl Ty {
         }
     }
     fn nullable(&self) -> bool {
-        matches!(self, Ty::Nil | Ty::Text | Ty::Rec(_) | Ty::List(_) | Ty::Map(..) | Ty::Ptr(_) | Ty::Func { .. } | Ty::Chan(_) | Ty::Param { .. })
+        matches!(self, Ty::Nil | Ty::Text | Ty::Err | Ty::Rec(_) | Ty::List(_) | Ty::Map(..) | Ty::Ptr(_) | Ty::Func { .. } | Ty::Chan(_) | Ty::Param { .. })
     }
     fn show(&self) -> String {
         match self {
             Ty::Void => "nothing".into(),
             Ty::Nil => "nil".into(),
             Ty::Bool => "bool".into(),
+            Ty::Int { bits: 32, signed: true } => "int".into(),
+            Ty::Int { bits: 64, signed: true } => "long".into(),
             Ty::Int { bits, signed } => format!("{}{}", if *signed { "i" } else { "u" }, bits),
             Ty::Float { bits: 32 } => "f32".into(),
             Ty::Float { .. } => "float".into(),
@@ -163,6 +171,7 @@ impl Ty {
             Ty::Map(k, v) => format!("Map<{}, {}>", k.show(), v.show()),
             Ty::Ptr(t) => format!("*{}", t.show()),
             Ty::Err => "error".into(),
+            Ty::Kind => "ErrorKind".into(),
             Ty::Result(t) => {
                 if **t == Ty::Void {
                     "error".into()
@@ -188,10 +197,44 @@ impl Ty {
 }
 
 /// Can a value of type `got` be stored where `want` is expected?
+/// Does every value of integer type `from` fit `to`? (the implicit, lossless widening)
+fn widens(from: &Ty, to: &Ty) -> bool {
+    match (from, to) {
+        (Ty::Int { bits: fb, signed: fs }, Ty::Int { bits: tb, signed: ts }) => {
+            if fs == ts {
+                fb <= tb
+            } else {
+                // unsigned into a strictly wider signed type
+                !*fs && *ts && fb < tb
+            }
+        }
+        _ => false,
+    }
+}
+
+/// The wider of two integer operand types, when one converts to the other.
+fn wider(a: &Ty, b: &Ty) -> Option<Ty> {
+    if widens(a, b) {
+        Some(b.clone())
+    } else if widens(b, a) {
+        Some(a.clone())
+    } else {
+        None
+    }
+}
+
+/// Is a comparison of `a` with `b` unsigned? Two integers compare as their wider type.
+fn cmp_unsigned(a: &Ty, b: &Ty) -> bool {
+    match wider(a, b) {
+        Some(w) if a.is_int() && b.is_int() => w.is_unsigned(),
+        _ => a.is_unsigned() || b.is_unsigned(),
+    }
+}
+
 fn compatible(want: &Ty, got: &Ty) -> bool {
     match (want, got) {
         (a, b) if a == b => true,
-        (Ty::Int { .. }, Ty::Int { .. }) => true,
+        (Ty::Int { .. }, Ty::Int { .. }) => widens(got, want),
         (Ty::Int { .. }, Ty::Bool) | (Ty::Bool, Ty::Int { .. }) => true,
         (w, Ty::Nil) => w.nullable(),
         (Ty::Ptr(_), Ty::Ptr(_)) => true,
@@ -205,7 +248,9 @@ fn compatible(want: &Ty, got: &Ty) -> bool {
         (Ty::Future(a), Ty::Future(b)) => compatible(a, b),
         (Ty::Rec(a), Ty::Future(_)) if a == "future.Future" => true,
         (Ty::Func { params: p1, ret: r1, ext: e1 }, Ty::Func { params: p2, ret: r2, ext: e2 }) => {
-            e1 == e2 && p1.len() == p2.len() && compatible(r1, r2)
+            // function values need the exact integer types (no widening of a signature)
+            let exact = |a: &Ty, b: &Ty| !(a.is_int() && b.is_int()) || a == b;
+            e1 == e2 && p1.len() == p2.len() && compatible(r1, r2) && exact(r1, r2) && p1.iter().zip(p2).all(|(a, b)| exact(a, b))
         }
         _ => false,
     }
@@ -435,6 +480,14 @@ fn literal_bits(e: &Expr, ty: &Ty) -> Option<i64> {
     }
 }
 
+fn is_int_literal(e: &Expr) -> bool {
+    match &e.kind {
+        ExprKind::Int(_) => true,
+        ExprKind::Unary { op: "-", expr } => matches!(expr.kind, ExprKind::Int(_)),
+        _ => false,
+    }
+}
+
 fn is_place(e: &Expr) -> bool {
     matches!(e.kind, ExprKind::Ident(_) | ExprKind::Field { .. } | ExprKind::Index { .. } | ExprKind::Deref(_))
 }
@@ -444,7 +497,8 @@ fn int_type(name: &str) -> Option<Ty> {
         "i8" => (8, true),
         "i16" => (16, true),
         "i32" => (32, true),
-        "i64" | "isize" | "int" => (64, true),
+        "int" => (32, true),
+        "i64" | "isize" | "long" => (64, true),
         "u8" | "byte" => (8, false),
         "u16" => (16, false),
         "u32" => (32, false),
@@ -452,6 +506,15 @@ fn int_type(name: &str) -> Option<Ty> {
         _ => return None,
     };
     Some(Ty::Int { bits, signed })
+}
+
+/// Does the literal `n` (negated when `neg`) fit integer type `t`?
+fn lit_fits(n: u64, neg: bool, t: &Ty) -> bool {
+    let Ty::Int { bits, signed } = t else { return true };
+    let v = n as i128;
+    let v = if neg { -v } else { v };
+    let (lo, hi) = if *signed { (-(1i128 << (bits - 1)), (1i128 << (bits - 1)) - 1) } else { (0, (1i128 << bits) - 1) };
+    lo <= v && v <= hi
 }
 
 fn c_type(name: &str) -> Option<Ty> {
@@ -559,11 +622,15 @@ pub struct CompileOptions {
     /// Constant folding, direct operands, fused compare-and-branch, peephole cleanups and the
     /// cheaper function entry. `--no-opt` turns it off.
     pub optimize: bool,
+    /// Set by `--test` when it builds the test entry point: a failing `assert` in a function
+    /// that returns `error` then returns the error (one test fails, the run goes on). It is not
+    /// a command-line flag; a normal build aborts instead.
+    pub test_mode: bool,
 }
 
 impl Default for CompileOptions {
     fn default() -> Self {
-        CompileOptions { optimize: true }
+        CompileOptions { optimize: true, test_mode: false }
     }
 }
 
@@ -571,6 +638,7 @@ pub struct Compiler {
     target: Target,
     /// All optimizations are on (see `CompileOptions`).
     opt: bool,
+    test_mode: bool,
     modules: Vec<Module>,
     imports: HashMap<String, HashSet<String>>,
     rec_decls: HashMap<String, (String, Vec<Field>)>,
@@ -592,6 +660,10 @@ pub struct Compiler {
     globals: HashMap<(String, String), Global>,
     libs: BTreeSet<String>,
     extern_syms: BTreeSet<String>,
+    /// the library of each extern symbol, from the `#[link]` before it (Windows imports)
+    extern_lib: BTreeMap<String, String>,
+    /// Windows imports as `(dll, symbols)`, `kernel32` first; filled by `generate`
+    win_imports: Vec<(String, Vec<String>)>,
     /// functions handed to C as callbacks (Linux: each gets a System V entry thunk)
     callbacks: BTreeMap<String, (Vec<u8>, u8)>,
     /// the divisor being compiled is a literal that is not zero
@@ -633,6 +705,7 @@ pub struct Compiler {
     /// Bound checks met before all methods were known: (type, interface, module, line).
     deferred_bounds: Vec<(Ty, String, u32)>,
     inst_count: usize,
+    custom_allocator: Option<crate::noalloc::CustomAllocatorInfo>,
 }
 
 struct Pending {
@@ -667,6 +740,7 @@ impl Compiler {
         Compiler {
             target,
             opt: true,
+            test_mode: false,
             modules: Vec::new(),
             imports: HashMap::new(),
             rec_decls: HashMap::new(),
@@ -685,6 +759,8 @@ impl Compiler {
             globals: HashMap::new(),
             libs: BTreeSet::new(),
             extern_syms: BTreeSet::new(),
+            extern_lib: BTreeMap::new(),
+            win_imports: Vec::new(),
             callbacks: BTreeMap::new(),
             div_nonzero: false,
             data: Vec::new(),
@@ -710,6 +786,7 @@ impl Compiler {
             declared: false,
             deferred_bounds: Vec::new(),
             inst_count: 0,
+            custom_allocator: None,
         }
     }
 
@@ -746,6 +823,12 @@ impl Compiler {
         self.fs.free.push(o);
     }
 
+    /// Loads the text `file.br:line` of the statement being compiled into `reg`, for a failing path.
+    fn at(&mut self, reg: &str) {
+        let l = self.string_lit(&format!("{}.br:{}", self.cur_mod, self.line));
+        self.e(format!("lea {}, {}", reg, l));
+    }
+
     fn string_lit(&mut self, s: &str) -> String {
         if let Some(l) = self.strings.get(s) {
             return l.clone();
@@ -766,7 +849,7 @@ impl Compiler {
 
     fn is_rc(&self, t: &Ty) -> bool {
         match t {
-            Ty::Text | Ty::Rec(_) | Ty::List(_) | Ty::Map(..) | Ty::Err | Ty::Result(_) | Ty::Chan(_) | Ty::Future(_) => true,
+            Ty::Text | Ty::Kind | Ty::Rec(_) | Ty::List(_) | Ty::Map(..) | Ty::Err | Ty::Result(_) | Ty::Chan(_) | Ty::Future(_) => true,
             Ty::Func { ext, .. } => !*ext,
             Ty::Enum(q) => self.enum_payload.contains(q),
             _ => false,
@@ -932,13 +1015,12 @@ impl Compiler {
         }
     }
 
-    /// `assert(cond)`, `assert(cond, "message")` and `assert_eq(a, b)`: when the check fails
-    /// the enclosing function returns an error `line N: ...`. Written as the statements a
-    /// program could have written itself.
+    /// `assert(cond)`, `assert(cond, "message")` and `assert_eq(a, b)`: under `--test`, in a
+    /// function that returns an error, a failed check returns the error `line N: ...` (one test
+    /// fails and the run goes on); anywhere else it aborts with the same text and the location
+    /// of the assertion. Written as the statements a program could have written itself.
     fn assert_stmt(&mut self, name: &str, args: &[Arg], line: u32) -> R<()> {
-        if !matches!(self.fs.ret, Ty::Result(_)) {
-            return self.err(format!("{} needs a function that returns an error: write `func name() -> error`", name));
-        }
+        let returns = self.test_mode && matches!(self.fs.ret, Ty::Result(_));
         let (min, max) = if name == "assert" { (1, 2) } else { (2, 2) };
         if args.len() < min || args.len() > max || args.iter().any(|a| a.name.is_some() || a.by_ref || a.spread) {
             return self.err(if name == "assert" {
@@ -950,13 +1032,18 @@ impl Compiler {
         let mk = |kind: ExprKind| Expr { kind, line };
         let fail = |parts: Vec<TextPart>| {
             let call = mk(ExprKind::Call {
-                callee: Box::new(mk(ExprKind::Ident("error".into()))),
+                callee: Box::new(mk(ExprKind::Ident(if returns { "error" } else { "__abort" }.into()))),
                 args: vec![Arg { name: None, by_ref: false, spread: false, value: mk(ExprKind::Text(parts)) }],
                 targs: Vec::new(),
             });
-            vec![Stmt { kind: StmtKind::Return(Some(call)), line }]
+            if returns {
+                vec![Stmt { kind: StmtKind::Return(Some(call)), line }]
+            } else {
+                vec![Stmt { kind: StmtKind::Expr(call), line }]
+            }
         };
-        let prefix = TextPart::Lit(format!("line {}: ", line));
+        // the abort message carries the location already
+        let prefix = TextPart::Lit(if returns { format!("line {}: ", line) } else { String::new() });
         let mut stmts: Vec<Stmt> = Vec::new();
         let (cond, body) = if name == "assert" {
             let mut parts = vec![prefix];
@@ -1177,6 +1264,8 @@ impl Compiler {
         let mods: Vec<(String, Vec<Decl>)> = self.modules.iter().map(|m| (m.name.clone(), m.file.decls.clone())).collect();
         for (m, decls) in &mods {
             self.cur_mod = m.clone();
+            // a `#[link]` names the library of the externs that follow it, up to the next `#[link]`
+            let mut cur_lib: Option<String> = None;
             for d in decls {
                 self.line = d.line;
                 match &d.kind {
@@ -1208,13 +1297,21 @@ impl Compiler {
                     }
                     DeclKind::Extern(ed) => {
                         for a in &d.attrs {
+                            if a.name == "link_src" && self.target == Target::Windows {
+                                self.line = d.line;
+                                return self.err("#[link_src] is not supported on Windows: the compiler no longer builds C source files there (build the C code into a DLL and use #[link])");
+                            }
                             if a.name == "link" {
                                 if let Some(Expr { kind: ExprKind::Text(parts), .. }) = a.args.first() {
                                     if let Some(TextPart::Lit(l)) = parts.first() {
                                         self.libs.insert(l.clone());
+                                        cur_lib = Some(l.clone());
                                     }
                                 }
                             }
+                        }
+                        if let Some(l) = &cur_lib {
+                            self.extern_lib.entry(ed.name.clone()).or_insert_with(|| l.clone());
                         }
                         let mut params = Vec::new();
                         for p in &ed.params {
@@ -1246,7 +1343,13 @@ impl Compiler {
                         let konst = if vd.mutable { None } else { vd.value.as_ref().and_then(|e| self.const_eval(e, m)) };
                         let ty = match (&vd.ty, &konst) {
                             (Some(t), _) => self.resolve(t, m)?,
-                            (None, Some(_)) => Ty::i64(),
+                            (None, Some(k)) => {
+                                let t = Ty::int();
+                                if !lit_fits(k.unsigned_abs(), *k < 0, &t) {
+                                    return self.err(format!("constant {} is out of range for int; write `let {}: long = ...`", k, vd.name));
+                                }
+                                t
+                            }
                             (None, None) => self.infer_global(vd.value.as_ref(), m)?,
                         };
                         self.globals.insert(
@@ -1259,6 +1362,12 @@ impl Compiler {
             }
         }
         self.declared = true;
+        let mods: Vec<(String, File)> = self.modules.iter().map(|m| (m.name.clone(), m.file.clone())).collect();
+        let mut ifaces = HashSet::new();
+        for k in self.interfaces.keys() {
+            ifaces.insert(k.clone());
+        }
+        self.custom_allocator = crate::noalloc::check_program(&mods, &ifaces)?;
         Ok(())
     }
 
@@ -1335,7 +1444,7 @@ impl Compiler {
         Ok(match &e.kind {
             ExprKind::Bool(_) => Ty::Bool,
             ExprKind::Text(_) => Ty::Text,
-            ExprKind::Int(_) | ExprKind::Char(_) => Ty::i64(),
+            ExprKind::Int(_) | ExprKind::Char(_) => Ty::int(),
             ExprKind::Float(_) => Ty::Float { bits: 64 },
             ExprKind::Record { path, .. } => Ty::Rec(self.record_name(path, m)?),
             ExprKind::Call { callee, .. } => match &callee.kind {
@@ -1406,6 +1515,7 @@ impl Compiler {
                         "bool" => return Ok(Ty::Bool),
                         "text" => return Ok(Ty::Text),
                         "error" => return Ok(Ty::Err),
+                        "ErrorKind" => return Ok(Ty::Kind),
                         "float" | "f64" => return Ok(Ty::Float { bits: 64 }),
                         "f32" => return Ok(Ty::Float { bits: 32 }),
                         "List" if args.len() == 1 => return Ok(Ty::List(Box::new(self.resolve(&args[0], m)?))),
@@ -1540,11 +1650,22 @@ option casemap:none
         if !bare && !linux {
             for s in ["ExitProcess", "GetProcessHeap", "HeapAlloc", "HeapFree", "GetStdHandle", "WriteFile", "SetConsoleOutputCP"] {
                 self.extern_syms.insert(s.to_string());
+                self.extern_lib.entry(s.to_string()).or_insert_with(|| "kernel32".to_string());
             }
+            let mut by_lib: BTreeMap<String, Vec<String>> = BTreeMap::new();
             for s in &self.extern_syms {
-                out.push_str(&format!("extern {}:proc
-", s));
+                let Some(lib) = self.extern_lib.get(s) else {
+                    return Err(format!("extern function '{}' has no #[link(\"library\")] naming the library that provides it", s));
+                };
+                by_lib.entry(lib.clone()).or_default().push(s.clone());
             }
+            // kernel32 first (the runtime), the others by name, so the image is reproducible
+            let mut imports: Vec<(String, Vec<String>)> = Vec::new();
+            if let Some(k) = by_lib.remove("kernel32") {
+                imports.push(("kernel32".to_string(), k));
+            }
+            imports.extend(by_lib);
+            self.win_imports = imports;
         }
         out.push_str("
 .code
@@ -1594,7 +1715,7 @@ brasa_main_ok:
             start.push_str("brasa_start proc
     sub rsp, 40
     mov ecx, 65001
-    call SetConsoleOutputCP
+    call qword ptr GOT_SetConsoleOutputCP
 ");
         }
         for i in &inits {
@@ -1663,6 +1784,20 @@ brasa_start endp
         if linux {
             for s in &self.extern_syms {
                 out.push_str(&format!("GOT_{} dq 0\n", s));
+            }
+        }
+        if !bare && !linux {
+            // the import address table: one run of slots per library, each run ended by a zero
+            // (the loader fills the slots; the PE writer builds the import directory around them)
+            for (dll, syms) in &self.win_imports {
+                out.push_str(&format!("; imports from {}
+", dll));
+                for s in syms {
+                    out.push_str(&format!("GOT_{} dq 0
+", s));
+                }
+                out.push_str("dq 0
+");
             }
         }
         out.push_str(RUNTIME_DATA_COMMON);
@@ -1974,11 +2109,27 @@ end
         self.e(s);
     }
 
+    /// An integer literal must fit the type it takes; a too-big `int` suggests `long`.
+    fn lit_check(&self, n: u64, neg: bool, t: &Ty) -> R<()> {
+        if lit_fits(n, neg, t) {
+            return Ok(());
+        }
+        let shown = if neg { format!("-{}", n) } else { n.to_string() };
+        let hint = if *t == Ty::int() && lit_fits(n, neg, &Ty::i64()) { "; write it as a long (`let x: long = ...`)" } else { "" };
+        self.err(format!("integer literal {} is out of range for {}{}", shown, t.show(), hint))
+    }
+
     fn check(&self, want: &Ty, got: &Ty, what: &str) -> R<()> {
         if compatible(want, got) {
             Ok(())
         } else {
-            let hint = if want.is_float() && got.is_int() { " (write a float literal such as 3.0, or use float(x))" } else { "" };
+            let hint = if want.is_float() && got.is_int() {
+                " (write a float literal such as 3.0, or use float(x))".to_string()
+            } else if want.is_int() && (got.is_int() || got.is_float()) {
+                format!(" (use {}(x) to convert)", want.show())
+            } else {
+                String::new()
+            };
             self.err(format!("{}: expected {}, found {}{}", what, want.show(), got.show(), hint))
         }
     }
@@ -2024,7 +2175,7 @@ end
                 let l = self.string_lit("");
                 self.e(format!("lea rax, {}", l));
             }
-            Ty::Chan(_) | Ty::Err | Ty::Result(_) => return self.err(format!("a {} needs an explicit value", t.show())),
+            Ty::Chan(_) | Ty::Err | Ty::Kind | Ty::Result(_) => return self.err(format!("a {} needs an explicit value", t.show())),
             _ => self.e("xor eax, eax"),
         }
         Ok(())
@@ -2071,7 +2222,7 @@ end
     /// Converts the owned value in rax to an owned text.
     fn to_text(&mut self, t: &Ty) -> R<()> {
         match t {
-            Ty::Text => {}
+            Ty::Text | Ty::Kind => {}
             Ty::Int { .. } => {
                 self.e("mov rcx, rax");
                 self.e("call rt_text_from_int");
@@ -2434,6 +2585,7 @@ end
                         self.e("mov r8, rax");
                         self.e(format!("mov rcx, qword ptr [rbp - {}]", t));
                         self.e(format!("mov rdx, qword ptr [rbp - {}]", it));
+                        self.at("r9");
                         self.e("call rt_list_set");
                     }
                     Ty::Ptr(el) => {
@@ -2484,7 +2636,21 @@ end
                 Some(r) => self.e(format!("mov {}, rax", r)),
                 None => self.e(format!("mov qword ptr [rbp - {}], rax", var)),
             }
-            self.expr(rhs, Some(&ty))?;
+            let rt = self.expr(rhs, Some(&ty))?;
+            if rt != ty {
+                // `0..n` with a `long` n counts in `long`; the bounds must otherwise agree
+                match wider(&ty, &rt) {
+                    Some(w) if rt.is_int() => {
+                        for sc in self.fs.scopes.iter_mut().rev() {
+                            if let Some(l) = sc.vars.get_mut(&vars[0]) {
+                                l.ty = w.clone();
+                                break;
+                            }
+                        }
+                    }
+                    _ => return self.err(format!("range bounds must have the same integer type, found {} and {}", ty.show(), rt.show())),
+                }
+            }
             let hi = self.slot();
             self.e(format!("mov qword ptr [rbp - {}], rax", hi));
             self.label(&start);
@@ -2555,7 +2721,7 @@ end
             let idx = self.slot();
             self.e(format!("mov qword ptr [rbp - {}], 0", idx));
             let (iv, vv) = if vars.len() >= 2 {
-                (Some(self.declare_local(&vars[0], Ty::i64(), false)), self.declare_local(&vars[1], (*el).clone(), false))
+                (Some(self.declare_local(&vars[0], Ty::int(), false)), self.declare_local(&vars[1], (*el).clone(), false))
             } else {
                 (None, self.declare_local(&vars[0], (*el).clone(), false))
             };
@@ -2630,6 +2796,8 @@ end
         if self.fs.unsafe_depth == 0 && !self.fs.code.is_empty() {
             self.require_unsafe("inline 'asm'")?;
         }
+        // lets an assembler error be reported at the Brasa line of the block
+        self.e(format!("; asm {}.br:{}", self.cur_mod, self.line));
         const POOL: [&str; 4] = ["r10", "r11", "r8", "r9"];
         let mut regs: HashMap<String, String> = HashMap::new();
         let mut next = 0;
@@ -2692,7 +2860,7 @@ end
             // literals are typed from the expected type, as the code generator would do
             let t = match want {
                 Some(t) if t.is_int() => t.clone(),
-                _ => Ty::i64(),
+                _ => Ty::int(),
             };
             let fbits = if matches!(want, Some(Ty::Float { bits: 32 })) { 32 } else { 64 };
             if let Some(c) = self.fold(e, &t, fbits) {
@@ -2701,11 +2869,13 @@ end
         }
         match &e.kind {
             ExprKind::Int(n) => {
-                self.e(format!("mov rax, {}", n));
-                Ok(match want {
+                let t = match want {
                     Some(t) if t.is_int() => t.clone(),
-                    _ => Ty::i64(),
-                })
+                    _ => Ty::int(),
+                };
+                self.lit_check(*n, false, &t)?;
+                self.e(format!("mov rax, {}", imm64(*n as i64)));
+                Ok(t)
             }
             ExprKind::Char(c) => {
                 self.e(format!("mov eax, {}", *c as u32));
@@ -2880,6 +3050,15 @@ end
                     Ok(Ty::Bool)
                 }
                 "-" => {
+                    if let ExprKind::Int(n) = &inner.kind {
+                        let t = match want {
+                            Some(t) if t.is_int() => t.clone(),
+                            _ => Ty::int(),
+                        };
+                        self.lit_check(*n, true, &t)?;
+                        self.e(format!("mov rax, {}", imm64((*n as i64).wrapping_neg())));
+                        return Ok(t);
+                    }
                     let t = self.expr(inner, want)?;
                     if let Ty::Float { bits } = t {
                         if bits == 32 {
@@ -2923,6 +3102,7 @@ end
                         self.e(format!("mov qword ptr [rbp - {}], rax", ks));
                         self.e("mov rdx, rax");
                         self.e(format!("mov rcx, qword ptr [rbp - {}]", t));
+                        self.at("r8");
                         self.e("call rt_map_get");
                         self.retain_if(v);
                         if **k == Ty::Text {
@@ -2934,6 +3114,7 @@ end
                     Ty::List(el) => {
                         self.e("mov rdx, rax");
                         self.e(format!("mov rcx, qword ptr [rbp - {}]", t));
+                        self.at("r9");
                         self.e("call rt_list_get");
                         self.retain_if(el);
                         (**el).clone()
@@ -2941,6 +3122,7 @@ end
                     Ty::Text => {
                         self.e("mov rdx, rax");
                         self.e(format!("mov rcx, qword ptr [rbp - {}]", t));
+                        self.at("r9");
                         self.e("call rt_text_byte");
                         Ty::Int { bits: 8, signed: false }
                     }
@@ -3304,8 +3486,12 @@ end
     fn simple_rhs(&mut self, e: &Expr, lt: &Ty) -> Option<Ty> {
         match &e.kind {
             ExprKind::Int(n) => {
+                let t = if lt.is_int() { lt.clone() } else { Ty::int() };
+                if !lit_fits(*n, false, &t) {
+                    return None; // the general path reports the range error
+                }
                 self.e(format!("mov rcx, {}", imm64(*n as i64)));
-                Some(if lt.is_int() { lt.clone() } else { Ty::i64() })
+                Some(t)
             }
             ExprKind::Float(f) => {
                 if matches!(lt, Ty::Float { bits: 32 }) {
@@ -3380,10 +3566,10 @@ end
                     return self.err("enums with data cannot be compared with '=='; use `match`");
                 }
             }
-            if matches!(lt, Ty::Result(_) | Ty::Err) || matches!(rt, Ty::Result(_) | Ty::Err) {
+            if (matches!(lt, Ty::Result(_) | Ty::Err) || matches!(rt, Ty::Result(_) | Ty::Err)) && *lt != Ty::Nil && *rt != Ty::Nil {
                 return self.err("a result cannot be compared; use `match`, `try` or `??`");
             }
-            let unsigned = lt.is_unsigned() || rt.is_unsigned();
+            let unsigned = cmp_unsigned(lt, rt);
             let cc = match (op, unsigned) {
                 ("==", _) => "e",
                 ("!=", _) => "ne",
@@ -3403,7 +3589,20 @@ end
             return Ok(Ty::Bool);
         }
         let ty = match (lt, rt) {
-            (Ty::Int { .. }, Ty::Int { .. }) => lt.clone(),
+            // a shift keeps the type of the value shifted; the count may be any integer
+            (Ty::Int { .. }, Ty::Int { .. }) if op == "<<" || op == ">>" => lt.clone(),
+            (Ty::Int { .. }, Ty::Int { .. }) => match wider(lt, rt) {
+                Some(t) => t,
+                None => {
+                    return self.err(format!(
+                        "operator '{}' is not defined for {} and {}; convert one side first (for example {}(x))",
+                        op,
+                        lt.show(),
+                        rt.show(),
+                        lt.show()
+                    ))
+                }
+            },
             (Ty::Ptr(_), Ty::Int { .. }) if op == "+" || op == "-" => lt.clone(),
             _ => return self.err(format!("operator '{}' is not defined for {} and {}", op, lt.show(), rt.show())),
         };
@@ -3424,15 +3623,36 @@ end
             "*" => self.e("imul rax, rcx"),
             "/" | "%" => {
                 if self.target != Target::Bare && !self.div_nonzero {
+                    self.at("rdx");
                     self.e("test rcx, rcx");
                     self.e("jz rt_div_zero");
                 }
                 if unsigned {
                     self.e("xor edx, edx");
                     self.e("div rcx");
-                } else {
+                } else if self.div_nonzero {
                     self.e("cqo");
                     self.e("idiv rcx");
+                } else {
+                    // MIN / -1 wraps to MIN (and MIN % -1 is 0) instead of faulting
+                    let (norm, done) = (self.lbl("divnorm"), self.lbl("divdone"));
+                    self.e("cmp rcx, -1");
+                    self.e(format!("jne {}", norm));
+                    if op == "/" {
+                        self.e("neg rax");
+                    } else {
+                        self.e("xor eax, eax");
+                    }
+                    self.e(format!("jmp {}", done));
+                    self.label(&norm);
+                    self.e("cqo");
+                    self.e("idiv rcx");
+                    if op == "%" {
+                        self.e("mov rax, rdx");
+                    }
+                    self.label(&done);
+                    self.norm(&ty);
+                    return Ok(ty);
                 }
                 if op == "%" {
                     self.e("mov rax, rdx");
@@ -3535,14 +3755,33 @@ end
             }
             Ty::List(_) | Ty::Text if name == "len" => {
                 self.e("mov rax, qword ptr [rax]");
-                Ty::i64()
+                Ty::int()
             }
             Ty::Map(..) if name == "len" => {
                 self.e("mov rax, qword ptr [rax + 48]");
-                Ty::i64()
+                Ty::int()
             }
             Ty::Err if name == "message" => {
                 self.e("mov rax, qword ptr [rax]");
+                self.retain();
+                Ty::Text
+            }
+            Ty::Err if name == "kind" => {
+                self.e("mov rax, qword ptr [rax + 8]");
+                self.retain();
+                Ty::Kind
+            }
+            Ty::Err if name == "cause" => {
+                self.e("mov rax, qword ptr [rax + 16]");
+                self.retain();
+                Ty::Err
+            }
+            Ty::Err if name == "full_message" => {
+                self.e("mov rcx, rax");
+                self.e("call rt_error_full");
+                Ty::Text
+            }
+            Ty::Kind if name == "name" => {
                 self.retain();
                 Ty::Text
             }
@@ -4209,7 +4448,7 @@ end
                     }
                     let at = self.expr(&args[0].value, None)?;
                     if let Ty::Float { bits } = at {
-                        // truncate toward zero; NaN, infinities and out-of-range values panic
+                        // truncate toward zero; NaN, infinities and out-of-range values abort
                         let ok = self.lbl("f2iok");
                         if bits == 32 {
                             self.e("movd xmm0, eax");
@@ -4226,10 +4465,25 @@ end
                         self.e("cmp rdx, rcx");
                         self.e(format!("je {}", ok));
                         self.e("lea rcx, rt_msg_floatrange");
-                        self.e("call rt_panic");
+                        self.at("rdx");
+                        self.e("call rt_abort");
                         self.label(&ok);
                         if t == Ty::Bool {
                             return self.err("cannot convert float to bool");
+                        }
+                        if let (Ty::Int { bits, .. }, Some(_)) = (&t, norm_insn(&t)) {
+                            // a narrower target: the truncated value must be the converted one
+                            if *bits < 64 {
+                                let fits = self.lbl("f2ifit");
+                                self.e("mov rdx, rax");
+                                self.norm(&t);
+                                self.e("cmp rax, rdx");
+                                self.e(format!("je {}", fits));
+                                self.e("lea rcx, rt_msg_floatrange");
+                                self.at("rdx");
+                                self.e("call rt_abort");
+                                self.label(&fits);
+                            }
                         }
                         self.norm(&t);
                         return Ok(t);
@@ -4245,11 +4499,12 @@ end
                     self.norm(&t);
                     return Ok(t);
                 }
-                if name == "panic" && args.len() == 1 && !self.funcs.contains_key(&(self.cur_mod.clone(), name.clone())) {
+                if (name == "__abort" || name == "abort" && !self.funcs.contains_key(&(self.cur_mod.clone(), name.clone()))) && args.len() == 1 {
                     let t = self.expr(&args[0].value, Some(&Ty::Text))?;
-                    self.check(&Ty::Text, &t, "panic message")?;
+                    self.check(&Ty::Text, &t, "abort message")?;
                     self.e("mov rcx, rax");
-                    self.e("call rt_panic");
+                    self.at("rdx");
+                    self.e("call rt_abort");
                     return Ok(Ty::Void);
                 }
                 if name == "print" || name == "println" {
@@ -4275,15 +4530,58 @@ end
                     self.e("call rt_write_out");
                     return Ok(Ty::Void);
                 }
-                if name == "error" && args.len() == 1 {
+                if name == "__kind" && args.len() == 1 {
+                    // the interned kind for a name: the one way a kind is made at run time
                     let t = self.expr(&args[0].value, Some(&Ty::Text))?;
-                    self.check(&Ty::Text, &t, "error message")?;
-                    let tmp = self.temp();
-                    self.e(format!("mov qword ptr [rbp - {}], rax", tmp));
-                    self.alloc(8, "rt_drop_error");
-                    self.e(format!("mov rcx, qword ptr [rbp - {}]", tmp));
+                    self.check(&Ty::Text, &t, "__kind")?;
+                    let keep = self.temp();
+                    self.e(format!("mov qword ptr [rbp - {}], rax", keep));
+                    self.e("mov rcx, rax");
+                    self.e("call rt_kind_intern");
+                    let res = self.temp();
+                    self.e(format!("mov qword ptr [rbp - {}], rax", res));
+                    self.release_slot(keep);
+                    self.e(format!("mov rax, qword ptr [rbp - {}]", res));
+                    self.free(res);
+                    self.free(keep);
+                    return Ok(Ty::Kind);
+                }
+                if name == "error" && (1..=3).contains(&args.len()) {
+                    let (k, m, c) = (self.temp(), self.temp(), self.temp());
+                    if args.len() == 1 {
+                        let t = self.expr(&args[0].value, Some(&Ty::Text))?;
+                        self.check(&Ty::Text, &t, "error message")?;
+                        self.e(format!("mov qword ptr [rbp - {}], rax", m));
+                        self.e("call rt_kind_other");
+                        self.e(format!("mov qword ptr [rbp - {}], rax", k));
+                    } else {
+                        let kt = self.expr(&args[0].value, Some(&Ty::Kind))?;
+                        if kt == Ty::Text {
+                            return self.err("error(kind, message): expected an ErrorKind, found text; make a kind with errors.kind(\"package.Name\")");
+                        }
+                        self.check(&Ty::Kind, &kt, "error kind")?;
+                        self.e(format!("mov qword ptr [rbp - {}], rax", k));
+                        let t = self.expr(&args[1].value, Some(&Ty::Text))?;
+                        self.check(&Ty::Text, &t, "error message")?;
+                        self.e(format!("mov qword ptr [rbp - {}], rax", m));
+                    }
+                    if args.len() == 3 {
+                        let ct = self.expr(&args[2].value, Some(&Ty::Err))?;
+                        self.check(&Ty::Err, &ct, "error cause")?;
+                        self.e(format!("mov qword ptr [rbp - {}], rax", c));
+                    } else {
+                        self.e(format!("mov qword ptr [rbp - {}], 0", c));
+                    }
+                    self.alloc(24, "rt_drop_error");
+                    self.e(format!("mov rcx, qword ptr [rbp - {}]", m));
                     self.e("mov qword ptr [rax], rcx");
-                    self.free(tmp);
+                    self.e(format!("mov rcx, qword ptr [rbp - {}]", k));
+                    self.e("mov qword ptr [rax + 8], rcx");
+                    self.e(format!("mov rcx, qword ptr [rbp - {}]", c));
+                    self.e("mov qword ptr [rax + 16], rcx");
+                    self.free(c);
+                    self.free(m);
+                    self.free(k);
                     return Ok(Ty::Err);
                 }
                 if name == "chr" && args.len() == 1 {
@@ -4296,6 +4594,9 @@ end
                     return Ok(Ty::Text);
                 }
                 if name == "heap_bytes" && args.is_empty() {
+                    if self.custom_allocator.is_some() {
+                        return self.err("heap_bytes() needs the built-in heap");
+                    }
                     if self.target != Target::Bare {
                         return self.err("heap_bytes() is only available in a bare-metal kernel");
                     }
@@ -4305,7 +4606,7 @@ end
                 }
                 if name == "live_objects" && args.is_empty() {
                     self.e("mov rax, qword ptr rt_live");
-                    return Ok(Ty::i64());
+                    return Ok(Ty::int());
                 }
                 if name == "channel" {
                     return self.channel_new(args);
@@ -4449,6 +4750,46 @@ end
                     self.free(t);
                     return Ok(Ty::Text);
                 }
+                if ot == Ty::Err && (name == "context" || name == "is") {
+                    if args.len() != 1 {
+                        return self.err(format!("'{}' takes one argument", name));
+                    }
+                    let t = self.temp();
+                    self.e(format!("mov qword ptr [rbp - {}], rax", t));
+                    if name == "context" {
+                        // a new error with the kind of this one; this one becomes its cause
+                        let mt = self.expr(&args[0].value, Some(&Ty::Text))?;
+                        self.check(&Ty::Text, &mt, "context message")?;
+                        let m = self.temp();
+                        self.e(format!("mov qword ptr [rbp - {}], rax", m));
+                        self.alloc(24, "rt_drop_error");
+                        self.e(format!("mov rcx, qword ptr [rbp - {}]", m));
+                        self.e("mov qword ptr [rax], rcx");
+                        self.e(format!("mov rdx, qword ptr [rbp - {}]", t));
+                        self.e("mov rcx, qword ptr [rdx + 8]");
+                        self.e("mov qword ptr [rax + 8], rcx");
+                        self.e("call rt_retain");
+                        self.e("mov qword ptr [rax + 16], rdx");
+                        self.free(m);
+                        self.free(t);
+                        return Ok(Ty::Err);
+                    }
+                    let kt = self.expr(&args[0].value, Some(&Ty::Kind))?;
+                    if kt == Ty::Text {
+                        return self.err("is(kind): expected an ErrorKind, found text; make a kind with errors.kind(\"package.Name\")");
+                    }
+                    self.check(&Ty::Kind, &kt, "is")?;
+                    let k = self.temp();
+                    self.e(format!("mov qword ptr [rbp - {}], rax", k));
+                    self.e("mov rdx, rax");
+                    self.e(format!("mov rcx, qword ptr [rbp - {}]", t));
+                    self.e("call rt_error_is");
+                    self.release_slot(k);
+                    self.release_slot(t);
+                    self.free(k);
+                    self.free(t);
+                    return Ok(Ty::Bool);
+                }
                 if let Ty::Chan(el) = &ot {
                     return self.chan_method(el, name, args);
                 }
@@ -4472,8 +4813,51 @@ end
                             self.e("call rt_list_clear");
                             return Ok(Ty::Void);
                         }
+                        if name == "get" {
+                            // the element at an index, or nothing when there is none (negative
+                            // included): `T?` for a type that can be nil, `T or error` otherwise
+                            if args.len() != 1 || args[0].name.is_some() {
+                                return self.err("'get' takes one index");
+                            }
+                            let it = self.expr(&args[0].value, Some(&Ty::i64()))?;
+                            if !it.is_int() {
+                                return self.err(format!("list index must be a number, found {}", it.show()));
+                            }
+                            let (miss, done) = (self.lbl("getmiss"), self.lbl("getdone"));
+                            self.e("mov rdx, rax");
+                            self.e(format!("mov rcx, qword ptr [rbp - {}]", t));
+                            self.e("cmp rdx, qword ptr [rcx]");
+                            self.e(format!("jae {}", miss));
+                            self.e("mov rax, qword ptr [rcx + 16]");
+                            self.e("mov rax, qword ptr [rax + rdx * 8]");
+                            self.retain_if(el);
+                            if el.nullable() {
+                                self.e(format!("jmp {}", done));
+                                self.label(&miss);
+                                self.e("xor eax, eax");
+                                self.label(&done);
+                                return Ok((**el).clone());
+                            }
+                            self.mk_ok(el);
+                            self.e(format!("jmp {}", done));
+                            self.label(&miss);
+                            let at = self.line;
+                            let mk = |kind: ExprKind| Expr { kind, line: at };
+                            let lit = |s: &str| Arg { name: None, by_ref: false, spread: false, value: mk(ExprKind::Text(vec![TextPart::Lit(s.into())])) };
+                            let kind = mk(ExprKind::Call { callee: Box::new(mk(ExprKind::Ident("__kind".into()))), args: vec![lit("std.InvalidInput")], targs: Vec::new() });
+                            let failed = mk(ExprKind::Call {
+                                callee: Box::new(mk(ExprKind::Ident("error".into()))),
+                                args: vec![Arg { name: None, by_ref: false, spread: false, value: kind }, lit("index out of bounds")],
+                                targs: Vec::new(),
+                            });
+                            self.expr(&failed, None)?;
+                            self.mk_err(el);
+                            self.label(&done);
+                            return Ok(Ty::Result(el.clone()));
+                        }
                         if name == "take" {
                             self.e(format!("mov rcx, qword ptr [rbp - {}]", t));
+                            self.at("rdx");
                             self.e("call rt_list_take");
                             return Ok((**el).clone());
                         }
@@ -4732,7 +5116,8 @@ end
                 self.e(format!("movq xmm{}, {}", idx, reg));
             }
         }
-        self.emit_call(&temps, &format!("call {}", sig.sym), None);
+        let target = if sig.is_extern { format!("call qword ptr GOT_{}", sig.sym) } else { format!("call {}", sig.sym) };
+        self.emit_call(&temps, &target, None);
         }
         if sig.is_extern {
             match sig.ret {
@@ -5013,7 +5398,7 @@ end
             format!("        return await {}\n", f_name)
         };
         let src = format!(
-            "package t\nfunc f()\n    let i = future.timeout_wait({}, {})\n    if i == 1\n{}    end\n    return error(\"timed out\")\nend\n",
+            "package t\nfunc f()\n    let i = future.timeout_wait({}, {})\n    if i == 1\n{}    end\n    return future.timed_out()\nend\n",
             ms_name, f_name, wait
         );
         let file = parse_source(&src).map_err(|d| format!("internal: timeout template: {}", d.msg))?;
@@ -5493,7 +5878,7 @@ impl Compiler {
             Type::Named { path, args } => {
                 if path.len() == 1 && args.is_empty() && params.contains(&path[0]) {
                     match b.get(&path[0]) {
-                        Some(prev) if prev != actual && !(prev.is_int() && actual.is_int()) => {
+                        Some(prev) if prev != actual => {
                             return self.err(format!(
                                 "type parameter {} is both {} and {} in this call",
                                 path[0],
@@ -5572,6 +5957,7 @@ impl Compiler {
         }
         let mut next = 0;
         let mut lambdas: Vec<(Type, &Expr)> = Vec::new();
+        let mut late_lits: Vec<(Type, &Expr)> = Vec::new();
         for a in args {
             if a.spread {
                 return self.err("spread arguments ('...') are not supported by the native backend yet");
@@ -5595,12 +5981,31 @@ impl Compiler {
             if p.variadic || !mentions_param(pt, &names) {
                 continue;
             }
+            // a bare number literal adapts to a type another argument fixed: it only binds an open parameter
+            if is_int_literal(&a.value) {
+                if let Type::Named { path, args: pargs } = pt {
+                    if path.len() == 1 && pargs.is_empty() && b.contains_key(&path[0]) {
+                        continue;
+                    }
+                }
+                late_lits.push((pt.clone(), &a.value));
+                continue;
+            }
             // type the argument by compiling it into a scratch buffer
             let snap = self.snapshot();
             let r = self.expr(&a.value, None);
             self.restore(snap);
             let aty = r?;
             self.unify(pt, &aty, &names, &mut b, module)?;
+        }
+        for (pt, lit) in late_lits {
+            if let Type::Named { path, args: pargs } = &pt {
+                if path.len() == 1 && pargs.is_empty() && b.contains_key(&path[0]) {
+                    continue;
+                }
+            }
+            let aty = self.expr(lit, None)?;
+            self.unify(&pt, &aty, &names, &mut b, module)?;
         }
         // lambdas: their parameter types come from the bindings so far; their body gives the rest
         for (pt, lam) in lambdas {
@@ -5822,7 +6227,7 @@ impl Compiler {
     /// have, `fbits` the float width.
     fn fold(&self, e: &Expr, t: &Ty, fbits: u8) -> Option<Const> {
         match &e.kind {
-            ExprKind::Int(n) => Some(Const::Int(*n as i64)),
+            ExprKind::Int(n) => lit_fits(*n, false, t).then(|| Const::Int(*n as i64)),
             ExprKind::Float(f) => Some(Const::Float(if fbits == 32 { *f as f32 as f64 } else { *f })),
             ExprKind::Bool(b) => Some(Const::Bool(*b)),
             ExprKind::Unary { op, expr } => {
@@ -6074,7 +6479,7 @@ impl Compiler {
     fn fuse_compare(&mut self, op: &str, lt: &Ty, rt: &Ty, label: &str, jump_if: bool) -> bool {
         let intlike = |t: &Ty| t.is_int() || matches!(t, Ty::Bool | Ty::Ptr(_));
         if intlike(lt) && intlike(rt) && (compatible(lt, rt) || compatible(rt, lt)) {
-            let unsigned = lt.is_unsigned() || rt.is_unsigned();
+            let unsigned = cmp_unsigned(lt, rt);
             let cc = match (op, unsigned) {
                 ("==", _) => "e",
                 ("!=", _) => "ne",
@@ -6448,9 +6853,131 @@ rt_drop_closure proc
 rt_drop_closure endp
 
 rt_drop_error proc
+    push rbp
+    mov rbp, rsp
+    sub rsp, 48
+    mov qword ptr [rbp - 8], rcx
     mov rcx, qword ptr [rcx]
-    jmp rt_release
+    call rt_release
+    mov rcx, qword ptr [rbp - 8]
+    mov rcx, qword ptr [rcx + 8]
+    call rt_release
+    mov rcx, qword ptr [rbp - 8]
+    mov rcx, qword ptr [rcx + 16]
+    call rt_release
+    mov rsp, rbp
+    pop rbp
+    ret
 rt_drop_error endp
+
+; rax = the interned kind named by text rcx, +1 reference for the caller (rcx is not consumed).
+; Equal names give the same object, so kinds compare by address.
+rt_kind_intern proc
+    push rbp
+    mov rbp, rsp
+    sub rsp, 48
+    mov qword ptr [rbp - 8], rcx
+    mov rax, qword ptr rt_kinds
+rt_ki_loop:
+    test rax, rax
+    jz rt_ki_new
+    mov qword ptr [rbp - 16], rax
+    mov rcx, qword ptr [rbp - 8]
+    mov rdx, qword ptr [rax + 8]
+    call rt_text_eq
+    test rax, rax
+    jnz rt_ki_found
+    mov rax, qword ptr [rbp - 16]
+    mov rax, qword ptr [rax]
+    jmp rt_ki_loop
+rt_ki_found:
+    mov rax, qword ptr [rbp - 16]
+    mov rax, qword ptr [rax + 8]
+    mov rcx, rax
+    call rt_retain
+    mov rsp, rbp
+    pop rbp
+    ret
+rt_ki_new:
+    mov ecx, 16
+    xor edx, edx
+    call rt_alloc
+    mov rcx, qword ptr [rbp - 8]
+    mov qword ptr [rax + 8], rcx
+    mov rdx, qword ptr rt_kinds
+    mov qword ptr [rax], rdx
+    mov qword ptr rt_kinds, rax
+    call rt_retain
+    call rt_retain
+    mov rax, qword ptr [rbp - 8]
+    mov rsp, rbp
+    pop rbp
+    ret
+rt_kind_intern endp
+
+; rax = the kind `std.Other` (+1 reference): the kind of error("message"). It is the first
+; entry of the kind table, a static node, so it costs no allocation.
+rt_kind_other proc
+    lea rax, rt_kind_other_name
+    mov rcx, rax
+    call rt_retain
+    ret
+rt_kind_other endp
+
+; rax = 1 when the error rcx or one of its causes has kind rdx
+rt_error_is proc
+rt_eis_loop:
+    test rcx, rcx
+    jz rt_eis_no
+    cmp qword ptr [rcx + 8], rdx
+    je rt_eis_yes
+    mov rcx, qword ptr [rcx + 16]
+    jmp rt_eis_loop
+rt_eis_yes:
+    mov eax, 1
+    ret
+rt_eis_no:
+    xor eax, eax
+    ret
+rt_error_is endp
+
+; rax = new text: the messages of error rcx and its causes, joined with ": "
+rt_error_full proc
+    push rbp
+    mov rbp, rsp
+    sub rsp, 48
+    mov qword ptr [rbp - 8], rcx
+    mov rcx, qword ptr [rcx + 16]
+    test rcx, rcx
+    jnz rt_ef_chain
+    mov rax, qword ptr [rbp - 8]
+    mov rax, qword ptr [rax]
+    mov rcx, rax
+    call rt_retain
+    mov rsp, rbp
+    pop rbp
+    ret
+rt_ef_chain:
+    call rt_error_full
+    mov qword ptr [rbp - 16], rax
+    mov rcx, qword ptr [rbp - 8]
+    mov rcx, qword ptr [rcx]
+    lea rdx, rt_msg_sep
+    call rt_concat
+    mov qword ptr [rbp - 24], rax
+    mov rcx, rax
+    mov rdx, qword ptr [rbp - 16]
+    call rt_concat
+    mov qword ptr [rbp - 32], rax
+    mov rcx, qword ptr [rbp - 24]
+    call rt_release
+    mov rcx, qword ptr [rbp - 16]
+    call rt_release
+    mov rax, qword ptr [rbp - 32]
+    mov rsp, rbp
+    pop rbp
+    ret
+rt_error_full endp
 
 rt_drop_result_plain proc
     mov rcx, qword ptr [rcx]
@@ -6485,19 +7012,30 @@ rt_memcpy proc
     ret
 rt_memcpy endp
 
-; print "panic: <text rcx>" and exit with code 101
-rt_panic proc
-    sub rsp, 40
+; write "abort: <location rdx>: <message rcx>" to standard error and exit with code 101
+; (rdx = 0 when there is no location). Nothing else runs: no defer, no drop, no flush.
+rt_abort proc
+    and rsp, -16
+    sub rsp, 48
     mov qword ptr [rsp + 32], rcx
-    lea rcx, rt_msg_panic
-    call rt_write_out
+    mov qword ptr [rsp + 40], rdx
+    lea rcx, rt_msg_abort
+    call rt_write_err
+    mov rdx, qword ptr [rsp + 40]
+    test rdx, rdx
+    jz rt_abort_msg
+    mov rcx, rdx
+    call rt_write_err
+    lea rcx, rt_msg_sep
+    call rt_write_err
+rt_abort_msg:
     mov rcx, qword ptr [rsp + 32]
-    call rt_write_out
+    call rt_write_err
     lea rcx, rt_msg_nl
-    call rt_write_out
+    call rt_write_err
     mov ecx, 101
     call rt_exit
-rt_panic endp
+rt_abort endp
 
 ; rax = new text with room for rcx bytes (zeroed, length set)
 rt_text_alloc proc
@@ -6880,7 +7418,7 @@ rt_list_take proc
     ret
 rt_take_empty:
     lea rcx, rt_msg_take
-    jmp rt_panic
+    jmp rt_abort
 rt_list_take endp
 
 ; empties list rcx (releasing its elements)
@@ -6912,7 +7450,8 @@ rt_list_clear endp
 
 rt_index_oob proc
     lea rcx, rt_msg_oob
-    jmp rt_panic
+    mov rdx, r9
+    jmp rt_abort
 rt_index_oob endp
 "#;
 
@@ -6930,14 +7469,14 @@ rt_alloc proc
     mov rax, qword ptr rt_heap
     test rax, rax
     jnz rt_alloc_have
-    call GetProcessHeap
+    call qword ptr GOT_GetProcessHeap
     mov qword ptr rt_heap, rax
 rt_alloc_have:
     mov rcx, rax
     mov edx, 8
     mov r8, qword ptr [rbp - 8]
     add r8, 16
-    call HeapAlloc
+    call qword ptr GOT_HeapAlloc
     test rax, rax
     jz rt_alloc_fail
     mov qword ptr [rax], 1
@@ -6950,7 +7489,8 @@ rt_alloc_have:
     ret
 rt_alloc_fail:
     lea rcx, rt_msg_oom
-    call rt_panic
+    xor edx, edx
+    call rt_abort
 rt_alloc endp
 
 ; write rdx bytes at rcx to stdout
@@ -6961,13 +7501,13 @@ rt_write proc
     mov qword ptr [rbp - 8], rcx
     mov qword ptr [rbp - 16], rdx
     mov ecx, -11
-    call GetStdHandle
+    call qword ptr GOT_GetStdHandle
     mov rcx, rax
     mov rdx, qword ptr [rbp - 8]
     mov r8, qword ptr [rbp - 16]
     lea r9, [rbp - 24]
     mov qword ptr [rsp + 32], 0
-    call WriteFile
+    call qword ptr GOT_WriteFile
     mov rsp, rbp
     pop rbp
     ret
@@ -6984,6 +7524,28 @@ rt_write_out proc
 rt_write_out endp
 
 
+; write text rcx to standard error
+rt_write_err proc
+    push rbp
+    mov rbp, rsp
+    sub rsp, 64
+    mov rdx, qword ptr [rcx]
+    add rcx, 8
+    mov qword ptr [rbp - 8], rcx
+    mov qword ptr [rbp - 16], rdx
+    mov ecx, -12
+    call qword ptr GOT_GetStdHandle
+    mov rcx, rax
+    mov rdx, qword ptr [rbp - 8]
+    mov r8, qword ptr [rbp - 16]
+    lea r9, [rbp - 24]
+    mov qword ptr [rsp + 32], 0
+    call qword ptr GOT_WriteFile
+    mov rsp, rbp
+    pop rbp
+    ret
+rt_write_err endp
+
 ; frees the object whose payload is at rcx
 rt_free_obj proc
     sub rsp, 40
@@ -6991,7 +7553,7 @@ rt_free_obj proc
     sub r8, 16
     mov rcx, qword ptr rt_heap
     xor edx, edx
-    call HeapFree
+    call qword ptr GOT_HeapFree
     dec qword ptr rt_live
     add rsp, 40
     ret
@@ -7000,13 +7562,13 @@ rt_free_obj endp
 ; exit the process with code ecx
 rt_exit proc
     sub rsp, 40
-    call ExitProcess
+    call qword ptr GOT_ExitProcess
 rt_exit endp
 
 rt_div_zero proc
     sub rsp, 8
     lea rcx, rt_msg_divzero
-    jmp rt_panic
+    jmp rt_abort
 rt_div_zero endp
 "#;
 
@@ -7063,7 +7625,8 @@ rt_alloc_zero:
     ret
 rt_alloc_fail:
     lea rcx, rt_msg_oom
-    call rt_panic
+    xor edx, edx
+    call rt_abort
 rt_alloc endp
 
 ; frees the object whose payload is at rcx
@@ -7093,6 +7656,11 @@ rt_write_out proc
     ret
 rt_write_out endp
 
+; the kernel has one console: an abort message goes there too
+rt_write_err proc
+    jmp rt_write_out
+rt_write_err endp
+
 ; stop the machine
 rt_exit proc
     cli
@@ -7113,6 +7681,14 @@ rt_freelists:
 ";
 
 const RUNTIME_DATA_COMMON: &str = r#"rt_live dq 0
+rt_kinds dq rt_kind_other_node
+rt_kind_other_node dq 0, rt_kind_other_name
+dq 4611686018427387904, 0
+rt_kind_other_name dq 9
+    db "std.Other", 0
+dq 4611686018427387904, 0
+rt_msg_sep dq 2
+    db ": ", 0
 dq 4611686018427387904, 0
 rt_msg_oom dq 13
     db "out of memory", 0
@@ -7129,8 +7705,8 @@ dq 4611686018427387904, 0
 rt_msg_floatrange dq 18
     db "float out of range", 0
 dq 4611686018427387904, 0
-rt_msg_panic dq 7
-    db "panic: ", 0
+rt_msg_abort dq 7
+    db "abort: ", 0
 dq 4611686018427387904, 0
 rt_msg_error dq 7
     db "error: ", 0
@@ -7235,6 +7811,7 @@ pub fn generate_asm(file: &File) -> Result<String, String> {
 pub fn generate_asm_with(file: &File, options: &CompileOptions) -> Result<String, String> {
     let mut c = Compiler::new(Target::Windows);
     c.opt = options.optimize;
+    c.test_mode = options.test_mode;
     c.load(file)?;
     c.declare()?;
     c.generate()
@@ -7312,7 +7889,8 @@ rt_alloc_hdr:
     ret
 rt_alloc_fail:
     lea rcx, rt_msg_oom
-    call rt_panic
+    xor edx, edx
+    call rt_abort
 rt_alloc endp
 
 ; frees the object whose payload is at rcx
@@ -7372,6 +7950,20 @@ rt_write_out proc
     ret
 rt_write_out endp
 
+; write text rcx to standard error (file descriptor 2)
+rt_write_err proc
+    push rdi
+    push rsi
+    mov rdx, qword ptr [rcx]
+    lea rsi, [rcx + 8]
+    mov edi, 2
+    mov eax, 1
+    syscall
+    pop rsi
+    pop rdi
+    ret
+rt_write_err endp
+
 ; exit the process with code ecx
 rt_exit proc
     mov edi, ecx
@@ -7382,7 +7974,7 @@ rt_exit endp
 rt_div_zero proc
     sub rsp, 8
     lea rcx, rt_msg_divzero
-    jmp rt_panic
+    jmp rt_abort
 rt_div_zero endp
 "#;
 
@@ -7436,6 +8028,7 @@ pub fn elf_image(code: &[u8], entry: u64) -> Vec<u8> {
 pub fn generate_asm_for(file: &File, options: &CompileOptions, target: Target) -> Result<String, String> {
     let mut c = Compiler::new(target);
     c.opt = options.optimize;
+    c.test_mode = options.test_mode;
     c.load(file)?;
     c.declare()?;
     c.generate()
@@ -7677,110 +8270,20 @@ pub fn compile_to_linux(file: &File, output: &str, options: &CompileOptions) -> 
     Ok(())
 }
 
-const MANIFEST: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-  <dependency>
-    <dependentAssembly>
-      <assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" processorArchitecture="*" publicKeyToken="6595b64144ccf1df" language="*"/>
-    </dependentAssembly>
-  </dependency>
-  <application xmlns="urn:schemas-microsoft-com:asm.v3">
-    <windowsSettings>
-      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
-      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
-    </windowsSettings>
-  </application>
-</assembly>
-"#;
-
-/// Visual Studio installations that can run `vcvars64.bat`, newest first.
-fn vcvars_candidates() -> Vec<PathBuf> {
-    let mut roots: Vec<PathBuf> = Vec::new();
-    let vswhere = Path::new(r"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe");
-    if vswhere.exists() {
-        if let Ok(out) = Command::new(vswhere).args(["-all", "-products", "*", "-property", "installationPath"]).output() {
-            for l in String::from_utf8_lossy(&out.stdout).lines() {
-                if !l.trim().is_empty() {
-                    roots.push(PathBuf::from(l.trim()));
-                }
-            }
-        }
-    }
-    for base in [r"C:\Program Files\Microsoft Visual Studio", r"C:\Program Files (x86)\Microsoft Visual Studio"] {
-        for ver in ["18", "2022", "2019"] {
-            for ed in ["Community", "Professional", "Enterprise", "BuildTools"] {
-                roots.push(Path::new(base).join(ver).join(ed));
-            }
-        }
-    }
-    let mut seen = HashSet::new();
-    roots
-        .into_iter()
-        .map(|r| r.join(r"VC\Auxiliary\Build\vcvars64.bat"))
-        .filter(|p| p.exists() && seen.insert(p.clone()))
-        .collect()
-}
-
-/// Compiles to a native Windows x86-64 executable using `ml64` and `link`.
+/// Compiles to a native Windows x86-64 executable. The compiler writes the PE file itself
+/// (`pe::pe_image`): no assembler, linker or Visual Studio is involved.
 pub fn compile_to_native(file: &File, output_exe: &str) -> Result<(), String> {
     compile_to_native_with(file, output_exe, &CompileOptions::default())
 }
 
-/// `compile_to_native` with explicit options.
+/// `compile_to_native` with explicit options. Nothing is written unless the image is complete.
 pub fn compile_to_native_with(file: &File, output_exe: &str, options: &CompileOptions) -> Result<(), String> {
     let mut c = Compiler::new(Target::Windows);
     c.opt = options.optimize;
+    c.test_mode = options.test_mode;
     c.load(file)?;
     c.declare()?;
     let asm = c.generate()?;
-    let gui = c.uses_ui;
-    let mut libs: Vec<String> = vec!["kernel32".into()];
-    libs.extend(c.libs.iter().filter(|l| *l != "kernel32").cloned());
-
-    let out_abs = std::env::current_dir().map_err(|e| e.to_string())?.join(output_exe);
-    // unique per build: several builds may run at once in one process
-    static BUILD_ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-    let work = std::env::temp_dir().join(format!(
-        "brasa-build-{}-{}",
-        std::process::id(),
-        BUILD_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-    ));
-    std::fs::create_dir_all(&work).map_err(|e| format!("cannot create {}: {}", work.display(), e))?;
-    std::fs::write(work.join("prog.asm"), &asm).map_err(|e| e.to_string())?;
-    std::fs::write(work.join("prog.manifest"), MANIFEST).map_err(|e| e.to_string())?;
-
-    let candidates = vcvars_candidates();
-    if candidates.is_empty() {
-        return Err("could not find Visual Studio C++ build tools (vcvars64.bat); install the 'Desktop development with C++' workload".into());
-    }
-    let lib_args: Vec<String> = libs.iter().map(|l| format!("{}.lib", l)).collect();
-    let mut last_err = String::new();
-    for vcvars in candidates {
-        let bat = format!(
-            "@echo off\r\ncall \"{}\" >nul 2>&1\r\nml64 /nologo /c /Fo prog.obj prog.asm || exit /b 1\r\nlink /nologo /subsystem:{} /entry:brasa_start /manifest:embed /manifestinput:prog.manifest prog.obj {} /out:\"{}\" || exit /b 1\r\n",
-            vcvars.display(),
-            if gui { "windows" } else { "console" },
-            lib_args.join(" "),
-            out_abs.display()
-        );
-        let bat_path = work.join("build.bat");
-        std::fs::write(&bat_path, bat).map_err(|e| e.to_string())?;
-        let out = Command::new("cmd")
-            .arg("/c")
-            .arg(&bat_path)
-            .current_dir(&work)
-            .output()
-            .map_err(|e| format!("failed to run the assembler/linker: {}", e))?;
-        if out.status.success() {
-            let _ = std::fs::remove_dir_all(&work);
-            return Ok(());
-        }
-        last_err = format!(
-            "assembler/linker failed (using {}):\n{}{}",
-            vcvars.display(),
-            String::from_utf8_lossy(&out.stdout),
-            String::from_utf8_lossy(&out.stderr)
-        );
-    }
-    Err(format!("{}\n(intermediate files kept in {})", last_err, work.display()))
+    let image = crate::pe::pe_image(&asm, &c.win_imports, c.uses_ui)?;
+    std::fs::write(output_exe, &image).map_err(|e| format!("cannot write {}: {}", output_exe, e))
 }

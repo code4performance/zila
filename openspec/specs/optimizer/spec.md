@@ -103,7 +103,6 @@ A function that uses registers for variables SHALL leave the registers it uses a
 - **WHEN** two tasks with register variables switch between each other many times
 - **THEN** each task sees only its own values
 
-
 ### Requirement: Inlining small functions
 With optimization on, the compiler SHALL compile a call to a small function in place, without a call instruction, when the function's body is a single `return` of an expression of a few operations, its parameters and result are plain numbers, booleans or raw pointers, and it is an ordinary function (not a method, generic, `extern`, `async`, `naked` or recursive function, and one with no `asm`, `defer`, `try`, `await`, lambda or `match`). All other calls SHALL stay calls. Inlining SHALL NOT change what the program prints, returns or reports.
 
@@ -138,11 +137,11 @@ The body of an inlined function SHALL see only its own parameters and the names 
 - **THEN** the library's global is used
 
 ### Requirement: Run-time errors survive inlining
-A division by zero, an out-of-range index or any other run-time failure inside an inlined body SHALL behave as it does in the unoptimized program (same message, same exit code).
+A division by zero, an out-of-range index or any other abort inside an inlined body SHALL behave as it does in the unoptimized program (same message, same file and line of the original source, same exit code).
 
 #### Scenario: Division by zero in a helper
 - **WHEN** an inlined `func half(a: int, b: int) -> int return a / b end` is called with `b` equal to 0
-- **THEN** the program stops with the same message and exit code as with `--no-opt`
+- **THEN** the program aborts with the same message, location and exit code as with `--no-opt`
 
 ### Requirement: Inlining is switched off by `--no-opt`
 With `--no-opt` no call SHALL be inlined.

@@ -25,7 +25,7 @@
 
   <main>
     <h1>Getting Started</h1>
-    <p>Brasa's reference implementation is a Rust lexer, AST, and recursive-descent parser with a tree-walking interpreter and a native x86-64 compiler — std-only, no external dependencies.</p>
+    <p>Brasa's reference implementation is a Rust lexer, AST, and recursive-descent parser and a native x86-64 compiler — std-only, no external dependencies.</p>
 
     <section>
       <h2>Build</h2>
@@ -40,7 +40,7 @@ cargo test</code></pre>
       <pre><code>./target/release/brasa-parse examples/rest_api.br            <span class="cm"># OK + summary</span>
 ./target/release/brasa-parse examples/hello.br --ast          <span class="cm"># dump the AST</span>
 ./target/release/brasa-parse examples/hello.br --tokens       <span class="cm"># dump tokens</span>
-./target/release/brasa-parse examples/hello.br --run          <span class="cm"># execute with AST interpreter</span>
+./target/release/brasa-parse examples/hello.br --run          <span class="cm"># compile, run, delete the executable</span>
 ./target/release/brasa-parse examples/async.br -o async.exe   <span class="cm"># compile to a native executable</span></code></pre>
 
       <dl class="cli">
@@ -54,10 +54,10 @@ cargo test</code></pre>
         <dd>Parses the file and pretty-prints the full abstract syntax tree (every statement and expression node, each carrying its source line).</dd>
 
         <dt>--run</dt>
-        <dd>Parses the file and executes it with the built-in AST tree-walking interpreter, calling its <code>main</code> function. The interpreter does not know the native-only features (<code>async</code>, <code>await</code>, the <code>ui</code>, <code>fs</code> and <code>net</code> libraries); use <code>-o</code> for those.</dd>
+        <dd>Builds the program into a temporary executable for this machine, runs it with your terminal's input and output, deletes the executable and exits with the program's exit status (101 after an abort). The program is the one <code>-o</code> would build, so every feature works the same way; compile errors are reported as <code>-o</code> reports them and nothing runs. <code>--run</code> only runs programs for the machine it is on: a different <code>--target</code> is rejected.</dd>
 
         <dt>-o output.exe</dt>
-        <dd>Compiles the file to a native Windows x86-64 executable (also written <code>--build</code>). Needs the Visual Studio C++ build tools (<code>ml64</code> and <code>link</code>), which the compiler finds on its own. The resulting program has no runtime to install. See <a href="native.html">Native compilation</a> for what it supports.</dd>
+        <dd>Compiles the file to a native Windows x86-64 executable (also written <code>--build</code>). The compiler writes the executable itself, so no other tool (no Visual Studio) is needed. The resulting program has no runtime to install. See <a href="native.html">Native compilation</a> for what it supports.</dd>
 
         <dt>--asm</dt>
         <dd>Prints the x86-64 assembly the native compiler generates for the file.</dd>
@@ -86,6 +86,15 @@ cargo test</code></pre>
         <dt>--os boot.br kernel.br -o disk.img</dt>
         <dd>Builds a bootable disk image from a boot sector and a kernel, both written in Brasa (see <code>os/</code> in the repository). Run it with QEMU.</dd>
       </dl>
+    </section>
+
+    <section id="editors">
+      <h2>Editor support</h2>
+      <p>The repository has a VS Code extension in <code>editors/vscode</code>: syntax highlighting, syntax errors as you type and Format Document, using the language server (<code>brasa-parse --lsp</code>). It has no npm dependencies and needs no build step. Put <code>brasa-parse</code> on your <code>PATH</code> (or set <code>brasa.server.path</code>), then package and install it:</p>
+      <pre><code>cd editors/vscode
+npx @vscode/vsce package
+code --install-extension brasa-lang-0.2.0.vsix</code></pre>
+      <p>The settings are <code>brasa.server.path</code> (the executable, default <code>brasa-parse</code>), <code>brasa.server.enabled</code> and <code>brasa.trace</code> (log the protocol to the <strong>Brasa Language Server</strong> output channel), and the command <strong>Brasa: Restart Language Server</strong>. If the executable cannot be started you get one message and highlighting keeps working. Other editors can run <code>brasa-parse --lsp</code> with any Language Server Protocol client.</p>
     </section>
 
     <section>

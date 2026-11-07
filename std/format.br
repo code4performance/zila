@@ -19,6 +19,7 @@
 package format
 
 use math
+use errors
 
 // ---- characters and padding ----
 
@@ -98,13 +99,13 @@ end
 // ---- numbers as text ----
 
 // The decimal text of `n`.
-func int(n: int) -> text
+func int(n: long) -> text
     return "{n}"
 end
 
 // The digits of `n` in `base` (2 to 16), lowercase, with a leading `-` for negative numbers.
 // Works on the remainders, so the smallest 64-bit integer needs no special case.
-func to_base(n: int, base: int) -> text
+func to_base(n: long, base: int) -> text
     if n == 0
         return "0"
     end
@@ -116,7 +117,7 @@ func to_base(n: int, base: int) -> text
         if d < 0
             d = 0 - d
         end
-        out = digits.slice(d, d + 1) + out
+        out = digits.slice(int(d), int(d) + 1) + out
         v = v / base
     end
     if n < 0
@@ -126,17 +127,17 @@ func to_base(n: int, base: int) -> text
 end
 
 // `n` in base 16 without a prefix: `hex(255)` is "ff".
-func hex(n: int) -> text
+func hex(n: long) -> text
     return to_base(n, 16)
 end
 
 // `n` in base 2 without a prefix: `bin(5)` is "101".
-func bin(n: int) -> text
+func bin(n: long) -> text
     return to_base(n, 2)
 end
 
 // `n` with a comma between groups of three digits: `thousands(1234567)` is "1,234,567".
-func thousands(n: int) -> text
+func thousands(n: long) -> text
     let all = to_base(n, 10)
     var sign = ""
     var digits = all
@@ -162,7 +163,7 @@ end
 
 // A value to put in a template: what `format.fmt` makes of its arguments.
 type Value = enum
-    Int(int)
+    Int(long)
     Float(float)
     Text(text)
     Bool(bool)
@@ -175,6 +176,10 @@ type Valued = interface
 end
 
 func (n: int) to_value() -> Value
+    return Int(long(n))
+end
+
+func (n: long) to_value() -> Value
     return Int(n)
 end
 
@@ -191,31 +196,27 @@ func (b: bool) to_value() -> Value
 end
 
 func (n: i8) to_value() -> Value
-    return Int(int(n))
+    return Int(long(n))
 end
 
 func (n: i16) to_value() -> Value
-    return Int(int(n))
-end
-
-func (n: i32) to_value() -> Value
-    return Int(int(n))
+    return Int(long(n))
 end
 
 func (n: u8) to_value() -> Value
-    return Int(int(n))
+    return Int(long(n))
 end
 
 func (n: u16) to_value() -> Value
-    return Int(int(n))
+    return Int(long(n))
 end
 
 func (n: u32) to_value() -> Value
-    return Int(int(n))
+    return Int(long(n))
 end
 
 func (n: u64) to_value() -> Value
-    return Int(int(n))
+    return Int(long(n))
 end
 
 func (x: f32) to_value() -> Value
@@ -242,7 +243,7 @@ func plain(v: Value) -> text
     end
 end
 
-func int_of(v: Value) -> int
+func int_of(v: Value) -> long
     match v
         Int(n) -> return n
         Float(x) -> return 0
@@ -306,7 +307,7 @@ func parse_layout(layout: text) -> Spec or error
     var width = 0
     while p < layout.len and is_digit(int(layout[p]))
         if width > 100000000
-            return error(bad)
+            return error(errors.InvalidInput, bad)
         end
         width = width * 10 + (int(layout[p]) - 48)
         p += 1
@@ -318,27 +319,27 @@ func parse_layout(layout: text) -> Spec or error
         prec = 0
         while p < layout.len and is_digit(int(layout[p]))
             if prec > 1000
-                return error(bad)
+                return error(errors.InvalidInput, bad)
             end
             prec = prec * 10 + (int(layout[p]) - 48)
             digits += 1
             p += 1
         end
         if digits == 0
-            return error(bad)
+            return error(errors.InvalidInput, bad)
         end
     end
     var kind = ""
     if p < layout.len
         let letter = layout.slice(p, p + 1)
         if letter != "d" and letter != "x" and letter != "X" and letter != "b" and letter != "," and letter != "f" and letter != "s"
-            return error(bad)
+            return error(errors.InvalidInput, bad)
         end
         kind = letter
         p += 1
     end
     if p < layout.len
-        return error(bad)
+        return error(errors.InvalidInput, bad)
     end
     return Spec { fill: fill, align: align, width: width, prec: prec, kind: kind }
 end
@@ -364,7 +365,7 @@ func render(v: Value, spec: Spec) -> text or error
     let kind = kind_name(v)
     let t = spec.kind
     if spec.prec >= 0 and t != "" and t != "f"
-        return error("a precision goes with 'f', not '{t}'")
+        return error(errors.InvalidInput, "a precision goes with 'f', not '{t}'")
     end
     if t == "" and spec.prec < 0
         return plain(v)
@@ -375,9 +376,9 @@ func render(v: Value, spec: Spec) -> text or error
     if t == "f" or t == ""
         if kind != "float"
             if t == "f"
-                return error("'f' needs a float, got {kind}")
+                return error(errors.InvalidInput, "'f' needs a float, got {kind}")
             end
-            return error("a precision needs a float, got {kind}")
+            return error(errors.InvalidInput, "a precision needs a float, got {kind}")
         end
         var digits = 6
         if spec.prec >= 0
@@ -386,7 +387,7 @@ func render(v: Value, spec: Spec) -> text or error
         return math.fixed(float_of(v), digits)
     end
     if kind != "integer"
-        return error("'{t}' needs an integer, got {kind}")
+        return error(errors.InvalidInput, "'{t}' needs an integer, got {kind}")
     end
     let n = int_of(v)
     if t == "x"
@@ -427,16 +428,16 @@ end
 func apply_layout(s: text, layout: text) -> text or error
     let spec = try parse_layout(layout)
     if spec.prec >= 0 and spec.kind != "" and spec.kind != "f"
-        return error("a precision goes with 'f', not '{spec.kind}'")
+        return error(errors.InvalidInput, "a precision goes with 'f', not '{spec.kind}'")
     end
     if spec.kind == "f"
-        return error("'f' needs a float, got text")
+        return error(errors.InvalidInput, "'f' needs a float, got text")
     end
     if spec.kind == "" and spec.prec >= 0
-        return error("a precision needs a float, got text")
+        return error(errors.InvalidInput, "a precision needs a float, got text")
     end
     if spec.kind != "" and spec.kind != "s"
-        return error("'{spec.kind}' needs an integer, got text")
+        return error(errors.InvalidInput, "'{spec.kind}' needs an integer, got text")
     end
     return pad(s, spec)
 end
@@ -484,13 +485,13 @@ func parse_template(template: text, nargs: int) -> []Piece or error
                         j += 1
                     end
                     if j >= n
-                        return error("unclosed '(' in placeholder")
+                        return error(errors.InvalidInput, "unclosed '(' in placeholder")
                     end
                     layout = template.slice(i + 1, j)
                     i = j + 1
                 end
                 if idx >= nargs
-                    return error("missing argument {idx}")
+                    return error(errors.InvalidInput, "missing argument {idx}")
                 end
                 if cur.len > 0
                     out.add(Piece { lit: cur, idx: 0 - 1, layout: "" })

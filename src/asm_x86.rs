@@ -29,7 +29,7 @@ pub struct Assembled {
 }
 
 pub fn assemble(src: &str, default_org: u64, default_bits: u8) -> R<Assembled> {
-    let lines = parse_lines(src)?;
+    let (lines, numbers) = parse_lines(src)?;
     let mut syms: HashMap<String, u64> = HashMap::new();
     let mut result = None;
     for pass in 1..=2 {
@@ -43,7 +43,7 @@ pub fn assemble(src: &str, default_org: u64, default_bits: u8) -> R<Assembled> {
             new_syms: HashMap::new(),
         };
         for (n, l) in lines.iter().enumerate() {
-            a.line(l).map_err(|e| format!("asm line {}: {} (in `{}`)", n + 1, e, l.trim()))?;
+            a.line(l).map_err(|e| format!("asm line {}: {} (in `{}`)", numbers[n], e, l.trim()))?;
         }
         let Asm { out, new_syms, org, .. } = a;
         if pass == 1 {
@@ -59,9 +59,11 @@ pub fn assemble(src: &str, default_org: u64, default_bits: u8) -> R<Assembled> {
 // Text handling
 // ---------------------------------------------------------------------------
 
-fn parse_lines(src: &str) -> R<Vec<String>> {
+/// The code lines of `src` (comments and blank lines dropped) and the line number of each in `src`.
+fn parse_lines(src: &str) -> R<(Vec<String>, Vec<usize>)> {
     let mut out = Vec::new();
-    for raw in src.lines() {
+    let mut numbers = Vec::new();
+    for (at, raw) in src.lines().enumerate() {
         // strip comments, but not inside quotes
         let mut line = String::new();
         let mut q: Option<char> = None;
@@ -87,9 +89,10 @@ fn parse_lines(src: &str) -> R<Vec<String>> {
         let t = line.trim();
         if !t.is_empty() {
             out.push(t.to_string());
+            numbers.push(at + 1);
         }
     }
-    Ok(out)
+    Ok((out, numbers))
 }
 
 /// Splits on `sep` outside brackets and quotes.
@@ -975,6 +978,7 @@ impl<'a> Asm<'a> {
             "rdmsr" => Some(&[0x0F, 0x32]),
             "wrmsr" => Some(&[0x0F, 0x30]),
             "cpuid" => Some(&[0x0F, 0xA2]),
+            "rdtsc" => Some(&[0x0F, 0x31]),
             "ud2" => Some(&[0x0F, 0x0B]),
             "movsb" => Some(&[0xA4]),
             "stosb" => Some(&[0xAA]),
@@ -1801,6 +1805,7 @@ mod tests {
         assert_eq!(enc("mov [0x7c00], dl", 16), [0x88, 0x16, 0x00, 0x7C]);
         assert_eq!(enc("lgdt [0x7c10]", 16), [0x0F, 0x01, 0x16, 0x10, 0x7C]);
         assert_eq!(enc("lodsb", 16), [0xAC]);
+        assert_eq!(enc("rdtsc", 64), [0x0F, 0x31]);
         assert_eq!(enc("rdmsr", 32), [0x0F, 0x32]);
     }
 

@@ -58,10 +58,10 @@ type Op = record
     offset: u32
     offset_high: u32
     event: usize
-    id: int
-    task: int
-    status: int
-    bytes: int
+    id: long
+    task: long
+    status: long
+    bytes: long
     done: bool
 end
 
@@ -83,32 +83,32 @@ end
 // Words in transit are plain integers: ownership of a value moves into the
 // queue on `send` and out of it on `receive`.
 type Chan = record
-    items: []int
-    head: int
-    waiting: []int
-    whead: int
+    items: []long
+    head: long
+    waiting: []long
+    whead: long
     closed: bool
 end
 
 var tasks: []Task
-var ready: []int
-var ready_head = 0
+var ready: []long
+var ready_head: long = 0
 // ids of tasks that finished (their fibers are deleted later) and ids free for reuse
-var finished: []int
-var free_ids: []int
-var current = 0
+var finished: []long
+var free_ids: []long
+var current: long = 0
 var started = false
-var switches = 0
+var switches: long = 0
 
 // Timers, ascending by deadline (milliseconds of the system tick count).
-var timer_at: []int
+var timer_at: []long
 var timer_run: []func()
 
 // Operations the operating system is still working on (see std/fs.br, std/net.br).
-var pending_io = 0
+var pending_io: long = 0
 var iocp: usize = 0
 var ops: []Op
-var op_free: []int
+var op_free: []long
 
 func init()
     if started
@@ -130,12 +130,12 @@ func fatal(message: text)
     end
 end
 
-func now() -> int
+func now() -> long
     var t: usize = 0
     unsafe
         t = GetTickCount64()
     end
-    return int(t)
+    return long(t)
 end
 
 // Deletes the fibers of finished tasks and makes their ids reusable.
@@ -153,7 +153,7 @@ func reap()
 end
 
 // Runs `action` once the clock reaches `at`.
-func add_timer(at: int, action: func())
+func add_timer(at: long, action: func())
     timer_at.add(at)
     timer_run.add(action)
     var j = timer_at.len - 1
@@ -174,7 +174,7 @@ func fire_timers()
         return
     end
     let t = now()
-    var fired = 0
+    var fired: long = 0
     while fired < timer_at.len and timer_at[fired] <= t
         fired += 1
     end
@@ -185,7 +185,7 @@ func fire_timers()
     for i in 0..fired
         batch.add(timer_run[i])
     end
-    var k = 0
+    var k: long = 0
     while k + fired < timer_at.len
         timer_at[k] = timer_at[k + fired]
         timer_run[k] = timer_run[k + fired]
@@ -218,10 +218,10 @@ func io_attach(handle: usize)
     end
 end
 
-func last_error() -> int
-    var e = 0
+func last_error() -> long
+    var e: long = 0
     unsafe
-        e = int(GetLastError())
+        e = long(GetLastError())
     end
     return e
 end
@@ -269,14 +269,14 @@ end
 // by itself after a routine has run, so the routine also posts an empty packet to the port,
 // which makes `poll_io` return and lets the scheduler see the task it woke.
 func dns_done(error: u32, bytes: u32, overlapped: usize)
-    let idp: *int = overlapped + 32
-    var id = 0
+    let idp: *long = overlapped + 32
+    var id: long = 0
     unsafe
         id = idp[0]
     end
     let op = ops[id]
-    op.bytes = int(bytes)
-    op.status = int(error)
+    op.bytes = long(bytes)
+    op.status = long(error)
     op.done = true
     pending_io -= 1
     wake(op.task)
@@ -287,7 +287,7 @@ end
 
 // Collects completed operations, waiting up to `ms` milliseconds for the first. The wait is
 // alertable, so completion routines queued by the system (name lookups) run inside it.
-func poll_io(ms: int)
+func poll_io(ms: long)
     if iocp == 0
         return
     end
@@ -297,7 +297,7 @@ func poll_io(ms: int)
     while pending_io > 0
         entry.ov = 0
         out.removed = 0
-        var ok = 0
+        var ok: long = 0
         unsafe
             ok = GetQueuedCompletionStatusEx(iocp, &entry, 1, &out.removed, u32(wait), 1)
         end
@@ -312,20 +312,20 @@ func poll_io(ms: int)
         if out.removed == 0 or entry.ov == 0
             return
         end
-        let idp: *int = entry.ov + 32
-        var id = 0
+        let idp: *long = entry.ov + 32
+        var id: long = 0
         unsafe
             id = idp[0]
         end
         let op = ops[id]
         // the operation's own status (an NTSTATUS in its OVERLAPPED) as a Windows error code
-        var status = 0
+        var status: long = 0
         if op.internal != 0
             unsafe
-                status = int(RtlNtStatusToDosError(u32(op.internal)))
+                status = long(RtlNtStatusToDosError(u32(op.internal)))
             end
         end
-        op.bytes = int(entry.bytes)
+        op.bytes = long(entry.bytes)
         op.status = status
         op.done = true
         pending_io -= 1
@@ -336,7 +336,7 @@ end
 
 // Nothing is ready: wait for the earliest timer or for an I/O completion.
 func wait_events()
-    var ms = 0xFFFFFFFF
+    var ms: long = 0xFFFFFFFF
     if timer_at.len > 0
         ms = timer_at[0] - now()
         if ms < 0
@@ -395,7 +395,7 @@ end
 
 // Makes a parked task ready. Waking a task that is not parked does nothing,
 // so a stale registration can never run a task twice.
-func wake(id: int)
+func wake(id: long)
     if id < tasks.len and tasks[id].waiting
         tasks[id].waiting = false
         ready.add(id)
@@ -404,7 +404,7 @@ end
 
 // Entry point of every spawned fiber. Must never return.
 func fiber_main(id: usize)
-    let me = int(id)
+    let me = long(id)
     // No local may own heap values here: this function never returns,
     // so nothing it holds would ever be released.
     tasks[me].action()
@@ -417,7 +417,7 @@ end
 func start(action: func())
     init()
     reap()
-    var id = 0
+    var id: long = 0
     if free_ids.len > 0
         id = free_ids.take()
         tasks[id].action = action
@@ -458,7 +458,7 @@ func wake_one(ref ch: Chan)
     end
 end
 
-func chan_send(ref ch: Chan, word: int)
+func chan_send(ref ch: Chan, word: long)
     if ch.closed
         fatal("send on a closed channel")
     end
@@ -466,7 +466,7 @@ func chan_send(ref ch: Chan, word: int)
     wake_one(ref ch)
 end
 
-func chan_recv(ref ch: Chan) -> int
+func chan_recv(ref ch: Chan) -> long
     init()
     while true
         if ch.head < ch.items.len

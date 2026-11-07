@@ -321,15 +321,6 @@ fn error_asm_interpolated_line() {
     assert!(msg.contains("plain text"), "{}", msg);
 }
 
-#[test]
-fn interpreter_runs_hello() {
-    let src = std::fs::read_to_string("examples/hello.br").unwrap();
-    let file = parse_source(&src).unwrap();
-    let mut interp = brasa::Interpreter::new();
-    interp.load_file(&file).unwrap();
-    interp.run_main().unwrap();
-}
-
 fn parses(src: &str) -> Result<brasa::ast::File, String> {
     brasa::parse_source(src).map_err(|d| d.msg)
 }

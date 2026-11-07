@@ -24,7 +24,7 @@ fn ui_is_compiled_from_brasa_source() {
     assert!(a.contains("B_ui_wndproc proc"));
     assert!(a.contains("B_ui_Control_layout proc"));
     // ...and call Win32 directly.
-    assert!(a.contains("extern CreateWindowExA:proc"));
+    assert!(a.contains("GOT_CreateWindowExA dq 0"));
 }
 
 #[test]
@@ -88,7 +88,7 @@ fn spawn_pulls_in_the_task_library() {
     let a = asm("package main\nfunc w()\nend\nfunc main()\n    spawn w()\n    let c = channel(int)\n    c.send(1)\nend\n").unwrap();
     assert!(a.contains("B_task_start proc"));
     assert!(a.contains("B_task_chan_send proc"));
-    assert!(a.contains("extern CreateFiber:proc"));
+    assert!(a.contains("GOT_CreateFiber dq 0"));
 }
 
 #[test]

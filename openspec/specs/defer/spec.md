@@ -70,7 +70,7 @@ The operand of `defer` SHALL be a call. Any other expression SHALL be rejected a
 - **THEN** compilation fails with an error saying `defer` needs a call
 
 ### Requirement: Where defer does and does not run
-`defer` SHALL work in functions, methods, lambdas and async functions, each with its own list of deferred calls. Deferred calls SHALL NOT run on `break` or `continue`, nor when the program stops abruptly (a runtime panic or a fatal error).
+`defer` SHALL work in functions, methods, lambdas and async functions, each with its own list of deferred calls. Deferred calls SHALL NOT run on `break` or `continue`, nor when the program aborts (an `abort`, an out-of-bounds index, a division by zero and the other aborts: nothing is unwound).
 
 #### Scenario: Break does not run it
 - **WHEN** a loop body executes `defer print("x")` and then `break`
@@ -80,16 +80,13 @@ The operand of `defer` SHALL be a call. Any other expression SHALL be rejected a
 - **WHEN** a lambda or an async function contains a `defer`
 - **THEN** the deferred call runs when that lambda or async function ends
 
+#### Scenario: Abort
+- **WHEN** a function executes `defer print("x")` and then aborts
+- **THEN** `x` is not printed
+
 ### Requirement: No memory leaks
 Scheduling and running deferred calls SHALL NOT leak memory: a function with a `defer` called many times SHALL NOT increase the number of live heap objects.
 
 #### Scenario: Many calls
 - **WHEN** a function that executes a `defer` is called 5000 times
 - **THEN** the number of live heap objects afterwards equals the number before
-
-### Requirement: The interpreter agrees
-The interpreter (`--run`) SHALL run deferred calls at function exit, last in first out, like the native compiler, and SHALL NOT ignore them.
-
-#### Scenario: Interpreted program
-- **WHEN** a program with two defers is run with `--run`
-- **THEN** both calls run when the function ends, in reverse order

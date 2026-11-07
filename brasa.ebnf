@@ -176,15 +176,22 @@ new_expr   = 'new' type ;
    - async func f() -> T returns Future<T>; `await` yields T, waits without blocking other
      tasks, and may be used once per future. `await` is allowed only in an `async` function
      and in `main`; async functions take no `ref` parameters.
-   - error("message") creates an error; e.message reads it; call() ?? x gives
-     a default when the call fails.
+   - An 'error' has a kind (ErrorKind), a message (text) and a cause (error?, nil for a
+     root error). error("message") has kind errors.Other; error(kind, "message") and
+     error(kind, "message", cause) say more; e.kind, e.message and e.cause read the parts;
+     e.context("message") wraps e in a new error with the same kind; e.is(kind) looks at e
+     and its causes; e.full_message joins the messages. 'try' passes the error on
+     unchanged. call() ?? x gives a default when the call fails. ErrorKind values are
+     open, namespaced names (package.Name), made with errors.kind(...) and compared with
+     == and !=; a text is not a kind. A function that returns an error as a value is
+     written '-> error?' ('-> error' means "fails or not").
    - Generics are monomorphized at compile time.
    - Interfaces are structural: a type satisfies an interface if it has
      the methods with matching signatures.
    Values
    - record/array values are copied on assignment and call;
      'ref' passes by reference (no borrow checker, no lifetimes).
-   - Integer overflow: panic in debug, wraparound with --fast.
+   - Integer arithmetic wraps at the width of the type.
    - 'text' is immutable UTF-8 (pointer + length); []u8 for raw bytes.
    FFI & Assembly
    - Calling C requires declaring `extern [abi] func ...` (abi defaults to "C").

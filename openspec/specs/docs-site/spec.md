@@ -31,11 +31,11 @@ The site SHALL present annotated walkthroughs of the example programs shipped in
 - **THEN** the page shows the example's Brasa source code and a written explanation of the language features it demonstrates
 
 ### Requirement: Getting started guide
-The site SHALL explain how to build the Brasa parser and run a `.br` file, including the `--ast`, `--tokens`, and `--run` command-line options.
+The site SHALL explain how to build the Brasa parser and run a `.br` file, including the `--ast`, `--tokens`, and `--run` command-line options. It SHALL describe `--run` as compiling the program to a temporary native executable for this machine, running it and passing its exit status through, and SHALL NOT describe an interpreter.
 
 #### Scenario: Visitor wants to run a program
 - **WHEN** a visitor opens the getting-started page
-- **THEN** the page shows the commands to build the project and run a `.br` file, including what each of `--ast`, `--tokens`, and `--run` does
+- **THEN** the page shows the commands to build the project and run a `.br` file, including what each of `--ast`, `--tokens`, and `--run` does, with `--run` described as compile and run
 
 ### Requirement: Self-contained static site
 The site SHALL be viewable by opening its entry HTML file in a browser directly from the filesystem (no server, build step, or network access required), and all internal navigation links SHALL resolve to pages within the site.

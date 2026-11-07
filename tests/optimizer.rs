@@ -11,8 +11,8 @@ use std::time::{Duration, Instant};
 
 static N: AtomicUsize = AtomicUsize::new(0);
 
-const ON: CompileOptions = CompileOptions { optimize: true };
-const OFF: CompileOptions = CompileOptions { optimize: false };
+const ON: CompileOptions = CompileOptions { optimize: true, test_mode: false };
+const OFF: CompileOptions = CompileOptions { optimize: false, test_mode: false };
 
 /// Compiles and runs `src`; `None` when there is no native toolchain.
 fn run_with(src: &str, options: &CompileOptions) -> Option<(String, i32, Duration)> {
@@ -243,8 +243,8 @@ print(x / (2 - 2))"] {
         let Some((a, ca, _)) = run_with(&main_of(body), &OFF) else { return };
         let (b, cb, _) = run_with(&main_of(body), &ON).unwrap();
         assert_eq!((a.clone(), ca), (b, cb), "{}", body);
-        assert_eq!(ca, 101, "{} should panic: {}", body, a);
-        assert!(a.contains("panic: division by zero"), "{}: {}", body, a);
+        assert_eq!(ca, 101, "{} should abort: {}", body, a);
+        assert!(a.contains("abort: main.br:") && a.contains(": division by zero"), "{}: {}", body, a);
     }
 }
 

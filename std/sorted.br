@@ -17,6 +17,7 @@
 package sorted
 
 use text
+use errors
 
 #[shared]
 type Node<K, V> = record
@@ -314,7 +315,7 @@ end
 // The smallest key.
 func (m: SortedMap<K, V>) min() -> K or error
     if m.root == nil
-        return error("the collection is empty")
+        return error(errors.NotFound, "the collection is empty")
     end
     return min_node(m.root).key
 end
@@ -322,7 +323,7 @@ end
 // The largest key.
 func (m: SortedMap<K, V>) max() -> K or error
     if m.root == nil
-        return error("the collection is empty")
+        return error(errors.NotFound, "the collection is empty")
     end
     var n = m.root
     while n.right != nil
@@ -344,7 +345,7 @@ func (m: SortedMap<K, V>) floor(k: K) -> K or error
         end
     end
     if best == nil
-        return error("no key at or below the given key")
+        return error(errors.NotFound, "no key at or below the given key")
     end
     return best.key
 end
@@ -362,7 +363,7 @@ func (m: SortedMap<K, V>) ceil(k: K) -> K or error
         end
     end
     if best == nil
-        return error("no key at or above the given key")
+        return error(errors.NotFound, "no key at or above the given key")
     end
     return best.key
 end

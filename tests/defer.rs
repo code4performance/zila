@@ -1,6 +1,5 @@
 //! `defer`: a call that runs when the enclosing function ends. Programs are compiled to native
-//! executables and run (skipped when the Visual Studio build tools are missing), and the
-//! interpreter is exercised through the command-line tool.
+//! executables and run (skipped when the Visual Studio build tools are missing).
 
 use brasa::{compile_to_native, parse_source};
 use std::process::Command;
@@ -232,38 +231,30 @@ fn only_a_call_can_be_deferred() {
 }
 
 #[test]
-fn the_interpreter_runs_deferred_calls_at_function_exit() {
-    let dir = std::env::temp_dir().join(format!("brasa-defer-interp-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let file = dir.join("d.br");
-    std::fs::write(
-        &file,
-        "package main\nfunc work(n: int) -> int\n    defer print(\"first deferred\")\n    defer print(\"second deferred\")\n    print(\"working {n}\")\n    if n > 1\n        return n * 2\n    end\n    return 0\nend\nfunc main()\n    print(\"result {work(5)}\")\n    print(\"result {work(1)}\")\nend\n",
-    )
-    .unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_brasa-parse")).arg(&file).arg("--run").output().unwrap();
-    let _ = std::fs::remove_dir_all(&dir);
-    let text = String::from_utf8_lossy(&out.stdout).replace('\r', "");
+fn deferred_calls_run_at_function_exit() {
+    let src = "package main\nfunc work(n: int) -> int\n    defer print(\"first deferred\")\n    defer print(\"second deferred\")\n    print(\"working {n}\")\n    if n > 1\n        return n * 2\n    end\n    return 0\nend\nfunc main()\n    print(\"result {work(5)}\")\n    print(\"result {work(1)}\")\nend\n";
+    let Some((out, code)) = run(src) else { return };
     assert_eq!(
-        text,
-        "working 5\nsecond deferred\nfirst deferred\nresult 10\nworking 1\nsecond deferred\nfirst deferred\nresult 0\n"
+        out,
+        "working 5
+second deferred
+first deferred
+result 10
+working 1
+second deferred
+first deferred
+result 0
+"
     );
-    assert!(out.status.success());
+    assert_eq!(code, 0);
 }
 
 #[test]
-fn return_break_and_continue_inside_if_work_in_the_interpreter() {
-    let dir = std::env::temp_dir().join(format!("brasa-flow-interp-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let file = dir.join("f.br");
-    std::fs::write(
-        &file,
-        "package main\nfunc first_even(limit: int) -> int\n    for i in 1..limit\n        if i % 2 == 1\n            continue\n        end\n        if i > 3\n            break\n        end\n        return i\n    end\n    return -1\nend\nfunc main()\n    print(first_even(10))\nend\n",
-    )
-    .unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_brasa-parse")).arg(&file).arg("--run").output().unwrap();
-    let _ = std::fs::remove_dir_all(&dir);
-    assert_eq!(String::from_utf8_lossy(&out.stdout).replace('\r', ""), "2\n");
+fn return_break_and_continue_inside_if_work() {
+    let src = "package main\nfunc first_even(limit: int) -> int\n    for i in 1..limit\n        if i % 2 == 1\n            continue\n        end\n        if i > 3\n            break\n        end\n        return i\n    end\n    return -1\nend\nfunc main()\n    print(first_even(10))\nend\n";
+    let Some((out, _)) = run(src) else { return };
+    assert_eq!(out, "2
+");
 }
 
 #[test]

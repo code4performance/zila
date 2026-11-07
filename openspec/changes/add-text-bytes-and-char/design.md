@@ -1,0 +1,38 @@
+## Context
+
+A `text` is already a pointer plus a length holding UTF-8 bytes; `len` is O(1) and counts bytes. Today `s[i]` calls `rt_text_byte` and yields a `u8` (`src/codegen_x64.rs`, the `Ty::Text` arm of `ExprKind::Index`), `slice` calls `rt_text_slice` with no boundary check, `chr(n)` builds a text from a number, and `for` accepts only ranges, maps and lists. `ExprKind::Char` already compiles to an unsigned 32-bit `Ty::Int`, so a char literal is just a number. `c.char` (FFI) is the 8-bit C type and has nothing to do with Brasa's `char`. `std/text.br`, `std/format.br` (its UTF-8 width code at the top reads `s[i]` and tests continuation bytes by hand), `std/float.br`, `std/net.br`, `std/ui.br` and `os/kernel.br` index text directly.
+
+## Goals / Non-Goals
+
+**Goals**
+- One clear model: bytes for `len`, `slice`, `byte`; characters for `for`, `char_count`, `chars`.
+- Text that is valid UTF-8 by construction: no operation on the safe surface can cut a character.
+- Every Brasa file in the repo migrated in the same change.
+
+**Non-Goals**
+- Grapheme clusters, normalization, Unicode case mapping, locale collation.
+- A `[]byte` view without copy (see decision 4), or a mutable text buffer type.
+- Touching FFI types.
+
+## Decisions
+
+1. **Why `len` stays bytes.** Characters need a scan; bytes are the unit that memory, files and sockets use, and an O(1) `len` is what loops and buffers need. The docs say it once, early, with `"ação".len == 6`. `char_count()` is the explicit O(n) alternative.
+2. **`char` is its own type.** A new `Ty::Char` (32-bit unsigned, scalar values only). It is not an int so `c + 1` and `let n: int = 'a'` fail loudly; `c.code` and `char(n)` are the two crossings. Comparison operators work by code point. Interpolation and `print` write the UTF-8 text. The literal case in `expr` returns `Ty::Char`; `const_value` (line ~1355) keeps folding it. `match` patterns with char literals compile as integer compares.
+3. **`char(n)` aborts, it does not return an error.** An invalid scalar value is a programming mistake, like a bad index, and uses the abort from `remove-panic-add-abort` (until that lands, the existing `panic` runtime path is used, and the message text is the same). Code that handles untrusted numbers checks the range first. `text.from_bytes` returns `text or error` because bytes really do come from outside.
+4. **`bytes()` copies; `byte(i)` is the zero-copy primitive.** Texts are immutable and lists are owned and mutable, so `bytes()` allocates a list. Library loops that need many byte reads (`index_from`, `trim`, `parse_int`, `parse_float`, `format`'s parser) use `s.byte(i)` and do not copy. This keeps `split` and `replace` linear. `byte(i)` is implemented by the same runtime routine as the old index (`rt_text_byte`, renamed `rt_text_byte_at`) plus an abort in the out-of-range case.
+5. **`slice` checks boundaries in the runtime.** `rt_text_slice` verifies `0 <= a <= b <= len`, and that the byte at `a` (if `a < len`) and at `b` (if `b < len`) is not a continuation byte (`0x80..=0xBF`). Because text is valid UTF-8, that is enough. The check is constant time. The abort messages name the position and which rule failed (decision recorded in the spec).
+6. **`for c in s` decodes inline.** `for_loop` gets a branch for `Ty::Text` that keeps a hidden byte offset, calls a small runtime routine `rt_text_next_char(text, offset) -> (char, next_offset)` (returns U+FFFD and advances by one on an invalid lead or truncated sequence), and binds `c` per iteration like the list branch binds its variable. The text is retained for the loop's duration so the body can reassign the variable that named it. `break`, `continue` and `defer` interact exactly as in the list loop.
+7. **Invalid UTF-8 can still exist.** Text read from `fs` or `net` is not validated at the boundary (that would make every read O(n) and fallible). So "text is valid UTF-8" is an invariant of everything the program builds, and a promise of the standard library on its outputs, while text from outside may be invalid. `for` and `char_count` tolerate it (U+FFFD, count of one per bad byte); `slice` boundary checks treat any continuation byte as a non-boundary, which on invalid text is still safe (it can only refuse a cut, never produce more invalid text than it was given). `text.from_bytes` is the validating door, and the docs say `fs.read` returns unvalidated text.
+8. **`s[i]` is a compile error with a teaching message.** The `Ty::Text` arm in `ExprKind::Index` (both the read at line ~2941 and the assignment arm at ~2410) returns: `text cannot be indexed: use s.bytes() for the bytes, s.slice(a, b) for a piece (byte positions), or for c in s for the characters`. The LSP shows the same message.
+9. **Removing `chr`.** `chr(n)` made a one-byte text for `n < 128` and raw bytes otherwise, which is exactly how invalid text gets built. Its uses (`std/text.br` case conversion, `os/kernel.br`) become `char(n).to_text()`. With `upper`/`lower` the library copies unchanged runs with `slice` and converts ASCII letters; the loops use `for c in s` and `from_chars`/list pieces rather than byte tricks.
+10. **Library rewrite policy.** Anything that needs bytes uses `s.byte(i)` with `s.len` bounds (searching, parsing, trimming of ASCII whitespace); anything that needs characters uses `for c in s`. `reverse` builds a `[]char` with `chars(s)` and walks it backwards. `pad_*` use `char_count()` and require `fill.char_count() == 1`. `format.br`'s hand-written UTF-8 width counter is replaced by `char_count()`. `compare` and `sorted.text_map` order by bytes, which for UTF-8 equals code point order, so they are unchanged in behavior (documented).
+11. **Interpreter.** `--run` is being removed by `remove-interpreter`. This change does not add `char` or the new methods there; if the interpreter still exists when this lands, its `chr` builtin and text indexing are deleted rather than ported, and its tests that rely on them are dropped with a note in the task.
+
+**Depends on** `remove-panic-add-abort` (abort message and exit status; if it is not merged first, the old `panic` runtime path is used and the messages stay identical), `add-direct-pe-output` (no direct dependency, but the new runtime routines must be expressible in the assembler it ships; they use only instructions already in the runtime), `remove-interpreter` (see decision 11). Related but separate: `add-int-long-aliases` (renames of integer types; `char` here is not an integer alias), `add-json` and `add-web` (will use `from_bytes` and `chars`), `add-derived-eq-ord-hash` (`char` gets `==`, ordering and hashing here as built-in operators, not through that mechanism).
+
+## Risks / Trade-offs
+
+- **Large mechanical migration** (about 70 sites, plus test programs). Mitigation: make the compile error land first (task 2), and let the compiler list every site; migrate by file with its tests in the same task.
+- **`bytes()` cost.** A copy per call surprises people in loops. Mitigation: docs recommend `byte(i)` in hot loops; library code never calls `bytes()` per iteration.
+- **Unvalidated text from outside** (decision 7) weakens the invariant. Mitigation: documented, tolerant iteration, and `from_bytes` for validation; validating at the I/O boundary can be added later without changing the language.
+- **`char` as a distinct type** touches type checking in many arms (`Ty` match statements, `show`, size 4, formatting in `print` and interpolation, map keys). Mitigation: its own task with a checklist of each `Ty` match, and a test per place (print, interpolation, list of char, record field, parameter, comparison).

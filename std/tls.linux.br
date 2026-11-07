@@ -19,6 +19,7 @@ package tls
 
 use c
 use sys
+use errors
 use net
 
 #[link("ssl")]
@@ -97,10 +98,10 @@ func last_error(fallback: text) -> text
 end
 
 // Copies `n` bytes of `data` starting at `from` into raw memory at `dest`.
-func put_text(dest: *u8, data: text, from: int, n: int)
+func put_text(dest: *u8, data: text, from: long, n: long)
     unsafe
         for i in 0..n
-            dest[i] = int(data[from + i])
+            dest[i] = data[from + i]
         end
     end
 end
@@ -108,17 +109,17 @@ end
 // Sends what OpenSSL has queued for the server.
 async func flush(conn: Conn) -> error
     while true
-        var pending = 0
+        var pending: long = 0
         unsafe
-            pending = int(BIO_ctrl_pending(conn.wbio))
+            pending = long(BIO_ctrl_pending(conn.wbio))
         end
         if pending == 0
             return
         end
         let b = sys.buffer(pending)
-        var n = 0
+        var n: long = 0
         unsafe
-            n = int(BIO_read(conn.wbio, b.ptr, i32(pending)))
+            n = long(BIO_read(conn.wbio, b.ptr, i32(pending)))
         end
         if n <= 0
             return
@@ -143,7 +144,7 @@ async func feed(conn: Conn) -> bool or error
 end
 
 // Opens a TCP connection and runs the TLS handshake.
-async func connect(host: text, port: int) -> Conn or error
+async func connect(host: text, port: long) -> Conn or error
     let raw = try await net.connect(host, port)
     let conn = Conn{ raw: raw, ssl: usize(0), rbio: usize(0), wbio: usize(0), open: false }
     var ctx = usize(0)
@@ -151,16 +152,16 @@ async func connect(host: text, port: int) -> Conn or error
         ctx = SSL_CTX_new(TLS_client_method())
     end
     if ctx == usize(0)
-        return error(last_error("TLS: cannot create a context (is OpenSSL 3 installed?)"))
+        return error(errors.Io, last_error("TLS: cannot create a context (is OpenSSL 3 installed?)"))
     end
-    var ok = 0
+    var ok: long = 0
     unsafe
-        ok = int(SSL_CTX_set_default_verify_paths(ctx))
+        ok = long(SSL_CTX_set_default_verify_paths(ctx))
         conn.ssl = SSL_new(ctx)
         SSL_CTX_free(ctx)
     end
     if conn.ssl == usize(0)
-        return error(last_error("TLS: cannot create a connection"))
+        return error(errors.Io, last_error("TLS: cannot create a connection"))
     end
     conn.open = true
     unsafe
@@ -173,19 +174,19 @@ async func connect(host: text, port: int) -> Conn or error
         SSL_ctrl(conn.ssl, i32(SSL_CTRL_SET_TLSEXT_HOSTNAME), i64(0), c.cstr(host))
     end
     while true
-        var r = 0
-        var e = 0
+        var r: long = 0
+        var e: long = 0
         unsafe
-            r = int(SSL_do_handshake(conn.ssl))
+            r = long(SSL_do_handshake(conn.ssl))
             if r != 1
-                e = int(SSL_get_error(conn.ssl, i32(r)))
+                e = long(SSL_get_error(conn.ssl, i32(r)))
             end
         end
         if r != 1 and e != SSL_ERROR_WANT_READ and e != SSL_ERROR_WANT_WRITE
             var why = last_error("the handshake was refused")
-            var vr = 0
+            var vr: long = 0
             unsafe
-                vr = int(SSL_get_verify_result(conn.ssl))
+                vr = long(SSL_get_verify_result(conn.ssl))
             end
             if vr != 0
                 unsafe
@@ -193,7 +194,7 @@ async func connect(host: text, port: int) -> Conn or error
                 end
             end
             release(conn)
-            return error("TLS handshake with {host} failed: {why}")
+            return error(errors.Io, "TLS handshake with {host} failed: {why}")
         end
         try await flush(conn)
         if r == 1
@@ -203,7 +204,7 @@ async func connect(host: text, port: int) -> Conn or error
             let alive = try await feed(conn)
             if not alive
                 release(conn)
-                return error("TLS handshake with {host} failed: the connection was closed")
+                return error(errors.ConnectionReset, "TLS handshake with {host} failed: the connection was closed")
             end
         end
     end
@@ -213,16 +214,16 @@ end
 // Encrypts and sends all of `data`.
 async func (conn: Conn) write(data: text) -> error
     if not conn.open
-        return error("write: the connection is closed")
+        return error(errors.Closed, "write: the connection is closed")
     end
-    var done = 0
+    var done: long = 0
     while done < data.len
-        var n = 0
-        var e = 0
+        var n: long = 0
+        var e: long = 0
         unsafe
-            n = int(SSL_write(conn.ssl, c.cstr(data) + done, i32(data.len - done)))
+            n = long(SSL_write(conn.ssl, c.cstr(data) + done, i32(data.len - done)))
             if n <= 0
-                e = int(SSL_get_error(conn.ssl, i32(n)))
+                e = long(SSL_get_error(conn.ssl, i32(n)))
             end
         end
         try await flush(conn)
@@ -233,11 +234,11 @@ async func (conn: Conn) write(data: text) -> error
         if e == SSL_ERROR_WANT_READ
             let alive = try await feed(conn)
             if not alive
-                return error("write: the connection is closed")
+                return error(errors.Closed, "write: the connection is closed")
             end
         else
             if e != SSL_ERROR_WANT_WRITE
-                return error("TLS: " + last_error("cannot send"))
+                return error(errors.Io, "TLS: " + last_error("cannot send"))
             end
         end
     end
@@ -245,18 +246,18 @@ async func (conn: Conn) write(data: text) -> error
 end
 
 // Receives up to `max` bytes; empty text means the server closed the connection.
-async func (conn: Conn) read(max: int) -> text or error
+async func (conn: Conn) read(max: long) -> text or error
     if not conn.open
         return ""
     end
     let b = sys.buffer(max + 1)
     while true
-        var n = 0
-        var e = 0
+        var n: long = 0
+        var e: long = 0
         unsafe
-            n = int(SSL_read(conn.ssl, b.ptr, i32(max)))
+            n = long(SSL_read(conn.ssl, b.ptr, i32(max)))
             if n <= 0
-                e = int(SSL_get_error(conn.ssl, i32(n)))
+                e = long(SSL_get_error(conn.ssl, i32(n)))
             end
         end
         try await flush(conn)
@@ -273,7 +274,7 @@ async func (conn: Conn) read(max: int) -> text or error
             end
         else
             if e != SSL_ERROR_WANT_WRITE
-                return error("TLS: " + last_error("cannot receive"))
+                return error(errors.Io, "TLS: " + last_error("cannot receive"))
             end
         end
     end

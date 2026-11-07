@@ -30,7 +30,7 @@ Not sure where to begin? Look for issues labelled `good first issue`, or open an
 
 ## Setting up
 
-You need a recent stable **Rust** toolchain. To compile Brasa programs on Windows you also need the **Visual Studio C++ Build Tools** (`ml64` and `link`). **QEMU** is optional and only needed to boot Brasa OS.
+You need a recent stable **Rust** toolchain. Compiling Brasa programs needs nothing else (the compiler writes the executable itself); on Windows, Rust's default MSVC toolchain needs the Visual Studio C++ linker to build the compiler. **QEMU** is optional and only needed to boot Brasa OS.
 
 ```sh
 git clone https://github.com/code4performance/brasa-parser
@@ -52,7 +52,7 @@ A good bug report lets someone else see the problem in a minute. Please include:
 1. **The smallest Brasa program** that shows it (a few lines, not your whole project).
 2. **What you ran**, for example `brasa-parse bug.br -o bug.exe`.
 3. **What you expected** and **what happened** (paste the exact message or output).
-4. Your **Windows version** and the Visual Studio Build Tools version if the problem is in compiling.
+4. Your **Windows version** if the problem is in compiling.
 
 If a program crashes or prints something impossible, say so plainly. Crashes in compiled programs are almost always compiler bugs, and they are the most valuable reports we get.
 

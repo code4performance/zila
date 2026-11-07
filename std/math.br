@@ -11,6 +11,8 @@
 
 package math
 
+use errors
+
 // Square root. `sqrt(-1.0)` is NaN.
 func sqrt(x: float) -> float
     return __sqrt(x)
@@ -96,7 +98,7 @@ func fixed(x: float, digits: int) -> text
     if scaled >= 9.0e15
         return "{x}"
     end
-    let n = int(scaled)
+    let n = long(scaled)
     var out = ""
     if x < 0.0 and n != 0
         out = "-"
@@ -104,10 +106,94 @@ func fixed(x: float, digits: int) -> text
     if digits == 0
         return out + "{n}"
     end
-    let unit = int(pow(10.0, digits))
+    let unit = long(pow(10.0, digits))
     var frac = "{n % unit}"
     while frac.len < digits
         frac = "0" + frac
     end
     return out + "{n / unit}." + frac
+end
+
+// ---- checked integer arithmetic ----
+// `+`, `-` and `*` on integers wrap at the width of the type and never fail. When a program
+// needs to know, these return the exact result or an error: kind `Overflow` when it does not
+// fit, kind `InvalidInput` for a zero divisor. `checked_add` and its friends work on `int`
+// (32 bits); the `_long` versions work on `long` (64 bits).
+
+func checked_add(a: int, b: int) -> int or error
+    let r = long(a) + long(b)
+    if r != long(int(r))
+        return error(errors.Overflow, "integer overflow: {a} + {b}")
+    end
+    return int(r)
+end
+
+func checked_sub(a: int, b: int) -> int or error
+    let r = long(a) - long(b)
+    if r != long(int(r))
+        return error(errors.Overflow, "integer overflow: {a} - {b}")
+    end
+    return int(r)
+end
+
+func checked_mul(a: int, b: int) -> int or error
+    let r = long(a) * long(b)
+    if r != long(int(r))
+        return error(errors.Overflow, "integer overflow: {a} * {b}")
+    end
+    return int(r)
+end
+
+// Whole-number division, rounding toward zero. `MIN / -1` does not fit.
+func checked_div(a: int, b: int) -> int or error
+    if b == 0
+        return error(errors.InvalidInput, "division by zero: {a} / {b}")
+    end
+    let least = 0 - 2147483647 - 1
+    if a == least and b == -1
+        return error(errors.Overflow, "integer overflow: {a} / {b}")
+    end
+    return a / b
+end
+
+func checked_add_long(a: long, b: long) -> long or error
+    let r = a + b
+    if (b > 0 and r < a) or (b < 0 and r > a)
+        return error(errors.Overflow, "integer overflow: {a} + {b}")
+    end
+    return r
+end
+
+func checked_sub_long(a: long, b: long) -> long or error
+    let r = a - b
+    if (b > 0 and r > a) or (b < 0 and r < a)
+        return error(errors.Overflow, "integer overflow: {a} - {b}")
+    end
+    return r
+end
+
+func checked_mul_long(a: long, b: long) -> long or error
+    if a == 0 or b == 0
+        return 0
+    end
+    let least: long = 0 - 9223372036854775807 - 1
+    if (a == -1 and b == least) or (b == -1 and a == least)
+        return error(errors.Overflow, "integer overflow: {a} * {b}")
+    end
+    let r = a * b
+    if r / b != a
+        return error(errors.Overflow, "integer overflow: {a} * {b}")
+    end
+    return r
+end
+
+func checked_div_long(a: long, b: long) -> long or error
+    if b == 0
+        return error(errors.InvalidInput, "division by zero: {a} / {b}")
+    end
+    let least: long = 0 - 9223372036854775807 - 1
+    if a == least and b == -1
+        return error(errors.Overflow, "integer overflow: {a} / {b}")
+    end
+    return a / b
 end

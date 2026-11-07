@@ -12,6 +12,7 @@
 package text
 
 use float
+use errors
 
 // ---- searching ----
 
@@ -101,7 +102,7 @@ end
 // The pieces between the occurrences of `sep`, empty pieces included.
 func split(s: text, sep: text) -> []text
     if sep.len == 0
-        panic("split needs a separator")
+        abort("split needs a separator")
     end
     let out: []text = []
     var start = 0
@@ -260,8 +261,18 @@ end
 
 // ---- parsing ----
 
-// The whole number written in `s`: optional sign, then decimal digits.
+// The whole number written in `s`: optional sign, then decimal digits. It must fit an `int`
+// (32 bits); `parse_long` takes up to 64 bits.
 func parse_int(s: text) -> int or error
+    let n = try parse_long(s)
+    if n < -2147483648 or n > 2147483647
+        return error(errors.InvalidInput, "not a whole number that fits an int: \"" + s + "\"")
+    end
+    return int(n)
+end
+
+// Like `parse_int` for a number up to 64 bits.
+func parse_long(s: text) -> long or error
     let bad = "not a whole number: \"" + s + "\""
     var i = 0
     var neg = false
@@ -270,18 +281,18 @@ func parse_int(s: text) -> int or error
         i = 1
     end
     if i >= s.len
-        return error(bad)
+        return error(errors.InvalidInput, bad)
     end
-    let least = 0 - 9223372036854775807 - 1
-    var acc = 0
+    let least: long = 0 - 9223372036854775807 - 1
+    var acc: long = 0
     while i < s.len
         let d = int(s[i]) - 48
         if d < 0 or d > 9
-            return error(bad)
+            return error(errors.InvalidInput, bad)
         end
         // acc * 10 - d must not go below the smallest int (acc is kept negative)
         if acc < (least + d) / 10
-            return error(bad)
+            return error(errors.InvalidInput, bad)
         end
         acc = acc * 10 - d
         i += 1
@@ -290,7 +301,7 @@ func parse_int(s: text) -> int or error
         return acc
     end
     if acc == least
-        return error(bad)
+        return error(errors.InvalidInput, bad)
     end
     return 0 - acc
 end
@@ -298,8 +309,8 @@ end
 // ---- parsing numbers with a fraction ----
 
 // A copy of a big number (see the float library for the representation).
-func copy_big(a: []int) -> []int
-    let out: []int = []
+func copy_big(a: []long) -> []long
+    let out: []long = []
     for x in a
         out.add(x)
     end
@@ -307,8 +318,8 @@ func copy_big(a: []int) -> []int
 end
 
 // a = a + d, for 0 <= d < 1000000000
-func add_small(a: []int, d: int)
-    var carry = d
+func add_small(a: []long, d: int)
+    var carry: long = d
     var i = 0
     while carry > 0
         if i >= a.len
@@ -321,7 +332,7 @@ func add_small(a: []int, d: int)
     end
 end
 
-func big_pow10(n: int) -> []int
+func big_pow10(n: int) -> []long
     let a = float.big_from(1)
     for i in 0..n
         float.b_mul(a, 10)
@@ -335,7 +346,7 @@ end
 // gives the same float.
 func parse_float(s: text) -> float or error
     let bad = "not a number: \"" + s + "\""
-    let least = 0 - 9223372036854775807 - 1
+    let least: long = 0 - 9223372036854775807 - 1
     var i = 0
     var neg = false
     if s.len > 0 and (s[0] == 45 or s[0] == 43)
@@ -364,7 +375,7 @@ func parse_float(s: text) -> float or error
         let c = int(s[j])
         if c == 46
             if seen_dot
-                return error(bad)
+                return error(errors.InvalidInput, bad)
             end
             seen_dot = true
             j += 1
@@ -382,7 +393,7 @@ func parse_float(s: text) -> float or error
         end
     end
     if not any
-        return error(bad)
+        return error(errors.InvalidInput, bad)
     end
     var e10 = 0
     if j < s.len and (s[j] == 101 or s[j] == 69)
@@ -393,12 +404,12 @@ func parse_float(s: text) -> float or error
             j += 1
         end
         if j >= s.len
-            return error(bad)
+            return error(errors.InvalidInput, bad)
         end
         while j < s.len
             let c = int(s[j])
             if c < 48 or c > 57
-                return error(bad)
+                return error(errors.InvalidInput, bad)
             end
             if e10 < 100000
                 e10 = e10 * 10 + (c - 48)
@@ -410,10 +421,10 @@ func parse_float(s: text) -> float or error
         end
     end
     if j != s.len
-        return error(bad)
+        return error(errors.InvalidInput, bad)
     end
 
-    var signbit = 0
+    var signbit: long = 0
     if neg
         signbit = least
     end
@@ -453,7 +464,7 @@ func parse_float(s: text) -> float or error
     if k < 0 - 1074
         k = 0 - 1074
     end
-    var q = 0
+    var q: long = 0
     var rem = float.big_from(0)
     var d2 = float.big_from(1)
     var found = false
@@ -500,7 +511,7 @@ func parse_float(s: text) -> float or error
         if expf >= 2047
             return __from_bits(signbit bitor 9218868437227405312)
         end
-        return __from_bits(signbit bitor (expf << 52) bitor (q - 4503599627370496))
+        return __from_bits(signbit bitor (long(expf) << 52) bitor (q - 4503599627370496))
     end
     return __from_bits(signbit bitor q)
 end

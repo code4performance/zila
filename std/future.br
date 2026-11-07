@@ -17,13 +17,14 @@
 package future
 
 use task
+use errors
 
 // Reference semantics: copying a Future would split its waiters from its result.
 #[shared]
 type Future = record
     done: bool
-    slot: []int
-    waiters: []int
+    slot: []long
+    waiters: []long
 end
 
 func future_new() -> Future
@@ -31,7 +32,7 @@ func future_new() -> Future
 end
 
 // Stores the result and wakes every task waiting for it.
-func complete(fut: Future, word: int)
+func complete(fut: Future, word: long)
     fut.slot.add(word)
     fut.done = true
     for i in 0..fut.waiters.len
@@ -41,7 +42,7 @@ func complete(fut: Future, word: int)
 end
 
 // Waits for the future without blocking other tasks and takes its value.
-func wait(fut: Future) -> int
+func wait(fut: Future) -> long
     task.init()
     while not fut.done
         fut.waiters.add(task.current)
@@ -54,7 +55,7 @@ func wait(fut: Future) -> int
 end
 
 // Waits until at least one of the futures is done; returns its index.
-func wait_any(fs: []Future) -> int
+func wait_any(fs: []Future) -> long
     task.init()
     while true
         for i in 0..fs.len
@@ -72,7 +73,7 @@ end
 
 // Waits until `f` completes or `ms` milliseconds have passed; 1 when `f` completed.
 // A stale wake-up (from an earlier timer) only makes the loop check again.
-func timeout_wait(ms: int, f: Future) -> int
+func timeout_wait(ms: long, f: Future) -> long
     task.init()
     let me = task.current
     let deadline = task.now() + ms
@@ -89,8 +90,13 @@ func timeout_wait(ms: int, f: Future) -> int
     return 0
 end
 
+// The error of `timeout(ms, f)` when `ms` pass first.
+func timed_out() -> error?
+    return error(errors.Timeout, "timed out")
+end
+
 // A future that completes `ms` milliseconds from now (`await sleep(ms)`).
-func sleep_future(ms: int) -> Future
+func sleep_future(ms: long) -> Future
     task.init()
     let fut = Future{}
     task.add_timer(task.now() + ms, func()
@@ -100,7 +106,7 @@ func sleep_future(ms: int) -> Future
 end
 
 // Runs `body` as a task and completes `fut` with the word it returns.
-func launch(body: func() -> int, fut: Future)
+func launch(body: func() -> long, fut: Future)
     task.start(func()
         complete(fut, body())
     end)

@@ -1,6 +1,6 @@
 //! Generics and interfaces: methods on any type, monomorphization, inference, bounds. Programs are
 //! compiled to native executables and run (skipped when the Visual Studio build tools are
-//! missing); the interpreter is exercised through the command-line tool.
+//! missing).
 
 use brasa::{compile_to_native, parse_source};
 use std::process::Command;
@@ -387,15 +387,17 @@ end
 }
 
 #[test]
-fn the_interpreter_agrees_with_the_native_compiler() {
+fn the_generics_example_prints_what_the_docs_say() {
     let src = std::fs::read_to_string("examples/generics.br").unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_brasa-parse")).arg("examples/generics.br").arg("--run").output().unwrap();
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    let interp = String::from_utf8_lossy(&out.stdout).replace('\r', "");
-    assert!(interp.contains("showing the number 42") && interp.contains("popped alan"), "{}", interp);
-    if let Some((native, code)) = run(&src) {
+    if let Some((out, code)) = run(&src) {
         assert_eq!(code, 0);
-        assert_eq!(native, interp);
+        assert_eq!(out, "popped 4
+popped alan
+first of two lists: 10 and x
+showing (1, 2)
+showing dog rex
+showing the number 42
+");
     }
 }
 

@@ -43,13 +43,15 @@ pub struct Options {
     pub optimize: bool,
     /// `--target`: `windows` (the default) or `linux`.
     pub target: String,
+    /// Whether `--target` was given (without it, `--run` uses the host).
+    pub target_explicit: bool,
 }
 
 /// The targets `--target` accepts.
 pub const TARGETS: &[&str] = &["windows", "linux"];
 
 pub fn parse(args: &[String]) -> Result<Options, String> {
-    let mut o = Options { mode: Mode::Check, path: None, extra: Vec::new(), out: None, optimize: true, target: "windows".to_string() };
+    let mut o = Options { mode: Mode::Check, path: None, extra: Vec::new(), out: None, optimize: true, target: "windows".to_string(), target_explicit: false };
     let mut explicit = false;
     let mut i = 0;
     while i < args.len() {
@@ -70,7 +72,10 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
             "--target" => {
                 i += 1;
                 match args.get(i) {
-                    Some(v) if TARGETS.contains(&v.as_str()) => o.target = v.clone(),
+                    Some(v) if TARGETS.contains(&v.as_str()) => {
+                        o.target = v.clone();
+                        o.target_explicit = true;
+                    }
                     Some(v) => return Err(format!("unknown target '{}' (valid targets: {})", v, TARGETS.join(", "))),
                     None => return Err(format!("--target needs a name ({})", TARGETS.join(", "))),
                 }
@@ -123,6 +128,14 @@ mod tests {
         assert!(p(&["a.br"]).unwrap().optimize);
         let n = p(&["a.br", "--no-opt", "-o", "a.exe"]).unwrap();
         assert!(!n.optimize && n.mode == Mode::Build);
+    }
+
+    #[test]
+    fn target_is_explicit_only_when_given() {
+        let d = p(&["a.br", "--run"]).unwrap();
+        assert!(!d.target_explicit && d.target == "windows");
+        let l = p(&["a.br", "--run", "--target", "linux"]).unwrap();
+        assert!(l.target_explicit && l.target == "linux");
     }
 
     #[test]

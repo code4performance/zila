@@ -7,6 +7,7 @@
 package sys
 
 use c
+use errors
 
 #[link("kernel32")]
 extern "system" func FormatMessageA(flags: u32, source: usize, message: u32, language: u32, buffer: *u8, size: u32, args: usize) -> u32
@@ -24,24 +25,24 @@ end
 
 // Scratch integers whose addresses are handed to the operating system.
 type Scratch = record
-    a: int
-    b: int
+    a: long
+    b: long
 end
 
 // A zeroed block of `bytes` bytes.
-func buffer(bytes: int) -> Buf
+func buffer(bytes: long) -> Buf
     return Buf{ ptr: c.alloc(usize(bytes)) }
 end
 
 // `s` as a NUL-terminated UTF-16 string.
 func wide(s: text) -> Buf
-    var n = 0
+    var n: long = 0
     unsafe
         n = MultiByteToWideChar(65001, 0, c.cstr(s), -1, 0, 0)
     end
     let b = buffer(n * 2 + 2)
     unsafe
-        MultiByteToWideChar(65001, 0, c.cstr(s), -1, b.ptr, n)
+        MultiByteToWideChar(65001, 0, c.cstr(s), -1, b.ptr, int(n))
     end
     return b
 end
@@ -55,10 +56,55 @@ func trim_end(s: text) -> text
 end
 
 // "what: reason given by Windows" for an error code.
-func describe(code: int, what: text) -> text
+func describe(code: long, what: text) -> text
     let b = buffer(512)
     unsafe
         FormatMessageA(0x1200, 0, u32(code), 0, b.ptr, 512, 0)
     end
     return "{what}: {trim_end(c.from_cstr(b.ptr))}"
+end
+
+// The kind of an error code of Windows (`GetLastError`, a Winsock error or an operation status).
+// Codes with no mapping are `Io`.
+func kind_of(code: long) -> ErrorKind
+    if code == 2 or code == 3 or code == 1168 or code == 11001 or code == 11004
+        return errors.NotFound
+    end
+    if code == 5 or code == 1314
+        return errors.PermissionDenied
+    end
+    if code == 80 or code == 183
+        return errors.AlreadyExists
+    end
+    if code == 38
+        return errors.UnexpectedEof
+    end
+    if code == 995 or code == 1223 or code == 125
+        return errors.Cancelled
+    end
+    if code == 10060 or code == 258 or code == 1460 or code == 121
+        return errors.Timeout
+    end
+    if code == 10061 or code == 1225
+        return errors.ConnectionRefused
+    end
+    if code == 10051 or code == 10065 or code == 1231 or code == 1232
+        return errors.Unavailable
+    end
+    if code == 10053 or code == 10054 or code == 64 or code == 1236
+        return errors.ConnectionReset
+    end
+    if code == 10048 or code == 1227
+        return errors.AddrInUse
+    end
+    if code == 87 or code == 10022 or code == 10049 or code == 10040 or code == 1784
+        return errors.InvalidInput
+    end
+    return errors.Io
+end
+
+// The error for an operating-system code: its kind, and the message `describe` gives. (`error?`
+// is the type of an error that is a value; a plain `-> error` would mean "fails or not".)
+func error_for(code: long, what: text) -> error?
+    return error(kind_of(code), describe(code, what))
 end

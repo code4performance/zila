@@ -35,7 +35,7 @@ Lets a program store values under keys and find them again quickly, so lookups b
 - **THEN** it compiles and `m.len` is 0
 
 ### Requirement: Reading and writing by key
-`m[key]` SHALL read the value stored under `key`, and `m[key] = value` SHALL store it, adding the key when absent and replacing the value when present. Reading a missing key SHALL stop the program with a runtime panic that says the map key was not found.
+`m[key]` SHALL read the value stored under `key`, and `m[key] = value` SHALL store it, adding the key when absent and replacing the value when present. Reading a missing key SHALL abort the program with the message `map key not found` (use `has` or `get(key, default)` when the key may be absent).
 
 #### Scenario: Insert and read
 - **WHEN** a program sets `m["x"] = 5` and then prints `m["x"]`
@@ -47,7 +47,7 @@ Lets a program store values under keys and find them again quickly, so lookups b
 
 #### Scenario: Missing key
 - **WHEN** a program reads `m["nope"]` and the key was never stored
-- **THEN** the program panics with a "map key not found" message
+- **THEN** the program aborts with `abort: <file>.br:<line>: map key not found` and exits with 101
 
 ### Requirement: Map methods
 A map SHALL provide the methods `has(key)` (bool), `get(key, default)` (the stored value or `default`), `remove(key)` (removes the key if present, otherwise does nothing) and `clear()` (removes every entry), and a `len` property (the number of entries, as for lists and text).
@@ -99,10 +99,3 @@ Maps, and the keys and values they own, SHALL be released when no longer used: w
 #### Scenario: Many maps
 - **WHEN** a function that builds a map of texts and records and sets, replaces and removes entries is called 5000 times
 - **THEN** the number of live heap objects afterwards equals the number before
-
-### Requirement: The interpreter agrees
-The interpreter (`--run`) SHALL support the same map literals, reads, writes, methods and iteration order, and SHALL report a missing key with the same message.
-
-#### Scenario: Interpreted program
-- **WHEN** a program that builds a map, iterates it and reads a missing key is run with `--run`
-- **THEN** it prints the same lines as the native executable and stops with the same message

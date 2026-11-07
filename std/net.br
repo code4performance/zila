@@ -21,6 +21,7 @@ package net
 
 use c
 use sys
+use errors
 use task
 use ws
 use bufio
@@ -30,7 +31,7 @@ let SOCK_STREAM = 1
 let NS_DNS = 12
 let SOCK_DGRAM = 2
 let IPPROTO_UDP = 17
-let SIO_UDP_CONNRESET = 0x9800000C
+let SIO_UDP_CONNRESET: u32 = 0x9800000C
 let WSAEMSGSIZE = 10040
 let ERROR_MORE_DATA = 234
 let IPPROTO_TCP = 6
@@ -38,9 +39,9 @@ let WSA_FLAG_OVERLAPPED = 1
 let SOL_SOCKET = 0xFFFF
 let SO_UPDATE_ACCEPT_CONTEXT = 0x700B
 let SO_UPDATE_CONNECT_CONTEXT = 0x7010
-let SIO_GET_EXTENSION_FUNCTION_POINTER = 0xC8000006
+let SIO_GET_EXTENSION_FUNCTION_POINTER: u32 = 0xC8000006
 let ERROR_IO_PENDING = 997
-let INVALID_SOCKET = 0xFFFFFFFFFFFFFFFF
+let INVALID_SOCKET: usize = 0xFFFFFFFFFFFFFFFF
 
 type ConnectExFn = extern "system" func(usize, *u8, i32, usize, u32, usize, *task.Op) -> i32
 type AcceptExFn = extern "system" func(usize, usize, *u8, u32, u32, u32, usize, *task.Op) -> i32
@@ -69,7 +70,7 @@ end
 #[shared]
 type Listener = record
     sock: usize
-    port: int
+    port: long
     open: bool
 end
 
@@ -82,7 +83,7 @@ func (ref l: Listener) drop()
     end
 end
 
-func new_socket_of(kind: int, protocol: int) -> usize
+func new_socket_of(kind: i32, protocol: i32) -> usize
     var s: usize = INVALID_SOCKET
     unsafe
         s = ws.WSASocketW(AF_INET, kind, protocol, 0, 0, WSA_FLAG_OVERLAPPED)
@@ -98,10 +99,10 @@ func new_socket() -> usize
 end
 
 // Looks up a Winsock extension function (ConnectEx, AcceptEx) by its GUID.
-func extension(s: usize, guid: sys.Buf) -> int
+func extension(s: usize, guid: sys.Buf) -> long
     let out = sys.Scratch{}
     let size = sys.Scratch{}
-    var rc = 0
+    var rc: long = 0
     unsafe
         rc = ws.WSAIoctl(s, SIO_GET_EXTENSION_FUNCTION_POINTER, guid.ptr, 16, &out.a, 8, &size.a, 0, 0)
     end
@@ -111,16 +112,16 @@ func extension(s: usize, guid: sys.Buf) -> int
     return out.a
 end
 
-func put_bytes(p: *u8, b0: int, b1: int, b2: int, b3: int, b4: int, b5: int, b6: int, b7: int)
+func put_bytes(p: *u8, b0: long, b1: long, b2: long, b3: long, b4: long, b5: long, b6: long, b7: long)
     unsafe
-        p[0] = b0
-        p[1] = b1
-        p[2] = b2
-        p[3] = b3
-        p[4] = b4
-        p[5] = b5
-        p[6] = b6
-        p[7] = b7
+        p[0] = u8(b0)
+        p[1] = u8(b1)
+        p[2] = u8(b2)
+        p[3] = u8(b3)
+        p[4] = u8(b4)
+        p[5] = u8(b5)
+        p[6] = u8(b6)
+        p[7] = u8(b7)
     end
 end
 
@@ -130,17 +131,17 @@ func net_init() -> error
         return
     end
     let data = sys.buffer(512)
-    var rc = 0
+    var rc: long = 0
     unsafe
         rc = ws.WSAStartup(0x0202, data.ptr)
     end
     if rc != 0
-        return error("cannot start Winsock (error {rc})")
+        return error(errors.Io, "cannot start Winsock (error {rc})")
     end
     task.io_init()
     let s = new_socket()
     if s == INVALID_SOCKET
-        return error(sys.describe(task.last_error(), "cannot create a socket"))
+        return sys.error_for(task.last_error(), "cannot create a socket")
     end
     // {25a207b9-ddf3-4660-8ee9-76e58c74063e}
     let g1 = sys.buffer(16)
@@ -160,22 +161,22 @@ func net_init() -> error
 end
 
 // A sockaddr_in for an IPv4 address given as a 32-bit number and a port.
-func make_addr(ip: int, port: int) -> sys.Buf
+func make_addr(ip: long, port: long) -> sys.Buf
     let b = sys.buffer(16)
     put_bytes(b.ptr, AF_INET, 0, (port >> 8) bitand 255, port bitand 255, (ip >> 24) bitand 255, (ip >> 16) bitand 255, (ip >> 8) bitand 255, ip bitand 255)
     return b
 end
 
 // "a.b.c.d" as a number, or -1 when `host` is not a numeric IPv4 address.
-func parse_ip(host: text) -> int
-    var ip = 0
-    var parts = 0
-    var value = 0
-    var digits = 0
+func parse_ip(host: text) -> long
+    var ip: long = 0
+    var parts: long = 0
+    var value: long = 0
+    var digits: long = 0
     for i in 0..host.len + 1
-        var ch = 46
+        var ch: long = 46
         if i < host.len
-            ch = int(host[i])
+            ch = long(host[i])
         end
         if ch == 46
             if digits == 0 or value > 255
@@ -213,7 +214,7 @@ async func lookup(host: text) -> text or error
     end
     let res = sys.Scratch{}
     let op = task.op_new()
-    var rc = 0
+    var rc: long = 0
     unsafe
         rc = ws.GetAddrInfoExW(name.ptr, 0, NS_DNS, 0, hints.ptr, &res.a, 0, &op, task.dns_done, 0)
     end
@@ -224,46 +225,46 @@ async func lookup(host: text) -> text or error
     end
     task.op_release(op)
     if rc != 0
-        return error("cannot resolve '{host}'")
+        return error(errors.NotFound, "cannot resolve '{host}'")
     end
     // the first AF_INET entry of the list (ADDRINFOEXW: family at 4, address at 32, next at 64)
     var found = ""
     var info = res.a
-    var guard = 0
+    var guard: long = 0
     while info != 0 and guard < 32
         let node: *u8 = info
-        let slot: *int = info + 32
-        let next: *int = info + 64
+        let slot: *long = info + 32
+        let next: *long = info + 64
         unsafe
             if node[4] == AF_INET and found == ""
                 let addr: *u8 = slot[0]
-                found = "{int(addr[4])}.{int(addr[5])}.{int(addr[6])}.{int(addr[7])}"
+                found = "{long(addr[4])}.{long(addr[5])}.{long(addr[6])}.{long(addr[7])}"
             end
             info = next[0]
         end
         guard += 1
     end
     unsafe
-        ws.FreeAddrInfoExW(res.a)
+        ws.FreeAddrInfoExW(usize(res.a))
     end
     if found == ""
-        return error("cannot resolve '{host}'")
+        return error(errors.NotFound, "cannot resolve '{host}'")
     end
     return found
 end
 
 // The IPv4 address of `host` as a number, for building a socket address.
-async func resolve(host: text) -> int or error
+async func resolve(host: text) -> long or error
     let text_ip = try await lookup(host)
     return parse_ip(text_ip)
 end
 
 // Waits for an operation the system accepted (or finished at once) and
 // returns the bytes it moved.
-func await_op(op: task.Op, accepted: bool, err: int, what: text) -> int or error
+func await_op(op: task.Op, accepted: bool, err: long, what: text) -> long or error
     if not accepted and err != ERROR_IO_PENDING
         task.op_release(op)
-        return error(sys.describe(err, what))
+        return sys.error_for(err, what)
     end
     task.op_submit(op)
     task.op_wait(op)
@@ -271,33 +272,33 @@ func await_op(op: task.Op, accepted: bool, err: int, what: text) -> int or error
     let moved = op.bytes
     task.op_release(op)
     if status != 0
-        return error(sys.describe(status, what))
+        return sys.error_for(status, what)
     end
     return moved
 end
 
 // Connects to a TCP server.
-async func connect(host: text, port: int) -> Conn or error
+async func connect(host: text, port: long) -> Conn or error
     try net_init()
     let ip = try await resolve(host)
     let s = new_socket()
     if s == INVALID_SOCKET
-        return error(sys.describe(task.last_error(), "cannot create a socket"))
+        return sys.error_for(task.last_error(), "cannot create a socket")
     end
     let conn = Conn{ sock: s, open: true }
     // ConnectEx wants the socket bound first
     let local = make_addr(0, 0)
-    var rc = 0
+    var rc: long = 0
     unsafe
         rc = ws.bind(s, local.ptr, 16)
     end
     if rc != 0
-        return error(sys.describe(task.last_error(), "cannot bind a socket"))
+        return sys.error_for(task.last_error(), "cannot bind a socket")
     end
     let remote = make_addr(ip, port)
     let op = task.op_new()
-    var ok = 0
-    var err = 0
+    var ok: long = 0
+    var err: long = 0
     unsafe
         ok = connect_ex(s, remote.ptr, 16, 0, 0, 0, &op)
         err = task.last_error()
@@ -310,32 +311,32 @@ async func connect(host: text, port: int) -> Conn or error
 end
 
 // Starts listening on a port (0 picks a free one; see `.port`).
-async func listen(port: int) -> Listener or error
+async func listen(port: long) -> Listener or error
     try net_init()
     let s = new_socket()
     if s == INVALID_SOCKET
-        return error(sys.describe(task.last_error(), "cannot create a socket"))
+        return sys.error_for(task.last_error(), "cannot create a socket")
     end
     let l = Listener{ sock: s, port: port, open: true }
     let addr = make_addr(0, port)
-    var rc = 0
+    var rc: long = 0
     unsafe
         rc = ws.bind(s, addr.ptr, 16)
     end
     if rc != 0
-        return error(sys.describe(task.last_error(), "cannot listen on port {port}"))
+        return sys.error_for(task.last_error(), "cannot listen on port {port}")
     end
     unsafe
         rc = ws.listen(s, 128)
     end
     if rc != 0
-        return error(sys.describe(task.last_error(), "cannot listen on port {port}"))
+        return sys.error_for(task.last_error(), "cannot listen on port {port}")
     end
     let bound = sys.buffer(16)
     let size = sys.Scratch{ a: 16 }
     unsafe
         ws.getsockname(s, bound.ptr, &size.a)
-        l.port = (int(bound.ptr[2]) << 8) bitor int(bound.ptr[3])
+        l.port = (long(bound.ptr[2]) << 8) bitor long(bound.ptr[3])
     end
     return l
 end
@@ -344,13 +345,13 @@ end
 async func (l: Listener) accept() -> Conn or error
     let s = new_socket()
     if s == INVALID_SOCKET
-        return error(sys.describe(task.last_error(), "cannot create a socket"))
+        return sys.error_for(task.last_error(), "cannot create a socket")
     end
     let conn = Conn{ sock: s, open: true }
     let scratch = sys.buffer(64)
     let op = task.op_new()
-    var ok = 0
-    var err = 0
+    var ok: long = 0
+    var err: long = 0
     unsafe
         ok = accept_ex(l.sock, s, scratch.ptr, 0, 32, 32, 0, &op)
         err = task.last_error()
@@ -363,13 +364,13 @@ async func (l: Listener) accept() -> Conn or error
 end
 
 // Receives up to `max` bytes; empty text means the peer closed the connection.
-async func (conn: Conn) read(max: int) -> text or error
+async func (conn: Conn) read(max: long) -> text or error
     let b = sys.buffer(max)
     let wb = ws.Wsabuf{ len: u32(max), ptr: b.ptr }
     let flags = sys.Scratch{}
     let op = task.op_new()
-    var rc = 0
-    var err = 0
+    var rc: long = 0
+    var err: long = 0
     unsafe
         rc = ws.WSARecv(conn.sock, &wb, 1, 0, &flags.a, &op, 0)
         err = task.last_error()
@@ -380,19 +381,19 @@ end
 
 // Sends all of `data`.
 async func (conn: Conn) write(data: text) -> error
-    var done = 0
+    var done: long = 0
     while done < data.len
         let wb = ws.Wsabuf{ len: u32(data.len - done), ptr: c.cstr(data) + done }
         let op = task.op_new()
-        var rc = 0
-        var err = 0
+        var rc: long = 0
+        var err: long = 0
         unsafe
             rc = ws.WSASend(conn.sock, &wb, 1, 0, 0, &op, 0)
             err = task.last_error()
         end
         let sent = try await_op(op, rc == 0, err, "write")
         if sent == 0
-            return error("write: the connection is closed")
+            return error(errors.Closed, "write: the connection is closed")
         end
         done += sent
     end
@@ -426,7 +427,7 @@ end
 type Reader = record
     conn: Conn
     buf: bufio.InBuf
-    reads: int
+    reads: long
 end
 
 // Collects writes and sends them in large pieces.
@@ -434,7 +435,7 @@ end
 type Writer = record
     conn: Conn
     buf: bufio.OutBuf
-    writes: int
+    writes: long
 end
 
 // A reader over this connection (the end of the data is the peer closing it).
@@ -471,7 +472,7 @@ async func (r: Reader) read_line() -> text or error
         try await r.fill()
     end
     if not r.buf.has_line()
-        return error("end of file")
+        return error(errors.UnexpectedEof, "end of file")
     end
     return r.buf.take_line()
 end
@@ -549,7 +550,7 @@ end
 type UdpSocket = record
     sock: usize
     open: bool
-    port: int
+    port: long
 end
 
 func (ref s: UdpSocket) drop()
@@ -565,17 +566,17 @@ end
 type Packet = record
     data: text
     host: text
-    port: int
+    port: long
 end
 
 // Like `await_op`, for receiving a datagram: a datagram larger than the buffer is its own error.
-func await_dgram(op: task.Op, accepted: bool, err: int, what: text, max: int) -> int or error
+func await_dgram(op: task.Op, accepted: bool, err: long, what: text, max: long) -> long or error
     if not accepted and err != ERROR_IO_PENDING
         task.op_release(op)
         if err == WSAEMSGSIZE or err == ERROR_MORE_DATA
-            return error("datagram larger than {max} bytes")
+            return error(errors.InvalidInput, "datagram larger than {max} bytes")
         end
-        return error(sys.describe(err, what))
+        return sys.error_for(err, what)
     end
     task.op_submit(op)
     task.op_wait(op)
@@ -583,20 +584,20 @@ func await_dgram(op: task.Op, accepted: bool, err: int, what: text, max: int) ->
     let moved = op.bytes
     task.op_release(op)
     if status == WSAEMSGSIZE or status == ERROR_MORE_DATA
-        return error("datagram larger than {max} bytes")
+        return error(errors.InvalidInput, "datagram larger than {max} bytes")
     end
     if status != 0
-        return error(sys.describe(status, what))
+        return sys.error_for(status, what)
     end
     return moved
 end
 
 // Binds a UDP socket to a port (0 picks a free one; see `.port`).
-async func udp(port: int) -> UdpSocket or error
+async func udp(port: long) -> UdpSocket or error
     try net_init()
     let s = new_socket_of(SOCK_DGRAM, IPPROTO_UDP)
     if s == INVALID_SOCKET
-        return error(sys.describe(task.last_error(), "cannot create a socket"))
+        return sys.error_for(task.last_error(), "cannot create a socket")
     end
     let sock = UdpSocket{ sock: s, open: true, port: port }
     // an ICMP "port unreachable" must not make a later receive fail
@@ -606,33 +607,33 @@ async func udp(port: int) -> UdpSocket or error
         ws.WSAIoctl(s, SIO_UDP_CONNRESET, &off.a, 4, 0, 0, &got.a, 0, 0)
     end
     let addr = make_addr(0, port)
-    var rc = 0
+    var rc: long = 0
     unsafe
         rc = ws.bind(s, addr.ptr, 16)
     end
     if rc != 0
-        return error(sys.describe(task.last_error(), "cannot bind UDP port {port}"))
+        return sys.error_for(task.last_error(), "cannot bind UDP port {port}")
     end
     let bound = sys.buffer(16)
     let size = sys.Scratch{ a: 16 }
     unsafe
         ws.getsockname(s, bound.ptr, &size.a)
-        sock.port = (int(bound.ptr[2]) << 8) bitor int(bound.ptr[3])
+        sock.port = (long(bound.ptr[2]) << 8) bitor long(bound.ptr[3])
     end
     return sock
 end
 
 // Sends `data` as one datagram to `host` (an address or a name) and `port`.
-async func (sock: UdpSocket) send_to(host: text, port: int, data: text) -> error
+async func (sock: UdpSocket) send_to(host: text, port: long, data: text) -> error
     if not sock.open
-        return error("the socket is closed")
+        return error(errors.Closed, "the socket is closed")
     end
     let ip = try await resolve(host)
     let addr = make_addr(ip, port)
     let wb = ws.Wsabuf{ len: u32(data.len), ptr: c.cstr(data) }
     let op = task.op_new()
-    var rc = 0
-    var err = 0
+    var rc: long = 0
+    var err: long = 0
     unsafe
         rc = ws.WSASendTo(sock.sock, &wb, 1, 0, 0, addr.ptr, 16, &op, 0)
         err = task.last_error()
@@ -642,9 +643,9 @@ async func (sock: UdpSocket) send_to(host: text, port: int, data: text) -> error
 end
 
 // Waits for the next datagram (up to `max` bytes) and says who sent it.
-async func (sock: UdpSocket) recv(max: int = 65535) -> Packet or error
+async func (sock: UdpSocket) recv(max: long = 65535) -> Packet or error
     if not sock.open
-        return error("the socket is closed")
+        return error(errors.Closed, "the socket is closed")
     end
     let b = sys.buffer(max + 1)
     let wb = ws.Wsabuf{ len: u32(max), ptr: b.ptr }
@@ -652,18 +653,18 @@ async func (sock: UdpSocket) recv(max: int = 65535) -> Packet or error
     let size = sys.Scratch{ a: 16 }
     let flags = sys.Scratch{}
     let op = task.op_new()
-    var rc = 0
-    var err = 0
+    var rc: long = 0
+    var err: long = 0
     unsafe
         rc = ws.WSARecvFrom(sock.sock, &wb, 1, 0, &flags.a, from.ptr, &size.a, &op, 0)
         err = task.last_error()
     end
     let n = try await_dgram(op, rc == 0, err, "receive", max)
     var host = ""
-    var port = 0
+    var port: long = 0
     unsafe
-        host = "{int(from.ptr[4])}.{int(from.ptr[5])}.{int(from.ptr[6])}.{int(from.ptr[7])}"
-        port = (int(from.ptr[2]) << 8) bitor int(from.ptr[3])
+        host = "{long(from.ptr[4])}.{long(from.ptr[5])}.{long(from.ptr[6])}.{long(from.ptr[7])}"
+        port = (long(from.ptr[2]) << 8) bitor long(from.ptr[3])
     end
     return Packet{ data: c.from_bytes(b.ptr, n), host: host, port: port }
 end

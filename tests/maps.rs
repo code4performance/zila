@@ -1,6 +1,6 @@
 //! Maps: `Map<K, V>`, literals, lookup, methods, iteration order, memory behavior. Programs are
 //! compiled to native executables and run (skipped when the Visual Studio build tools are
-//! missing); the interpreter is exercised through the command-line tool.
+//! missing).
 
 use brasa::{compile_to_native, parse_source};
 use std::process::Command;
@@ -59,7 +59,7 @@ print("empty {e.len}")"#,
 }
 
 #[test]
-fn missing_key_panics() {
+fn missing_key_aborts() {
     let src = main_of(
         r#"let m = { "a": 1 }
 print("before")
@@ -67,7 +67,7 @@ print("{m["nope"]}")
 print("after")"#,
     );
     let Some((out, code)) = run(&src) else { return };
-    assert_eq!(out, "before\npanic: map key not found\n");
+    assert_eq!(out, "before\nabort: main.br:11: map key not found\n");
     assert_eq!(code, 101);
 }
 
@@ -277,7 +277,7 @@ fn compile_errors() {
 }
 
 #[test]
-fn the_interpreter_agrees_with_the_native_compiler() {
+fn a_map_program_prints_in_insertion_order_and_aborts_on_a_missing_key() {
     let src = main_of(
         r#"let m = { "b": 1, "a": 2 }
 m["c"] = 3
@@ -301,21 +301,20 @@ m.clear()
 print("cleared {m.len}")
 print("{m["nope"]}")"#,
     );
-    let dir = std::env::temp_dir().join(format!("brasa-maps-interp-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let file = dir.join("m.br");
-    std::fs::write(&file, &src).unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_brasa-parse")).arg(&file).arg("--run").output().unwrap();
-    let _ = std::fs::remove_dir_all(&dir);
-    let stdout = String::from_utf8_lossy(&out.stdout).replace('\r', "");
-    let stderr = String::from_utf8_lossy(&out.stderr).replace('\r', "");
-    let expected = "b=1\na=20\nc=3\na\nc\nb\ntrue false 7 len 3\n7 seven\n3 three\ncleared 0\n";
-    assert_eq!(stdout, expected);
-    assert!(stderr.contains("map key not found"), "{}", stderr);
-    assert!(!out.status.success());
-    // the native executable prints the same lines and stops with the same message
+    let expected = "b=1
+a=20
+c=3
+a
+c
+b
+true false 7 len 3
+7 seven
+3 three
+cleared 0
+";
+    // the program prints these lines and stops with an abort
     if let Some((native, code)) = run(&src) {
-        assert_eq!(native, format!("{}panic: map key not found\n", expected));
+        assert_eq!(native, format!("{}abort: main.br:29: map key not found\n", expected));
         assert_eq!(code, 101);
     }
 }

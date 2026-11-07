@@ -1,6 +1,5 @@
 //! The `sorted` library (sorted maps and sets). Programs are compiled to native executables and
-//! run (skipped when the Visual Studio build tools are missing); programs without error cases
-//! also run in the interpreter and must print the same.
+//! run (skipped when the Visual Studio build tools are missing).
 
 use brasa::{compile_to_native, parse_source};
 use std::process::Command;
@@ -30,15 +29,6 @@ fn native_timed(src: &str) -> Option<(String, Duration)> {
 
 fn native(src: &str) -> Option<String> {
     native_timed(src).map(|(o, _)| o)
-}
-
-fn interpreted(src: &str) -> String {
-    let file = std::env::temp_dir().join(format!("brasa-sorted-interp-{}-{}.br", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
-    std::fs::write(&file, src).unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_brasa-parse")).arg(&file).arg("--run").output().unwrap();
-    let _ = std::fs::remove_file(&file);
-    assert!(out.status.success(), "interpreter failed: {}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
-    String::from_utf8_lossy(&out.stdout).replace('\r', "")
 }
 
 const HELPERS: &str = r#"
@@ -79,13 +69,12 @@ fn program(extra: &str, body: &str) -> String {
     format!("package main\n\nuse sorted\n{}\n{}\nfunc main()\n{}end\n", HELPERS, extra, indented)
 }
 
-/// Runs the body natively and in the interpreter and checks both outputs.
+/// Runs the body natively and checks the output.
 fn expect(body: &str, want: &str) {
     let src = program("", body);
     if let Some(out) = native(&src) {
         assert_eq!(out, want, "native output");
     }
-    assert_eq!(interpreted(&src), want, "interpreter output");
 }
 
 #[test]
@@ -130,7 +119,6 @@ fn records_can_be_keys_ordered_by_a_field() {
     if let Some(out) = native(&src) {
         assert_eq!(out, want, "native output");
     }
-    assert_eq!(interpreted(&src), want, "interpreter output");
 }
 
 #[test]
@@ -188,11 +176,9 @@ fn sorted_collections_do_not_leak() {
 }
 
 #[test]
-fn the_sorted_example_agrees_with_the_interpreter() {
+fn the_sorted_example_runs() {
     let src = std::fs::read_to_string("examples/sorted.br").unwrap();
-    let interp = interpreted(&src);
-    assert!(interp.contains("leaderboard"), "{}", interp);
     if let Some(out) = native(&src) {
-        assert_eq!(out, interp);
+        assert!(out.contains("leaderboard"), "{}", out);
     }
 }

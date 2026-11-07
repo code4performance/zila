@@ -18,8 +18,8 @@ package float
 
 // ---- big numbers ----
 
-func big_from(n: int) -> []int
-    let a: []int = []
+func big_from(n: long) -> []long
+    let a: []long = []
     var v = n
     if v == 0
         a.add(0)
@@ -32,8 +32,8 @@ func big_from(n: int) -> []int
 end
 
 // a = a * k, for 0 <= k <= 2^30
-func b_mul(a: []int, k: int)
-    var carry = 0
+func b_mul(a: []long, k: long)
+    var carry: long = 0
     for i in 0..a.len
         let t = a[i] * k + carry
         a[i] = t % 1000000000
@@ -45,7 +45,7 @@ func b_mul(a: []int, k: int)
     end
 end
 
-func b_mul_pow2(a: []int, n: int)
+func b_mul_pow2(a: []long, n: int)
     var left = n
     while left >= 30
         b_mul(a, 1073741824)
@@ -54,14 +54,14 @@ func b_mul_pow2(a: []int, n: int)
     b_mul(a, 1 << left)
 end
 
-func b_pow2(n: int) -> []int
+func b_pow2(n: int) -> []long
     let a = big_from(1)
     b_mul_pow2(a, n)
     return a
 end
 
 // number of limbs without leading zeros
-func b_eff(a: []int) -> int
+func b_eff(a: []long) -> int
     var n = a.len
     while n > 1 and a[n - 1] == 0
         n -= 1
@@ -70,7 +70,7 @@ func b_eff(a: []int) -> int
 end
 
 // -1, 0 or 1
-func b_cmp(a: []int, b: []int) -> int
+func b_cmp(a: []long, b: []long) -> int
     let na = b_eff(a)
     let nb = b_eff(b)
     if na < nb
@@ -92,13 +92,13 @@ func b_cmp(a: []int, b: []int) -> int
     return 0
 end
 
-func b_add(a: []int, b: []int) -> []int
-    let out: []int = []
+func b_add(a: []long, b: []long) -> []long
+    let out: []long = []
     var n = a.len
     if b.len > n
         n = b.len
     end
-    var carry = 0
+    var carry: long = 0
     for i in 0..n
         var t = carry
         if i < a.len
@@ -122,8 +122,8 @@ func b_add(a: []int, b: []int) -> []int
 end
 
 // a = a - b, requires a >= b
-func b_sub(a: []int, b: []int)
-    var borrow = 0
+func b_sub(a: []long, b: []long)
+    var borrow: long = 0
     for i in 0..a.len
         var t = a[i] - borrow
         if i < b.len
@@ -150,23 +150,23 @@ func zeros(n: int) -> text
 end
 
 // `bits` holds the IEEE bits of the number: 64 bits, or the low 32 bits when `single`.
-func to_text(bits: int, single: bool) -> text
+func to_text(bits: long, single: bool) -> text
     var neg = false
     var expf = 0
-    var mant = 0
+    var mant: long = 0
     var p = 53
     var bias = 1075
     var maxexp = 2047
     if single
         neg = ((bits >> 31) bitand 1) == 1
-        expf = (bits >> 23) bitand 255
+        expf = int((bits >> 23) bitand 255)
         mant = bits bitand 8388607
         p = 24
         bias = 150
         maxexp = 255
     else
         neg = bits < 0
-        expf = (bits >> 52) bitand 2047
+        expf = int((bits >> 52) bitand 2047)
         mant = bits bitand 4503599627370495
     end
     let sign = if neg "-" else "" end
@@ -177,7 +177,7 @@ func to_text(bits: int, single: bool) -> text
         return sign + "inf"
     end
 
-    var f = mant
+    var f: long = mant
     var e = 1 - bias
     if expf == 0
         if f == 0

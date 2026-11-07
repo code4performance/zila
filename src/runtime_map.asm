@@ -130,9 +130,11 @@ rt_mf_done:
     ret
 rt_map_find endp
 
-; rax = the value stored under key rdx in map rcx (borrowed); panics when there is none
+; rax = the value stored under key rdx in map rcx (borrowed); aborts when there is none
+; (r8 = the location text of the caller, for the message)
 rt_map_get proc
     sub rsp, 40
+    mov qword ptr [rsp + 32], r8
     call rt_map_find
     test rax, rax
     jz rt_mg_miss
@@ -141,7 +143,8 @@ rt_map_get proc
     ret
 rt_mg_miss:
     lea rcx, rt_msg_nokey
-    call rt_panic
+    mov rdx, qword ptr [rsp + 32]
+    call rt_abort
 rt_map_get endp
 
 ; rax = 1 when map rcx has key rdx

@@ -64,14 +64,6 @@ A placeholder MAY carry a layout in parentheses: `%(W)`, `%(<W)`, `%(>W)`, `%(^W
 - **WHEN** a program calls `hex` and `thousands` on the largest and smallest 64-bit integers
 - **THEN** the digits are correct and nothing overflows
 
-### Requirement: A table
-Formatting rows of columns SHALL work with the pieces above, as shown by an example program that prints a right-aligned table of names and amounts, and that program SHALL produce the same output natively and in the interpreter.
-
-#### Scenario: Example
-- **WHEN** `examples/report.br` is run natively and with the interpreter
-- **THEN** both print the same aligned table
-
-
 ### Requirement: Values of any type
 `format.fmt(template, v1, v2, ...)` SHALL format a template like `format.text` with up to eight arguments, each of which is an integer, a float, a boolean or text, or a value of a type that has a method `to_value()` returning a `format.Value`. It SHALL return `text or error`, with the same errors as `format.text` (missing argument, unclosed `(`, bad layout) and the same placeholders (`%`, `%n`, `%%`, `%(layout)`). More than eight values SHALL be a compile error that says so. Without a type letter a value SHALL be shown the way `print` shows it: an integer in decimal, a float in its shortest form, `true` or `false`, text as it is.
 
@@ -120,10 +112,3 @@ A layout MAY end with a precision `.N` and a type letter: `[[fill]align][0][widt
 #### Scenario: Old programs
 - **WHEN** the formatting tests and examples written before this change run
 - **THEN** their output is the same
-
-### Requirement: Typed formatting is native
-`format.fmt` and `format.Value` SHALL work in programs compiled to native executables. Programs run by the interpreter MAY be unable to use them, but SHALL still load `use format` and use `format.text` and the helpers as before.
-
-#### Scenario: Interpreter
-- **WHEN** a program that uses `format.text` and `format.hex` is run with `--run`
-- **THEN** it prints what it printed before

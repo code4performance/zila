@@ -31,7 +31,7 @@
       <h2>Build a program</h2>
       <pre><code>brasa-parse examples/hello.br -o hello.exe
 ./hello.exe</code></pre>
-      <p>The compiler writes assembly and hands it to <code>ml64</code> and <code>link</code> from the Visual Studio C++ build tools, which it finds on its own. Windows x64 is the only target for programs; <a href="os.html">Brasa OS</a> uses a second, bare-metal target. <code>--asm</code> prints the generated assembly instead of building.</p>
+      <p>The compiler writes assembly, assembles it with its own assembler and writes the Windows executable (PE) itself: it needs no Visual Studio, <code>ml64</code> or <code>link</code>, and starts no other program. Imports come from each <code>#[link("library")]</code> (<code>#[link_src]</code>, which compiles C files, is an error on Windows). Windows x64 is the only target for programs; <a href="os.html">Brasa OS</a> uses a second, bare-metal target. <code>--asm</code> prints the generated assembly instead of building.</p>
     </section>
 
     <section id="supported">
@@ -112,13 +112,13 @@
     <section id="linux">
       <h2>Linux</h2>
       <p><code>brasa-parse prog.br --target linux -o prog</code> writes an x86-64 ELF executable. The compiler does everything itself (its own assembler, no linker, no Visual Studio) and the program talks to the kernel with system calls. A program that does not call C needs no library at all (a static executable); one that declares <code>extern</code> functions is dynamically linked and starts through <code>/lib64/ld-linux-x86-64.so.2</code>. <code>--asm --target linux</code> prints the assembly instead. The result was checked under WSL with Ubuntu (glibc).</p>
-      <p>The language is the same and so is the output. A program whose <code>main</code> returns an error prints <code>error: ...</code> and exits with status 1, a <code>panic</code> prints <code>panic: ...</code> and exits with 101, and an integer division by zero is a panic (<code>panic: division by zero</code>) on both targets. Objects are reference counted as on Windows and <code>live_objects()</code> counts them. Small objects come from a 256 MiB region that the executable asks the kernel for, and large ones from <code>mmap</code>, given back when freed; running out of memory is <code>panic: out of memory</code>.</p>
+      <p>The language is the same and so is the output. A program whose <code>main</code> returns an error prints <code>error: ...</code> and exits with status 1, an <code>abort</code> writes <code>abort: file.br:line: ...</code> to standard error and exits with 101, and an integer division by zero is an abort (<code>abort: main.br:7: division by zero</code>) on both targets. Objects are reference counted as on Windows and <code>live_objects()</code> counts them. Small objects come from a 256 MiB region that the executable asks the kernel for, and large ones from <code>mmap</code>, given back when freed; running out of memory is <code>abort: out of memory</code> (no file and line: the allocator has none).</p>
       <p>The libraries have the same functions on both targets. Where a library talks to the operating system, a file called <code>std/&lt;name&gt;.linux.br</code> replaces <code>std/&lt;name&gt;.br</code> when you build for Linux (the Linux layers use <code>epoll</code>, <code>pread</code>/<code>pwrite</code>, sockets and a DNS client written in Brasa), so one source builds for both.</p>
       <table class="compat">
         <thead><tr><th>Library or feature</th><th>Windows</th><th>Linux</th><th>Notes</th></tr></thead>
         <tbody>
           <tr><td>The language, <code>print</code>, text, lists, maps, records, enums, generics, interfaces, closures, <code>defer</code>, errors, floats, <code>unsafe</code>, <code>asm</code></td><td>yes</td><td>yes</td><td>same output</td></tr>
-          <tr><td><code>text</code>, <code>list</code>, <code>math</code>, <code>float</code>, <code>format</code>, <code>set</code>, <code>sorted</code>, <code>bufio</code></td><td>yes</td><td>yes</td><td>written in Brasa, no operating system calls</td></tr>
+          <tr><td><code>text</code>, <code>list</code>, <code>math</code>, <code>float</code>, <code>format</code>, <code>set</code>, <code>sorted</code>, <code>bufio</code>, <code>errors</code></td><td>yes</td><td>yes</td><td>written in Brasa, no operating system calls</td></tr>
           <tr><td><code>task</code>, <code>future</code>: <code>spawn</code>, <code>sleep</code>, channels, <code>async</code>, <code>await</code></td><td>yes</td><td>yes</td><td>cooperative tasks on one thread; each task has a 256 KiB stack with a guard page (Windows fibers there)</td></tr>
           <tr><td><code>fs</code></td><td>yes</td><td>yes</td><td>on Linux a regular file is read and written in pieces of at most 64 KiB and the other tasks run between the pieces (Windows moves the data in the background); errors read <code>path: reason</code> with the operating system's wording</td></tr>
           <tr><td><code>net</code>: TCP, UDP, <code>lookup</code>, <code>resolve</code></td><td>yes</td><td>yes</td><td>IPv4 only on both. Names: <code>/etc/hosts</code>, then the servers of <code>/etc/resolv.conf</code> over UDP (2 seconds, two tries, TCP when the answer is cut short, CNAME chains followed)</td></tr>
@@ -135,7 +135,7 @@
       <p>On Linux the library speaks the X11 protocol itself, over the X server's Unix socket: there is no C library, GTK or Xlib, so the program is still a static executable. It works with any X server, including XWayland and WSLg (<code>DISPLAY</code> picks the display; only local displays are supported). X11 has no controls, so the library draws text boxes, buttons, lists and labels with the server's built-in <code>fixed</code> font and handles the keyboard (typing, Backspace, Delete, arrows, Home, End, Tab, Enter) and the mouse (clicks, list selection, the wheel) itself. The layout rules, padding and sizes are the ones Windows uses; only the look differs. When no display can be reached the program stops with <code>error: ui: cannot open a display: ...</code>.</p>
       <p>For tests, the environment variable <code>BRASA_UI_SCRIPT</code> can name a file of input steps, one per line: <code>click N</code> (the Nth button), <code>type TEXT</code>, <code>key backspace|enter|up|down</code>, <code>select N</code> and <code>close</code>. <code>ui.run()</code> applies them to the first window and then closes it; <code>alert</code> does not wait while a script is active.</p>
       <p><strong>Changed in this version:</strong> the handle of a control is now <code>id</code> (it was <code>hwnd</code>, which never was part of the documented API), and <code>use ws</code> is rejected: <code>ws</code> is internal to <code>net</code>, so use <code>net</code>.</p>
-      <p>Differences to keep in mind: the wording of an operating-system error (the text after the path) is the platform's own; a program that prints times, ports or addresses prints what the machine gives; and the interpreter behind <code>--run</code> does not know the native-only libraries on either platform.</p>
+      <p>Differences to keep in mind: the wording of an operating-system error (the text after the path) is the platform's own; a program that prints times, ports or addresses prints what the machine gives.</p>
     </section>
 
     <section id="not-yet">
@@ -146,7 +146,6 @@
         <li>Generic enums and type aliases, generic methods with their own type parameters, explicit type arguments at call sites (<code>first&lt;int&gt;(x)</code>), and interfaces as the type of a variable or parameter (they only work as bounds).</li>
         <li><code>new</code>, spreading a list into arguments (<code>f(...xs)</code>), and <code>html</code> templates.</li>
       </ul>
-      <p>The tree-walking interpreter behind <code>--run</code> is separate from the compiler and does not know the native-only features (<code>async</code>, <code>await</code>, <code>ui</code>, <code>fs</code>, <code>net</code>).</p>
     </section>
   </main>
 

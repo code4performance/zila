@@ -33,8 +33,15 @@ fn wsl_works() -> bool {
     })
 }
 
-/// Builds `src` for Linux and runs it under WSL: (output, exit status). `None` without WSL.
+/// Builds `src` for Linux and runs it under WSL: (standard output followed by standard error,
+/// exit status). `None` without WSL.
 fn run_linux(src: &str) -> Option<(String, i32)> {
+    let (out, err, code) = run_linux_split(src)?;
+    Some((out + &err, code))
+}
+
+/// Like `run_linux`, with the two streams kept apart: (standard output, standard error, status).
+fn run_linux_split(src: &str) -> Option<(String, String, i32)> {
     if !wsl_works() {
         eprintln!("WSL is not available: skipping");
         return None;
@@ -43,12 +50,13 @@ fn run_linux(src: &str) -> Option<(String, i32)> {
     let exe = temp("prog");
     compile_to_linux(&file, exe.to_str().unwrap(), &CompileOptions::default()).unwrap_or_else(|e| panic!("compile error: {}", e));
     let name = exe.file_name().unwrap().to_str().unwrap().to_string();
-    let script = format!("cp '{}' /tmp/{n} && chmod +x /tmp/{n} && /tmp/{n}; echo \"__EXIT:$?\"; rm -f /tmp/{n}", wsl_path(&exe), n = name);
+    let script = format!("cp '{}' /tmp/{n} && chmod +x /tmp/{n} && /tmp/{n} 2>/tmp/{n}.err; echo \"__EXIT:$?\"; cat /tmp/{n}.err; rm -f /tmp/{n} /tmp/{n}.err", wsl_path(&exe), n = name);
     let out = Command::new("wsl.exe").args(["-e", "sh", "-c", &script]).output().unwrap();
     let _ = std::fs::remove_file(&exe);
     let text = String::from_utf8_lossy(&out.stdout).replace('\r', "");
-    let (body, code) = text.rsplit_once("__EXIT:").unwrap_or_else(|| panic!("no exit marker in: {}", text));
-    Some((body.to_string(), code.trim().parse().unwrap()))
+    let (body, rest) = text.rsplit_once("__EXIT:").unwrap_or_else(|| panic!("no exit marker in: {}", text));
+    let (code, err) = rest.split_once('\n').unwrap_or((rest, ""));
+    Some((body.to_string(), err.to_string(), code.trim().parse().unwrap()))
 }
 
 /// The same program built for Windows and run: its output. `None` without the Windows toolchain.
@@ -147,7 +155,7 @@ fn the_windows_build_and_the_boot_image_are_unchanged_by_the_new_target() {
     // the Windows assembly still imports from kernel32 and still has no system calls
     let file = parse_source(&main_of("print(\"hi\")")).unwrap();
     let asm = generate_asm_for(&file, &CompileOptions::default(), Target::Windows).unwrap();
-    assert!(asm.contains("extern ExitProcess:proc") && !asm.contains("syscall"));
+    assert!(asm.contains("GOT_ExitProcess dq 0") && !asm.contains("syscall"));
 }
 
 // ---- under WSL ----
@@ -159,12 +167,12 @@ fn hello_prints_and_exits_with_zero() {
 }
 
 #[test]
-fn an_error_from_main_and_a_panic_set_the_exit_status() {
+fn an_error_from_main_and_an_abort_set_the_exit_status() {
     let src = "package main\n\nfunc main() -> error\n    print(\"before\")\n    return error(\"boom\")\nend\n";
     let Some((out, code)) = run_linux(src) else { return };
     assert_eq!((out.as_str(), code), ("before\nerror: boom\n", 1));
-    let Some((out, code)) = run_linux(&main_of("print(\"x\")\npanic(\"stop\")")) else { return };
-    assert_eq!((out.as_str(), code), ("x\npanic: stop\n", 101));
+    let Some((out, code)) = run_linux(&main_of("print(\"x\")\nabort(\"stop\")")) else { return };
+    assert_eq!((out.as_str(), code), ("x\nabort: main.br:5: stop\n", 101));
 }
 
 #[test]
@@ -172,7 +180,7 @@ fn division_by_zero_stops_the_program() {
     for body in ["var z = 0\nprint(10 / z)", "var z = 0\nprint(10 % z)", "print(10 / 0)"] {
         let Some((out, code)) = run_linux(&main_of(body)) else { return };
         assert_eq!(code, 101, "{}: {}", body, out);
-        assert!(out.contains("panic: division by zero"), "{}: {}", body, out);
+        assert!(out.contains("abort: main.br:") && out.contains(": division by zero"), "{}: {}", body, out);
     }
 }
 
@@ -222,11 +230,11 @@ fn programs_that_do_not_use_the_windows_api_print_the_same_on_both_targets() {
 }
 
 #[test]
-fn running_out_of_memory_is_a_panic() {
+fn running_out_of_memory_is_an_abort() {
     let src = main_of("let xs: []text = []\nvar i = 0\nwhile true\n    xs.add(\"some text number {i}\")\n    i += 1\nend\n");
     let Some((out, code)) = run_linux(&src) else { return };
     assert_eq!(code, 101, "{}", out);
-    assert!(out.contains("panic: out of memory"), "{}", out);
+    assert!(out.contains("abort: out of memory"), "{}", out);
 }
 
 // ---- library layers ----
@@ -1077,14 +1085,14 @@ written by Brasa
 }
 
 #[test]
-fn an_error_and_a_panic_still_exit_correctly_in_a_dynamic_program() {
+fn an_error_and_an_abort_still_exit_correctly_in_a_dynamic_program() {
     let head = "package main\nuse c\n\n#[link(\"c\")]\nextern \"C\" func getpid() -> i32\n\n";
     let src = format!("{}func main() -> error\n    unsafe\n        getpid()\n    end\n    return error(\"boom\")\nend\n", head);
     let Some((out, code)) = run_linux(&src) else { return };
     assert_eq!((out.as_str(), code), ("error: boom\n", 1));
-    let src = format!("{}func main()\n    unsafe\n        getpid()\n    end\n    panic(\"stop\")\nend\n", head);
+    let src = format!("{}func main()\n    unsafe\n        getpid()\n    end\n    abort(\"stop\")\nend\n", head);
     let Some((out, code)) = run_linux(&src) else { return };
-    assert_eq!((out.as_str(), code), ("panic: stop\n", 101));
+    assert_eq!((out.as_str(), code), ("abort: main.br:11: stop\n", 101));
 }
 
 #[test]

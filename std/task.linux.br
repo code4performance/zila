@@ -18,53 +18,53 @@ use sys
 // A task: `slot` holds the stack pointer of the task while it is not running.
 type Task = record
     slot: sys.Buf
-    stack: int
+    stack: long
     action: func()
     done: bool
     waiting: bool
-    event: int
-    gen: int
+    event: long
+    gen: long
 end
 
 // Words in transit are plain integers: ownership of a value moves into the
 // queue on `send` and out of it on `receive`.
 type Chan = record
-    items: []int
-    head: int
-    waiting: []int
-    whead: int
+    items: []long
+    head: long
+    waiting: []long
+    whead: long
     closed: bool
 end
 
 var tasks: []Task
-var ready: []int
-var ready_head = 0
+var ready: []long
+var ready_head: long = 0
 // ids of tasks that finished (their stacks are released later) and ids free for reuse
-var finished: []int
-var free_ids: []int
-var current = 0
+var finished: []long
+var free_ids: []long
+var current: long = 0
 var started = false
-var switches = 0
+var switches: long = 0
 
 // Timers, ascending by deadline (milliseconds of the monotonic clock).
-var timer_at: []int
+var timer_at: []long
 var timer_run: []func()
 
 // Tasks waiting for a file descriptor, the epoll instance and its scratch memory.
-var pending_io = 0
-var epfd = 0
+var pending_io: long = 0
+var epfd: long = 0
 var clock: sys.Buf
 var evbuf: sys.Buf
 var evreg: sys.Buf
-var stack_cache: []int
+var stack_cache: []long
 
 let STACK_SIZE = 262144
 let GUARD = 4096
-let TIMED_OUT = 0x10000000000
+let TIMED_OUT: long = 0x10000000000
 
 // The address of the function a new task starts in.
-func entry_address() -> int
-    var r = 0
+func entry_address() -> long
+    var r: long = 0
     unsafe
         asm
             lea rax, B_task_fiber_entry
@@ -76,7 +76,7 @@ end
 
 // Saves the running task's registers on its stack, stores the stack pointer at `save`, and
 // continues the task whose saved stack pointer is `to`.
-func fiber_swap(save: int, to: int)
+func fiber_swap(save: long, to: long)
     unsafe
         asm
             in rcx = save
@@ -116,15 +116,15 @@ func fatal(message: text)
     sys.syscall(231, 2, 0, 0, 0, 0, 0)
 end
 
-func now() -> int
+func now() -> long
     init()
-    let a = int(clock.ptr)
+    let a = long(clock.ptr)
     sys.syscall(228, 1, a, 0, 0, 0, 0)
     return sys.peek(a) * 1000 + sys.peek(a + 8) / 1000000
 end
 
 // A stack for a new task: a cached one, or a new region with a guard page at its low end.
-func stack_new() -> int
+func stack_new() -> long
     if stack_cache.len > 0
         return stack_cache.take()
     end
@@ -136,7 +136,7 @@ func stack_new() -> int
     return base
 end
 
-func stack_free(base: int)
+func stack_free(base: long)
     if stack_cache.len < 16
         stack_cache.add(base)
     else
@@ -171,9 +171,9 @@ end
 
 // Collects the file descriptors that became ready, waiting up to `ms` milliseconds for the
 // first (a negative time waits for as long as it takes).
-func poll_io(ms: int)
+func poll_io(ms: long)
     io_init()
-    let base = int(evbuf.ptr)
+    let base = long(evbuf.ptr)
     let n = sys.syscall(232, epfd, base, 16, ms, 0, 0)
     if n <= 0
         return
@@ -190,15 +190,15 @@ end
 // Parks the running task until the file descriptor `fd` is ready for `events` (1 readable,
 // 4 writable; errors and hang-up always wake it). The result is the events that arrived, or
 // minus an error number when the descriptor cannot be waited for.
-func wait_fd(fd: int, events: int) -> int
+func wait_fd(fd: long, events: long) -> long
     return wait_fd_for(fd, events, -1)
 end
 
 // `wait_fd` that gives up after `ms` milliseconds (a negative time never does): the result is 0
 // when the time ran out.
-func wait_fd_for(fd: int, events: int, ms: int) -> int
+func wait_fd_for(fd: long, events: long, ms: long) -> long
     io_init()
-    let reg = int(evreg.ptr)
+    let reg = long(evreg.ptr)
     sys.poke(reg, events bitor 0x40000000)
     sys.poke(reg + 4, current)
     var r = sys.syscall(233, epfd, 3, fd, reg, 0, 0)
@@ -228,7 +228,7 @@ end
 
 // The timer of a `wait_fd_for`: if that very wait is still going, ends it and forgets the
 // descriptor.
-func wait_timeout(id: int, gen: int, fd: int)
+func wait_timeout(id: long, gen: long, fd: long)
     if tasks[id].gen == gen and tasks[id].event == 0
         sys.syscall(233, epfd, 2, fd, 0, 0, 0)
         pending_io -= 1
@@ -239,7 +239,7 @@ end
 
 // Nothing is ready: wait for the earliest timer or for a file descriptor.
 func wait_events()
-    var ms = -1
+    var ms: long = -1
     if timer_at.len > 0
         ms = timer_at[0] - now()
         if ms < 0
@@ -279,7 +279,7 @@ func switch_away()
         return
     end
     current = next
-    fiber_swap(int(tasks[me].slot.ptr), sys.peek(int(tasks[next].slot.ptr)))
+    fiber_swap(long(tasks[me].slot.ptr), sys.peek(long(tasks[next].slot.ptr)))
 end
 
 // The function every new task starts in (reached by the first switch to it). Must never return.
@@ -288,7 +288,7 @@ func fiber_entry()
 end
 
 // Runs a task's action. Must never return.
-func fiber_main(id: int)
+func fiber_main(id: long)
     // No local may own heap values here: this function never returns,
     // so nothing it holds would ever be released.
     tasks[id].action()
@@ -301,7 +301,7 @@ end
 func start(action: func())
     init()
     reap()
-    var id = 0
+    var id: long = 0
     if free_ids.len > 0
         id = free_ids.take()
         tasks[id].action = action
@@ -323,12 +323,12 @@ func start(action: func())
     sys.poke(sp + 40, frame)
     sys.poke(frame, 0)
     sys.poke(frame + 8, entry_address())
-    sys.poke(int(tasks[id].slot.ptr), sp)
+    sys.poke(long(tasks[id].slot.ptr), sp)
     ready.add(id)
 end
 
 // Runs `action` once the clock reaches `at`.
-func add_timer(at: int, action: func())
+func add_timer(at: long, action: func())
     timer_at.add(at)
     timer_run.add(action)
     var j = timer_at.len - 1
@@ -349,7 +349,7 @@ func fire_timers()
         return
     end
     let t = now()
-    var fired = 0
+    var fired: long = 0
     while fired < timer_at.len and timer_at[fired] <= t
         fired += 1
     end
@@ -360,7 +360,7 @@ func fire_timers()
     for i in 0..fired
         batch.add(timer_run[i])
     end
-    var k = 0
+    var k: long = 0
     while k + fired < timer_at.len
         timer_at[k] = timer_at[k + fired]
         timer_run[k] = timer_run[k + fired]
@@ -383,7 +383,7 @@ end
 
 // Makes a parked task ready. Waking a task that is not parked does nothing,
 // so a stale registration can never run a task twice.
-func wake(id: int)
+func wake(id: long)
     if id < tasks.len and tasks[id].waiting
         tasks[id].waiting = false
         ready.add(id)
@@ -413,7 +413,7 @@ func wake_one(ref ch: Chan)
     end
 end
 
-func chan_send(ref ch: Chan, word: int)
+func chan_send(ref ch: Chan, word: long)
     if ch.closed
         fatal("send on a closed channel")
     end
@@ -421,7 +421,7 @@ func chan_send(ref ch: Chan, word: int)
     wake_one(ref ch)
 end
 
-func chan_recv(ref ch: Chan) -> int
+func chan_recv(ref ch: Chan) -> long
     init()
     while true
         if ch.head < ch.items.len

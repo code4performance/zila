@@ -129,14 +129,31 @@ fn failed_assertions_name_the_line_and_the_values() {
 }
 
 #[test]
-fn assert_needs_a_function_that_returns_an_error() {
-    let src = "package main\n\nfunc f()\n    assert(true)\nend\n\nfunc main()\n    f()\nend\n";
-    let file = brasa::parse_source(src).unwrap();
-    let e = brasa::codegen_x64::generate_asm(&file).unwrap_err();
-    assert!(e.contains("assert needs a function that returns an error"), "{}", e);
-    let src = "package main\n\nfunc g() -> int\n    assert_eq(1, 1)\n    return 1\nend\n\nfunc main()\n    print(g())\nend\n";
-    let e = brasa::codegen_x64::generate_asm(&brasa::parse_source(src).unwrap()).unwrap_err();
-    assert!(e.contains("assert_eq needs a function that returns an error"), "{}", e);
+fn assert_compiles_in_a_function_that_returns_no_error() {
+    // outside a test run it aborts, so it is allowed anywhere
+    let src = "package main
+
+func f()
+    assert(true)
+end
+
+func main()
+    f()
+end
+";
+    assert!(brasa::codegen_x64::generate_asm(&brasa::parse_source(src).unwrap()).is_ok());
+    let src = "package main
+
+func g() -> int
+    assert_eq(1, 1)
+    return 1
+end
+
+func main()
+    print(g())
+end
+";
+    assert!(brasa::codegen_x64::generate_asm(&brasa::parse_source(src).unwrap()).is_ok());
 }
 
 #[test]
@@ -186,7 +203,7 @@ fn a_crash_stops_the_run_and_is_reported() {
     let _ = std::fs::remove_file(&f);
     assert_eq!(code, 1);
     assert!(out.contains("ok fine") && !out.contains("never"), "{}", out);
-    assert!(out.contains("run stopped early (exit code "), "{}", out);
+    assert!(out.contains("run stopped early ("), "{}", out);
 }
 
 #[test]

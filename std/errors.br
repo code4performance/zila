@@ -1,0 +1,83 @@
+// =====================================================================
+// Brasa standard library: error kinds
+//
+//     use errors
+//     if e.kind == errors.NotFound
+//         ...
+//     end
+//
+// An `error` has a kind, a message and an optional cause. A kind is an open, namespaced name
+// (`std.NotFound`, `mylib.Corrupt`): two kinds are equal when their names are. Libraries make
+// their own once, at package level:
+//
+//     let Corrupt = errors.kind("mylib.Corrupt") ?? errors.Other
+//
+// `error("message")` has kind `errors.Other` and works in programs that never `use errors`.
+// =====================================================================
+
+package errors
+
+// The standard kinds, in the reserved `std` namespace.
+let NotFound: ErrorKind = __kind("std.NotFound")
+let PermissionDenied: ErrorKind = __kind("std.PermissionDenied")
+let AlreadyExists: ErrorKind = __kind("std.AlreadyExists")
+let Unauthenticated: ErrorKind = __kind("std.Unauthenticated")
+let Unavailable: ErrorKind = __kind("std.Unavailable")
+let Timeout: ErrorKind = __kind("std.Timeout")
+let ConnectionRefused: ErrorKind = __kind("std.ConnectionRefused")
+let ConnectionReset: ErrorKind = __kind("std.ConnectionReset")
+let AddrInUse: ErrorKind = __kind("std.AddrInUse")
+let InvalidInput: ErrorKind = __kind("std.InvalidInput")
+let Overflow: ErrorKind = __kind("std.Overflow")
+let UnexpectedEof: ErrorKind = __kind("std.UnexpectedEof")
+let Closed: ErrorKind = __kind("std.Closed")
+let Cancelled: ErrorKind = __kind("std.Cancelled")
+let Unsupported: ErrorKind = __kind("std.Unsupported")
+// An operating-system failure with no more specific kind.
+let Io: ErrorKind = __kind("std.Io")
+// Anything else, and the kind of `error("message")`.
+let Other: ErrorKind = __kind("std.Other")
+
+// A standard kind by its full name (no checks: for the standard library only).
+func __std(name: text) -> ErrorKind
+    return __kind(name)
+end
+
+func is_word_byte(b: int, first: bool) -> bool
+    if b == 95 or (b >= 65 and b <= 90) or (b >= 97 and b <= 122)
+        return true
+    end
+    return not first and b >= 48 and b <= 57
+end
+
+// The kind with this name, `package.Name` (letters, digits and `_`, one dot). The `std`
+// namespace belongs to the standard library.
+func kind(name: text) -> ErrorKind or error
+    let n = name.len
+    var dots = 0
+    var start = true
+    var i = 0
+    while i < n
+        let b = name[i]
+        if b == 46
+            if start or dots > 0
+                return error(InvalidInput, "'{name}' is not a kind name: write package.Name")
+            end
+            dots += 1
+            start = true
+        else
+            if not is_word_byte(b, start)
+                return error(InvalidInput, "'{name}' is not a kind name: write package.Name")
+            end
+            start = false
+        end
+        i += 1
+    end
+    if dots != 1 or start
+        return error(InvalidInput, "'{name}' is not a kind name: write package.Name")
+    end
+    if n > 3 and name[0] == 115 and name[1] == 116 and name[2] == 100 and name[3] == 46
+        return error(InvalidInput, "'{name}': the std namespace is reserved for the standard library")
+    end
+    return __kind(name)
+end

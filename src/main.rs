@@ -81,6 +81,19 @@ fn main() {
         build_os_image(&path, &opts.extra, out_exe);
         return;
     }
+    if mode == Mode::Run && opts.target_explicit {
+        match brasa::run::host_target() {
+            Some(host) if host == opts.target => {}
+            Some(host) => {
+                eprintln!("error: --run can only run programs built for this machine ({}); use --build --target {}", host, opts.target);
+                exit(1);
+            }
+            None => {
+                eprintln!("error: --run is not supported on this platform");
+                exit(1);
+            }
+        }
+    }
     let src = match std::fs::read_to_string(&path) {
         Ok(s) => s,
         Err(e) => {
@@ -110,7 +123,7 @@ fn main() {
                 println!("{:#?}", file);
             } else if mode == Mode::Asm {
                 let target = if opts.target == "linux" { brasa::codegen_x64::Target::Linux } else { brasa::codegen_x64::Target::Windows };
-                match brasa::codegen_x64::generate_asm_for(&file, &brasa::codegen_x64::CompileOptions { optimize: opts.optimize }, target) {
+                match brasa::codegen_x64::generate_asm_for(&file, &brasa::codegen_x64::CompileOptions { optimize: opts.optimize, test_mode: false }, target) {
                     Ok(asm) => println!("{}", asm),
                     Err(e) => {
                         eprintln!("error: {}", e);
@@ -131,7 +144,7 @@ fn main() {
                     }
                 };
                 let target_exe = out_exe.unwrap_or(default_out);
-                let options = brasa::codegen_x64::CompileOptions { optimize: opts.optimize };
+                let options = brasa::codegen_x64::CompileOptions { optimize: opts.optimize, test_mode: false };
                 println!("Compiling {} to native x86-64 binary: {}...", path, target_exe);
                 let built = if linux {
                     brasa::codegen_x64::compile_to_linux(&file, &target_exe, &options)
@@ -152,27 +165,14 @@ fn main() {
                     }
                 }
             } else if mode == Mode::Run {
-                // The interpreter recurses once per nested expression, so it gets a big stack.
-                let worker = std::thread::Builder::new().stack_size(512 * 1024 * 1024).spawn(move || {
-                    let mut interp = brasa::Interpreter::new();
-                    if let Err(e) = interp.load_file(&file) {
-                        eprintln!("runtime error: {}", e);
+                let host = match brasa::run::host_target() {
+                    Some(h) => h,
+                    None => {
+                        eprintln!("error: --run is not supported on this platform");
                         exit(1);
                     }
-                    if let Err(e) = interp.run_main() {
-                        eprintln!("runtime error: {}", e);
-                        exit(1);
-                    }
-                });
-                match worker {
-                    Ok(h) => {
-                        let _ = h.join();
-                    }
-                    Err(e) => {
-                        eprintln!("runtime error: cannot start the interpreter: {}", e);
-                        exit(1);
-                    }
-                }
+                };
+                exit(brasa::run::run_file(&file, opts.optimize, host));
             } else {
                 println!("OK {}: {}", path, summarize(&file));
             }

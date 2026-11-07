@@ -80,10 +80,3 @@ Generic enums, generic type aliases, async generic functions, generic closures a
 #### Scenario: Async generic
 - **WHEN** a program declares `async func f<T>(x: T) -> T`
 - **THEN** compilation fails with an error that async generic functions are not supported
-
-### Requirement: Interpreter
-`--run` SHALL run programs that declare and use generic functions and records, with the same output as the native compiler.
-
-#### Scenario: Same output
-- **WHEN** `examples/generics.br` runs natively and with `--run`
-- **THEN** the output is identical

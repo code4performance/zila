@@ -65,7 +65,7 @@ extern "system" func SetBkMode(hdc: usize, mode: i32) -> i32
 extern "system" func GetModuleHandleA(name: usize) -> usize
 extern "system" func GetEnvironmentVariableA(name: *u8, buffer: *u8, size: u32) -> u32
 extern "system" func CreateFileA(name: *u8, access: u32, share: u32, security: usize, disposition: u32, flags: u32, template: usize) -> usize
-extern "system" func ReadFile(file: usize, buffer: *u8, count: u32, read: *int, overlapped: usize) -> i32
+extern "system" func ReadFile(file: usize, buffer: *u8, count: u32, read: *long, overlapped: usize) -> i32
 extern "system" func GetFileSize(file: usize, high: usize) -> u32
 extern "system" func CloseHandle(file: usize) -> i32
 extern "system" func ExitProcess(code: u32)
@@ -118,7 +118,7 @@ let ES_AUTOHSCROLL = 0x0080
 let LBS_NOTIFY = 0x0001
 let LBS_NOINTEGRALHEIGHT = 0x0100
 let SS_CENTERIMAGE = 0x0200
-let CW_USEDEFAULT = 0x80000000
+let CW_USEDEFAULT: i32 = -2147483648
 
 let WM_DESTROY = 0x0002
 let WM_SIZE = 0x0005
@@ -197,7 +197,7 @@ var scripted = false
 // What a window's controls held when it closed; they keep answering with it afterwards.
 var frozen: []Frozen
 // While the library itself sets a text, the backend must not report it as typing.
-var muted = 0
+var muted: long = 0
 
 // ---------- constructors ----------
 
@@ -396,7 +396,7 @@ func pref(w: Control, vertical: bool) -> i32
     end
     if w.kind == VSTACK or w.kind == HSTACK
         let along = (w.kind == VSTACK) == vertical
-        var total = 0
+        var total: i32 = 0
         for ch in w.children
             let p = pref(ch, vertical)
             if p < 0
@@ -427,8 +427,8 @@ func place(w: Control, x: i32, y: i32, width: i32, height: i32, dpi: i32)
         return
     end
     let gap = scale(GAP, dpi)
-    var fixed = 0
-    var flex = 0
+    var fixed: i32 = 0
+    var flex: i32 = 0
     for ch in w.children
         let p = pref(ch, vertical)
         if p < 0
@@ -441,7 +441,7 @@ func place(w: Control, x: i32, y: i32, width: i32, height: i32, dpi: i32)
     if vertical
         main = height
     end
-    var each = 0
+    var each: i32 = 0
     if flex > 0
         each = max(main - fixed - gap * (n - 1), 0) / flex
     end
@@ -516,7 +516,7 @@ func closed(window: usize)
             end
         end
     end
-    var open = 0
+    var open: long = 0
     for i in 0..frames.len
         if frames[i].id == window
             frames[i].id = 0
@@ -811,7 +811,7 @@ func be_client_height(window: usize) -> i32
 end
 
 func be_dpi(window: usize) -> i32
-    var d = 0
+    var d: i32 = 0
     unsafe
         d = i32(GetDpiForWindow(window))
     end

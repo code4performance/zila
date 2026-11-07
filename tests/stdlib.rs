@@ -1,6 +1,6 @@
 //! The text and list libraries. Programs are
 //! compiled to native executables and run (skipped when the Visual Studio build tools are
-//! missing); the interpreter is exercised through the command-line tool.
+//! missing).
 
 use brasa::{compile_to_native, parse_source};
 use std::process::Command;
@@ -200,10 +200,10 @@ println(text.lines("").len, text.lines("a\n\nb").len, text.lines("x").len)"#,
 }
 
 #[test]
-fn empty_separator_is_a_panic() {
+fn empty_separator_is_an_abort() {
     let src = main_of("use text", "let p = text.split(\"abc\", \"\")\nprintln(p.len)");
     let Some((out, code)) = run(&src) else { return };
-    assert_eq!(out, "panic: split needs a separator\n");
+    assert!(out.starts_with("abort: text.br:") && out.ends_with(": split needs a separator\n"), "{}", out);
     assert_eq!(code, 101);
 }
 
@@ -349,14 +349,16 @@ fn parse_float_matches_the_reference_parser() {
 
 
 #[test]
-fn the_interpreter_agrees_with_the_native_compiler() {
+fn the_words_example_prints_what_the_docs_say() {
     let src = std::fs::read_to_string("examples/words.br").unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_brasa-parse")).arg("examples/words.br").arg("--run").output().unwrap();
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    let interp = String::from_utf8_lossy(&out.stdout).replace('\r', "");
-    assert!(interp.contains("top three: THE, DOG, FOX") && interp.contains("42 -1 39.98"), "{}", interp);
-    if let Some((native, code)) = run(&src) {
+    if let Some((out, code)) = run(&src) {
         assert_eq!(code, 0);
-        assert_eq!(native, interp);
+        assert_eq!(out, "the    4
+dog    2
+fox    2
+15 words, 10 different, 15 counted
+top three: THE, DOG, FOX
+42 -1 39.98
+");
     }
 }

@@ -11,7 +11,7 @@
 package list
 
 // A new list holding f(x) for every x, in order.
-func map<T, U>(xs: []T, f: func(T) -> U) -> []U
+pub func map<T, U>(xs: []T, f: func(T) -> U) -> []U
     let out: []U = []
     for x in xs
         out.add(f(x))
@@ -20,7 +20,7 @@ func map<T, U>(xs: []T, f: func(T) -> U) -> []U
 end
 
 // The elements for which keep(x) is true, in order.
-func filter<T>(xs: []T, keep: func(T) -> bool) -> []T
+pub func filter<T>(xs: []T, keep: func(T) -> bool) -> []T
     let out: []T = []
     for x in xs
         if keep(x)
@@ -31,7 +31,7 @@ func filter<T>(xs: []T, keep: func(T) -> bool) -> []T
 end
 
 // f(f(start, x0), x1) ... from left to right.
-func reduce<T, A>(xs: []T, start: A, f: func(A, T) -> A) -> A
+pub func reduce<T, A>(xs: []T, start: A, f: func(A, T) -> A) -> A
     var acc = start
     for x in xs
         acc = f(acc, x)
@@ -40,7 +40,7 @@ func reduce<T, A>(xs: []T, start: A, f: func(A, T) -> A) -> A
 end
 
 // True as soon as one element passes the test (false for an empty list).
-func any<T>(xs: []T, test: func(T) -> bool) -> bool
+pub func any<T>(xs: []T, test: func(T) -> bool) -> bool
     for x in xs
         if test(x)
             return true
@@ -50,7 +50,7 @@ func any<T>(xs: []T, test: func(T) -> bool) -> bool
 end
 
 // False as soon as one element fails the test (true for an empty list).
-func all<T>(xs: []T, test: func(T) -> bool) -> bool
+pub func all<T>(xs: []T, test: func(T) -> bool) -> bool
     for x in xs
         if not test(x)
             return false
@@ -60,7 +60,7 @@ func all<T>(xs: []T, test: func(T) -> bool) -> bool
 end
 
 // The index of the first element that passes the test, or -1.
-func find<T>(xs: []T, test: func(T) -> bool) -> int
+pub func find<T>(xs: []T, test: func(T) -> bool) -> int
     for i in 0..xs.len
         if test(xs[i])
             return i
@@ -70,7 +70,7 @@ func find<T>(xs: []T, test: func(T) -> bool) -> int
 end
 
 // The elements in the opposite order.
-func reverse<T>(xs: []T) -> []T
+pub func reverse<T>(xs: []T) -> []T
     let out: []T = []
     var i = xs.len - 1
     while i >= 0
@@ -81,7 +81,7 @@ func reverse<T>(xs: []T) -> []T
 end
 
 // The elements from `from` up to (not including) `to`; both are clamped to the list.
-func slice<T>(xs: []T, from: int, to: int) -> []T
+pub func slice<T>(xs: []T, from: int, to: int) -> []T
     let out: []T = []
     var a = from
     var b = to
@@ -99,7 +99,7 @@ func slice<T>(xs: []T, from: int, to: int) -> []T
 end
 
 // All of `a`, then all of `b`.
-func concat<T>(a: []T, b: []T) -> []T
+pub func concat<T>(a: []T, b: []T) -> []T
     let out: []T = []
     for x in a
         out.add(x)
@@ -111,7 +111,7 @@ func concat<T>(a: []T, b: []T) -> []T
 end
 
 // The integers from `a` up to (not including) `b`.
-func range(a: int, b: int) -> []int
+pub func range(a: int, b: int) -> []int
     let out: []int = []
     var i = a
     while i < b
@@ -123,7 +123,7 @@ end
 
 // The elements ordered so that less(next, previous) is false everywhere. A stable merge sort:
 // elements that are neither less than the other keep their order. `xs` is not changed.
-func sort_by<T>(xs: []T, less: func(T, T) -> bool) -> []T
+pub func sort_by<T>(xs: []T, less: func(T, T) -> bool) -> []T
     var src: []T = []
     var dst: []T = []
     for x in xs
@@ -178,12 +178,12 @@ end
 
 // The elements in ascending order of `compare` (integers by value, text by bytes, records and
 // enums by their derived or declared `compare`). A stable merge sort; `xs` is not changed.
-func sort<T: Ord>(xs: []T) -> []T
+pub func sort<T: Ord>(xs: []T) -> []T
     return sort_by(xs, func(a, b) a.compare(b) < 0 end)
 end
 
 // True when some element of `xs` is `==` to `x`.
-func contains<T: Eq>(xs: []T, x: T) -> bool
+pub func contains<T: Eq>(xs: []T, x: T) -> bool
     for y in xs
         if y == x
             return true

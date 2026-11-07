@@ -52,30 +52,30 @@ let EV_SELECT = 2
 let PAD = 12
 let GAP = 8
 
-type Control = record
-    id: usize
-    kind: i32
-    children: []Control
+pub type Control = record
+    pub id: usize
+    pub kind: i32
+    pub children: []Control
 end
 
 // A control's state at the moment its window closed.
 type Frozen = record
-    id: usize
-    text: text
-    count: i32
-    selected: i32
+    pub id: usize
+    pub text: text
+    pub count: i32
+    pub selected: i32
 end
 
 type Handler = record
-    id: usize
-    code: i32
-    action: func()
+    pub id: usize
+    pub code: i32
+    pub action: func()
 end
 
 // An open top-level window and the layout tree it arranges.
 type Frame = record
-    id: usize
-    root: Control?
+    pub id: usize
+    pub root: Control?
 end
 
 var handlers: []Handler
@@ -88,29 +88,29 @@ var muted: long = 0
 
 // ---------- constructors ----------
 
-func Window(title: text, width: i32 = 640, height: i32 = 480) -> Control
+pub func Window(title: text, width: i32 = 640, height: i32 = 480) -> Control
     let id = be_window(title, width, height)
     frames.add(Frame{ id: id })
     return Control{ id: id, kind: WINDOW }
 end
 
-func TextBox(value: text = "") -> Control
+pub func TextBox(value: text = "") -> Control
     return Control{ id: be_create(TEXTBOX, value), kind: TEXTBOX }
 end
 
-func Button(label: text) -> Control
+pub func Button(label: text) -> Control
     return Control{ id: be_create(BUTTON, label), kind: BUTTON }
 end
 
-func ListView() -> Control
+pub func ListView() -> Control
     return Control{ id: be_create(LISTVIEW, ""), kind: LISTVIEW }
 end
 
-func Label(value: text) -> Control
+pub func Label(value: text) -> Control
     return Control{ id: be_create(LABEL, value), kind: LABEL }
 end
 
-func vstack(items: ...Control) -> Control
+pub func vstack(items: ...Control) -> Control
     return Control{ kind: VSTACK, children: items }
 end
 
@@ -120,7 +120,7 @@ end
 
 // ---------- properties: `w.text`, `w.text = ...`, `w.count`, `w.selected` ----------
 
-func (w: Control) text() -> text
+pub func (w: Control) text() -> text
     for z in frozen
         if z.id == w.id
             return z.text
@@ -129,11 +129,11 @@ func (w: Control) text() -> text
     return be_text(w.id)
 end
 
-func (w: Control) set_text(value: text)
+pub func (w: Control) set_text(value: text)
     change_text(w.id, value)
 end
 
-func (w: Control) count() -> i32
+pub func (w: Control) count() -> i32
     for z in frozen
         if z.id == w.id
             return z.count
@@ -143,7 +143,7 @@ func (w: Control) count() -> i32
 end
 
 // Index of the selected list item, or -1.
-func (w: Control) selected() -> i32
+pub func (w: Control) selected() -> i32
     for z in frozen
         if z.id == w.id
             return z.selected
@@ -154,15 +154,15 @@ end
 
 // ---------- methods ----------
 
-func (w: Control) add(item: text)
+pub func (w: Control) add(item: text)
     be_list_add(w.id, item)
 end
 
-func (w: Control) remove(index: i32)
+pub func (w: Control) remove(index: i32)
     be_list_remove(w.id, index)
 end
 
-func (w: Control) clear()
+pub func (w: Control) clear()
     if w.kind == LISTVIEW
         be_list_clear(w.id)
     else
@@ -170,19 +170,19 @@ func (w: Control) clear()
     end
 end
 
-func (w: Control) onClick(action: func())
+pub func (w: Control) onClick(action: func())
     handlers.add(Handler{ id: w.id, code: EV_CLICK, action: action })
 end
 
-func (w: Control) onChange(action: func())
+pub func (w: Control) onChange(action: func())
     handlers.add(Handler{ id: w.id, code: EV_CHANGE, action: action })
 end
 
-func (w: Control) onSelect(action: func())
+pub func (w: Control) onSelect(action: func())
     handlers.add(Handler{ id: w.id, code: EV_SELECT, action: action })
 end
 
-func (w: Control) layout(root: Control)
+pub func (w: Control) layout(root: Control)
     adopt(root, w.id)
     for i in 0..frames.len
         if frames[i].id == w.id
@@ -193,22 +193,22 @@ func (w: Control) layout(root: Control)
     relayout(w.id)
 end
 
-func (w: Control) show()
+pub func (w: Control) show()
     be_show(w.id)
     relayout(w.id)
 end
 
-func (w: Control) close()
+pub func (w: Control) close()
     be_close(w.id)
 end
 
 // Runs the event loop until the last window is closed.
-func run()
+pub func run()
     run_script()
     be_run()
 end
 
-func alert(message: text, title: text = "Brasa")
+pub func alert(message: text, title: text = "Brasa")
     // a scripted run has nobody to dismiss it
     if be_script().len > 0
         return
@@ -552,15 +552,15 @@ end
 let CHAR_W = 6
 let CHAR_H = 13
 let ASCENT = 11
-let ROW = 16
+pub let ROW = 16
 
 // Colors (24-bit RGB).
-let C_BG = 0xF0F0F0
-let C_FIELD = 0xFFFFFF
+pub let C_BG = 0xF0F0F0
+pub let C_FIELD = 0xFFFFFF
 let C_TEXT = 0x000000
 let C_BORDER = 0x7A7A7A
-let C_FOCUS = 0x0078D7
-let C_FACE = 0xE1E1E1
+pub let C_FOCUS = 0x0078D7
+pub let C_FACE = 0xE1E1E1
 let C_PRESSED = 0xB8B8B8
 let C_SELECT = 0x0078D7
 let C_SELECT_TEXT = 0xFFFFFF
@@ -583,31 +583,31 @@ let KS_DOWN = 0xFF54
 let KS_END = 0xFF57
 let KS_DELETE = 0xFFFF
 
-type Widget = record
-    id: long
-    kind: long
+pub type Widget = record
+    pub id: long
+    pub kind: long
     win: long
-    text: text
-    items: []text
-    selected: long
+    pub text: text
+    pub items: []text
+    pub selected: long
     scroll: long
-    x: long
-    y: long
-    w: long
-    h: long
+    pub x: long
+    pub y: long
+    pub w: long
+    pub h: long
     caret: long
 end
 
-type Win = record
-    id: long
-    pixmap: long
-    w: long
-    h: long
+pub type Win = record
+    pub id: long
+    pub pixmap: long
+    pub w: long
+    pub h: long
     dirty: bool
     mapped: bool
     focus: long
     pressed: long
-    open: bool
+    pub open: bool
 end
 
 var connected = false
@@ -625,13 +625,13 @@ var gc: long = 0
 var font: long = 0
 var current_fg: long = -1
 var current_bg: long = -1
-var atom_protocols: long = 0
-var atom_delete: long = 0
-var min_keycode: long = 8
-var keysyms_per: long = 0
-var keysyms: sys.Buf
-var widgets: []Widget
-var wins: []Win
+pub var atom_protocols: long = 0
+pub var atom_delete: long = 0
+pub var min_keycode: long = 8
+pub var keysyms_per: long = 0
+pub var keysyms: sys.Buf
+pub var widgets: []Widget
+pub var wins: []Win
 var next_control: long = 1
 var quit = false
 var alert_window: long = 0
@@ -640,21 +640,21 @@ var script_read = false
 
 // ---------- raw memory and the socket ----------
 
-func put16(addr: long, v: long)
+pub func put16(addr: long, v: long)
     sys.put8(addr, v bitand 255)
     sys.put8(addr + 1, (v >> 8) bitand 255)
 end
 
-func put32(addr: long, v: long)
+pub func put32(addr: long, v: long)
     put16(addr, v bitand 65535)
     put16(addr + 2, (v >> 16) bitand 65535)
 end
 
-func get16(addr: long) -> long
+pub func get16(addr: long) -> long
     return sys.get8(addr) + sys.get8(addr + 1) * 256
 end
 
-func get32(addr: long) -> long
+pub func get32(addr: long) -> long
     return get16(addr) + get16(addr + 2) * 65536
 end
 
@@ -704,7 +704,7 @@ func pad4(n: long) -> long
 end
 
 // Reads exactly `n` bytes; false when the server went away.
-func read_full(addr: long, n: long) -> bool
+pub func read_full(addr: long, n: long) -> bool
     var got: long = 0
     while got < n
         let r = sys.syscall(0, sock, addr + got, n - got, 0, 0, 0)
@@ -733,7 +733,7 @@ func write_all(addr: long, n: long)
     end
 end
 
-func flush_x()
+pub func flush_x()
     if out_len > 0
         write_all(long(out.ptr), out_len)
         out_len = 0
@@ -741,7 +741,7 @@ func flush_x()
 end
 
 // Starts a request of `words` 4-byte units and returns where to write it.
-func req(opcode: long, data: long, words: long) -> long
+pub func req(opcode: long, data: long, words: long) -> long
     if out_len + words * 4 > 200000
         flush_x()
     end
@@ -1022,7 +1022,7 @@ func read_dpi()
     end
 end
 
-func ensure_connected()
+pub func ensure_connected()
     if connected
         return
     end
@@ -1034,7 +1034,7 @@ end
 
 // ---------- widget and window tables ----------
 
-func widget_index(id: long) -> long
+pub func widget_index(id: long) -> long
     for i in 0..widgets.len
         if widgets[i].id == id
             return i
@@ -1043,7 +1043,7 @@ func widget_index(id: long) -> long
     return -1
 end
 
-func win_index(id: long) -> long
+pub func win_index(id: long) -> long
     for i in 0..wins.len
         if wins[i].id == id
             return i
@@ -1251,7 +1251,7 @@ func be_client_height(window: usize) -> i32
     return i32(wins[w].h)
 end
 
-func be_dpi(window: usize) -> i32
+pub func be_dpi(window: usize) -> i32
     return i32(screen_dpi)
 end
 
@@ -1520,7 +1520,7 @@ func paint(w: long)
     flush_x()
 end
 
-func paint_dirty()
+pub func paint_dirty()
     for i in 0..wins.len
         if wins[i].dirty
             paint(wins[i].id)
@@ -1835,7 +1835,7 @@ func dispatch(ev: long)
 end
 
 // Handles events until `stop` is closed (0: until the last window is closed).
-func event_loop(stop: long)
+pub func event_loop(stop: long)
     let ev = sys.buffer(32)
     paint_dirty()
     while not quit
@@ -1873,7 +1873,7 @@ func be_run()
 end
 
 // Makes a window the alert that Escape closes.
-func set_alert_window(id: long)
+pub func set_alert_window(id: long)
     alert_window = id
 end
 

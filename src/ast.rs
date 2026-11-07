@@ -16,6 +16,7 @@ pub struct Attr {
 #[derive(Debug, Clone)]
 pub struct Decl {
     pub attrs: Vec<Attr>,
+    pub public: bool,
     pub kind: DeclKind,
     pub line: u32,
 }
@@ -50,6 +51,8 @@ pub struct FuncDecl {
     pub is_async: bool,
     /// `comptime func`: runs at build time and returns source text
     pub comptime: bool,
+    /// written with `pub` (the parser copies `Decl::public` here)
+    pub public: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -115,6 +118,7 @@ pub enum TypeBody {
 #[derive(Debug, Clone)]
 pub struct Field {
     pub attrs: Vec<Attr>,
+    pub public: bool,
     pub name: String,
     pub ty: Type,
     pub line: u32,

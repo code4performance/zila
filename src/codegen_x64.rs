@@ -313,6 +313,8 @@ struct Sig {
     is_extern: bool,
     /// Receiver type for methods.
     receiver: Option<Ty>,
+    /// written with `pub`: other packages may use it
+    public: bool,
 }
 
 impl Sig {
@@ -330,6 +332,7 @@ struct Global {
     ty: Ty,
     konst: Option<i64>,
     mutable: bool,
+    public: bool,
 }
 
 #[derive(Clone)]
@@ -699,6 +702,8 @@ pub struct Compiler {
     /// records that `new` allocates (they get a `B_rcdrop_*` wrapper); never rolled back
     rc_recs: HashSet<String>,
     enum_decls: HashMap<String, (String, Vec<Variant>)>,
+    /// qualified names of the types written with `pub`
+    pub_types: HashSet<String>,
     enum_payload: HashSet<String>,
     aliases: HashMap<String, (String, Type)>,
     records: HashMap<String, RecInfo>,
@@ -815,6 +820,7 @@ impl Compiler {
             shared_recs: HashSet::new(),
             rc_recs: HashSet::new(),
             enum_decls: HashMap::new(),
+            pub_types: HashSet::new(),
             enum_payload: HashSet::new(),
             aliases: HashMap::new(),
             records: HashMap::new(),
@@ -1348,6 +1354,9 @@ end
                 self.line = d.line;
                 if let DeclKind::Type(td) = &d.kind {
                     let q = format!("{}.{}", mname, td.name);
+                    if d.public {
+                        self.pub_types.insert(q.clone());
+                    }
                     if td.name == "Rc" || td.name == "Weak" {
                         return self.err(format!("type '{}' is defined twice: '{}' is a built-in type (shared references)", td.name, td.name));
                     }
@@ -1523,6 +1532,7 @@ end
                                 c_variadic: ed.c_variadic,
                                 is_extern: true,
                                 receiver: None,
+                                public: d.public,
                             },
                         );
                     }
@@ -1541,13 +1551,14 @@ end
                         };
                         self.globals.insert(
                             (m.clone(), vd.name.clone()),
-                            Global { sym: format!("G_{}_{}", m, vd.name), ty, konst, mutable: vd.mutable },
+                            Global { sym: format!("G_{}_{}", m, vd.name), ty, konst, mutable: vd.mutable, public: d.public },
                         );
                     }
                     _ => {}
                 }
             }
         }
+        self.check_public_signatures()?;
         self.declared = true;
         let keys = std::mem::take(&mut self.deferred_keys);
         for (k, line, m) in keys {
@@ -1633,7 +1644,7 @@ end
         if fd_has_await(fd) {
             self.await_syms.insert(sym.clone());
         }
-        Ok(Sig { sym, module: m.to_string(), params, ret, variadic, c_variadic: false, is_extern: false, receiver })
+        Ok(Sig { sym, module: m.to_string(), params, ret, variadic, c_variadic: false, is_extern: false, receiver, public: fd.public })
     }
 
     fn infer_global(&mut self, e: Option<&Expr>, m: &str) -> R<Ty> {
@@ -1685,6 +1696,9 @@ end
 
     fn record_name(&mut self, path: &[String], m: &str) -> R<String> {
         let q = if path.len() == 1 { format!("{}.{}", m, path[0]) } else { path.join(".") };
+        if path.len() > 1 && !self.type_visible(&q, m) && self.type_exists(&q) {
+            return self.private_name(path.last().unwrap(), type_owner(&q));
+        }
         if self.rec_decls.contains_key(&q) {
             return Ok(q);
         }
@@ -1694,6 +1708,95 @@ end
             }
         }
         self.err(format!("unknown record type '{}'", path.join(".")))
+    }
+
+    /// A `pub` declaration may not name a private type of its own package.
+    fn check_public_signatures(&mut self) -> R<()> {
+        let mods: Vec<(String, Vec<Decl>)> = self.modules.iter().map(|m| (m.name.clone(), m.file.decls.clone())).collect();
+        for (m, decls) in &mods {
+            self.cur_mod = m.clone();
+            for d in decls {
+                if !d.public {
+                    continue;
+                }
+                self.line = d.line;
+                let mut tys: Vec<&Type> = Vec::new();
+                let mut generics: Vec<&str> = Vec::new();
+                let mut bounds: Vec<&Vec<String>> = Vec::new();
+                let (kind, name) = match &d.kind {
+                    DeclKind::Func(fd) => {
+                        for p in &fd.params {
+                            tys.extend(p.ty.iter());
+                        }
+                        if let Some(r) = &fd.ret {
+                            tys.extend(r.ty.iter());
+                        }
+                        generics.extend(fd.generics.iter().map(|g| g.name.as_str()));
+                        bounds.extend(fd.generics.iter().filter_map(|g| g.bound.as_ref()));
+                        (if fd.receiver.is_some() { "method" } else { "func" }, fd.name.as_str())
+                    }
+                    DeclKind::Extern(ed) => {
+                        for p in &ed.params {
+                            tys.extend(p.ty.iter());
+                        }
+                        tys.extend(ed.ret.iter());
+                        ("extern func", ed.name.as_str())
+                    }
+                    DeclKind::Var(vd) => {
+                        tys.extend(vd.ty.iter());
+                        (if vd.mutable { "var" } else { "let" }, vd.name.as_str())
+                    }
+                    DeclKind::Type(td) => {
+                        generics.extend(td.generics.iter().map(|g| g.name.as_str()));
+                        bounds.extend(td.generics.iter().filter_map(|g| g.bound.as_ref()));
+                        match &td.body {
+                            TypeBody::Record(fs) => tys.extend(fs.iter().filter(|f| f.public).map(|f| &f.ty)),
+                            TypeBody::Enum(vs) => tys.extend(vs.iter().flat_map(|v| v.fields.iter())),
+                            TypeBody::Alias(t) => tys.push(t),
+                            TypeBody::Interface(sigs) => {
+                                for sg in sigs {
+                                    for p in &sg.params {
+                                        tys.extend(p.ty.iter());
+                                    }
+                                    if let Some(r) = &sg.ret {
+                                        tys.extend(r.ty.iter());
+                                    }
+                                }
+                            }
+                        }
+                        ("type", td.name.as_str())
+                    }
+                    DeclKind::Embed(_) => continue,
+                };
+                let mut names: Vec<String> = Vec::new();
+                for t in tys {
+                    named_types(t, &generics, &mut names);
+                }
+                for b in bounds {
+                    if b.len() == 1 {
+                        names.push(b[0].clone());
+                    }
+                }
+                for n in names {
+                    let q = format!("{}.{}", m, n);
+                    if self.type_exists(&q) && !self.pub_types.contains(&q) {
+                        return self.err(format!(
+                            "pub {} '{}' exposes private type '{}'; mark '{}' pub or make '{}' private",
+                            kind, name, n, n, name
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn type_exists(&self, q: &str) -> bool {
+        self.tmpl_recs.contains_key(q)
+            || self.rec_decls.contains_key(q)
+            || self.interfaces.contains_key(q)
+            || self.enum_decls.contains_key(q)
+            || self.aliases.contains_key(q)
     }
 
     fn resolve(&mut self, t: &Type, m: &str) -> R<Ty> {
@@ -1742,6 +1845,9 @@ end
                     }
                 }
                 let q = if path.len() == 1 { format!("{}.{}", m, path[0]) } else { path.join(".") };
+                if path.len() > 1 && !self.type_visible(&q, m) && self.type_exists(&q) {
+                    return self.private_name(path.last().unwrap(), type_owner(&q));
+                }
                 if self.tmpl_recs.contains_key(&q) {
                     return self.instantiate_record(&q, args, m);
                 }
@@ -2503,6 +2609,76 @@ end
         self.records[r].size
     }
 
+    /// The error for a name that exists but is not `pub`, used from another package.
+    fn private_name<T>(&self, name: &str, pkg: &str) -> R<T> {
+        self.err(format!("'{}' is private to package '{}'; mark it `pub` to use it from another package", name, pkg))
+    }
+
+    /// A function, global or variant of package `m` may be named from the current package.
+    fn check_member_vis(&self, m: &str, name: &str, public: bool) -> R<()> {
+        if public || m == self.cur_mod {
+            Ok(())
+        } else {
+            self.private_name(name, m)
+        }
+    }
+
+    /// The type `q` (qualified) is `pub` or declared in package `from`.
+    fn type_visible(&self, q: &str, from: &str) -> bool {
+        self.pub_types.contains(q) || type_owner(q) == from
+    }
+
+    /// The declared fields of record `r` (an instance of a generic record uses its template's).
+    fn rec_field_decls(&self, r: &str) -> Option<(&str, &[Field])> {
+        let (m, f) = self.rec_decls.get(r)?;
+        if f.is_empty() {
+            if let Some((tq, _)) = self.inst_args.get(r) {
+                if let Some((tm, td, _)) = self.tmpl_recs.get(tq) {
+                    if let TypeBody::Record(fs) = &td.body {
+                        return Some((tm.as_str(), fs.as_slice()));
+                    }
+                }
+            }
+        }
+        Some((m.as_str(), f.as_slice()))
+    }
+
+    /// `field_of` for source the program wrote: a private field of another package's record is an error.
+    fn fld(&self, r: &str, name: &str) -> R<Option<(Ty, u32)>> {
+        let res = self.field_of(r, name);
+        if res.is_some() {
+            if let Some((owner, fields)) = self.rec_field_decls(r) {
+                if owner != self.cur_mod && fields.iter().any(|f| f.name == name && !f.public) {
+                    return self.err(format!("field '{}' of '{}' is private to package '{}'", name, r, owner));
+                }
+            }
+        }
+        Ok(res)
+    }
+
+    /// A record literal or `new` of another package's record needs every field to be `pub`.
+    fn check_constructible(&self, r: &str) -> R<()> {
+        if let Some((owner, fields)) = self.rec_field_decls(r) {
+            if owner != self.cur_mod && fields.iter().any(|f| !f.public) {
+                return self.err(format!(
+                    "cannot create '{}' here: it has private fields; use a function from package '{}'",
+                    r,
+                    owner
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// A method of another package must be `pub`.
+    fn check_method_vis(&self, sig: &Sig, name: &str) -> R<()> {
+        if sig.public || sig.module == self.cur_mod || name == "drop" {
+            Ok(())
+        } else {
+            self.private_name(name, &sig.module)
+        }
+    }
+
     fn field_of(&self, r: &str, name: &str) -> Option<(Ty, u32)> {
         self.records.get(r)?.fields.iter().find(|f| f.0 == name).map(|f| (f.1.clone(), f.2))
     }
@@ -2987,7 +3163,7 @@ end
             ExprKind::Field { expr: obj, name, safe: false } if self.path_ty(e).is_some() => {
                 let ot = self.rec_ptr(obj)?;
                 if let Ty::Rec(r) = &rc_view(&ot) {
-                    if let Some((fty, off)) = self.field_of(r, name) {
+                    if let Some((fty, off)) = self.fld(r, name)? {
                         self.e(format!("add rax, {}", off));
                         return Ok(fty);
                     }
@@ -3026,7 +3202,7 @@ end
             ExprKind::Field { expr: obj, name, safe: false } if self.path_ty(e).is_some() => {
                 let ot = self.rec_ptr(obj)?;
                 if let Ty::Rec(r) = &rc_view(&ot) {
-                    if let Some((fty, off)) = self.field_of(r, name) {
+                    if let Some((fty, off)) = self.fld(r, name)? {
                         self.e(format!("mov rax, qword ptr [rax + {}]", off));
                         return Ok(fty);
                     }
@@ -3246,7 +3422,7 @@ end
                 };
                 let t = self.temp();
                 self.e(format!("mov qword ptr [rbp - {}], rax", t));
-                if let Some((fty, off)) = self.field_of(&r, name) {
+                if let Some((fty, off)) = self.fld(&r, name)? {
                     let vt = self.value(rhs, Some(&fty))?;
                     self.check(&fty, &vt, &format!("field '{}'", name))?;
                     self.norm(&fty);
@@ -3262,6 +3438,7 @@ end
                         self.store_mem(&fty, &format!("rcx + {}", off));
                     }
                 } else if let Some(sig) = self.methods.get(&(r.clone(), format!("set_{}", name))).cloned() {
+                    self.check_method_vis(&sig, &format!("set_{}", name))?;
                     // property setter: `w.text = v` -> `w.set_text(v)`
                     let Some(p) = sig.params.first().cloned() else {
                         return self.err(format!("'set_{}' must take one parameter", name));
@@ -3769,6 +3946,7 @@ end
                     Some(r) => r,
                     None => self.record_name(path, &self.cur_mod.clone())?,
                 };
+                self.check_constructible(&r)?;
                 self.record_literal(&r, fields)?;
                 Ok(Ty::Rec(r))
             }
@@ -3786,6 +3964,7 @@ end
                     Some(r) => r,
                     None => self.record_name(path, &self.cur_mod.clone())?,
                 };
+                self.check_constructible(&r)?;
                 self.rc_recs.insert(r.clone());
                 self.record_alloc(&r, fields, true)?;
                 Ok(Ty::Rc(Box::new(Ty::Rec(r))))
@@ -3972,6 +4151,7 @@ end
     fn member(&mut self, m: &str, name: &str, want: Option<&Ty>) -> R<Ty> {
         let key = (m.to_string(), name.to_string());
         if let Some(g) = self.globals.get(&key) {
+            self.check_member_vis(m, name, g.public)?;
             let ty = g.ty.clone();
             match g.konst {
                 Some(k) => {
@@ -3990,6 +4170,7 @@ end
             }
         }
         if let Some(sig) = self.funcs.get(&key).cloned() {
+            self.check_member_vis(m, name, sig.public)?;
             if sig.is_extern {
                 return self.err(format!("extern function '{}' cannot be used as a value", name));
             }
@@ -4016,6 +4197,7 @@ end
             return Ok(sig.func_ty(ext));
         }
         if let Some((q, idx)) = self.variants.get(&key).cloned() {
+            self.check_member_vis(m, name, self.pub_types.contains(&q))?;
             return self.enum_construct(&q, idx, &[]);
         }
         if self.imports.get(&self.cur_mod).map_or(false, |i| i.contains(name)) {
@@ -4099,7 +4281,7 @@ end
                     },
                     _ => return self.err("'&' needs a variable or record field"),
                 };
-                let Some((fty, off)) = self.field_of(&r, name) else { return self.err(format!("{} has no field '{}'", r, name)) };
+                let Some((fty, off)) = self.fld(&r, name)? else { return self.err(format!("{} has no field '{}'", r, name)) };
                 if let Ty::Rec(_) = &fty {
                     self.e(format!("mov rax, qword ptr [rax + {}]", off));
                 } else {
@@ -4585,7 +4767,7 @@ end
             Ty::Rec(r) => self.rec_field(&r.clone(), name, own)?,
             Ty::Ptr(p) if matches!(&**p, Ty::Rec(_)) => {
                 let Ty::Rec(r) = &**p else { unreachable!() };
-                let f = self.field_of(r, name);
+                let f = self.fld(r, name)?;
                 match f {
                     Some((fty, off)) => {
                         self.load_mem(&fty, &format!("rax + {}", off));
@@ -4650,13 +4832,14 @@ end
     /// Field of the record in rax, or a property getter (a method without
     /// parameters). `own`: the receiver is an owned reference.
     fn rec_field(&mut self, r: &str, name: &str, own: bool) -> R<Ty> {
-        if let Some((fty, off)) = self.field_of(r, name) {
+        if let Some((fty, off)) = self.fld(r, name)? {
             self.load_mem(&fty, &format!("rax + {}", off));
             self.retain_if(&fty);
             return Ok(fty);
         }
         if let Some(sig) = self.methods.get(&(r.to_string(), name.to_string())).cloned() {
             if sig.params.is_empty() && sig.ret != Ty::Void {
+                self.check_method_vis(&sig, name)?;
                 if !own {
                     self.retain();
                 }
@@ -5550,12 +5733,17 @@ end
                         };
                         let key = (m.clone(), name.clone());
                         if let Some((fd, line)) = self.tmpl_funcs.get(&key).cloned() {
+                            self.check_member_vis(m, name, fd.public)?;
                             return self.call_generic(&key.0, &fd, line, args, targs, want);
                         }
                         return match self.funcs.get(&key).cloned() {
-                            Some(sig) => self.call_sig(&sig, None, args),
+                            Some(sig) => {
+                                self.check_member_vis(m, name, sig.public)?;
+                                self.call_sig(&sig, None, args)
+                            }
                             None if self.modules.iter().any(|x| &x.name == m) => {
                                 if let Some((q, idx)) = self.variants.get(&key).cloned() {
+                                    self.check_member_vis(m, name, self.pub_types.contains(&q))?;
                                     return self.enum_construct(&q, idx, args);
                                 }
                                 if self.globals.contains_key(&key) {
@@ -5592,6 +5780,9 @@ end
                 }
                 if !matches!(ot, Ty::Rec(_)) {
                     let mut found = self.methods.get(&(method_key(&ot), name.clone())).cloned();
+                    if let Some(sg) = &found {
+                        self.check_method_vis(sg, name)?;
+                    }
                     if found.is_none() {
                         found = self.std_sig(&ot, name)?;
                     }
@@ -5609,6 +5800,9 @@ end
                 };
                 if let Some(r) = r {
                     let mut found = self.methods.get(&(r.clone(), name.clone())).cloned();
+                    if let Some(sg) = &found {
+                        self.check_method_vis(sg, name)?;
+                    }
                     if found.is_none() {
                         found = self.std_sig(&ot, name)?;
                     }
@@ -5620,7 +5814,7 @@ end
                         self.free(t);
                         return res;
                     }
-                    if let Some((fty @ Ty::Func { .. }, off)) = self.field_of(&r, name) {
+                    if let Some((fty @ Ty::Func { .. }, off)) = self.fld(&r, name)? {
                         // closure stored in a field: keep it alive for the call
                         let s = self.temp();
                         self.e(format!("mov qword ptr [rbp - {}], rax", s));
@@ -6703,6 +6897,11 @@ impl Compiler {
                 Ty::Param { .. } => None,
                 _ => {
                     let found = self.methods.get(&(method_key(ty), sg.name.clone())).cloned();
+                    if let Some(m) = &found {
+                        if !standard && !m.public && m.module != im {
+                            return self.private_name(&sg.name, &m.module);
+                        }
+                    }
                     let found = match found {
                         Some(m) => Some(m),
                         None => self.std_sig(ty, &sg.name)?,
@@ -10131,5 +10330,36 @@ impl Compiler {
         self.free(t);
         self.pop_scope();
         Ok(sig.ret.clone())
+    }
+}
+
+/// The package part of a qualified type name (`text.Builder`, `list.Stack<int>`).
+fn type_owner(q: &str) -> &str {
+    let base = q.split('<').next().unwrap_or(q);
+    base.rsplit_once('.').map_or(base, |x| x.0)
+}
+
+/// Single-segment type names written in `t` (the package's own types), except type parameters.
+fn named_types(t: &Type, generics: &[&str], out: &mut Vec<String>) {
+    match t {
+        Type::Named { path, args } => {
+            if path.len() == 1 && !generics.contains(&path[0].as_str()) {
+                out.push(path[0].clone());
+            }
+            for a in args {
+                named_types(a, generics, out);
+            }
+        }
+        Type::Optional(i) | Type::Pointer(i) | Type::Shared(i) | Type::Slice(i) | Type::Array(_, i) => named_types(i, generics, out),
+        Type::Func { params, ret, .. } => {
+            for p in params {
+                named_types(p, generics, out);
+            }
+            if let Some(r) = ret {
+                if let Some(t) = &r.ty {
+                    named_types(t, generics, out);
+                }
+            }
+        }
     }
 }

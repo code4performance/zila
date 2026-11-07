@@ -208,7 +208,8 @@ impl Compiler {
         let sig = self.func_sig(&module, &fd);
         self.bindings = saved;
         self.cur_mod = saved_mod;
-        let sig = sig?;
+        let mut sig = sig?;
+        sig.public = true;
         self.methods.insert(key.clone(), sig.clone());
         self.derived.insert(key);
         self.pending.push(Pending { module, decl: fd, bindings: binds, line: self.line });

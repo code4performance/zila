@@ -72,7 +72,7 @@ extern "system" func ExitProcess(code: u32)
 
 #[c_layout]
 type WndClass = record
-    size: u32
+    pub size: u32
     style: u32
     proc: extern "system" func(usize, u32, usize, isize) -> isize
     cls_extra: i32
@@ -88,21 +88,21 @@ end
 
 #[c_layout]
 type Msg = record
-    hwnd: usize
-    message: u32
+    pub hwnd: usize
+    pub message: u32
     wparam: usize
     lparam: isize
-    time: u32
-    x: i32
-    y: i32
+    pub time: u32
+    pub x: i32
+    pub y: i32
     private: u32
 end
 
 #[c_layout]
 type Rect = record
-    left: i32
+    pub left: i32
     top: i32
-    right: i32
+    pub right: i32
     bottom: i32
 end
 
@@ -165,30 +165,30 @@ let EV_SELECT = 2
 let PAD = 12
 let GAP = 8
 
-type Control = record
-    id: usize
-    kind: i32
-    children: []Control
+pub type Control = record
+    pub id: usize
+    pub kind: i32
+    pub children: []Control
 end
 
 // A control's state at the moment its window closed.
 type Frozen = record
-    id: usize
-    text: text
-    count: i32
-    selected: i32
+    pub id: usize
+    pub text: text
+    pub count: i32
+    pub selected: i32
 end
 
 type Handler = record
-    id: usize
-    code: i32
-    action: func()
+    pub id: usize
+    pub code: i32
+    pub action: func()
 end
 
 // An open top-level window and the layout tree it arranges.
 type Frame = record
-    id: usize
-    root: Control?
+    pub id: usize
+    pub root: Control?
 end
 
 var handlers: []Handler
@@ -201,29 +201,29 @@ var muted: long = 0
 
 // ---------- constructors ----------
 
-func Window(title: text, width: i32 = 640, height: i32 = 480) -> Control
+pub func Window(title: text, width: i32 = 640, height: i32 = 480) -> Control
     let id = be_window(title, width, height)
     frames.add(Frame{ id: id })
     return Control{ id: id, kind: WINDOW }
 end
 
-func TextBox(value: text = "") -> Control
+pub func TextBox(value: text = "") -> Control
     return Control{ id: be_create(TEXTBOX, value), kind: TEXTBOX }
 end
 
-func Button(label: text) -> Control
+pub func Button(label: text) -> Control
     return Control{ id: be_create(BUTTON, label), kind: BUTTON }
 end
 
-func ListView() -> Control
+pub func ListView() -> Control
     return Control{ id: be_create(LISTVIEW, ""), kind: LISTVIEW }
 end
 
-func Label(value: text) -> Control
+pub func Label(value: text) -> Control
     return Control{ id: be_create(LABEL, value), kind: LABEL }
 end
 
-func vstack(items: ...Control) -> Control
+pub func vstack(items: ...Control) -> Control
     return Control{ kind: VSTACK, children: items }
 end
 
@@ -233,7 +233,7 @@ end
 
 // ---------- properties: `w.text`, `w.text = ...`, `w.count`, `w.selected` ----------
 
-func (w: Control) text() -> text
+pub func (w: Control) text() -> text
     for z in frozen
         if z.id == w.id
             return z.text
@@ -242,11 +242,11 @@ func (w: Control) text() -> text
     return be_text(w.id)
 end
 
-func (w: Control) set_text(value: text)
+pub func (w: Control) set_text(value: text)
     change_text(w.id, value)
 end
 
-func (w: Control) count() -> i32
+pub func (w: Control) count() -> i32
     for z in frozen
         if z.id == w.id
             return z.count
@@ -256,7 +256,7 @@ func (w: Control) count() -> i32
 end
 
 // Index of the selected list item, or -1.
-func (w: Control) selected() -> i32
+pub func (w: Control) selected() -> i32
     for z in frozen
         if z.id == w.id
             return z.selected
@@ -267,15 +267,15 @@ end
 
 // ---------- methods ----------
 
-func (w: Control) add(item: text)
+pub func (w: Control) add(item: text)
     be_list_add(w.id, item)
 end
 
-func (w: Control) remove(index: i32)
+pub func (w: Control) remove(index: i32)
     be_list_remove(w.id, index)
 end
 
-func (w: Control) clear()
+pub func (w: Control) clear()
     if w.kind == LISTVIEW
         be_list_clear(w.id)
     else
@@ -283,19 +283,19 @@ func (w: Control) clear()
     end
 end
 
-func (w: Control) onClick(action: func())
+pub func (w: Control) onClick(action: func())
     handlers.add(Handler{ id: w.id, code: EV_CLICK, action: action })
 end
 
-func (w: Control) onChange(action: func())
+pub func (w: Control) onChange(action: func())
     handlers.add(Handler{ id: w.id, code: EV_CHANGE, action: action })
 end
 
-func (w: Control) onSelect(action: func())
+pub func (w: Control) onSelect(action: func())
     handlers.add(Handler{ id: w.id, code: EV_SELECT, action: action })
 end
 
-func (w: Control) layout(root: Control)
+pub func (w: Control) layout(root: Control)
     adopt(root, w.id)
     for i in 0..frames.len
         if frames[i].id == w.id
@@ -306,22 +306,22 @@ func (w: Control) layout(root: Control)
     relayout(w.id)
 end
 
-func (w: Control) show()
+pub func (w: Control) show()
     be_show(w.id)
     relayout(w.id)
 end
 
-func (w: Control) close()
+pub func (w: Control) close()
     be_close(w.id)
 end
 
 // Runs the event loop until the last window is closed.
-func run()
+pub func run()
     run_script()
     be_run()
 end
 
-func alert(message: text, title: text = "Brasa")
+pub func alert(message: text, title: text = "Brasa")
     // a scripted run has nobody to dismiss it
     if be_script().len > 0
         return
@@ -660,7 +660,7 @@ end
 let CLASS = "BrasaWindow"
 
 type Font = record
-    window: usize
+    pub window: usize
     font: usize
 end
 
@@ -812,7 +812,7 @@ func be_client_height(window: usize) -> i32
     return r.bottom
 end
 
-func be_dpi(window: usize) -> i32
+pub func be_dpi(window: usize) -> i32
     var d: i32 = 0
     unsafe
         d = i32(GetDpiForWindow(window))

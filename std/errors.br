@@ -18,25 +18,25 @@
 package errors
 
 // The standard kinds, in the reserved `std` namespace.
-let NotFound: ErrorKind = __kind("std.NotFound")
-let PermissionDenied: ErrorKind = __kind("std.PermissionDenied")
-let AlreadyExists: ErrorKind = __kind("std.AlreadyExists")
-let Unauthenticated: ErrorKind = __kind("std.Unauthenticated")
-let Unavailable: ErrorKind = __kind("std.Unavailable")
-let Timeout: ErrorKind = __kind("std.Timeout")
-let ConnectionRefused: ErrorKind = __kind("std.ConnectionRefused")
-let ConnectionReset: ErrorKind = __kind("std.ConnectionReset")
-let AddrInUse: ErrorKind = __kind("std.AddrInUse")
-let InvalidInput: ErrorKind = __kind("std.InvalidInput")
-let Overflow: ErrorKind = __kind("std.Overflow")
-let UnexpectedEof: ErrorKind = __kind("std.UnexpectedEof")
-let Closed: ErrorKind = __kind("std.Closed")
-let Cancelled: ErrorKind = __kind("std.Cancelled")
-let Unsupported: ErrorKind = __kind("std.Unsupported")
+pub let NotFound: ErrorKind = __kind("std.NotFound")
+pub let PermissionDenied: ErrorKind = __kind("std.PermissionDenied")
+pub let AlreadyExists: ErrorKind = __kind("std.AlreadyExists")
+pub let Unauthenticated: ErrorKind = __kind("std.Unauthenticated")
+pub let Unavailable: ErrorKind = __kind("std.Unavailable")
+pub let Timeout: ErrorKind = __kind("std.Timeout")
+pub let ConnectionRefused: ErrorKind = __kind("std.ConnectionRefused")
+pub let ConnectionReset: ErrorKind = __kind("std.ConnectionReset")
+pub let AddrInUse: ErrorKind = __kind("std.AddrInUse")
+pub let InvalidInput: ErrorKind = __kind("std.InvalidInput")
+pub let Overflow: ErrorKind = __kind("std.Overflow")
+pub let UnexpectedEof: ErrorKind = __kind("std.UnexpectedEof")
+pub let Closed: ErrorKind = __kind("std.Closed")
+pub let Cancelled: ErrorKind = __kind("std.Cancelled")
+pub let Unsupported: ErrorKind = __kind("std.Unsupported")
 // An operating-system failure with no more specific kind.
-let Io: ErrorKind = __kind("std.Io")
+pub let Io: ErrorKind = __kind("std.Io")
 // Anything else, and the kind of `error("message")`.
-let Other: ErrorKind = __kind("std.Other")
+pub let Other: ErrorKind = __kind("std.Other")
 
 // A standard kind by its full name (no checks: for the standard library only).
 func __std(name: text) -> ErrorKind
@@ -53,7 +53,7 @@ end
 
 // The kind with this name, `package.Name` (letters, digits and `_`, one dot). The `std`
 // namespace belongs to the standard library.
-func kind(name: text) -> ErrorKind or error
+pub func kind(name: text) -> ErrorKind or error
     let n = name.len
     var dots = 0
     var start = true

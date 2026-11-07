@@ -206,6 +206,7 @@ struct SpecInfo {
     module: String,
     template: FuncDecl,
     template_attrs: Vec<Attr>,
+    template_public: bool,
     comptime_idx: usize,
     arg_ty: Type,
     name: String,
@@ -218,6 +219,7 @@ struct CallInfo {
     fname: String,
     template: FuncDecl,
     template_attrs: Vec<Attr>,
+    template_public: bool,
     gen: (String, String),
     comptime_idx: usize,
     /// the type, as written at the call site (a name of the program's own module is single)
@@ -510,6 +512,7 @@ impl Expander {
             fname,
             template: fd.clone(),
             template_attrs: d.attrs.clone(),
+            template_public: d.public,
             gen,
             comptime_idx: ci,
             arg_ty,
@@ -687,6 +690,7 @@ impl Expander {
                         module: ci.module.clone(),
                         template: ci.template.clone(),
                         template_attrs: ci.template_attrs.clone(),
+                        template_public: ci.template_public,
                         comptime_idx: ci.comptime_idx,
                         arg_ty: ci.arg_ty.clone(),
                         name,
@@ -833,7 +837,7 @@ impl Expander {
                     let arg = self.qualify_for(&sp.arg_ty, &sp.module);
                     subst_type(&mut fd, &tname, &arg);
                     let attrs: Vec<Attr> = sp.template_attrs.iter().filter(|a| a.name != "generated").cloned().collect();
-                    let decl = Decl { attrs, kind: DeclKind::Func(fd), line: base };
+                    let decl = Decl { attrs, public: sp.template_public, kind: DeclKind::Func(fd), line: base };
                     self.specs.insert(sp.key.clone(), sp.name.clone());
                     if sp.module == self.main_name {
                         new_decls.push(decl);

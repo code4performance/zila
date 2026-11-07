@@ -12,28 +12,28 @@ use errors
 
 // Owns a block of raw memory; frees it when the last reference goes away.
 #[shared]
-type Buf = record
-    ptr: *u8
+pub type Buf = record
+    pub ptr: *u8
 end
 
-func (ref b: Buf) drop()
+pub func (ref b: Buf) drop()
     c.free(b.ptr)
 end
 
 // Scratch integers whose addresses are handed to the operating system.
-type Scratch = record
-    a: long
-    b: long
+pub type Scratch = record
+    pub a: long
+    pub b: long
 end
 
 // A zeroed block of `bytes` bytes.
-func buffer(bytes: long) -> Buf
+pub func buffer(bytes: long) -> Buf
     return Buf{ ptr: c.alloc(usize(bytes)) }
 end
 
 // A Linux system call. The result is the kernel's: a value, or minus an error number
 // (between -4095 and -1).
-func syscall(number: long, a: long, b: long, c3: long, d: long, e: long, f: long) -> long
+pub func syscall(number: long, a: long, b: long, c3: long, d: long, e: long, f: long) -> long
     var r: long = 0
     unsafe
         asm
@@ -53,7 +53,7 @@ func syscall(number: long, a: long, b: long, c3: long, d: long, e: long, f: long
 end
 
 // Reads and writes raw memory at an address (an integer of 8 bytes, or one byte).
-func peek(addr: long) -> long
+pub func peek(addr: long) -> long
     let p: *long = addr
     var v: long = 0
     unsafe
@@ -62,14 +62,14 @@ func peek(addr: long) -> long
     return v
 end
 
-func poke(addr: long, value: long)
+pub func poke(addr: long, value: long)
     let p: *long = addr
     unsafe
         p[0] = value
     end
 end
 
-func get8(addr: long) -> long
+pub func get8(addr: long) -> long
     let p: *u8 = addr
     var v: long = 0
     unsafe
@@ -78,7 +78,7 @@ func get8(addr: long) -> long
     return v
 end
 
-func put8(addr: long, value: long)
+pub func put8(addr: long, value: long)
     let p: *u8 = addr
     unsafe
         p[0] = u8(value)
@@ -86,7 +86,7 @@ func put8(addr: long, value: long)
 end
 
 // Whether a system call result is an error number.
-func failed(r: long) -> bool
+pub func failed(r: long) -> bool
     return r < 0 and r >= -4095
 end
 
@@ -99,7 +99,7 @@ func trim_end(s: text) -> text
 end
 
 // The standard message of an error number (the wording of `strerror`).
-func message(code: long) -> text
+pub func message(code: long) -> text
     match code
         1 -> return "Operation not permitted"
         2 -> return "No such file or directory"
@@ -184,7 +184,7 @@ func message(code: long) -> text
 end
 
 // "what: reason" for an error number (a result of `syscall` may be passed as it is).
-func describe(code: long, what: text) -> text
+pub func describe(code: long, what: text) -> text
     var n = code
     if n < 0
         n = -n
@@ -237,6 +237,6 @@ end
 
 // The error for an error number: its kind, and the message `describe` gives. (`error?` is the
 // type of an error that is a value; a plain `-> error` would mean "fails or not".)
-func error_for(code: long, what: text) -> error?
+pub func error_for(code: long, what: text) -> error?
     return error(kind_of(code), describe(code, what))
 end

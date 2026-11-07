@@ -46,7 +46,7 @@ func char_len(s: text, i: int) -> int
 end
 
 // `fill` written `n` times.
-func repeat(fill: text, n: int) -> text
+pub func repeat(fill: text, n: int) -> text
     var out = ""
     var piece = fill
     var k = n
@@ -61,7 +61,7 @@ func repeat(fill: text, n: int) -> text
 end
 
 // `s` with `fill` added before it until it is `width` characters wide.
-func pad_left(s: text, width: int, fill: text = " ") -> text
+pub func pad_left(s: text, width: int, fill: text = " ") -> text
     let n = chars(s)
     if n >= width
         return s
@@ -70,7 +70,7 @@ func pad_left(s: text, width: int, fill: text = " ") -> text
 end
 
 // `s` with `fill` added after it until it is `width` characters wide.
-func pad_right(s: text, width: int, fill: text = " ") -> text
+pub func pad_right(s: text, width: int, fill: text = " ") -> text
     let n = chars(s)
     if n >= width
         return s
@@ -79,7 +79,7 @@ func pad_right(s: text, width: int, fill: text = " ") -> text
 end
 
 // `s` in the middle of `width` characters; an odd extra fill goes on the right.
-func center(s: text, width: int, fill: text = " ") -> text
+pub func center(s: text, width: int, fill: text = " ") -> text
     let n = chars(s)
     if n >= width
         return s
@@ -91,7 +91,7 @@ end
 // ---- numbers as text ----
 
 // The decimal text of `n`.
-func int(n: long) -> text
+pub func int(n: long) -> text
     return "{n}"
 end
 
@@ -119,17 +119,17 @@ func to_base(n: long, base: int) -> text
 end
 
 // `n` in base 16 without a prefix: `hex(255)` is "ff".
-func hex(n: long) -> text
+pub func hex(n: long) -> text
     return to_base(n, 16)
 end
 
 // `n` in base 2 without a prefix: `bin(5)` is "101".
-func bin(n: long) -> text
+pub func bin(n: long) -> text
     return to_base(n, 2)
 end
 
 // `n` with a comma between groups of three digits: `thousands(1234567)` is "1,234,567".
-func thousands(n: long) -> text
+pub func thousands(n: long) -> text
     let all = to_base(n, 10)
     var sign = ""
     var digits = all
@@ -147,14 +147,14 @@ func thousands(n: long) -> text
 end
 
 // `x` with exactly `digits` decimals, halves away from zero: `float(3.14159, 2)` is "3.14".
-func float(x: float, digits: int) -> text
+pub func float(x: float, digits: int) -> text
     return math.fixed(x, digits)
 end
 
 // ---- values of any type ----
 
 // A value to put in a template: what `format.fmt` makes of its arguments.
-type Value = enum
+pub type Value = enum
     Int(long)
     Float(float)
     Text(text)
@@ -163,7 +163,7 @@ end
 
 // Anything with a `to_value` method can be formatted. Integers, floats, text and booleans
 // have one here; give your own types one that returns `format.Text("...")`.
-type Valued = interface
+pub type Valued = interface
     func to_value(self) -> Value
 end
 
@@ -262,11 +262,11 @@ end
 // A parsed layout: [[fill]align][0][width][.precision][type].
 // `prec` is -1 without a precision and `kind` is empty without a type letter.
 type Spec = record
-    fill: text
-    align: int
-    width: int
+    pub fill: text
+    pub align: int
+    pub width: int
     prec: int
-    kind: text
+    pub kind: text
 end
 
 func is_digit(b: int) -> bool
@@ -438,9 +438,9 @@ end
 
 // A piece of a template: literal text (`idx` is -1) or a placeholder.
 type Piece = record
-    lit: text
-    idx: int
-    layout: text
+    pub lit: text
+    pub idx: int
+    pub layout: text
 end
 
 // The pieces of `template`, for `nargs` arguments.
@@ -504,7 +504,7 @@ func parse_template(template: text, nargs: int) -> []Piece or error
 end
 
 // `template` with its placeholders replaced by the texts in `args`.
-func text(template: text, args: []text) -> text or error
+pub func text(template: text, args: []text) -> text or error
     let pieces = try parse_template(template, args.len)
     var out = ""
     for p in pieces
@@ -535,39 +535,39 @@ end
 
 // `format.fmt(template, a, b, ...)` is `fmtN` for N values (at most eight): values of any
 // type that is a `Valued`.
-func fmt0(template: text) -> text or error
+pub func fmt0(template: text) -> text or error
     let vs: []Value = []
     return values(template, vs)
 end
 
-func fmt1<A: Valued>(template: text, a: A) -> text or error
+pub func fmt1<A: Valued>(template: text, a: A) -> text or error
     return values(template, [a.to_value()])
 end
 
-func fmt2<A: Valued, B: Valued>(template: text, a: A, b: B) -> text or error
+pub func fmt2<A: Valued, B: Valued>(template: text, a: A, b: B) -> text or error
     return values(template, [a.to_value(), b.to_value()])
 end
 
-func fmt3<A: Valued, B: Valued, C: Valued>(template: text, a: A, b: B, c: C) -> text or error
+pub func fmt3<A: Valued, B: Valued, C: Valued>(template: text, a: A, b: B, c: C) -> text or error
     return values(template, [a.to_value(), b.to_value(), c.to_value()])
 end
 
-func fmt4<A: Valued, B: Valued, C: Valued, D: Valued>(template: text, a: A, b: B, c: C, d: D) -> text or error
+pub func fmt4<A: Valued, B: Valued, C: Valued, D: Valued>(template: text, a: A, b: B, c: C, d: D) -> text or error
     return values(template, [a.to_value(), b.to_value(), c.to_value(), d.to_value()])
 end
 
-func fmt5<A: Valued, B: Valued, C: Valued, D: Valued, E: Valued>(template: text, a: A, b: B, c: C, d: D, e: E) -> text or error
+pub func fmt5<A: Valued, B: Valued, C: Valued, D: Valued, E: Valued>(template: text, a: A, b: B, c: C, d: D, e: E) -> text or error
     return values(template, [a.to_value(), b.to_value(), c.to_value(), d.to_value(), e.to_value()])
 end
 
-func fmt6<A: Valued, B: Valued, C: Valued, D: Valued, E: Valued, F: Valued>(template: text, a: A, b: B, c: C, d: D, e: E, f: F) -> text or error
+pub func fmt6<A: Valued, B: Valued, C: Valued, D: Valued, E: Valued, F: Valued>(template: text, a: A, b: B, c: C, d: D, e: E, f: F) -> text or error
     return values(template, [a.to_value(), b.to_value(), c.to_value(), d.to_value(), e.to_value(), f.to_value()])
 end
 
-func fmt7<A: Valued, B: Valued, C: Valued, D: Valued, E: Valued, F: Valued, G: Valued>(template: text, a: A, b: B, c: C, d: D, e: E, f: F, g: G) -> text or error
+pub func fmt7<A: Valued, B: Valued, C: Valued, D: Valued, E: Valued, F: Valued, G: Valued>(template: text, a: A, b: B, c: C, d: D, e: E, f: F, g: G) -> text or error
     return values(template, [a.to_value(), b.to_value(), c.to_value(), d.to_value(), e.to_value(), f.to_value(), g.to_value()])
 end
 
-func fmt8<A: Valued, B: Valued, C: Valued, D: Valued, E: Valued, F: Valued, G: Valued, H: Valued>(template: text, a: A, b: B, c: C, d: D, e: E, f: F, g: G, h: H) -> text or error
+pub func fmt8<A: Valued, B: Valued, C: Valued, D: Valued, E: Valued, F: Valued, G: Valued, H: Valued>(template: text, a: A, b: B, c: C, d: D, e: E, f: F, g: G, h: H) -> text or error
     return values(template, [a.to_value(), b.to_value(), c.to_value(), d.to_value(), e.to_value(), f.to_value(), g.to_value(), h.to_value()])
 end

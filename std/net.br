@@ -52,12 +52,12 @@ var accept_ex: AcceptExFn
 
 // An open connection. Closes its socket when the last reference goes away.
 #[shared]
-type Conn = record
-    sock: usize
-    open: bool
+pub type Conn = record
+    pub sock: usize
+    pub open: bool
 end
 
-func (ref conn: Conn) drop()
+pub func (ref conn: Conn) drop()
     if conn.open
         unsafe
             ws.closesocket(conn.sock)
@@ -68,13 +68,13 @@ end
 
 // A listening socket and the port it listens on.
 #[shared]
-type Listener = record
-    sock: usize
-    port: long
-    open: bool
+pub type Listener = record
+    pub sock: usize
+    pub port: long
+    pub open: bool
 end
 
-func (ref l: Listener) drop()
+pub func (ref l: Listener) drop()
     if l.open
         unsafe
             ws.closesocket(l.sock)
@@ -168,7 +168,7 @@ func make_addr(ip: long, port: long) -> sys.Buf
 end
 
 // "a.b.c.d" as a number, or -1 when `host` is not a numeric IPv4 address.
-func parse_ip(host: text) -> long
+pub func parse_ip(host: text) -> long
     var ip: long = 0
     var parts: long = 0
     var value: long = 0
@@ -201,7 +201,7 @@ end
 
 // The first IPv4 address of `host` as "a.b.c.d". A numeric address is returned as it is; a
 // name goes through the asynchronous Windows resolver: the task waits and the others run.
-async func lookup(host: text) -> text or error
+pub async func lookup(host: text) -> text or error
     if parse_ip(host) >= 0
         return host
     end
@@ -254,7 +254,7 @@ async func lookup(host: text) -> text or error
 end
 
 // The IPv4 address of `host` as a number, for building a socket address.
-async func resolve(host: text) -> long or error
+pub async func resolve(host: text) -> long or error
     let text_ip = try await lookup(host)
     return parse_ip(text_ip)
 end
@@ -278,7 +278,7 @@ func await_op(op: task.Op, accepted: bool, err: long, what: text) -> long or err
 end
 
 // Connects to a TCP server.
-async func connect(host: text, port: long) -> Conn or error
+pub async func connect(host: text, port: long) -> Conn or error
     try net_init()
     let ip = try await resolve(host)
     let s = new_socket()
@@ -311,7 +311,7 @@ async func connect(host: text, port: long) -> Conn or error
 end
 
 // Starts listening on a port (0 picks a free one; see `.port`).
-async func listen(port: long) -> Listener or error
+pub async func listen(port: long) -> Listener or error
     try net_init()
     let s = new_socket()
     if s == INVALID_SOCKET
@@ -342,7 +342,7 @@ async func listen(port: long) -> Listener or error
 end
 
 // Waits for the next client.
-async func (l: Listener) accept() -> Conn or error
+pub async func (l: Listener) accept() -> Conn or error
     let s = new_socket()
     if s == INVALID_SOCKET
         return sys.error_for(task.last_error(), "cannot create a socket")
@@ -364,7 +364,7 @@ async func (l: Listener) accept() -> Conn or error
 end
 
 // Receives up to `max` bytes; empty text means the peer closed the connection.
-async func (conn: Conn) read(max: long) -> text or error
+pub async func (conn: Conn) read(max: long) -> text or error
     let b = sys.buffer(max)
     let wb = ws.Wsabuf{ len: u32(max), ptr: b.ptr }
     let flags = sys.Scratch{}
@@ -380,7 +380,7 @@ async func (conn: Conn) read(max: long) -> text or error
 end
 
 // Sends all of `data`.
-async func (conn: Conn) write(data: text) -> error
+pub async func (conn: Conn) write(data: text) -> error
     var done: long = 0
     while done < data.len
         let wb = ws.Wsabuf{ len: u32(data.len - done), ptr: c.cstr(data) + done }
@@ -401,7 +401,7 @@ async func (conn: Conn) write(data: text) -> error
 end
 
 // Closes the connection now.
-async func (conn: Conn) close()
+pub async func (conn: Conn) close()
     if conn.open
         unsafe
             ws.closesocket(conn.sock)
@@ -411,7 +411,7 @@ async func (conn: Conn) close()
 end
 
 // Stops listening now.
-async func (l: Listener) close()
+pub async func (l: Listener) close()
     if l.open
         unsafe
             ws.closesocket(l.sock)
@@ -424,32 +424,32 @@ end
 
 // Reads a connection in pieces and hands it out by lines or bytes.
 #[shared]
-type Reader = record
-    conn: Conn
-    buf: bufio.InBuf
-    reads: long
+pub type Reader = record
+    pub conn: Conn
+    pub buf: bufio.InBuf
+    pub reads: long
 end
 
 // Collects writes and sends them in large pieces.
 #[shared]
-type Writer = record
-    conn: Conn
-    buf: bufio.OutBuf
-    writes: long
+pub type Writer = record
+    pub conn: Conn
+    pub buf: bufio.OutBuf
+    pub writes: long
 end
 
 // A reader over this connection (the end of the data is the peer closing it).
-func (conn: Conn) reader() -> Reader
+pub func (conn: Conn) reader() -> Reader
     return Reader{ conn: conn, buf: bufio.input(), reads: 0 }
 end
 
 // A writer over this connection: `flush()` sends what has been collected.
-func (conn: Conn) writer() -> Writer
+pub func (conn: Conn) writer() -> Writer
     return Writer{ conn: conn, buf: bufio.output(), writes: 0 }
 end
 
 // Waits for more data; the peer closing the connection finishes the buffer.
-async func (r: Reader) fill() -> error
+pub async func (r: Reader) fill() -> error
     if r.buf.finished()
         return
     end
@@ -464,7 +464,7 @@ async func (r: Reader) fill() -> error
 end
 
 // The next line without its `\n` or `\r\n`, or the error `end of file`.
-async func (r: Reader) read_line() -> text or error
+pub async func (r: Reader) read_line() -> text or error
     while not r.buf.has_line()
         if r.buf.finished()
             break
@@ -478,7 +478,7 @@ async func (r: Reader) read_line() -> text or error
 end
 
 // Up to `max` bytes; empty text once the peer has closed the connection.
-async func (r: Reader) read(max: int) -> text or error
+pub async func (r: Reader) read(max: int) -> text or error
     if r.buf.unread() == 0
         try await r.fill()
     end
@@ -486,7 +486,7 @@ async func (r: Reader) read(max: int) -> text or error
 end
 
 // Everything until the peer closes the connection.
-async func (r: Reader) read_all() -> text or error
+pub async func (r: Reader) read_all() -> text or error
     while not r.buf.finished()
         try await r.fill()
     end
@@ -494,7 +494,7 @@ async func (r: Reader) read_all() -> text or error
 end
 
 // True when nothing is left to read (waits for data).
-async func (r: Reader) at_end() -> bool or error
+pub async func (r: Reader) at_end() -> bool or error
     if r.buf.unread() == 0 and not r.buf.finished()
         try await r.fill()
     end
@@ -502,7 +502,7 @@ async func (r: Reader) at_end() -> bool or error
 end
 
 // Sends everything that is buffered.
-async func (w: Writer) drain() -> error
+pub async func (w: Writer) drain() -> error
     if w.buf.len() == 0
         return
     end
@@ -513,7 +513,7 @@ async func (w: Writer) drain() -> error
 end
 
 // Adds `data` (sent once 64 KiB have gathered, or on `flush`).
-async func (w: Writer) write(data: text) -> error
+pub async func (w: Writer) write(data: text) -> error
     w.buf.add(data)
     if w.buf.len() >= 65536
         try await w.drain()
@@ -522,7 +522,7 @@ async func (w: Writer) write(data: text) -> error
 end
 
 // Adds `data` and a newline.
-async func (w: Writer) write_line(data: text) -> error
+pub async func (w: Writer) write_line(data: text) -> error
     w.buf.add(data)
     w.buf.add("\n")
     if w.buf.len() >= 65536
@@ -532,13 +532,13 @@ async func (w: Writer) write_line(data: text) -> error
 end
 
 // Sends whatever is buffered.
-async func (w: Writer) flush() -> error
+pub async func (w: Writer) flush() -> error
     try await w.drain()
     return
 end
 
 // Sends whatever is buffered. The connection stays open: close it with `conn.close()`.
-async func (w: Writer) close() -> error
+pub async func (w: Writer) close() -> error
     try await w.drain()
     return
 end
@@ -547,13 +547,13 @@ end
 
 // A bound UDP socket. Closes when the last reference goes away.
 #[shared]
-type UdpSocket = record
-    sock: usize
-    open: bool
-    port: long
+pub type UdpSocket = record
+    pub sock: usize
+    pub open: bool
+    pub port: long
 end
 
-func (ref s: UdpSocket) drop()
+pub func (ref s: UdpSocket) drop()
     if s.open
         unsafe
             ws.closesocket(s.sock)
@@ -563,10 +563,10 @@ func (ref s: UdpSocket) drop()
 end
 
 // One received datagram and where it came from.
-type Packet = record
-    data: text
-    host: text
-    port: long
+pub type Packet = record
+    pub data: text
+    pub host: text
+    pub port: long
 end
 
 // Like `await_op`, for receiving a datagram: a datagram larger than the buffer is its own error.
@@ -593,7 +593,7 @@ func await_dgram(op: task.Op, accepted: bool, err: long, what: text, max: long) 
 end
 
 // Binds a UDP socket to a port (0 picks a free one; see `.port`).
-async func udp(port: long) -> UdpSocket or error
+pub async func udp(port: long) -> UdpSocket or error
     try net_init()
     let s = new_socket_of(SOCK_DGRAM, IPPROTO_UDP)
     if s == INVALID_SOCKET
@@ -624,7 +624,7 @@ async func udp(port: long) -> UdpSocket or error
 end
 
 // Sends `data` as one datagram to `host` (an address or a name) and `port`.
-async func (sock: UdpSocket) send_to(host: text, port: long, data: text) -> error
+pub async func (sock: UdpSocket) send_to(host: text, port: long, data: text) -> error
     if not sock.open
         return error(errors.Closed, "the socket is closed")
     end
@@ -643,7 +643,7 @@ async func (sock: UdpSocket) send_to(host: text, port: long, data: text) -> erro
 end
 
 // Waits for the next datagram (up to `max` bytes) and says who sent it.
-async func (sock: UdpSocket) recv(max: long = 65535) -> Packet or error
+pub async func (sock: UdpSocket) recv(max: long = 65535) -> Packet or error
     if not sock.open
         return error(errors.Closed, "the socket is closed")
     end
@@ -670,7 +670,7 @@ async func (sock: UdpSocket) recv(max: long = 65535) -> Packet or error
 end
 
 // Closes the socket now.
-async func (sock: UdpSocket) close()
+pub async func (sock: UdpSocket) close()
     if sock.open
         unsafe
             ws.closesocket(sock.sock)

@@ -308,6 +308,13 @@ impl Parser {
         let attrs = self.attrs()?;
         self.skip_nl();
         let line = self.line();
+        let public = self.eat_kw("pub");
+        if public && self.is_kw("embed") {
+            return self.err("'pub' cannot be applied to 'embed'");
+        }
+        if public && (self.is_kw("use") || self.is_kw("package")) {
+            return self.err(format!("'pub' cannot be applied to '{}'", self.kw().unwrap()));
+        }
         let kind = match self.kw() {
             Some("func") => DeclKind::Func(self.func_decl(false, attrs.iter().any(|a| a.name == "generated"))?),
             Some("comptime") => {
@@ -350,7 +357,11 @@ impl Parser {
             }
             _ => return self.err(format!("expected a declaration, found {}", self.describe())),
         };
-        Ok(Decl { attrs, kind, line })
+        let mut kind = kind;
+        if let DeclKind::Func(f) = &mut kind {
+            f.public = public;
+        }
+        Ok(Decl { attrs, public, kind, line })
     }
 
     fn var_decl(&mut self) -> R<VarDecl> {
@@ -468,10 +479,11 @@ impl Parser {
                         self.skip_nl();
                     }
                     let line = self.line();
+                    let public = self.eat_kw("pub");
                     let name = self.expect_ident()?;
                     self.expect_op(":")?;
                     let ty = self.ty()?;
-                    fields.push(Field { attrs, name, ty, line });
+                    fields.push(Field { attrs, public, name, ty, line });
                     self.eat_op(",");
                     self.stmt_end()?;
                 }
@@ -491,6 +503,9 @@ impl Parser {
                         self.skip_nl();
                     }
                     let line = self.line();
+                    if self.is_kw("pub") {
+                        return self.err("'pub' cannot be applied to an enum variant; a 'pub' enum exports all its variants");
+                    }
                     let name = self.expect_ident()?;
                     let mut fields = Vec::new();
                     let mut field_names = Vec::new();
@@ -524,6 +539,9 @@ impl Parser {
                     self.skip_nl();
                     if self.eat_end(open) {
                         break;
+                    }
+                    if self.is_kw("pub") {
+                        return self.err("'pub' cannot be applied to an interface method signature");
                     }
                     self.expect_kw("func")?;
                     let name = self.expect_name()?;
@@ -566,11 +584,11 @@ impl Parser {
         self.expect_op(")")?;
         let ret = if self.eat_op("->") { Some(self.result()?) } else { None };
         if body_less {
-            return Ok(FuncDecl { receiver, name, generics, params, ret, body: Vec::new(), is_async, comptime: false });
+            return Ok(FuncDecl { receiver, name, generics, params, ret, body: Vec::new(), is_async, comptime: false, public: false });
         }
         let body = self.block()?;
         self.end_block(open)?;
-        Ok(FuncDecl { receiver, name, generics, params, ret, body, is_async, comptime: false })
+        Ok(FuncDecl { receiver, name, generics, params, ret, body, is_async, comptime: false, public: false })
     }
 
     /// Parameters up to (not including) `)`. Lambdas may omit types.
@@ -589,6 +607,9 @@ impl Parser {
     }
 
     fn param(&mut self, lambda: bool) -> R<Param> {
+        if self.is_kw("pub") {
+            return self.err("'pub' cannot be applied to a parameter");
+        }
         let comptime = self.eat_kw("comptime");
         if comptime && lambda {
             return self.err("'comptime' parameters are only allowed in function declarations");

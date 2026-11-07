@@ -21,6 +21,6 @@ package derive
 
 // Folds `x` into the running hash `h`. Equal inputs give equal results; a change in either
 // argument changes the result in all of its bits.
-func hash_combine(h: long, x: long) -> long
+pub func hash_combine(h: long, x: long) -> long
     return __mix(h, x)
 end

@@ -20,7 +20,7 @@ use errors
 
 // The byte position of the first `part` at or after `from`, or -1.
 #[no_alloc]
-func index_from(s: text, part: text, from: int) -> int
+pub func index_from(s: text, part: text, from: int) -> int
     let n = s.len
     let m = part.len
     var i = from
@@ -42,26 +42,26 @@ end
 
 // The byte position of the first `part` in `s`, or -1.
 #[no_alloc]
-func index_of(s: text, part: text) -> int
+pub func index_of(s: text, part: text) -> int
     return index_from(s, part, 0)
 end
 
 #[no_alloc]
-func contains(s: text, part: text) -> bool
+pub func contains(s: text, part: text) -> bool
     return index_from(s, part, 0) >= 0
 end
 
-func starts_with(s: text, prefix: text) -> bool
+pub func starts_with(s: text, prefix: text) -> bool
     return s.len >= prefix.len and s.slice(0, prefix.len) == prefix
 end
 
-func ends_with(s: text, suffix: text) -> bool
+pub func ends_with(s: text, suffix: text) -> bool
     return s.len >= suffix.len and s.slice(s.len - suffix.len, s.len) == suffix
 end
 
 // -1, 0 or 1: how `a` orders against `b`, comparing byte by byte (shorter first on a tie).
 #[no_alloc]
-func compare(a: text, b: text) -> int
+pub func compare(a: text, b: text) -> int
     var i = 0
     while i < a.len and i < b.len
         if a.byte(i) < b.byte(i)
@@ -106,7 +106,7 @@ func concat_all(parts: []text) -> text
 end
 
 // The pieces between the occurrences of `sep`, empty pieces included.
-func split(s: text, sep: text) -> []text
+pub func split(s: text, sep: text) -> []text
     if sep.len == 0
         abort("split needs a separator")
     end
@@ -123,7 +123,7 @@ func split(s: text, sep: text) -> []text
 end
 
 // The parts with `sep` between them.
-func join(parts: []text, sep: text) -> text
+pub func join(parts: []text, sep: text) -> text
     let all: []text = []
     for i in 0..parts.len
         if i > 0
@@ -135,7 +135,7 @@ func join(parts: []text, sep: text) -> text
 end
 
 // The lines of `s`: split at a newline, a trailing carriage return removed, no empty last line after a final newline.
-func lines(s: text) -> []text
+pub func lines(s: text) -> []text
     let out: []text = []
     if s.len == 0
         return out
@@ -157,7 +157,7 @@ func lines(s: text) -> []text
 end
 
 // `s` n times.
-func repeat(s: text, n: int) -> text
+pub func repeat(s: text, n: int) -> text
     let parts: []text = []
     for i in 0..n
         parts.add(s)
@@ -166,7 +166,7 @@ func repeat(s: text, n: int) -> text
 end
 
 // Every non-overlapping `from` in `s` replaced by `to`, scanning left to right.
-func replace(s: text, from: text, to: text) -> text
+pub func replace(s: text, from: text, to: text) -> text
     if from.len == 0
         return s
     end
@@ -186,11 +186,11 @@ end
 // ---- trimming and padding ----
 
 #[no_alloc]
-func is_space(b: int) -> bool
+pub func is_space(b: int) -> bool
     return b == 32 or b == 9 or b == 10 or b == 13
 end
 
-func trim_start(s: text) -> text
+pub func trim_start(s: text) -> text
     var i = 0
     while i < s.len and is_space(int(s.byte(i)))
         i += 1
@@ -198,7 +198,7 @@ func trim_start(s: text) -> text
     return s.slice(i, s.len)
 end
 
-func trim_end(s: text) -> text
+pub func trim_end(s: text) -> text
     var n = s.len
     while n > 0 and is_space(int(s.byte(n - 1)))
         n -= 1
@@ -207,7 +207,7 @@ func trim_end(s: text) -> text
 end
 
 // `s` without spaces, tabs, carriage returns and newlines at either end.
-func trim(s: text) -> text
+pub func trim(s: text) -> text
     return trim_end(trim_start(s))
 end
 
@@ -218,7 +218,7 @@ func check_fill(fill: text)
 end
 
 // `fill` (one character) added in front until `s` is `width` characters long.
-func pad_left(s: text, width: int, fill: text) -> text
+pub func pad_left(s: text, width: int, fill: text) -> text
     check_fill(fill)
     let n = s.char_count()
     if n >= width
@@ -228,7 +228,7 @@ func pad_left(s: text, width: int, fill: text) -> text
 end
 
 // `fill` (one character) added at the end until `s` is `width` characters long.
-func pad_right(s: text, width: int, fill: text) -> text
+pub func pad_right(s: text, width: int, fill: text) -> text
     check_fill(fill)
     let n = s.char_count()
     if n >= width
@@ -256,17 +256,17 @@ func shift_ascii(s: text, lo: int, hi: int, delta: int) -> text
 end
 
 // ASCII letters in capitals; other bytes unchanged.
-func upper(s: text) -> text
+pub func upper(s: text) -> text
     return shift_ascii(s, 97, 122, 0 - 32)
 end
 
 // ASCII letters in lower case; other bytes unchanged.
-func lower(s: text) -> text
+pub func lower(s: text) -> text
     return shift_ascii(s, 65, 90, 32)
 end
 
 // The characters of `s` in order.
-func chars(s: text) -> []char
+pub func chars(s: text) -> []char
     let out: []char = []
     for c in s
         out.add(c)
@@ -275,7 +275,7 @@ func chars(s: text) -> []char
 end
 
 // The characters joined into a text: `from_chars(chars(s)) == s`.
-func from_chars(cs: []char) -> text
+pub func from_chars(cs: []char) -> text
     let parts: []text = []
     for c in cs
         parts.add(c.to_text())
@@ -284,7 +284,7 @@ func from_chars(cs: []char) -> text
 end
 
 // The characters in the opposite order: `reverse("ação")` is `oãça`.
-func reverse(s: text) -> text
+pub func reverse(s: text) -> text
     let cs = chars(s)
     let parts: []text = []
     var i = cs.len - 1
@@ -298,7 +298,7 @@ end
 // The text of the UTF-8 bytes `b`, or an error `not valid UTF-8 at byte N` naming where the
 // first bad sequence starts (a bad lead byte, a missing or wrong continuation byte, an overlong
 // encoding, a surrogate or a value above U+10FFFF).
-func from_bytes(b: []byte) -> text or error
+pub func from_bytes(b: []byte) -> text or error
     let parts: []text = []
     let n = b.len
     var i = 0
@@ -345,7 +345,7 @@ end
 
 // The whole number written in `s`: optional sign, then decimal digits. It must fit an `int`
 // (32 bits); `parse_long` takes up to 64 bits.
-func parse_int(s: text) -> int or error
+pub func parse_int(s: text) -> int or error
     let n = try parse_long(s)
     if n < -2147483648 or n > 2147483647
         return error(errors.InvalidInput, "not a whole number that fits an int: \"" + s + "\"")
@@ -354,7 +354,7 @@ func parse_int(s: text) -> int or error
 end
 
 // Like `parse_int` for a number up to 64 bits.
-func parse_long(s: text) -> long or error
+pub func parse_long(s: text) -> long or error
     let bad = "not a whole number: \"" + s + "\""
     var i = 0
     var neg = false
@@ -426,7 +426,7 @@ end
 // exponent (`1.5`, `-2e3`, `.5`, `5.`), or `inf`, `-inf`, `NaN`. The result is the float nearest
 // to the written value (ties go to the even one), so printing a float and parsing it back
 // gives the same float.
-func parse_float(s: text) -> float or error
+pub func parse_float(s: text) -> float or error
     let bad = "not a number: \"" + s + "\""
     let least: long = 0 - 9223372036854775807 - 1
     var i = 0

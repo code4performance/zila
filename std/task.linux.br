@@ -16,24 +16,24 @@ use c
 use sys
 
 // A task: `slot` holds the stack pointer of the task while it is not running.
-type Task = record
-    slot: sys.Buf
-    stack: long
-    action: func()
-    done: bool
+pub type Task = record
+    pub slot: sys.Buf
+    pub stack: long
+    pub action: func()
+    pub done: bool
     waiting: bool
     event: long
-    gen: long
+    pub gen: long
 end
 
 // Words in transit are plain integers: ownership of a value moves into the
 // queue on `send` and out of it on `receive`.
 type Chan = record
-    items: []long
+    pub items: []long
     head: long
     waiting: []long
     whead: long
-    closed: bool
+    pub closed: bool
 end
 
 var tasks: []Task
@@ -99,7 +99,7 @@ func fiber_swap(save: long, to: long)
     end
 end
 
-func init()
+pub func init()
     if started
         return
     end
@@ -111,12 +111,12 @@ func init()
     tasks.add(Task{ slot: sys.buffer(8) })
 end
 
-func fatal(message: text)
+pub func fatal(message: text)
     print("fatal: {message}")
     sys.syscall(231, 2, 0, 0, 0, 0, 0)
 end
 
-func now() -> long
+pub func now() -> long
     init()
     let a = long(clock.ptr)
     sys.syscall(228, 1, a, 0, 0, 0, 0)
@@ -157,7 +157,7 @@ func reap()
 end
 
 // Creates the epoll instance the first time it is needed.
-func io_init()
+pub func io_init()
     init()
     if epfd != 0
         return
@@ -190,13 +190,13 @@ end
 // Parks the running task until the file descriptor `fd` is ready for `events` (1 readable,
 // 4 writable; errors and hang-up always wake it). The result is the events that arrived, or
 // minus an error number when the descriptor cannot be waited for.
-func wait_fd(fd: long, events: long) -> long
+pub func wait_fd(fd: long, events: long) -> long
     return wait_fd_for(fd, events, -1)
 end
 
 // `wait_fd` that gives up after `ms` milliseconds (a negative time never does): the result is 0
 // when the time ran out.
-func wait_fd_for(fd: long, events: long, ms: long) -> long
+pub func wait_fd_for(fd: long, events: long, ms: long) -> long
     io_init()
     let reg = long(evreg.ptr)
     sys.poke(reg, events bitor 0x40000000)
@@ -298,7 +298,7 @@ func fiber_main(id: long)
     switch_away()
 end
 
-func start(action: func())
+pub func start(action: func())
     init()
     reap()
     var id: long = 0
@@ -328,7 +328,7 @@ func start(action: func())
 end
 
 // Runs `action` once the clock reaches `at`.
-func add_timer(at: long, action: func())
+pub func add_timer(at: long, action: func())
     timer_at.add(at)
     timer_run.add(action)
     var j = timer_at.len - 1
@@ -376,14 +376,14 @@ func fire_timers()
 end
 
 // Waits until another task (or a timer) calls `wake` for this task.
-func park()
+pub func park()
     tasks[current].waiting = true
     switch_away()
 end
 
 // Makes a parked task ready. Waking a task that is not parked does nothing,
 // so a stale registration can never run a task twice.
-func wake(id: long)
+pub func wake(id: long)
     if id < tasks.len and tasks[id].waiting
         tasks[id].waiting = false
         ready.add(id)
@@ -391,7 +391,7 @@ func wake(id: long)
 end
 
 // Lets other tasks run; the caller continues later.
-func yield()
+pub func yield()
     init()
     ready.add(current)
     switch_away()

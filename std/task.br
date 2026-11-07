@@ -43,10 +43,10 @@ extern "system" func GetQueuedCompletionStatusEx(port: usize, entries: *u8, coun
 #[link("ntdll")]
 extern "system" func RtlNtStatusToDosError(status: u32) -> u32
 
-type Task = record
+pub type Task = record
     fiber: usize
-    action: func()
-    done: bool
+    pub action: func()
+    pub done: bool
     waiting: bool
 end
 
@@ -55,27 +55,27 @@ end
 // Ops are recycled, never freed, so the system can never write into freed memory.
 #[c_layout]
 #[shared]
-type Op = record
-    internal: usize
+pub type Op = record
+    pub internal: usize
     internal_high: usize
-    offset: u32
-    offset_high: u32
+    pub offset: u32
+    pub offset_high: u32
     event: usize
-    id: long
-    task: long
-    status: long
-    bytes: long
-    done: bool
+    pub id: long
+    pub task: long
+    pub status: long
+    pub bytes: long
+    pub done: bool
 end
 
 // One OVERLAPPED_ENTRY, as GetQueuedCompletionStatusEx fills it in.
 #[c_layout]
 type IoEntry = record
-    key: usize
+    pub key: usize
     ov: usize
-    internal: usize
-    bytes: u32
-    pad: u32
+    pub internal: usize
+    pub bytes: u32
+    pub pad: u32
 end
 
 // Scratch memory for GetQueuedCompletionStatusEx.
@@ -88,28 +88,28 @@ end
 // `lock` is a spin lock word, used only once the program has threads (`multi`). A waiting task
 // is recorded as `slot * 2^32 + id`: the scheduler it belongs to and its id there.
 type Chan = record
-    lock: long
-    items: []long
+    pub lock: long
+    pub items: []long
     head: long
     waiting: []long
     whead: long
-    closed: bool
+    pub closed: bool
 end
 
 // One scheduler: the tasks, run queue, timers and I/O state of a single thread. Every thread
 // has its own (`sched()`); a task never changes thread. `lock` is the spin lock of `inbox`, the
 // ids of tasks that other threads woke (see `wake_remote`).
 #[shared]
-type Sched = record
-    lock: long
-    slot: long
+pub type Sched = record
+    pub lock: long
+    pub slot: long
     idle: long
     inbox: []long
-    tasks: []Task
-    ready: []long
+    pub tasks: []Task
+    pub ready: []long
     ready_head: long
     // ids of tasks that finished (their fibers are deleted later) and ids free for reuse
-    finished: []long
+    pub finished: []long
     free_ids: []long
     current: long
     started: bool
@@ -120,7 +120,7 @@ type Sched = record
     // Operations the operating system is still working on (see std/fs.br, std/net.br).
     pending_io: long
     iocp: usize
-    ops: []Op
+    pub ops: []Op
     op_free: []long
 end
 
@@ -128,7 +128,7 @@ end
 // can read it while others register.
 #[shared]
 type Place = record
-    s: Sched
+    pub s: Sched
 end
 
 // `multi` is 1 once the program has started a thread (std/thread.br): from then on the
@@ -205,7 +205,7 @@ func chan_unlock(ref ch: Chan)
 end
 
 // Takes the lock of the thread bookkeeping (`live`, `blocked`, the `idle` flags).
-func dl_enter()
+pub func dl_enter()
     while true
         var old: long = 0
         unsafe
@@ -225,13 +225,13 @@ func dl_enter()
     end
 end
 
-func dl_leave()
+pub func dl_leave()
     dl_lock = 0
 end
 
 // Every live thread can only be woken by another one: nothing will ever run again.
 // The caller holds the bookkeeping lock.
-func check_deadlock()
+pub func check_deadlock()
     if live > 0 and blocked >= live
         fatal("all tasks are asleep - deadlock!")
     end
@@ -292,7 +292,7 @@ end
 
 // Called by the first `thread.start`, before any thread exists: the main thread's scheduler
 // becomes place 0, and threads from now on find theirs through thread-local storage.
-func threads_begin()
+pub func threads_begin()
     if multi != 0
         return
     end
@@ -312,14 +312,14 @@ func threads_begin()
 end
 
 // A thread was created (the caller is the creating thread).
-func thread_started()
+pub func thread_started()
     dl_enter()
     live += 1
     dl_leave()
 end
 
 // The calling thread is ending: its scheduler's place is free again.
-func thread_exit()
+pub func thread_exit()
     if multi == 0
         return
     end
@@ -341,7 +341,7 @@ end
 
 // A thread that other threads may be joining ended. `joiners` threads were blocked on it; they
 // are runnable now.
-func thread_done(joiners: long)
+pub func thread_done(joiners: long)
     dl_enter()
     blocked -= joiners
     live -= 1
@@ -350,7 +350,7 @@ func thread_done(joiners: long)
 end
 
 // Counts threads as blocked (the caller holds the bookkeeping lock).
-func blocked_add(n: long)
+pub func blocked_add(n: long)
     blocked += n
 end
 
@@ -424,7 +424,7 @@ func wait_forever(s: Sched)
     dl_leave()
 end
 
-func init()
+pub func init()
     let s = sched()
     if s.started
         return
@@ -438,14 +438,14 @@ func init()
     s.tasks.add(Task{ fiber: main_fiber })
 end
 
-func fatal(message: text)
+pub func fatal(message: text)
     print("fatal: {message}")
     unsafe
         ExitProcess(2)
     end
 end
 
-func now() -> long
+pub func now() -> long
     var t: usize = 0
     unsafe
         t = GetTickCount64()
@@ -469,7 +469,7 @@ func reap()
 end
 
 // Runs `action` once the clock reaches `at`.
-func add_timer(at: long, action: func())
+pub func add_timer(at: long, action: func())
     let s = sched()
     s.timer_at.add(at)
     s.timer_run.add(action)
@@ -519,7 +519,7 @@ func fire_timers()
 end
 
 // Creates the I/O completion port the first time it is needed.
-func io_init()
+pub func io_init()
     let s = sched()
     if s.iocp != 0
         return
@@ -530,7 +530,7 @@ func io_init()
 end
 
 // Lets completions of operations on `handle` arrive at the port.
-func io_attach(handle: usize)
+pub func io_attach(handle: usize)
     let s = sched()
     io_init()
     unsafe
@@ -538,7 +538,7 @@ func io_attach(handle: usize)
     end
 end
 
-func last_error() -> long
+pub func last_error() -> long
     var e: long = 0
     unsafe
         e = long(GetLastError())
@@ -547,7 +547,7 @@ func last_error() -> long
 end
 
 // A zeroed operation, ready to hand to the operating system.
-func op_new() -> Op
+pub func op_new() -> Op
     let s = sched()
     if s.op_free.len > 0
         let reused = s.ops[s.op_free.take()]
@@ -568,19 +568,19 @@ func op_new() -> Op
     return op
 end
 
-func op_release(op: Op)
+pub func op_release(op: Op)
     let s = sched()
     s.op_free.add(op.id)
 end
 
 // The system accepted the operation: its completion will arrive at the port.
-func op_submit(op: Op)
+pub func op_submit(op: Op)
     let s = sched()
     op.task = s.current
     s.pending_io += 1
 end
 
-func op_wait(op: Op)
+pub func op_wait(op: Op)
     while not op.done
         park()
     end
@@ -591,7 +591,7 @@ end
 // from the port does. It allocates nothing and never switches tasks. The wait does not return
 // by itself after a routine has run, so the routine also posts an empty packet to the port,
 // which makes `poll_io` return and lets the scheduler see the task it woke.
-func dns_done(error: u32, bytes: u32, overlapped: usize)
+pub func dns_done(error: u32, bytes: u32, overlapped: usize)
     let s = sched()
     let idp: *long = overlapped + 32
     var id: long = 0
@@ -722,7 +722,7 @@ func switch_away()
 end
 
 // Waits until another task (or a timer) calls `wake` for this task.
-func park()
+pub func park()
     let s = sched()
     s.tasks[s.current].waiting = true
     switch_away()
@@ -730,7 +730,7 @@ end
 
 // Makes a parked task ready. Waking a task that is not parked does nothing,
 // so a stale registration can never run a task twice.
-func wake(id: long)
+pub func wake(id: long)
     let s = sched()
     if id < s.tasks.len and s.tasks[id].waiting
         s.tasks[id].waiting = false
@@ -750,7 +750,7 @@ func fiber_main(id: usize)
     switch_away()
 end
 
-func start(action: func())
+pub func start(action: func())
     let s = sched()
     init()
     reap()
@@ -773,7 +773,7 @@ func start(action: func())
 end
 
 // Lets other tasks run; the caller continues later.
-func yield()
+pub func yield()
     let s = sched()
     init()
     s.ready.add(s.current)
@@ -859,6 +859,6 @@ func chan_close(ref ch: Chan)
 end
 
 // The id of the running task of this thread.
-func cur() -> long
+pub func cur() -> long
     return sched().current
 end

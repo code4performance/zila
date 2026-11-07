@@ -22,52 +22,52 @@ use text
 use errors
 
 #[shared]
-type Node<K, V> = record
-    key: K
-    value: V
-    left: Node<K, V>?
-    right: Node<K, V>?
-    height: int
+pub type Node<K, V> = record
+    pub key: K
+    pub value: V
+    pub left: Node<K, V>?
+    pub right: Node<K, V>?
+    pub height: int
 end
 
 // One entry of a sorted map, as listed by `entries()`.
-type Entry<K, V> = record
-    key: K
-    value: V
+pub type Entry<K, V> = record
+    pub key: K
+    pub value: V
 end
 
 #[shared]
-type SortedMap<K, V> = record
-    root: Node<K, V>?
-    less: func(K, K) -> bool
-    size: int
+pub type SortedMap<K, V> = record
+    pub root: Node<K, V>?
+    pub less: func(K, K) -> bool
+    pub size: int
 end
 
 #[shared]
-type SortedSet<T> = record
-    inner: SortedMap<T, bool>
+pub type SortedSet<T> = record
+    pub inner: SortedMap<T, bool>
 end
 
 // ---- making them ----
 
 // An empty map ordered by `less`.
-func map_by<K, V>(less: func(K, K) -> bool) -> SortedMap<K, V>
+pub func map_by<K, V>(less: func(K, K) -> bool) -> SortedMap<K, V>
     return SortedMap { root: nil, less: less, size: 0 }
 end
 
 // An empty map for any key type that is `Ord`, smallest key first.
-func map<K: Ord, V>() -> SortedMap<K, V>
+pub func map<K: Ord, V>() -> SortedMap<K, V>
     return SortedMap { root: nil, less: func(a, b) a < b end, size: 0 }
 end
 
 // An empty set ordered by `less`.
-func set_by<T>(less: func(T, T) -> bool) -> SortedSet<T>
+pub func set_by<T>(less: func(T, T) -> bool) -> SortedSet<T>
     let m: SortedMap<T, bool> = SortedMap { root: nil, less: less, size: 0 }
     return SortedSet { inner: m }
 end
 
 // An empty set for any element type that is `Ord`, smallest first.
-func set<T: Ord>() -> SortedSet<T>
+pub func set<T: Ord>() -> SortedSet<T>
     let m: SortedMap<T, bool> = SortedMap { root: nil, less: func(a, b) a < b end, size: 0 }
     return SortedSet { inner: m }
 end
@@ -244,14 +244,14 @@ end
 // ---- sorted map ----
 
 // Adds the entry or replaces the value of the same key; true when the key was new.
-func (m: SortedMap<K, V>) put(k: K, v: V) -> bool
+pub func (m: SortedMap<K, V>) put(k: K, v: V) -> bool
     let before = m.size
     m.root = put_node(m, m.root, k, v)
     return m.size > before
 end
 
 // The value stored for `k`, or `default`.
-func (m: SortedMap<K, V>) get(k: K, default: V) -> V
+pub func (m: SortedMap<K, V>) get(k: K, default: V) -> V
     let n = find(m, k)
     if n == nil
         return default
@@ -260,51 +260,51 @@ func (m: SortedMap<K, V>) get(k: K, default: V) -> V
 end
 
 // True when `k` is in the map.
-func (m: SortedMap<K, V>) has(k: K) -> bool
+pub func (m: SortedMap<K, V>) has(k: K) -> bool
     return find(m, k) != nil
 end
 
 // Removes `k`; true when it was in the map.
-func (m: SortedMap<K, V>) remove(k: K) -> bool
+pub func (m: SortedMap<K, V>) remove(k: K) -> bool
     let before = m.size
     m.root = remove_node(m, m.root, k)
     return m.size < before
 end
 
 // Removes every entry.
-func (m: SortedMap<K, V>) clear()
+pub func (m: SortedMap<K, V>) clear()
     m.root = nil
     m.size = 0
 end
 
 // The number of entries.
-func (m: SortedMap<K, V>) len() -> int
+pub func (m: SortedMap<K, V>) len() -> int
     return m.size
 end
 
 // The keys, smallest first.
-func (m: SortedMap<K, V>) keys() -> []K
+pub func (m: SortedMap<K, V>) keys() -> []K
     let out: []K = []
     walk_keys(m.root, ref out)
     return out
 end
 
 // The values, in key order.
-func (m: SortedMap<K, V>) values() -> []V
+pub func (m: SortedMap<K, V>) values() -> []V
     let out: []V = []
     walk_values(m.root, ref out)
     return out
 end
 
 // The entries, in key order.
-func (m: SortedMap<K, V>) entries() -> []Entry<K, V>
+pub func (m: SortedMap<K, V>) entries() -> []Entry<K, V>
     let out: []Entry<K, V> = []
     walk_entries(m.root, ref out)
     return out
 end
 
 // The smallest key.
-func (m: SortedMap<K, V>) min() -> K or error
+pub func (m: SortedMap<K, V>) min() -> K or error
     if m.root == nil
         return error(errors.NotFound, "the collection is empty")
     end
@@ -312,7 +312,7 @@ func (m: SortedMap<K, V>) min() -> K or error
 end
 
 // The largest key.
-func (m: SortedMap<K, V>) max() -> K or error
+pub func (m: SortedMap<K, V>) max() -> K or error
     if m.root == nil
         return error(errors.NotFound, "the collection is empty")
     end
@@ -324,7 +324,7 @@ func (m: SortedMap<K, V>) max() -> K or error
 end
 
 // The largest key that is not after `k`.
-func (m: SortedMap<K, V>) floor(k: K) -> K or error
+pub func (m: SortedMap<K, V>) floor(k: K) -> K or error
     var best: Node<K, V>? = nil
     var n = m.root
     while n != nil
@@ -342,7 +342,7 @@ func (m: SortedMap<K, V>) floor(k: K) -> K or error
 end
 
 // The smallest key that is not before `k`.
-func (m: SortedMap<K, V>) ceil(k: K) -> K or error
+pub func (m: SortedMap<K, V>) ceil(k: K) -> K or error
     var best: Node<K, V>? = nil
     var n = m.root
     while n != nil
@@ -360,7 +360,7 @@ func (m: SortedMap<K, V>) ceil(k: K) -> K or error
 end
 
 // The keys from `lo` up to, but not including, `hi`, smallest first.
-func (m: SortedMap<K, V>) range(lo: K, hi: K) -> []K
+pub func (m: SortedMap<K, V>) range(lo: K, hi: K) -> []K
     let out: []K = []
     walk_range(m, m.root, lo, hi, ref out)
     return out
@@ -369,62 +369,62 @@ end
 // ---- sorted set ----
 
 // Adds `x`; true when it was not in the set yet.
-func (s: SortedSet<T>) add(x: T) -> bool
+pub func (s: SortedSet<T>) add(x: T) -> bool
     return s.inner.put(x, true)
 end
 
 // True when `x` is in the set.
-func (s: SortedSet<T>) has(x: T) -> bool
+pub func (s: SortedSet<T>) has(x: T) -> bool
     return s.inner.has(x)
 end
 
 // Removes `x`; true when it was in the set.
-func (s: SortedSet<T>) remove(x: T) -> bool
+pub func (s: SortedSet<T>) remove(x: T) -> bool
     return s.inner.remove(x)
 end
 
 // Removes every element.
-func (s: SortedSet<T>) clear()
+pub func (s: SortedSet<T>) clear()
     s.inner.clear()
 end
 
 // The number of elements.
-func (s: SortedSet<T>) len() -> int
+pub func (s: SortedSet<T>) len() -> int
     return s.inner.size
 end
 
 // The elements, smallest first.
-func (s: SortedSet<T>) to_list() -> []T
+pub func (s: SortedSet<T>) to_list() -> []T
     return s.inner.keys()
 end
 
 // The smallest element.
-func (s: SortedSet<T>) min() -> T or error
+pub func (s: SortedSet<T>) min() -> T or error
     return s.inner.min()
 end
 
 // The largest element.
-func (s: SortedSet<T>) max() -> T or error
+pub func (s: SortedSet<T>) max() -> T or error
     return s.inner.max()
 end
 
 // The largest element that is not after `x`.
-func (s: SortedSet<T>) floor(x: T) -> T or error
+pub func (s: SortedSet<T>) floor(x: T) -> T or error
     return s.inner.floor(x)
 end
 
 // The smallest element that is not before `x`.
-func (s: SortedSet<T>) ceil(x: T) -> T or error
+pub func (s: SortedSet<T>) ceil(x: T) -> T or error
     return s.inner.ceil(x)
 end
 
 // The elements from `lo` up to, but not including, `hi`.
-func (s: SortedSet<T>) range(lo: T, hi: T) -> []T
+pub func (s: SortedSet<T>) range(lo: T, hi: T) -> []T
     return s.inner.range(lo, hi)
 end
 
 // The elements of `a` and of `b`, ordered like `a`.
-func union<T>(a: SortedSet<T>, b: SortedSet<T>) -> SortedSet<T>
+pub func union<T>(a: SortedSet<T>, b: SortedSet<T>) -> SortedSet<T>
     let out = set_by(a.inner.less)
     for x in a.to_list()
         out.add(x)
@@ -436,7 +436,7 @@ func union<T>(a: SortedSet<T>, b: SortedSet<T>) -> SortedSet<T>
 end
 
 // The elements that are in both `a` and `b`.
-func intersect<T>(a: SortedSet<T>, b: SortedSet<T>) -> SortedSet<T>
+pub func intersect<T>(a: SortedSet<T>, b: SortedSet<T>) -> SortedSet<T>
     let out = set_by(a.inner.less)
     for x in a.to_list()
         if b.has(x)
@@ -447,7 +447,7 @@ func intersect<T>(a: SortedSet<T>, b: SortedSet<T>) -> SortedSet<T>
 end
 
 // The elements of `a` that are not in `b`.
-func difference<T>(a: SortedSet<T>, b: SortedSet<T>) -> SortedSet<T>
+pub func difference<T>(a: SortedSet<T>, b: SortedSet<T>) -> SortedSet<T>
     let out = set_by(a.inner.less)
     for x in a.to_list()
         if not b.has(x)
@@ -458,7 +458,7 @@ func difference<T>(a: SortedSet<T>, b: SortedSet<T>) -> SortedSet<T>
 end
 
 // True when every element of `a` is in `b`.
-func is_subset<T>(a: SortedSet<T>, b: SortedSet<T>) -> bool
+pub func is_subset<T>(a: SortedSet<T>, b: SortedSet<T>) -> bool
     for x in a.to_list()
         if not b.has(x)
             return false

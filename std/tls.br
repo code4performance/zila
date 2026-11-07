@@ -23,7 +23,7 @@ use net
 
 #[c_layout]
 type SchannelCred = record
-    version: u32
+    pub version: u32
     ccreds: u32
     pacred: *u8
     hroot: *u8
@@ -35,7 +35,7 @@ type SchannelCred = record
     mincipher: u32
     maxcipher: u32
     lifespan: u32
-    flags: u32
+    pub flags: u32
     credformat: u32
 end
 
@@ -58,18 +58,18 @@ end
 
 #[c_layout]
 type Desc = record
-    version: u32
-    count: u32
+    pub version: u32
+    pub count: u32
     bufs: *u8
 end
 
 #[c_layout]
 type Sizes = record
-    header: u32
+    pub header: u32
     trailer: u32
     max_message: u32
-    buffers: u32
-    block: u32
+    pub buffers: u32
+    pub block: u32
 end
 
 #[link("secur32")]
@@ -104,18 +104,18 @@ let PACKAGE = "Microsoft Unified Security Protocol Provider"
 // An open TLS connection. Releases its security context when the last
 // reference goes away.
 #[shared]
-type Conn = record
-    raw: net.Conn
+pub type Conn = record
+    pub raw: net.Conn
     cred: sys.Scratch
     ctx: sys.Scratch
     sizes: Sizes
-    pending: text
+    pub pending: text
     plain: text
-    ready: bool
-    open: bool
+    pub ready: bool
+    pub open: bool
 end
 
-func (ref conn: Conn) drop()
+pub func (ref conn: Conn) drop()
     release(ref conn)
 end
 
@@ -148,7 +148,7 @@ func put_text(dest: *u8, data: text, from: long, n: long)
 end
 
 // Opens a TCP connection and runs the TLS handshake.
-async func connect(host: text, port: long) -> Conn or error
+pub async func connect(host: text, port: long) -> Conn or error
     let raw = try await net.connect(host, port)
     let conn = Conn{ raw: raw, cred: sys.Scratch{}, ctx: sys.Scratch{}, sizes: Sizes{}, pending: "", plain: "", ready: false, open: false }
     let cred = SchannelCred{}
@@ -235,7 +235,7 @@ async func connect(host: text, port: long) -> Conn or error
 end
 
 // Encrypts and sends all of `data`.
-async func (conn: Conn) write(data: text) -> error
+pub async func (conn: Conn) write(data: text) -> error
     if not conn.ready
         return error(errors.Closed, "write: the connection is closed")
     end
@@ -279,7 +279,7 @@ async func (conn: Conn) write(data: text) -> error
 end
 
 // Receives up to `max` bytes; empty text means the server closed the connection.
-async func (conn: Conn) read(max: long) -> text or error
+pub async func (conn: Conn) read(max: long) -> text or error
     while true
         if conn.plain.len > 0
             var n = conn.plain.len
@@ -361,7 +361,7 @@ async func (conn: Conn) read(max: long) -> text or error
 end
 
 // Closes the connection now.
-async func (conn: Conn) close()
+pub async func (conn: Conn) close()
     release(ref conn)
     await conn.raw.close()
 end

@@ -15,30 +15,30 @@ use errors
 
 // Square root. `sqrt(-1.0)` is NaN.
 #[no_alloc]
-func sqrt(x: float) -> float
+pub func sqrt(x: float) -> float
     return __sqrt(x)
 end
 
 // Largest whole number not above x.
 #[no_alloc]
-func floor(x: float) -> float
+pub func floor(x: float) -> float
     return __floor(x)
 end
 
 // Smallest whole number not below x.
 #[no_alloc]
-func ceil(x: float) -> float
+pub func ceil(x: float) -> float
     return __ceil(x)
 end
 
 // x without its fractional part (rounds toward zero).
 #[no_alloc]
-func trunc(x: float) -> float
+pub func trunc(x: float) -> float
     return __trunc(x)
 end
 
 #[no_alloc]
-func abs(x: float) -> float
+pub func abs(x: float) -> float
     if x < 0.0 or (x == 0.0 and 1.0 / x < 0.0)
         return -x
     end
@@ -46,7 +46,7 @@ func abs(x: float) -> float
 end
 
 #[no_alloc]
-func min(a: float, b: float) -> float
+pub func min(a: float, b: float) -> float
     if b < a
         return b
     end
@@ -54,7 +54,7 @@ func min(a: float, b: float) -> float
 end
 
 #[no_alloc]
-func max(a: float, b: float) -> float
+pub func max(a: float, b: float) -> float
     if b > a
         return b
     end
@@ -63,7 +63,7 @@ end
 
 // Nearest whole number; halves round away from zero (`round(2.5)` is 3.0, `round(-2.5)` is -3.0).
 #[no_alloc]
-func round(x: float) -> float
+pub func round(x: float) -> float
     let t = __trunc(x)
     let d = abs(x - t)
     if d >= 0.5
@@ -77,7 +77,7 @@ end
 
 // x to a whole-number power; negative powers give 1 / x^|n|.
 #[no_alloc]
-func pow(x: float, n: int) -> float
+pub func pow(x: float, n: int) -> float
     var e = n
     if e < 0
         e = 0 - e
@@ -99,7 +99,7 @@ end
 
 // x written with exactly `digits` decimals: `fixed(3.14159, 2)` is "3.14".
 // NaN, infinities and numbers too large to scale are written like `print` does.
-func fixed(x: float, digits: int) -> text
+pub func fixed(x: float, digits: int) -> text
     if x != x or x > 1.0e15 or x < -1.0e15 or digits < 0 or digits > 15
         return "{x}"
     end
@@ -129,7 +129,7 @@ end
 // fit, kind `InvalidInput` for a zero divisor. `checked_add` and its friends work on `int`
 // (32 bits); the `_long` versions work on `long` (64 bits).
 
-func checked_add(a: int, b: int) -> int or error
+pub func checked_add(a: int, b: int) -> int or error
     let r = long(a) + long(b)
     if r != long(int(r))
         return error(errors.Overflow, "integer overflow: {a} + {b}")
@@ -154,7 +154,7 @@ func checked_mul(a: int, b: int) -> int or error
 end
 
 // Whole-number division, rounding toward zero. `MIN / -1` does not fit.
-func checked_div(a: int, b: int) -> int or error
+pub func checked_div(a: int, b: int) -> int or error
     if b == 0
         return error(errors.InvalidInput, "division by zero: {a} / {b}")
     end
@@ -165,7 +165,7 @@ func checked_div(a: int, b: int) -> int or error
     return a / b
 end
 
-func checked_add_long(a: long, b: long) -> long or error
+pub func checked_add_long(a: long, b: long) -> long or error
     let r = a + b
     if (b > 0 and r < a) or (b < 0 and r > a)
         return error(errors.Overflow, "integer overflow: {a} + {b}")

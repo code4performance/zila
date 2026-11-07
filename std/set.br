@@ -14,17 +14,17 @@
 
 package set
 
-type Set<T> = record
-    items: Map<T, bool>
+pub type Set<T> = record
+    pub items: Map<T, bool>
 end
 
 // An empty set; the element type comes from the expected type.
-func empty<T: Hash>() -> Set<T>
+pub func empty<T: Hash>() -> Set<T>
     return Set { items: {} }
 end
 
 // A set of the elements of `xs`.
-func from_list<T: Hash>(xs: []T) -> Set<T>
+pub func from_list<T: Hash>(xs: []T) -> Set<T>
     let s: Set<T> = Set { items: {} }
     for x in xs
         s.items[x] = true
@@ -33,7 +33,7 @@ func from_list<T: Hash>(xs: []T) -> Set<T>
 end
 
 // Adds `x`; true when it was not in the set yet.
-func (s: Set<T>) add(x: T) -> bool
+pub func (s: Set<T>) add(x: T) -> bool
     if s.items.has(x)
         return false
     end
@@ -42,12 +42,12 @@ func (s: Set<T>) add(x: T) -> bool
 end
 
 // True when `x` is in the set.
-func (s: Set<T>) has(x: T) -> bool
+pub func (s: Set<T>) has(x: T) -> bool
     return s.items.has(x)
 end
 
 // Removes `x`; true when it was in the set.
-func (s: Set<T>) remove(x: T) -> bool
+pub func (s: Set<T>) remove(x: T) -> bool
     if s.items.has(x)
         s.items.remove(x)
         return true
@@ -56,17 +56,17 @@ func (s: Set<T>) remove(x: T) -> bool
 end
 
 // Removes every element.
-func (s: Set<T>) clear()
+pub func (s: Set<T>) clear()
     s.items.clear()
 end
 
 // The number of elements.
-func (s: Set<T>) len() -> int
+pub func (s: Set<T>) len() -> int
     return s.items.len
 end
 
 // The elements, in the order they were added.
-func (s: Set<T>) to_list() -> []T
+pub func (s: Set<T>) to_list() -> []T
     let out: []T = []
     for k, v in s.items
         out.add(k)
@@ -75,7 +75,7 @@ func (s: Set<T>) to_list() -> []T
 end
 
 // The elements of `a` and of `b`.
-func union<T: Hash>(a: Set<T>, b: Set<T>) -> Set<T>
+pub func union<T: Hash>(a: Set<T>, b: Set<T>) -> Set<T>
     let out = from_list(a.to_list())
     for x in b.to_list()
         out.add(x)
@@ -84,7 +84,7 @@ func union<T: Hash>(a: Set<T>, b: Set<T>) -> Set<T>
 end
 
 // The elements that are in both `a` and `b`.
-func intersect<T: Hash>(a: Set<T>, b: Set<T>) -> Set<T>
+pub func intersect<T: Hash>(a: Set<T>, b: Set<T>) -> Set<T>
     let out: Set<T> = Set { items: {} }
     for x in a.to_list()
         if b.has(x)
@@ -95,7 +95,7 @@ func intersect<T: Hash>(a: Set<T>, b: Set<T>) -> Set<T>
 end
 
 // The elements of `a` that are not in `b`.
-func difference<T: Hash>(a: Set<T>, b: Set<T>) -> Set<T>
+pub func difference<T: Hash>(a: Set<T>, b: Set<T>) -> Set<T>
     let out: Set<T> = Set { items: {} }
     for x in a.to_list()
         if not b.has(x)
@@ -106,7 +106,7 @@ func difference<T: Hash>(a: Set<T>, b: Set<T>) -> Set<T>
 end
 
 // True when every element of `a` is in `b`.
-func is_subset<T: Hash>(a: Set<T>, b: Set<T>) -> bool
+pub func is_subset<T: Hash>(a: Set<T>, b: Set<T>) -> bool
     for x in a.to_list()
         if not b.has(x)
             return false

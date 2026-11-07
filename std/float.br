@@ -18,7 +18,7 @@ package float
 
 // ---- big numbers ----
 
-func big_from(n: long) -> []long
+pub func big_from(n: long) -> []long
     let a: []long = []
     var v = n
     if v == 0
@@ -32,7 +32,7 @@ func big_from(n: long) -> []long
 end
 
 // a = a * k, for 0 <= k <= 2^30
-func b_mul(ref a: []long, k: long)
+pub func b_mul(ref a: []long, k: long)
     var carry: long = 0
     for i in 0..a.len
         let t = a[i] * k + carry
@@ -45,7 +45,7 @@ func b_mul(ref a: []long, k: long)
     end
 end
 
-func b_mul_pow2(ref a: []long, n: int)
+pub func b_mul_pow2(ref a: []long, n: int)
     var left = n
     while left >= 30
         b_mul(ref a, 1073741824)
@@ -70,7 +70,7 @@ func b_eff(a: []long) -> int
 end
 
 // -1, 0 or 1
-func b_cmp(a: []long, b: []long) -> int
+pub func b_cmp(a: []long, b: []long) -> int
     let na = b_eff(a)
     let nb = b_eff(b)
     if na < nb
@@ -92,7 +92,7 @@ func b_cmp(a: []long, b: []long) -> int
     return 0
 end
 
-func b_add(a: []long, b: []long) -> []long
+pub func b_add(a: []long, b: []long) -> []long
     let out: []long = []
     var n = a.len
     if b.len > n
@@ -122,7 +122,7 @@ func b_add(a: []long, b: []long) -> []long
 end
 
 // a = a - b, requires a >= b
-func b_sub(ref a: []long, b: []long)
+pub func b_sub(ref a: []long, b: []long)
     var borrow: long = 0
     for i in 0..a.len
         var t = a[i] - borrow
@@ -150,7 +150,7 @@ func zeros(n: int) -> text
 end
 
 // `bits` holds the IEEE bits of the number: 64 bits, or the low 32 bits when `single`.
-func to_text(bits: long, single: bool) -> text
+pub func to_text(bits: long, single: bool) -> text
     var neg = false
     var expf = 0
     var mant: long = 0

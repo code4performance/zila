@@ -30,17 +30,17 @@ extern "system" func WakeByAddressSingle(address: long)
 
 // One integer shared by threads. The value is the first field: the instructions below address it.
 #[shared]
-type Atomic = record
-    value: long
+pub type Atomic = record
+    pub value: long
 end
 
 // The current value.
-func (a: Atomic) load() -> long
+pub func (a: Atomic) load() -> long
     return a.value
 end
 
 // Replaces the value.
-func (a: Atomic) store(v: long)
+pub func (a: Atomic) store(v: long)
     unsafe
         asm
             in rcx = a
@@ -51,7 +51,7 @@ func (a: Atomic) store(v: long)
 end
 
 // Adds `n` and returns the value it had before.
-func (a: Atomic) add(n: long) -> long
+pub func (a: Atomic) add(n: long) -> long
     var old: long = 0
     unsafe
         asm
@@ -65,7 +65,7 @@ func (a: Atomic) add(n: long) -> long
 end
 
 // Replaces the value and returns the one it had before.
-func (a: Atomic) swap(v: long) -> long
+pub func (a: Atomic) swap(v: long) -> long
     var old: long = 0
     unsafe
         asm
@@ -79,7 +79,7 @@ func (a: Atomic) swap(v: long) -> long
 end
 
 // Replaces the value with `to` when it is `expected`; returns the value it had.
-func (a: Atomic) compare_swap(expected: long, to: long) -> long
+pub func (a: Atomic) compare_swap(expected: long, to: long) -> long
     var old: long = 0
     unsafe
         asm
@@ -96,10 +96,10 @@ end
 // A value guarded by a lock. `state` is 0 (free), 1 (held) or 2 (held, someone is waiting);
 // it is the first field: the instructions below address it.
 #[shared]
-type Mutex<T> = record
-    state: long
-    owner: long
-    value: T
+pub type Mutex<T> = record
+    pub state: long
+    pub owner: long
+    pub value: T
 end
 
 func thread_id() -> long
@@ -111,7 +111,7 @@ func thread_id() -> long
 end
 
 // A mutex holding `value`.
-func Mutex<T>(value: T) -> Mutex<T>
+pub func Mutex<T>(value: T) -> Mutex<T>
     return Mutex { state: 0, owner: 0, value: value }
 end
 
@@ -164,7 +164,7 @@ func (m: Mutex<T>) sleep_while_contended()
 end
 
 // Takes the lock, sleeping while another thread holds it.
-func (m: Mutex<T>) lock()
+pub func (m: Mutex<T>) lock()
     let me = thread_id()
     if m.owner == me and m.state != 0
         abort("the mutex is already locked by this thread")
@@ -183,7 +183,7 @@ func (m: Mutex<T>) lock()
 end
 
 // Releases the lock and wakes one waiting thread.
-func (m: Mutex<T>) unlock()
+pub func (m: Mutex<T>) unlock()
     if m.owner != thread_id()
         abort("the mutex is not locked by this thread")
     end
@@ -196,17 +196,17 @@ func (m: Mutex<T>) unlock()
 end
 
 // The value; the lock must be held (`lock`).
-func (m: Mutex<T>) locked_get() -> T
+pub func (m: Mutex<T>) locked_get() -> T
     return m.value
 end
 
 // Replaces the value; the lock must be held (`lock`).
-func (m: Mutex<T>) locked_set(v: T)
+pub func (m: Mutex<T>) locked_set(v: T)
     m.value = v
 end
 
 // A copy of the value, read under the lock.
-func (m: Mutex<T>) get() -> T
+pub func (m: Mutex<T>) get() -> T
     m.lock()
     let v = m.value
     m.unlock()
@@ -214,21 +214,21 @@ func (m: Mutex<T>) get() -> T
 end
 
 // Replaces the value under the lock.
-func (m: Mutex<T>) set(v: T)
+pub func (m: Mutex<T>) set(v: T)
     m.lock()
     m.value = v
     m.unlock()
 end
 
 // Runs `body` with the value while holding the lock.
-func (m: Mutex<T>) with(body: func(T))
+pub func (m: Mutex<T>) with(body: func(T))
     m.lock()
     body(m.value)
     m.unlock()
 end
 
 // Replaces the value with what `body` makes of it, all under the lock.
-func (m: Mutex<T>) update(body: func(T) -> T)
+pub func (m: Mutex<T>) update(body: func(T) -> T)
     m.lock()
     m.value = body(m.value)
     m.unlock()

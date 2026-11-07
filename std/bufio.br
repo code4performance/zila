@@ -19,32 +19,32 @@ use text
 
 // Text that has arrived and has not been taken yet.
 #[shared]
-type InBuf = record
-    data: text
-    pos: int
+pub type InBuf = record
+    pub data: text
+    pub pos: int
     scan: int
-    done: bool
+    pub done: bool
 end
 
 // Text waiting to be written.
 #[shared]
-type OutBuf = record
+pub type OutBuf = record
     pieces: []text
-    size: int
+    pub size: int
 end
 
 // An empty input buffer.
-func input() -> InBuf
+pub func input() -> InBuf
     return InBuf { data: "", pos: 0, scan: 0, done: false }
 end
 
 // An empty output buffer.
-func output() -> OutBuf
+pub func output() -> OutBuf
     return OutBuf { pieces: [], size: 0 }
 end
 
 // Adds text that arrived.
-func (b: InBuf) feed(chunk: text)
+pub func (b: InBuf) feed(chunk: text)
     if b.pos > 0
         b.data = b.data.__raw_slice(b.pos, b.data.len) + chunk
         b.scan = b.scan - b.pos
@@ -58,22 +58,22 @@ func (b: InBuf) feed(chunk: text)
 end
 
 // No more text will arrive: what is left counts as the last line.
-func (b: InBuf) finish()
+pub func (b: InBuf) finish()
     b.done = true
 end
 
 // True once `finish` was called.
-func (b: InBuf) finished() -> bool
+pub func (b: InBuf) finished() -> bool
     return b.done
 end
 
 // The number of bytes that have arrived and not been taken.
-func (b: InBuf) unread() -> int
+pub func (b: InBuf) unread() -> int
     return b.data.len - b.pos
 end
 
 // True when a whole line is ready (after `finish`, the last piece of text is a line too).
-func (b: InBuf) has_line() -> bool
+pub func (b: InBuf) has_line() -> bool
     if b.scan < b.pos
         b.scan = b.pos
     end
@@ -86,7 +86,7 @@ func (b: InBuf) has_line() -> bool
 end
 
 // The next line without its `\n` or `\r\n`; empty text when no line is ready.
-func (b: InBuf) take_line() -> text
+pub func (b: InBuf) take_line() -> text
     if b.scan < b.pos
         b.scan = b.pos
     end
@@ -112,7 +112,7 @@ func (b: InBuf) take_line() -> text
 end
 
 // Up to `max` bytes, empty text when nothing is left.
-func (b: InBuf) take(max: int) -> text
+pub func (b: InBuf) take(max: int) -> text
     var n = b.data.len - b.pos
     if n > max
         n = max
@@ -128,7 +128,7 @@ func (b: InBuf) take(max: int) -> text
 end
 
 // Everything that is left.
-func (b: InBuf) take_all() -> text
+pub func (b: InBuf) take_all() -> text
     let out = b.data.__raw_slice(b.pos, b.data.len)
     b.pos = b.data.len
     b.scan = b.pos
@@ -146,7 +146,7 @@ func (b: InBuf) release()
 end
 
 // Adds text to be written.
-func (o: OutBuf) add(s: text)
+pub func (o: OutBuf) add(s: text)
     if s.len > 0
         o.pieces.add(s)
         o.size += s.len
@@ -154,12 +154,12 @@ func (o: OutBuf) add(s: text)
 end
 
 // The number of bytes waiting.
-func (o: OutBuf) len() -> int
+pub func (o: OutBuf) len() -> int
     return o.size
 end
 
 // Everything that is waiting, in order; the buffer is empty afterwards.
-func (o: OutBuf) take() -> text
+pub func (o: OutBuf) take() -> text
     let out = text.join(o.pieces, "")
     o.pieces = []
     o.size = 0

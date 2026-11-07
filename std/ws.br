@@ -8,25 +8,25 @@ use task
 
 // WSABUF: a length and a pointer.
 #[c_layout]
-type Wsabuf = record
-    len: u32
-    ptr: *u8
+pub type Wsabuf = record
+    pub len: u32
+    pub ptr: *u8
 end
 
 #[link("ws2_32")]
-extern "system" func WSAStartup(version: u16, data: *u8) -> i32
-extern "system" func WSASocketW(family: i32, kind: i32, protocol: i32, info: usize, group: u32, flags: u32) -> usize
-extern "system" func closesocket(s: usize) -> i32
-extern "system" func bind(s: usize, addr: *u8, len: i32) -> i32
-extern "system" func listen(s: usize, backlog: i32) -> i32
-extern "system" func getsockname(s: usize, addr: *u8, len: *long) -> i32
-extern "system" func setsockopt(s: usize, level: i32, name: i32, value: *u8, len: i32) -> i32
-extern "system" func WSAIoctl(s: usize, code: u32, input: *u8, input_len: u32, output: *u8, output_len: u32, returned: *long, overlapped: usize, completion: usize) -> i32
-extern "system" func WSARecv(s: usize, buffers: *Wsabuf, count: u32, received: usize, flags: *long, overlapped: *task.Op, completion: usize) -> i32
-extern "system" func WSASend(s: usize, buffers: *Wsabuf, count: u32, sent: usize, flags: u32, overlapped: *task.Op, completion: usize) -> i32
-extern "system" func WSARecvFrom(s: usize, buffers: *Wsabuf, count: u32, received: usize, flags: *long, from: *u8, fromlen: *long, overlapped: *task.Op, completion: usize) -> i32
-extern "system" func WSASendTo(s: usize, buffers: *Wsabuf, count: u32, sent: usize, flags: u32, to: *u8, tolen: i32, overlapped: *task.Op, completion: usize) -> i32
-extern "system" func GetAddrInfoExW(name: *u8, service: usize, namespace: u32, provider: usize, hints: *u8, result: *long, timeout: usize, overlapped: *task.Op, completion: extern "system" func(u32, u32, usize), handle: usize) -> i32
-extern "system" func FreeAddrInfoExW(info: usize)
+pub extern "system" func WSAStartup(version: u16, data: *u8) -> i32
+pub extern "system" func WSASocketW(family: i32, kind: i32, protocol: i32, info: usize, group: u32, flags: u32) -> usize
+pub extern "system" func closesocket(s: usize) -> i32
+pub extern "system" func bind(s: usize, addr: *u8, len: i32) -> i32
+pub extern "system" func listen(s: usize, backlog: i32) -> i32
+pub extern "system" func getsockname(s: usize, addr: *u8, len: *long) -> i32
+pub extern "system" func setsockopt(s: usize, level: i32, name: i32, value: *u8, len: i32) -> i32
+pub extern "system" func WSAIoctl(s: usize, code: u32, input: *u8, input_len: u32, output: *u8, output_len: u32, returned: *long, overlapped: usize, completion: usize) -> i32
+pub extern "system" func WSARecv(s: usize, buffers: *Wsabuf, count: u32, received: usize, flags: *long, overlapped: *task.Op, completion: usize) -> i32
+pub extern "system" func WSASend(s: usize, buffers: *Wsabuf, count: u32, sent: usize, flags: u32, overlapped: *task.Op, completion: usize) -> i32
+pub extern "system" func WSARecvFrom(s: usize, buffers: *Wsabuf, count: u32, received: usize, flags: *long, from: *u8, fromlen: *long, overlapped: *task.Op, completion: usize) -> i32
+pub extern "system" func WSASendTo(s: usize, buffers: *Wsabuf, count: u32, sent: usize, flags: u32, to: *u8, tolen: i32, overlapped: *task.Op, completion: usize) -> i32
+pub extern "system" func GetAddrInfoExW(name: *u8, service: usize, namespace: u32, provider: usize, hints: *u8, result: *long, timeout: usize, overlapped: *task.Op, completion: extern "system" func(u32, u32, usize), handle: usize) -> i32
+pub extern "system" func FreeAddrInfoExW(info: usize)
 extern "system" func getaddrinfo(node: *u8, service: usize, hints: *u8, result: *long) -> i32
 extern "system" func freeaddrinfo(info: usize)

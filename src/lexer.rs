@@ -64,7 +64,7 @@ pub const KEYWORDS: &[&str] = &[
     "let", "if", "else", "match", "for", "in", "while", "break", "continue", "defer", "spawn",
     "end", "unsafe", "extern", "embed", "new", "and", "or", "not", "true", "false", "nil",
     "bitand", "bitor", "bitxor", "bitnot", "ref", "self", "asm", "try", "async", "await", "comptime",
-    "shared", "spawn_thread",
+    "shared", "spawn_thread", "pub",
 ];
 
 /// Longest operators first.

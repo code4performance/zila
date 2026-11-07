@@ -31,18 +31,18 @@ extern "system" func ExitProcess(code: u32)
 
 // A running (or finished) thread. Reference semantics: a copy is the same thread.
 #[shared]
-type Thread = record
-    done: long
-    handle: usize
-    action: func()
-    joiners: long
+pub type Thread = record
+    pub done: long
+    pub handle: usize
+    pub action: func()
+    pub joiners: long
 end
 
 // One place of the table of threads that were started and have not picked up their closure yet.
 #[shared]
 type Pending = record
-    t: Thread
-    taken: long
+    pub t: Thread
+    pub taken: long
 end
 
 // Threads that were started and have not picked up their closure yet. The table has a fixed
@@ -104,7 +104,7 @@ func entry(index: usize)
 end
 
 // Runs `action` on a new thread.
-func start(action: func()) -> Thread
+pub func start(action: func()) -> Thread
     let t = Thread{ done: 0, handle: 0, action: action, joiners: 0 }
     lock_table()
     if slots.len == 0
@@ -137,7 +137,7 @@ func start(action: func()) -> Thread
 end
 
 // Waits until the thread has finished; its writes are visible afterwards.
-func (t: Thread) join()
+pub func (t: Thread) join()
     if t.handle == 0
         return
     end
@@ -156,12 +156,12 @@ func (t: Thread) join()
 end
 
 // True once the thread has finished.
-func (t: Thread) finished() -> bool
+pub func (t: Thread) finished() -> bool
     return t.done != 0
 end
 
 // The identifier of the calling thread.
-func id() -> long
+pub func id() -> long
     var r: long = 0
     unsafe
         r = long(GetCurrentThreadId())
@@ -170,7 +170,7 @@ func id() -> long
 end
 
 // Blocks the calling thread (and every task on it) for `ms` milliseconds.
-func sleep(ms: long)
+pub func sleep(ms: long)
     unsafe
         Sleep(u32(ms))
     end

@@ -22,9 +22,9 @@ use errors
 
 // Reference semantics: copying a Future would split its waiters from its result.
 #[shared]
-type Future = record
-    done: bool
-    slot: []long
+pub type Future = record
+    pub done: bool
+    pub slot: []long
     waiters: []long
 end
 
@@ -74,7 +74,7 @@ end
 
 // Waits until `f` completes or `ms` milliseconds have passed; 1 when `f` completed.
 // A stale wake-up (from an earlier timer) only makes the loop check again.
-func timeout_wait(ms: long, f: Future) -> long
+pub func timeout_wait(ms: long, f: Future) -> long
     task.init()
     let me = task.cur()
     let deadline = task.now() + ms
@@ -92,7 +92,7 @@ func timeout_wait(ms: long, f: Future) -> long
 end
 
 // The error of `timeout(ms, f)` when `ms` pass first.
-func timed_out() -> error?
+pub func timed_out() -> error?
     return error(errors.Timeout, "timed out")
 end
 

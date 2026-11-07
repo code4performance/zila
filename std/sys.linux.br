@@ -1,0 +1,192 @@
+// =====================================================================
+// Brasa standard library: helpers shared by `fs` and `net` (Linux layer)
+//
+// The Linux counterpart of std/sys.br: raw memory that frees itself, system calls made with
+// `asm` (no C library), and the messages of the operating system's error numbers.
+// =====================================================================
+
+package sys
+
+use c
+
+// Owns a block of raw memory; frees it when the last reference goes away.
+#[shared]
+type Buf = record
+    ptr: *u8
+end
+
+func (ref b: Buf) drop()
+    c.free(b.ptr)
+end
+
+// Scratch integers whose addresses are handed to the operating system.
+type Scratch = record
+    a: int
+    b: int
+end
+
+// A zeroed block of `bytes` bytes.
+func buffer(bytes: int) -> Buf
+    return Buf{ ptr: c.alloc(usize(bytes)) }
+end
+
+// A Linux system call. The result is the kernel's: a value, or minus an error number
+// (between -4095 and -1).
+func syscall(number: int, a: int, b: int, c3: int, d: int, e: int, f: int) -> int
+    var r = 0
+    unsafe
+        asm
+            syscall
+            in rax = number
+            in rdi = a
+            in rsi = b
+            in rdx = c3
+            in r10 = d
+            in r8 = e
+            in r9 = f
+            out rax = r
+            clobber rcx, r11, memory
+        end
+    end
+    return r
+end
+
+// Reads and writes raw memory at an address (an integer of 8 bytes, or one byte).
+func peek(addr: int) -> int
+    let p: *int = addr
+    var v = 0
+    unsafe
+        v = p[0]
+    end
+    return v
+end
+
+func poke(addr: int, value: int)
+    let p: *int = addr
+    unsafe
+        p[0] = value
+    end
+end
+
+func get8(addr: int) -> int
+    let p: *u8 = addr
+    var v = 0
+    unsafe
+        v = int(p[0])
+    end
+    return v
+end
+
+func put8(addr: int, value: int)
+    let p: *u8 = addr
+    unsafe
+        p[0] = value
+    end
+end
+
+// Whether a system call result is an error number.
+func failed(r: int) -> bool
+    return r < 0 and r >= -4095
+end
+
+func trim_end(s: text) -> text
+    var n = s.len
+    while n > 0 and s[n - 1] <= 32
+        n -= 1
+    end
+    return s.slice(0, n)
+end
+
+// The standard message of an error number (the wording of `strerror`).
+func message(code: int) -> text
+    match code
+        1 -> return "Operation not permitted"
+        2 -> return "No such file or directory"
+        3 -> return "No such process"
+        4 -> return "Interrupted system call"
+        5 -> return "Input/output error"
+        6 -> return "No such device or address"
+        7 -> return "Argument list too long"
+        8 -> return "Exec format error"
+        9 -> return "Bad file descriptor"
+        10 -> return "No child processes"
+        11 -> return "Resource temporarily unavailable"
+        12 -> return "Cannot allocate memory"
+        13 -> return "Permission denied"
+        14 -> return "Bad address"
+        15 -> return "Block device required"
+        16 -> return "Device or resource busy"
+        17 -> return "File exists"
+        18 -> return "Invalid cross-device link"
+        19 -> return "No such device"
+        20 -> return "Not a directory"
+        21 -> return "Is a directory"
+        22 -> return "Invalid argument"
+        23 -> return "Too many open files in system"
+        24 -> return "Too many open files"
+        25 -> return "Inappropriate ioctl for device"
+        26 -> return "Text file busy"
+        27 -> return "File too large"
+        28 -> return "No space left on device"
+        29 -> return "Illegal seek"
+        30 -> return "Read-only file system"
+        31 -> return "Too many links"
+        32 -> return "Broken pipe"
+        33 -> return "Numerical argument out of domain"
+        34 -> return "Numerical result out of range"
+        35 -> return "Resource deadlock avoided"
+        36 -> return "File name too long"
+        37 -> return "No locks available"
+        38 -> return "Function not implemented"
+        39 -> return "Directory not empty"
+        40 -> return "Too many levels of symbolic links"
+        42 -> return "No message of desired type"
+        43 -> return "Identifier removed"
+        61 -> return "No data available"
+        62 -> return "Timer expired"
+        71 -> return "Protocol error"
+        74 -> return "Bad message"
+        75 -> return "Value too large for defined data type"
+        84 -> return "Invalid or incomplete multibyte or wide character"
+        88 -> return "Socket operation on non-socket"
+        89 -> return "Destination address required"
+        90 -> return "Message too long"
+        91 -> return "Protocol wrong type for socket"
+        92 -> return "Protocol not available"
+        93 -> return "Protocol not supported"
+        94 -> return "Socket type not supported"
+        95 -> return "Operation not supported"
+        96 -> return "Protocol family not supported"
+        97 -> return "Address family not supported by protocol"
+        98 -> return "Address already in use"
+        99 -> return "Cannot assign requested address"
+        100 -> return "Network is down"
+        101 -> return "Network is unreachable"
+        102 -> return "Network dropped connection on reset"
+        103 -> return "Software caused connection abort"
+        104 -> return "Connection reset by peer"
+        105 -> return "No buffer space available"
+        106 -> return "Transport endpoint is already connected"
+        107 -> return "Transport endpoint is not connected"
+        108 -> return "Cannot send after transport endpoint shutdown"
+        110 -> return "Connection timed out"
+        111 -> return "Connection refused"
+        112 -> return "Host is down"
+        113 -> return "No route to host"
+        114 -> return "Operation already in progress"
+        115 -> return "Operation now in progress"
+        116 -> return "Stale file handle"
+        122 -> return "Disk quota exceeded"
+        125 -> return "Operation canceled"
+        _ -> return "Unknown error {code}"
+    end
+end
+
+// "what: reason" for an error number (a result of `syscall` may be passed as it is).
+func describe(code: int, what: text) -> text
+    var n = code
+    if n < 0
+        n = -n
+    end
+    return "{what}: {message(n)}"
+end

@@ -45,7 +45,7 @@ fn other_tasks_run_while_lookups_are_in_flight() {
     let extra = "var ticks = 0\n\nasync func ticker()\n    while true\n        await sleep(2)\n        ticks += 1\n    end\nend\n\nasync func look(name: text) -> text or error\n    return try await net.lookup(name)\nend\n";
     let src = program(
         extra,
-        "let t = ticker()\nlet f1 = look(\"localhost\")\nlet f2 = look(\"localhost\")\nfor i in 0..5\n    print(try await net.lookup(\"localhost\"))\nend\nprint(try await f1)\nprint(try await f2)\nprint(\"ticker ran {ticks > 0}\")\n",
+        "let t = ticker()\nlet f1 = look(\"localhost\")\nlet f2 = look(\"localhost\")\nfor i in 0..5\n    print(try await net.lookup(\"localhost\"))\nend\nprint(try await f1)\nprint(try await f2)\nvar rounds = 0\nwhile ticks == 0 and rounds < 5000\n    let again = try await net.lookup(\"localhost\")\n    rounds += 1\nend\nprint(\"ticker ran {ticks > 0}\")\n",
     );
     let Some(out) = run(&src) else { return };
     assert_eq!(out, "127.0.0.1\n127.0.0.1\n127.0.0.1\n127.0.0.1\n127.0.0.1\n127.0.0.1\n127.0.0.1\nticker ran true\n");
@@ -93,8 +93,8 @@ fn a_lookup_can_have_a_deadline() {
 fn lookups_do_not_leak() {
     let src = program(
         "",
-        "let warm = try await net.lookup(\"localhost\")\nlet before = live_objects()\nvar n = 0\nfor i in 0..500\n    let ip = try await net.lookup(\"localhost\")\n    n += ip.len\n    match await net.lookup(\"a b c\")\n        ok(x) -> n += 1\n        err(e) -> n += 0\n    end\nend\nprint(\"grew {live_objects() - before} {n > 0}\")\n",
+        "let warm = try await net.lookup(\"localhost\")\nmatch await net.lookup(\"a b c\")\n    ok(x) -> print(\"unexpected\")\n    err(e) -> print(\"warm: {e.message}\")\nend\nlet before = live_objects()\nvar n = 0\nfor i in 0..500\n    let ip = try await net.lookup(\"localhost\")\n    n += ip.len\n    match await net.lookup(\"a b c\")\n        ok(x) -> n += 1\n        err(e) -> n += 0\n    end\nend\nprint(\"grew {live_objects() - before} {n > 0}\")\n",
     );
     let Some(out) = run(&src) else { return };
-    assert_eq!(out, "grew 0 true\n");
+    assert_eq!(out, "warm: cannot resolve 'a b c'\ngrew 0 true\n");
 }

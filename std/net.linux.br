@@ -1,0 +1,890 @@
+// =====================================================================
+// Brasa standard library: TCP and UDP networking (`use net`) (Linux layer)
+//
+// The Linux counterpart of std/net.br, with the same functions and behavior. Sockets are
+// non-blocking: a call that would wait parks the task on `epoll` (std/task.linux.br) and the
+// other tasks run. Names are looked up by a DNS client written in Brasa (there is no C library):
+// `/etc/hosts` first, then the servers of `/etc/resolv.conf` over UDP, and TCP when an answer
+// is cut short. Like on Windows, only IPv4 addresses are used.
+//
+//   let listener = try await net.listen(8080)
+//   let conn = try await listener.accept()
+//   let request = try await conn.read(4096)
+//   try await conn.write("hello")
+//
+//   let client = try await net.connect("127.0.0.1", 8080)
+//
+// `read` returns empty text when the peer closed the connection. Sockets
+// close when the last reference to them goes away, or earlier with `close()`.
+// =====================================================================
+
+package net
+
+use c
+use sys
+use task
+use text
+use bufio
+
+let AF_INET = 2
+let SOCK_STREAM = 1
+let SOCK_DGRAM = 2
+// SOCK_NONBLOCK | SOCK_CLOEXEC
+let SOCK_FLAGS = 0x80800
+let EAGAIN = -11
+let EINTR = -4
+let EINPROGRESS = -115
+let MSG_NOSIGNAL = 0x4000
+let MSG_TRUNC = 0x20
+let READABLE = 1
+let WRITABLE = 4
+
+// An open connection. Closes its socket when the last reference goes away.
+#[shared]
+type Conn = record
+    sock: int
+    open: bool
+end
+
+func (ref conn: Conn) drop()
+    if conn.open
+        sys.syscall(3, conn.sock, 0, 0, 0, 0, 0)
+        conn.open = false
+    end
+end
+
+// A listening socket and the port it listens on.
+#[shared]
+type Listener = record
+    sock: int
+    port: int
+    open: bool
+end
+
+func (ref l: Listener) drop()
+    if l.open
+        sys.syscall(3, l.sock, 0, 0, 0, 0, 0)
+        l.open = false
+    end
+end
+
+// A new non-blocking socket (a descriptor, or minus an error number).
+func new_socket_of(kind: int) -> int
+    return sys.syscall(41, AF_INET, kind bitor SOCK_FLAGS, 0, 0, 0, 0)
+end
+
+// A sockaddr_in for an IPv4 address given as a 32-bit number and a port.
+func make_addr(ip: int, port: int) -> sys.Buf
+    let b = sys.buffer(16)
+    let a = int(b.ptr)
+    sys.put8(a, AF_INET)
+    sys.put8(a + 2, (port >> 8) bitand 255)
+    sys.put8(a + 3, port bitand 255)
+    sys.put8(a + 4, (ip >> 24) bitand 255)
+    sys.put8(a + 5, (ip >> 16) bitand 255)
+    sys.put8(a + 6, (ip >> 8) bitand 255)
+    sys.put8(a + 7, ip bitand 255)
+    return b
+end
+
+// "a.b.c.d" as a number, or -1 when `host` is not a numeric IPv4 address.
+func parse_ip(host: text) -> int
+    var ip = 0
+    var parts = 0
+    var value = 0
+    var digits = 0
+    for i in 0..host.len + 1
+        var ch = 46
+        if i < host.len
+            ch = int(host[i])
+        end
+        if ch == 46
+            if digits == 0 or value > 255
+                return -1
+            end
+            ip = ip * 256 + value
+            parts += 1
+            value = 0
+            digits = 0
+        else if ch >= 48 and ch <= 57
+            value = value * 10 + (ch - 48)
+            digits += 1
+        else
+            return -1
+        end
+    end
+    if parts != 4
+        return -1
+    end
+    return ip
+end
+
+// The port a socket is bound to.
+func bound_port(sock: int) -> int
+    let b = sys.buffer(32)
+    let a = int(b.ptr)
+    sys.poke(a + 16, 16)
+    let rc = sys.syscall(51, sock, a, a + 16, 0, 0, 0)
+    if sys.failed(rc)
+        return 0
+    end
+    return sys.get8(a + 2) * 256 + sys.get8(a + 3)
+end
+
+// "a.b.c.d" for the four address bytes at `addr`.
+func dotted(addr: int) -> text
+    return "{sys.get8(addr)}.{sys.get8(addr + 1)}.{sys.get8(addr + 2)}.{sys.get8(addr + 3)}"
+end
+
+// ---- name lookup: a DNS client ----
+
+// The contents of a small file (up to 64 KiB), or "" when it cannot be read.
+func read_small(path: text) -> text
+    var fd = 0
+    unsafe
+        fd = sys.syscall(2, int(c.cstr(path)), 0x80000, 0, 0, 0, 0)
+    end
+    if sys.failed(fd)
+        return ""
+    end
+    let b = sys.buffer(65537)
+    var done = 0
+    while done < 65536
+        let n = sys.syscall(0, fd, int(b.ptr) + done, 65536 - done, 0, 0, 0)
+        if n == EINTR
+            continue
+        end
+        if n <= 0
+            break
+        end
+        done += n
+    end
+    sys.syscall(3, fd, 0, 0, 0, 0, 0)
+    return c.from_bytes(b.ptr, done)
+end
+
+// The words of a line, split at spaces and tabs.
+func words(line: text) -> []text
+    var out: []text = []
+    let parts = text.split(text.replace(line, "\t", " "), " ")
+    for i in 0..parts.len
+        if parts[i].len > 0
+            out.add(parts[i])
+        end
+    end
+    return out
+end
+
+// The IPv4 address `/etc/hosts` gives to `host`, or "".
+func hosts_lookup(host: text) -> text
+    let name = text.lower(host)
+    let lines = text.lines(read_small("/etc/hosts"))
+    for i in 0..lines.len
+        var line = lines[i]
+        let hash = text.index_of(line, "#")
+        if hash >= 0
+            line = line.slice(0, hash)
+        end
+        let w = words(line)
+        if w.len >= 2 and parse_ip(w[0]) >= 0
+            for j in 1..w.len
+                if text.lower(w[j]) == name
+                    return w[0]
+                end
+            end
+        end
+    end
+    if name == "localhost"
+        return "127.0.0.1"
+    end
+    return ""
+end
+
+// The IPv4 name servers of `/etc/resolv.conf` (127.0.0.1 when there are none).
+func name_servers() -> []text
+    var out: []text = []
+    let lines = text.lines(read_small("/etc/resolv.conf"))
+    for i in 0..lines.len
+        let w = words(lines[i])
+        if w.len >= 2 and w[0] == "nameserver" and parse_ip(w[1]) >= 0
+            out.add(w[1])
+        end
+    end
+    if out.len == 0
+        out.add("127.0.0.1")
+    end
+    return out
+end
+
+var dns_counter = 0
+
+// A DNS query for the A records of `host`, or an empty text when the name cannot be written.
+func dns_query(host: text, id: int) -> sys.Buf
+    let b = sys.buffer(host.len + 32)
+    let a = int(b.ptr)
+    sys.put8(a, (id >> 8) bitand 255)
+    sys.put8(a + 1, id bitand 255)
+    sys.put8(a + 2, 1)
+    sys.put8(a + 5, 1)
+    var at = a + 12
+    var start = 0
+    for i in 0..host.len + 1
+        if i == host.len or int(host[i]) == 46
+            let n = i - start
+            if n == 0 or n > 63
+                if i == host.len and n == 0 and i > 0
+                    break
+                end
+                return sys.buffer(0)
+            end
+            sys.put8(at, n)
+            at += 1
+            for k in 0..n
+                sys.put8(at + k, int(host[start + k]))
+            end
+            at += n
+            start = i + 1
+        end
+    end
+    sys.put8(at, 0)
+    // type A, class IN
+    sys.put8(at + 2, 1)
+    sys.put8(at + 4, 1)
+    at += 5
+    sys.poke(a + host.len + 24, at - a)
+    return b
+end
+
+// The length of the query built by `dns_query`.
+func dns_query_len(b: sys.Buf, host: text) -> int
+    return sys.peek(int(b.ptr) + host.len + 24)
+end
+
+// The position after the (possibly compressed) name at `at` in a message of `size` bytes.
+func skip_name(msg: int, size: int, at: int) -> int
+    var p = at
+    while p < size
+        let n = sys.get8(msg + p)
+        if n == 0
+            return p + 1
+        end
+        if n >= 192
+            return p + 2
+        end
+        p += n + 1
+    end
+    return size
+end
+
+// The name at `at`, following compression pointers.
+func read_name(msg: int, size: int, at: int) -> text
+    var out = ""
+    var p = at
+    var jumps = 0
+    while p < size and jumps < 16
+        let n = sys.get8(msg + p)
+        if n == 0
+            break
+        end
+        if n >= 192
+            p = (n bitand 63) * 256 + sys.get8(msg + p + 1)
+            jumps += 1
+            continue
+        end
+        if out != ""
+            out = out + "."
+        end
+        let part: *u8 = msg + p + 1
+        out = out + c.from_bytes(part, n)
+        p += n + 1
+    end
+    return out
+end
+
+// What a DNS answer says: the first A record as "a.b.c.d", or the name a CNAME points to
+// (prefixed with "=" so the caller can tell), or "" when there is neither. `truncated` is
+// set when the answer was cut short, and `missing` when the name does not exist.
+type Answer = record
+    value: text
+    truncated: bool
+    missing: bool
+end
+
+func parse_answer(msg: int, size: int, id: int) -> Answer
+    let result = Answer{ value: "", truncated: false, missing: false }
+    if size < 12 or sys.get8(msg) * 256 + sys.get8(msg + 1) != id
+        return result
+    end
+    let flags = sys.get8(msg + 2) * 256 + sys.get8(msg + 3)
+    if (flags bitand 0x8000) == 0
+        return result
+    end
+    if (flags bitand 0x0200) != 0
+        result.truncated = true
+        return result
+    end
+    if (flags bitand 15) == 3
+        result.missing = true
+        return result
+    end
+    let questions = sys.get8(msg + 4) * 256 + sys.get8(msg + 5)
+    let answers = sys.get8(msg + 6) * 256 + sys.get8(msg + 7)
+    var p = 12
+    for i in 0..questions
+        p = skip_name(msg, size, p) + 4
+    end
+    var cname = ""
+    for i in 0..answers
+        if p >= size
+            break
+        end
+        let name_end = skip_name(msg, size, p)
+        if name_end + 10 > size
+            break
+        end
+        let kind = sys.get8(msg + name_end) * 256 + sys.get8(msg + name_end + 1)
+        let length = sys.get8(msg + name_end + 8) * 256 + sys.get8(msg + name_end + 9)
+        let data = name_end + 10
+        if kind == 1 and length == 4 and data + 4 <= size
+            result.value = dotted(msg + data)
+            return result
+        end
+        if kind == 5 and cname == ""
+            cname = read_name(msg, size, data)
+        end
+        p = data + length
+    end
+    if cname != ""
+        result.value = "={cname}"
+    end
+    return result
+end
+
+// Asks `server` over UDP: the answer, or an error text. Waits up to 2 seconds per try, twice.
+async func ask_udp(server: text, host: text, port: int = 53) -> Answer or error
+    let s = new_socket_of(SOCK_DGRAM)
+    if sys.failed(s)
+        return error(sys.describe(s, "cannot create a socket"))
+    end
+    let conn = Conn{ sock: s, open: true }
+    let to = make_addr(parse_ip(server), port)
+    dns_counter += 1
+    let id = (task.now() * 7 + dns_counter * 4099) bitand 0xFFFF
+    let q = dns_query(host, id)
+    let qlen = dns_query_len(q, host)
+    let reply = sys.buffer(4097)
+    for attempt in 0..2
+        let sent = sys.syscall(44, s, int(q.ptr), qlen, 0, int(to.ptr), 16)
+        if sys.failed(sent)
+            return error(sys.describe(sent, "send to {server}:{port}"))
+        end
+        // answers to other questions (or late ones) are skipped until the time is up
+        let deadline = task.now() + 2000
+        while true
+            let left = deadline - task.now()
+            if left <= 0
+                break
+            end
+            var n = sys.syscall(45, s, int(reply.ptr), 4096, 0, 0, 0)
+            if n == EAGAIN
+                let w = task.wait_fd_for(s, READABLE, left)
+                if w == 0
+                    break
+                end
+                if w < 0
+                    return error(sys.describe(w, "receive"))
+                end
+                continue
+            end
+            if n == EINTR
+                continue
+            end
+            if sys.failed(n)
+                break
+            end
+            let a = parse_answer(int(reply.ptr), n, id)
+            if a.value != "" or a.truncated or a.missing
+                return a
+            end
+        end
+    end
+    return error("no answer from {server}")
+end
+
+// Like `ask_udp`, over TCP (used when the UDP answer was cut short).
+async func ask_tcp(server: text, host: text, port: int = 53) -> Answer or error
+    let conn = try await connect(server, port)
+    dns_counter += 1
+    let id = (task.now() * 7 + dns_counter * 4099) bitand 0xFFFF
+    let q = dns_query(host, id)
+    let qlen = dns_query_len(q, host)
+    let framed = sys.buffer(qlen + 2)
+    let f = int(framed.ptr)
+    sys.put8(f, qlen >> 8)
+    sys.put8(f + 1, qlen bitand 255)
+    for i in 0..qlen
+        sys.put8(f + 2 + i, sys.get8(int(q.ptr) + i))
+    end
+    try await conn.write(c.from_bytes(framed.ptr, qlen + 2))
+    var data = ""
+    var want = -1
+    while true
+        let piece = try await conn.read(4096)
+        if piece.len == 0
+            break
+        end
+        data = data + piece
+        if want < 0 and data.len >= 2
+            want = int(data[0]) * 256 + int(data[1])
+        end
+        if want >= 0 and data.len >= want + 2
+            break
+        end
+    end
+    await conn.close()
+    if want < 0 or data.len < want + 2
+        return error("incomplete answer from {server}")
+    end
+    return parse_answer(int(c.cstr(data)) + 2, want, id)
+end
+
+// The first IPv4 address of `host` as "a.b.c.d". A numeric address is returned as it is, names
+// from `/etc/hosts` come from there, and any other name is asked from the name servers; the
+// task waits and the others run.
+async func lookup(host: text) -> text or error
+    if parse_ip(host) >= 0
+        return host
+    end
+    let known = hosts_lookup(host)
+    if known != ""
+        return known
+    end
+    var name = host
+    if name.len > 1 and int(name[name.len - 1]) == 46
+        name = name.slice(0, name.len - 1)
+    end
+    if name.len == 0 or name.len > 253
+        return error("cannot resolve '{host}'")
+    end
+    let servers = name_servers()
+    for follow in 0..6
+        var found = ""
+        var next = ""
+        var missing = false
+        for i in 0..servers.len
+            var a = Answer{ value: "", truncated: false, missing: false }
+            match await ask_udp(servers[i], name)
+                ok(got) -> a = got
+                err(e) -> continue
+            end
+            if a.truncated
+                match await ask_tcp(servers[i], name)
+                    ok(got) -> a = got
+                    err(e) -> continue
+                end
+            end
+            if a.missing
+                missing = true
+                break
+            end
+            if a.value.len > 0 and int(a.value[0]) == 61
+                next = a.value.slice(1, a.value.len)
+                break
+            end
+            if a.value != ""
+                found = a.value
+                break
+            end
+        end
+        if found != ""
+            return found
+        end
+        if next == "" or missing
+            break
+        end
+        name = next
+    end
+    return error("cannot resolve '{host}'")
+end
+
+// The IPv4 address of `host` as a number, for building a socket address.
+async func resolve(host: text) -> int or error
+    let text_ip = try await lookup(host)
+    return parse_ip(text_ip)
+end
+
+// ---- TCP ----
+
+// Waits until `sock` can do what `events` asks; the error is the reason it cannot.
+func wait_ready(sock: int, events: int, what: text) -> error
+    let w = task.wait_fd(sock, events)
+    if w < 0
+        return error(sys.describe(w, what))
+    end
+    return
+end
+
+// Connects to a TCP server.
+async func connect(host: text, port: int) -> Conn or error
+    let ip = try await resolve(host)
+    let s = new_socket_of(SOCK_STREAM)
+    if sys.failed(s)
+        return error(sys.describe(s, "cannot create a socket"))
+    end
+    let conn = Conn{ sock: s, open: true }
+    let remote = make_addr(ip, port)
+    let what = "connect to {host}:{port}"
+    var rc = sys.syscall(42, s, int(remote.ptr), 16, 0, 0, 0)
+    if rc == EINPROGRESS
+        try wait_ready(s, WRITABLE, what)
+        // the outcome of the connection attempt
+        let b = sys.buffer(16)
+        let a = int(b.ptr)
+        sys.poke(a + 8, 4)
+        sys.syscall(55, s, 1, 4, a, a + 8, 0)
+        let e = sys.peek(a) bitand 0xFFFFFFFF
+        rc = 0 - e
+        if rc == 0
+            return conn
+        end
+    end
+    if rc != 0
+        return error(sys.describe(rc, what))
+    end
+    return conn
+end
+
+// Starts listening on a port (0 picks a free one; see `.port`).
+async func listen(port: int) -> Listener or error
+    let s = new_socket_of(SOCK_STREAM)
+    if sys.failed(s)
+        return error(sys.describe(s, "cannot create a socket"))
+    end
+    let l = Listener{ sock: s, port: port, open: true }
+    let on = sys.buffer(8)
+    sys.poke(int(on.ptr), 1)
+    sys.syscall(54, s, 1, 2, int(on.ptr), 4, 0)
+    let addr = make_addr(0, port)
+    var rc = sys.syscall(49, s, int(addr.ptr), 16, 0, 0, 0)
+    if sys.failed(rc)
+        return error(sys.describe(rc, "cannot listen on port {port}"))
+    end
+    rc = sys.syscall(50, s, 128, 0, 0, 0, 0)
+    if sys.failed(rc)
+        return error(sys.describe(rc, "cannot listen on port {port}"))
+    end
+    l.port = bound_port(s)
+    return l
+end
+
+// Waits for the next client.
+async func (l: Listener) accept() -> Conn or error
+    while true
+        let s = sys.syscall(288, l.sock, 0, 0, SOCK_FLAGS, 0, 0)
+        if s == EAGAIN
+            try wait_ready(l.sock, READABLE, "accept")
+            continue
+        end
+        if s == EINTR
+            continue
+        end
+        if sys.failed(s)
+            return error(sys.describe(s, "accept"))
+        end
+        return Conn{ sock: s, open: true }
+    end
+    return error("accept")
+end
+
+// Receives up to `max` bytes; empty text means the peer closed the connection.
+async func (conn: Conn) read(max: int) -> text or error
+    let b = sys.buffer(max + 1)
+    while true
+        let n = sys.syscall(45, conn.sock, int(b.ptr), max, 0, 0, 0)
+        if n == EAGAIN
+            try wait_ready(conn.sock, READABLE, "read")
+            continue
+        end
+        if n == EINTR
+            continue
+        end
+        if sys.failed(n)
+            return error(sys.describe(n, "read"))
+        end
+        return c.from_bytes(b.ptr, n)
+    end
+    return ""
+end
+
+// Sends all of `data`.
+async func (conn: Conn) write(data: text) -> error
+    var done = 0
+    while done < data.len
+        var sent = 0
+        unsafe
+            sent = sys.syscall(44, conn.sock, int(c.cstr(data)) + done, data.len - done, MSG_NOSIGNAL, 0, 0)
+        end
+        if sent == EAGAIN
+            try wait_ready(conn.sock, WRITABLE, "write")
+            continue
+        end
+        if sent == EINTR
+            continue
+        end
+        if sys.failed(sent)
+            return error(sys.describe(sent, "write"))
+        end
+        if sent == 0
+            return error("write: the connection is closed")
+        end
+        done += sent
+    end
+    return
+end
+
+// Closes the connection now.
+async func (conn: Conn) close()
+    if conn.open
+        sys.syscall(3, conn.sock, 0, 0, 0, 0, 0)
+        conn.open = false
+    end
+end
+
+// Stops listening now.
+async func (l: Listener) close()
+    if l.open
+        sys.syscall(3, l.sock, 0, 0, 0, 0, 0)
+        l.open = false
+    end
+end
+
+// ---- buffered reading and writing ----
+
+// Reads a connection in pieces and hands it out by lines or bytes.
+#[shared]
+type Reader = record
+    conn: Conn
+    buf: bufio.InBuf
+    reads: int
+end
+
+// Collects writes and sends them in large pieces.
+#[shared]
+type Writer = record
+    conn: Conn
+    buf: bufio.OutBuf
+    writes: int
+end
+
+// A reader over this connection (the end of the data is the peer closing it).
+func (conn: Conn) reader() -> Reader
+    return Reader{ conn: conn, buf: bufio.input(), reads: 0 }
+end
+
+// A writer over this connection: `flush()` sends what has been collected.
+func (conn: Conn) writer() -> Writer
+    return Writer{ conn: conn, buf: bufio.output(), writes: 0 }
+end
+
+// Waits for more data; the peer closing the connection finishes the buffer.
+async func (r: Reader) fill() -> error
+    if r.buf.finished()
+        return
+    end
+    let s = try await r.conn.read(65536)
+    r.reads += 1
+    if s.len == 0
+        r.buf.finish()
+        return
+    end
+    r.buf.feed(s)
+    return
+end
+
+// The next line without its `\n` or `\r\n`, or the error `end of file`.
+async func (r: Reader) read_line() -> text or error
+    while not r.buf.has_line()
+        if r.buf.finished()
+            break
+        end
+        try await r.fill()
+    end
+    if not r.buf.has_line()
+        return error("end of file")
+    end
+    return r.buf.take_line()
+end
+
+// Up to `max` bytes; empty text once the peer has closed the connection.
+async func (r: Reader) read(max: int) -> text or error
+    if r.buf.unread() == 0
+        try await r.fill()
+    end
+    return r.buf.take(max)
+end
+
+// Everything until the peer closes the connection.
+async func (r: Reader) read_all() -> text or error
+    while not r.buf.finished()
+        try await r.fill()
+    end
+    return r.buf.take_all()
+end
+
+// True when nothing is left to read (waits for data).
+async func (r: Reader) at_end() -> bool or error
+    if r.buf.unread() == 0 and not r.buf.finished()
+        try await r.fill()
+    end
+    return r.buf.unread() == 0
+end
+
+// Sends everything that is buffered.
+async func (w: Writer) drain() -> error
+    if w.buf.len() == 0
+        return
+    end
+    let data = w.buf.take()
+    try await w.conn.write(data)
+    w.writes += 1
+    return
+end
+
+// Adds `data` (sent once 64 KiB have gathered, or on `flush`).
+async func (w: Writer) write(data: text) -> error
+    w.buf.add(data)
+    if w.buf.len() >= 65536
+        try await w.drain()
+    end
+    return
+end
+
+// Adds `data` and a newline.
+async func (w: Writer) write_line(data: text) -> error
+    w.buf.add(data)
+    w.buf.add("\n")
+    if w.buf.len() >= 65536
+        try await w.drain()
+    end
+    return
+end
+
+// Sends whatever is buffered.
+async func (w: Writer) flush() -> error
+    try await w.drain()
+    return
+end
+
+// Sends whatever is buffered. The connection stays open: close it with `conn.close()`.
+async func (w: Writer) close() -> error
+    try await w.drain()
+    return
+end
+
+// ---- UDP ----
+
+// A bound UDP socket. Closes when the last reference goes away.
+#[shared]
+type UdpSocket = record
+    sock: int
+    open: bool
+    port: int
+end
+
+func (ref s: UdpSocket) drop()
+    if s.open
+        sys.syscall(3, s.sock, 0, 0, 0, 0, 0)
+        s.open = false
+    end
+end
+
+// One received datagram and where it came from.
+type Packet = record
+    data: text
+    host: text
+    port: int
+end
+
+// Binds a UDP socket to a port (0 picks a free one; see `.port`).
+async func udp(port: int) -> UdpSocket or error
+    let s = new_socket_of(SOCK_DGRAM)
+    if sys.failed(s)
+        return error(sys.describe(s, "cannot create a socket"))
+    end
+    let sock = UdpSocket{ sock: s, open: true, port: port }
+    let addr = make_addr(0, port)
+    let rc = sys.syscall(49, s, int(addr.ptr), 16, 0, 0, 0)
+    if sys.failed(rc)
+        return error(sys.describe(rc, "cannot bind UDP port {port}"))
+    end
+    sock.port = bound_port(s)
+    return sock
+end
+
+// Sends `data` as one datagram to `host` (an address or a name) and `port`.
+async func (sock: UdpSocket) send_to(host: text, port: int, data: text) -> error
+    if not sock.open
+        return error("the socket is closed")
+    end
+    let ip = try await resolve(host)
+    let addr = make_addr(ip, port)
+    let what = "send to {host}:{port}"
+    while true
+        var sent = 0
+        unsafe
+            sent = sys.syscall(44, sock.sock, int(c.cstr(data)), data.len, 0, int(addr.ptr), 16)
+        end
+        if sent == EAGAIN
+            try wait_ready(sock.sock, WRITABLE, what)
+            continue
+        end
+        if sent == EINTR
+            continue
+        end
+        if sys.failed(sent)
+            return error(sys.describe(sent, what))
+        end
+        return
+    end
+    return
+end
+
+// Waits for the next datagram (up to `max` bytes) and says who sent it.
+async func (sock: UdpSocket) recv(max: int = 65535) -> Packet or error
+    if not sock.open
+        return error("the socket is closed")
+    end
+    let b = sys.buffer(max + 1)
+    let from = sys.buffer(32)
+    let fa = int(from.ptr)
+    while true
+        sys.poke(fa + 16, 16)
+        // MSG_TRUNC: the result is the real size of the datagram, even if it did not fit
+        let n = sys.syscall(45, sock.sock, int(b.ptr), max, MSG_TRUNC, fa, fa + 16)
+        if n == EAGAIN
+            try wait_ready(sock.sock, READABLE, "receive")
+            continue
+        end
+        if n == EINTR
+            continue
+        end
+        if sys.failed(n)
+            return error(sys.describe(n, "receive"))
+        end
+        if n > max
+            return error("datagram larger than {max} bytes")
+        end
+        let host = dotted(fa + 4)
+        let port = sys.get8(fa + 2) * 256 + sys.get8(fa + 3)
+        return Packet{ data: c.from_bytes(b.ptr, n), host: host, port: port }
+    end
+    return error("receive")
+end
+
+// Closes the socket now.
+async func (sock: UdpSocket) close()
+    if sock.open
+        sys.syscall(3, sock.sock, 0, 0, 0, 0, 0)
+        sock.open = false
+    end
+end

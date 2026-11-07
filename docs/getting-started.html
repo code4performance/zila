@@ -62,6 +62,9 @@ cargo test</code></pre>
         <dt>--asm</dt>
         <dd>Prints the x86-64 assembly the native compiler generates for the file.</dd>
 
+        <dt>--target windows|linux</dt>
+        <dd>Chooses what <code>-o</code> builds: a Windows executable (the default) or a static Linux x86-64 ELF executable written by the compiler alone, with no external tools. With <code>--asm</code> it shows that target's assembly. Linux programs cannot use <code>fs</code>, <code>net</code>, <code>task</code>, <code>ui</code> or <code>extern</code> yet; see <a href="native.html#linux">Native compilation</a>.</dd>
+
         <dt>--no-opt</dt>
         <dd>Compiles without the optimizer (see <a href="native.html#optimizer">Native compilation</a>). Use it to check whether a problem comes from an optimization: the program must behave the same either way. Combine it with <code>-o</code> or <code>--asm</code>.</dd>
 

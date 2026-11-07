@@ -179,7 +179,7 @@ scores.put(<span class="str">"ana"</span>, 90)
     <section id="limits">
       <h2>Good to know</h2>
       <ul>
-        <li>The modules are compiled with your program, so only the functions you use add to its size. They need the Windows target (<code>use text</code> also brings in the float printing library, which is why it is not available in a bare-metal kernel).</li>
+        <li>The modules are compiled with your program, so only the functions you use add to its size. They need a hosted target, Windows or Linux (<code>use text</code> also brings in the float printing library, which is why it is not available in a bare-metal kernel).</li>
         <li>The interpreter behind <code>--run</code> runs them too. It handles errors only through <code>??</code> (it has no <code>match</code> on results), and a lambda in it cannot use variables of the function around it.</li>
         <li>Not here yet: regular expressions, Unicode case mapping, and <code>format.fmt</code> in the interpreter.</li>
       </ul>

@@ -1,0 +1,450 @@
+// =====================================================================
+// Brasa standard library: tasks, channels and the scheduler (Linux layer)
+//
+// The Linux counterpart of std/task.br, with the same behavior and the same functions: a task
+// is a user-mode stack (from `mmap`, with a guard page) that is switched with a few
+// instructions of assembly; the run queue, the timers, the blocking rules and the channels are
+// the same Brasa code. Waiting for the outside world uses `epoll` (a task that waits for a
+// file descriptor parks until it is ready) and the clock is `clock_gettime`.
+//
+// See std/task.br for the rules tasks follow.
+// =====================================================================
+
+package task
+
+use c
+use sys
+
+// A task: `slot` holds the stack pointer of the task while it is not running.
+type Task = record
+    slot: sys.Buf
+    stack: int
+    action: func()
+    done: bool
+    waiting: bool
+    event: int
+    gen: int
+end
+
+// Words in transit are plain integers: ownership of a value moves into the
+// queue on `send` and out of it on `receive`.
+type Chan = record
+    items: []int
+    head: int
+    waiting: []int
+    whead: int
+    closed: bool
+end
+
+var tasks: []Task
+var ready: []int
+var ready_head = 0
+// ids of tasks that finished (their stacks are released later) and ids free for reuse
+var finished: []int
+var free_ids: []int
+var current = 0
+var started = false
+var switches = 0
+
+// Timers, ascending by deadline (milliseconds of the monotonic clock).
+var timer_at: []int
+var timer_run: []func()
+
+// Tasks waiting for a file descriptor, the epoll instance and its scratch memory.
+var pending_io = 0
+var epfd = 0
+var clock: sys.Buf
+var evbuf: sys.Buf
+var evreg: sys.Buf
+var stack_cache: []int
+
+let STACK_SIZE = 262144
+let GUARD = 4096
+let TIMED_OUT = 0x10000000000
+
+// The address of the function a new task starts in.
+func entry_address() -> int
+    var r = 0
+    unsafe
+        asm
+            lea rax, B_task_fiber_entry
+            out rax = r
+        end
+    end
+    return r
+end
+
+// Saves the running task's registers on its stack, stores the stack pointer at `save`, and
+// continues the task whose saved stack pointer is `to`.
+func fiber_swap(save: int, to: int)
+    unsafe
+        asm
+            in rcx = save
+            in rdx = to
+            push rbp
+            push rbx
+            push r12
+            push r13
+            push r14
+            push r15
+            mov qword ptr [rcx], rsp
+            mov rsp, rdx
+            pop r15
+            pop r14
+            pop r13
+            pop r12
+            pop rbx
+            pop rbp
+        end
+    end
+end
+
+func init()
+    if started
+        return
+    end
+    started = true
+    clock = sys.buffer(16)
+    evbuf = sys.buffer(256)
+    evreg = sys.buffer(16)
+    // Task 0 is the main program, on the process stack.
+    tasks.add(Task{ slot: sys.buffer(8) })
+end
+
+func fatal(message: text)
+    print("fatal: {message}")
+    sys.syscall(231, 2, 0, 0, 0, 0, 0)
+end
+
+func now() -> int
+    init()
+    let a = int(clock.ptr)
+    sys.syscall(228, 1, a, 0, 0, 0, 0)
+    return sys.peek(a) * 1000 + sys.peek(a + 8) / 1000000
+end
+
+// A stack for a new task: a cached one, or a new region with a guard page at its low end.
+func stack_new() -> int
+    if stack_cache.len > 0
+        return stack_cache.take()
+    end
+    let base = sys.syscall(9, 0, STACK_SIZE, 3, 34, -1, 0)
+    if sys.failed(base)
+        fatal("out of memory")
+    end
+    sys.syscall(10, base, GUARD, 0, 0, 0, 0)
+    return base
+end
+
+func stack_free(base: int)
+    if stack_cache.len < 16
+        stack_cache.add(base)
+    else
+        sys.syscall(11, base, STACK_SIZE, 0, 0, 0, 0)
+    end
+end
+
+// Releases the stacks of finished tasks and makes their ids reusable.
+// A finished task is never the running one: it switched away for good.
+func reap()
+    for i in 0..finished.len
+        let id = finished[i]
+        stack_free(tasks[id].stack)
+        tasks[id].stack = 0
+        free_ids.add(id)
+    end
+    finished.clear()
+end
+
+// Creates the epoll instance the first time it is needed.
+func io_init()
+    init()
+    if epfd != 0
+        return
+    end
+    let r = sys.syscall(291, 0, 0, 0, 0, 0, 0)
+    if sys.failed(r)
+        fatal("cannot create an epoll instance")
+    end
+    epfd = r
+end
+
+// Collects the file descriptors that became ready, waiting up to `ms` milliseconds for the
+// first (a negative time waits for as long as it takes).
+func poll_io(ms: int)
+    io_init()
+    let base = int(evbuf.ptr)
+    let n = sys.syscall(232, epfd, base, 16, ms, 0, 0)
+    if n <= 0
+        return
+    end
+    for i in 0..n
+        let at = base + i * 12
+        let id = sys.peek(at + 4)
+        tasks[id].event = sys.peek(at) bitand 0xFFFFFFFF
+        pending_io -= 1
+        wake(id)
+    end
+end
+
+// Parks the running task until the file descriptor `fd` is ready for `events` (1 readable,
+// 4 writable; errors and hang-up always wake it). The result is the events that arrived, or
+// minus an error number when the descriptor cannot be waited for.
+func wait_fd(fd: int, events: int) -> int
+    return wait_fd_for(fd, events, -1)
+end
+
+// `wait_fd` that gives up after `ms` milliseconds (a negative time never does): the result is 0
+// when the time ran out.
+func wait_fd_for(fd: int, events: int, ms: int) -> int
+    io_init()
+    let reg = int(evreg.ptr)
+    sys.poke(reg, events bitor 0x40000000)
+    sys.poke(reg + 4, current)
+    var r = sys.syscall(233, epfd, 3, fd, reg, 0, 0)
+    if r == -2
+        r = sys.syscall(233, epfd, 1, fd, reg, 0, 0)
+    end
+    if sys.failed(r)
+        return r
+    end
+    let me = current
+    tasks[me].event = 0
+    tasks[me].gen += 1
+    pending_io += 1
+    if ms >= 0
+        let g = tasks[me].gen
+        add_timer(now() + ms, func() wait_timeout(me, g, fd) end)
+    end
+    while tasks[me].event == 0
+        park()
+    end
+    let got = tasks[me].event
+    if got == TIMED_OUT
+        return 0
+    end
+    return got
+end
+
+// The timer of a `wait_fd_for`: if that very wait is still going, ends it and forgets the
+// descriptor.
+func wait_timeout(id: int, gen: int, fd: int)
+    if tasks[id].gen == gen and tasks[id].event == 0
+        sys.syscall(233, epfd, 2, fd, 0, 0, 0)
+        pending_io -= 1
+        tasks[id].event = TIMED_OUT
+        wake(id)
+    end
+end
+
+// Nothing is ready: wait for the earliest timer or for a file descriptor.
+func wait_events()
+    var ms = -1
+    if timer_at.len > 0
+        ms = timer_at[0] - now()
+        if ms < 0
+            ms = 0
+        end
+    end
+    poll_io(ms)
+end
+
+// Runs the next ready task. The caller has already queued itself (yield),
+// parked itself (receive, await), or has finished.
+func switch_away()
+    let me = current
+    while true
+        switches += 1
+        if timer_at.len > 0 and (ready_head >= ready.len or switches % 64 == 0)
+            fire_timers()
+        end
+        if pending_io > 0 and switches % 64 == 0
+            poll_io(0)
+        end
+        if ready_head < ready.len
+            break
+        end
+        if timer_at.len == 0 and pending_io == 0
+            fatal("all tasks are asleep - deadlock!")
+        end
+        wait_events()
+    end
+    let next = ready[ready_head]
+    ready_head += 1
+    if ready_head == ready.len
+        ready.clear()
+        ready_head = 0
+    end
+    if next == me
+        return
+    end
+    current = next
+    fiber_swap(int(tasks[me].slot.ptr), sys.peek(int(tasks[next].slot.ptr)))
+end
+
+// The function every new task starts in (reached by the first switch to it). Must never return.
+func fiber_entry()
+    fiber_main(current)
+end
+
+// Runs a task's action. Must never return.
+func fiber_main(id: int)
+    // No local may own heap values here: this function never returns,
+    // so nothing it holds would ever be released.
+    tasks[id].action()
+    tasks[id].action = nil
+    tasks[id].done = true
+    finished.add(id)
+    switch_away()
+end
+
+func start(action: func())
+    init()
+    reap()
+    var id = 0
+    if free_ids.len > 0
+        id = free_ids.take()
+        tasks[id].action = action
+        tasks[id].done = false
+        tasks[id].waiting = false
+    else
+        id = tasks.len
+        tasks.add(Task{ slot: sys.buffer(8), action: action })
+    end
+    let base = stack_new()
+    tasks[id].stack = base
+    // The first switch pops six registers and returns from `fiber_swap`, which lands in
+    // `fiber_entry` as if it had been called (a frame whose saved frame pointer is 0).
+    let frame = base + STACK_SIZE - 24
+    let sp = frame - 48
+    for i in 0..6
+        sys.poke(sp + i * 8, 0)
+    end
+    sys.poke(sp + 40, frame)
+    sys.poke(frame, 0)
+    sys.poke(frame + 8, entry_address())
+    sys.poke(int(tasks[id].slot.ptr), sp)
+    ready.add(id)
+end
+
+// Runs `action` once the clock reaches `at`.
+func add_timer(at: int, action: func())
+    timer_at.add(at)
+    timer_run.add(action)
+    var j = timer_at.len - 1
+    while j > 0 and timer_at[j - 1] > timer_at[j]
+        let a = timer_at[j - 1]
+        timer_at[j - 1] = timer_at[j]
+        timer_at[j] = a
+        let f = timer_run[j - 1]
+        timer_run[j - 1] = timer_run[j]
+        timer_run[j] = f
+        j -= 1
+    end
+end
+
+// Runs the actions of every timer whose time has come, earliest first.
+func fire_timers()
+    if timer_at.len == 0
+        return
+    end
+    let t = now()
+    var fired = 0
+    while fired < timer_at.len and timer_at[fired] <= t
+        fired += 1
+    end
+    if fired == 0
+        return
+    end
+    var batch: []func() = []
+    for i in 0..fired
+        batch.add(timer_run[i])
+    end
+    var k = 0
+    while k + fired < timer_at.len
+        timer_at[k] = timer_at[k + fired]
+        timer_run[k] = timer_run[k + fired]
+        k += 1
+    end
+    for i in 0..fired
+        timer_at.take()
+        timer_run.take()
+    end
+    for i in 0..batch.len
+        batch[i]()
+    end
+end
+
+// Waits until another task (or a timer) calls `wake` for this task.
+func park()
+    tasks[current].waiting = true
+    switch_away()
+end
+
+// Makes a parked task ready. Waking a task that is not parked does nothing,
+// so a stale registration can never run a task twice.
+func wake(id: int)
+    if id < tasks.len and tasks[id].waiting
+        tasks[id].waiting = false
+        ready.add(id)
+    end
+end
+
+// Lets other tasks run; the caller continues later.
+func yield()
+    init()
+    ready.add(current)
+    switch_away()
+end
+
+func chan_new() -> Chan
+    init()
+    return Chan{}
+end
+
+func wake_one(ref ch: Chan)
+    if ch.whead < ch.waiting.len
+        wake(ch.waiting[ch.whead])
+        ch.whead += 1
+        if ch.whead == ch.waiting.len
+            ch.waiting.clear()
+            ch.whead = 0
+        end
+    end
+end
+
+func chan_send(ref ch: Chan, word: int)
+    if ch.closed
+        fatal("send on a closed channel")
+    end
+    ch.items.add(word)
+    wake_one(ref ch)
+end
+
+func chan_recv(ref ch: Chan) -> int
+    init()
+    while true
+        if ch.head < ch.items.len
+            let v = ch.items[ch.head]
+            ch.head += 1
+            if ch.head == ch.items.len
+                ch.items.clear()
+                ch.head = 0
+            end
+            return v
+        end
+        if ch.closed
+            return 0
+        end
+        ch.waiting.add(current)
+        park()
+    end
+    return 0
+end
+
+func chan_close(ref ch: Chan)
+    ch.closed = true
+    while ch.whead < ch.waiting.len
+        wake_one(ref ch)
+    end
+end

@@ -243,7 +243,8 @@ print(x / (2 - 2))"] {
         let Some((a, ca, _)) = run_with(&main_of(body), &OFF) else { return };
         let (b, cb, _) = run_with(&main_of(body), &ON).unwrap();
         assert_eq!((a.clone(), ca), (b, cb), "{}", body);
-        assert_ne!(ca, 0, "{} should fail: {}", body, a);
+        assert_eq!(ca, 101, "{} should panic: {}", body, a);
+        assert!(a.contains("panic: division by zero"), "{}: {}", body, a);
     }
 }
 

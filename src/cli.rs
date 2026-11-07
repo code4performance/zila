@@ -5,7 +5,7 @@
 //! entry and nothing else.
 
 /// Every option `brasa-parse` accepts.
-pub const FLAGS: &[&str] = &["--ast", "--tokens", "--asm", "--run", "--build", "-o", "--os", "--docs", "--no-opt", "--fmt", "--fmt-check", "--test"];
+pub const FLAGS: &[&str] = &["--ast", "--tokens", "--asm", "--run", "--build", "-o", "--os", "--docs", "--no-opt", "--fmt", "--fmt-check", "--test", "--target"];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Mode {
@@ -39,10 +39,15 @@ pub struct Options {
     pub out: Option<String>,
     /// Optimizations on (the default); `--no-opt` turns them off.
     pub optimize: bool,
+    /// `--target`: `windows` (the default) or `linux`.
+    pub target: String,
 }
 
+/// The targets `--target` accepts.
+pub const TARGETS: &[&str] = &["windows", "linux"];
+
 pub fn parse(args: &[String]) -> Result<Options, String> {
-    let mut o = Options { mode: Mode::Check, path: None, extra: Vec::new(), out: None, optimize: true };
+    let mut o = Options { mode: Mode::Check, path: None, extra: Vec::new(), out: None, optimize: true, target: "windows".to_string() };
     let mut explicit = false;
     let mut i = 0;
     while i < args.len() {
@@ -59,6 +64,14 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
             "--test" => o.mode = Mode::Test,
             "--no-opt" => o.optimize = false,
             "--build" | "build" => o.mode = Mode::Build,
+            "--target" => {
+                i += 1;
+                match args.get(i) {
+                    Some(v) if TARGETS.contains(&v.as_str()) => o.target = v.clone(),
+                    Some(v) => return Err(format!("unknown target '{}' (valid targets: {})", v, TARGETS.join(", "))),
+                    None => return Err(format!("--target needs a name ({})", TARGETS.join(", "))),
+                }
+            }
             "-o" => {
                 i += 1;
                 match args.get(i) {
@@ -79,7 +92,7 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
                 }
             }
         }
-        if FLAGS.contains(&a) && a != "-o" && a != "--no-opt" {
+        if FLAGS.contains(&a) && a != "-o" && a != "--no-opt" && a != "--target" {
             explicit = true;
         }
         i += 1;
@@ -118,7 +131,11 @@ mod tests {
     #[test]
     fn every_flag_is_accepted() {
         for f in FLAGS {
-            let args: Vec<&str> = if *f == "-o" { vec!["a.br", "-o", "x"] } else { vec!["a.br", f] };
+            let args: Vec<&str> = match *f {
+                "-o" => vec!["a.br", "-o", "x"],
+                "--target" => vec!["a.br", "--target", "linux"],
+                _ => vec!["a.br", f],
+            };
             assert!(p(&args).is_ok(), "{} is listed in FLAGS but not parsed", f);
         }
     }

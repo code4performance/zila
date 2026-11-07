@@ -964,6 +964,7 @@ impl<'a> Asm<'a> {
             "nop" => Some(&[0x90]),
             "hlt" => Some(&[0xF4]),
             "cli" => Some(&[0xFA]),
+            "syscall" => Some(&[0x0F, 0x05]),
             "sti" => Some(&[0xFB]),
             "cld" => Some(&[0xFC]),
             "std" => Some(&[0xFD]),
@@ -1663,6 +1664,11 @@ mod tests {
 
     fn enc(src: &str, bits: u8) -> Vec<u8> {
         assemble(src, 0x1000, bits).unwrap().bytes
+    }
+
+    #[test]
+    fn syscall_is_two_bytes() {
+        assert_eq!(enc("syscall", 64), [0x0F, 0x05]);
     }
 
     #[test]

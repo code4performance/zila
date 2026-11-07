@@ -10,6 +10,7 @@ fn usage() -> ! {
     eprintln!("       brasa-parse --docs");
     eprintln!("       brasa-parse --fmt | --fmt-check <file.br>...");
     eprintln!("       brasa-parse --test <file.br>... [--no-opt]");
+    eprintln!("       brasa-parse <file.br> --target linux -o <program>");
     exit(2);
 }
 
@@ -105,7 +106,8 @@ fn main() {
             if mode == Mode::Ast {
                 println!("{:#?}", file);
             } else if mode == Mode::Asm {
-                match brasa::codegen_x64::generate_asm_with(&file, &brasa::codegen_x64::CompileOptions { optimize: opts.optimize }) {
+                let target = if opts.target == "linux" { brasa::codegen_x64::Target::Linux } else { brasa::codegen_x64::Target::Windows };
+                match brasa::codegen_x64::generate_asm_for(&file, &brasa::codegen_x64::CompileOptions { optimize: opts.optimize }, target) {
                     Ok(asm) => println!("{}", asm),
                     Err(e) => {
                         eprintln!("error: {}", e);
@@ -113,19 +115,30 @@ fn main() {
                     }
                 }
             } else if mode == Mode::Build {
+                let linux = opts.target == "linux";
                 let default_out = {
                     let stem = std::path::Path::new(&path)
                         .file_stem()
                         .and_then(|s| s.to_str())
                         .unwrap_or("out");
-                    format!("{}.exe", stem)
+                    if linux {
+                        stem.to_string()
+                    } else {
+                        format!("{}.exe", stem)
+                    }
                 };
                 let target_exe = out_exe.unwrap_or(default_out);
+                let options = brasa::codegen_x64::CompileOptions { optimize: opts.optimize };
                 println!("Compiling {} to native x86-64 binary: {}...", path, target_exe);
-                match brasa::codegen_x64::compile_to_native_with(&file, &target_exe, &brasa::codegen_x64::CompileOptions { optimize: opts.optimize }) {
+                let built = if linux {
+                    brasa::codegen_x64::compile_to_linux(&file, &target_exe, &options)
+                } else {
+                    brasa::codegen_x64::compile_to_native_with(&file, &target_exe, &options)
+                };
+                match built {
                     Ok(()) => {
                         if let Ok(meta) = std::fs::metadata(&target_exe) {
-                            println!("Built {} ({} bytes, native x86-64 PE binary)", target_exe, meta.len());
+                            println!("Built {} ({} bytes, native x86-64 {} binary)", target_exe, meta.len(), if linux { "ELF" } else { "PE" });
                         } else {
                             println!("Built {}", target_exe);
                         }

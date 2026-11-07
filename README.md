@@ -181,7 +181,8 @@ Brasa is **pre-alpha**. The design is settling, but breaking changes are still p
 | Formatter (`--fmt`, `--fmt-check`) | ✅ Standard style for `.br` files; only whitespace changes, comments kept |
 | Test runner (`--test`, `#[test]`, `assert`, `assert_eq`) | ✅ Runs the tests of a file natively and reports `ok`/`FAIL` with the line |
 | Package manager, language server | ⏳ Not started |
-| Linux, macOS, ARM64, Android, iOS | ⏳ Windows x64 and bare-metal x86-64 only |
+| Linux x86-64 (`--target linux`) | ✅ ELF written by the compiler (no linker; static unless the program calls C): the language and every library except `ui`, with the same output as Windows (tasks, `async`, files, TCP/UDP, DNS, calling C) |
+| macOS, ARM64, Android, iOS | ⏳ Not started |
 
 ---
 
@@ -191,9 +192,9 @@ This is the plan, in roughly the order we intend to do it. **Every item is a pla
 
 | # | Work | What it involves | Difficulty |
 |---|---|---|---|
-| 1 | Standard library, next steps | TLS, async DNS. Mostly written in Brasa. | ⭐ – ⭐⭐ |
+| 1 | Standard library, next steps | TLS. Mostly written in Brasa. | ⭐ – ⭐⭐ |
 | 2 | Tooling | A package manager, a language server, a richer VS Code extension. | ⭐⭐ – ⭐⭐⭐ |
-| 3 | More platforms | **Linux x86-64 first** (ELF and the System V ABI), then macOS. Apple Silicon, Android and iOS need an ARM64 backend. WebAssembly later. | ⭐⭐⭐ – ⭐⭐⭐⭐ |
+| 3 | More platforms | A window toolkit for Linux (`ui`). Then macOS. Apple Silicon, Android and iOS need an ARM64 backend. WebAssembly later. | ⭐⭐⭐ – ⭐⭐⭐⭐ |
 | 4 | Self-hosting | A Brasa compiler written in Brasa. | long term |
 
 Beyond the compiler, contributions that make a big difference right now:

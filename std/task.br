@@ -35,6 +35,7 @@ extern "system" func GetTickCount64() -> u64
 extern "system" func Sleep(ms: u32)
 extern "system" func GetLastError() -> u32
 extern "system" func CreateIoCompletionPort(file: usize, port: usize, key: usize, threads: u32) -> usize
+extern "system" func PostQueuedCompletionStatus(port: usize, bytes: u32, key: usize, ov: usize) -> i32
 extern "system" func GetQueuedCompletionStatusEx(port: usize, entries: *u8, count: u32, removed: *usize, ms: u32, alertable: i32) -> i32
 #[link("ntdll")]
 extern "system" func RtlNtStatusToDosError(status: u32) -> u32
@@ -264,7 +265,9 @@ end
 
 // Completion routine of a name lookup (see `net.lookup`). The system calls it, on this thread,
 // while `poll_io` waits (the wait is alertable): it finishes the operation like a completion
-// from the port does. It allocates nothing and never switches tasks.
+// from the port does. It allocates nothing and never switches tasks. The wait does not return
+// by itself after a routine has run, so the routine also posts an empty packet to the port,
+// which makes `poll_io` return and lets the scheduler see the task it woke.
 func dns_done(error: u32, bytes: u32, overlapped: usize)
     let idp: *int = overlapped + 32
     var id = 0
@@ -277,6 +280,9 @@ func dns_done(error: u32, bytes: u32, overlapped: usize)
     op.done = true
     pending_io -= 1
     wake(op.task)
+    unsafe
+        PostQueuedCompletionStatus(iocp, 0, 0, 0)
+    end
 end
 
 // Collects completed operations, waiting up to `ms` milliseconds for the first. The wait is

@@ -96,7 +96,7 @@
 
 <span class="kw">try</span> <span class="kw">await</span> fs.write(<span class="str">"notes.txt"</span>, <span class="str">"hello"</span>)       <span class="cm">// creates or replaces the file</span>
 <span class="kw">let</span> text = <span class="kw">try</span> <span class="kw">await</span> fs.read(<span class="str">"notes.txt"</span>)</code></pre>
-      <p>Errors name the file and give Windows' reason, for example <code>missing.txt: The system cannot find the file specified.</code> Files are closed when the last reference to them goes away.</p>
+      <p>Errors name the file and give the operating system's reason, for example <code>missing.txt: The system cannot find the file specified.</code> on Windows and <code>missing.txt: No such file or directory</code> on Linux. Files are closed when the last reference to them goes away.</p>
     </section>
 
     <section id="network">
@@ -122,6 +122,15 @@
     <span class="kw">return</span>
 <span class="kw">end</span></code></pre>
       <p>This is <code>examples/async.br</code> in miniature; the full program also reads and writes a file and waits for three sleeps at once. Sockets close when the last reference goes away, or earlier with <code>close()</code>. The first <code>write</code> after the other side closed may still succeed (that is how TCP works); the next one fails with an error.</p>
+    </section>
+
+    <section id="dns">
+      <h2>Looking up names</h2>
+      <p>A host name is resolved without blocking the other tasks: the task that asked waits and the rest keep running. <code>net.connect</code> and <code>send_to</code> do it for you; <code>net.lookup(host)</code> gives the first IPv4 address of a host as text (<code>"127.0.0.1"</code>), or the error <code>cannot resolve 'host'</code>. An address that is already numeric is returned as it is, with no lookup. <code>timeout(ms, net.lookup(host))</code> gives a lookup a deadline; a lookup that timed out finishes in the background and its answer is dropped.</p>
+      <pre><code><span class="kw">use</span> net
+<span class="kw">use</span> task
+
+<span class="kw">let</span> ip = <span class="kw">try</span> <span class="kw">await</span> timeout(2000, net.lookup(<span class="str">"localhost"</span>))   <span class="cm">// 127.0.0.1</span></code></pre>
     </section>
 
     <section id="udp">
@@ -167,10 +176,9 @@
     <section id="limits">
       <h2>Limits in this version</h2>
       <ul>
-        <li>Windows x64 only. A bare-metal kernel that uses <code>async</code> fails to build with a message saying so.</li>
+        <li>Windows x64 and Linux x86-64 (<code>--target linux</code>; see <a href="native.html#linux">the Linux target</a>). A bare-metal kernel that uses <code>async</code> fails to build with a message saying so.</li>
         <li>No parallelism (one thread) and no cancellation.</li>
         <li>A future is awaited once.</li>
-        <li>Looking up a host name (not an address like <code>127.0.0.1</code>) uses the Windows resolver and blocks every task until it answers.</li>
         <li>Only TCP and UDP over IPv4: no TLS, connected UDP sockets, broadcast, multicast or directory operations, and the <code>ui</code> message loop does not yet run other tasks.</li>
       </ul>
     </section>

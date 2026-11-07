@@ -1,0 +1,49 @@
+// Tests written in Brasa.
+//
+//   brasa-parse --test examples/testing.br
+//
+// A test is a function marked #[test] that takes nothing and returns `error`. `assert` and
+// `assert_eq` end the test with an error that names the line when a check fails, the same way
+// `try` ends a function. The runner prints `ok` or `FAIL` for each test, then a summary, and
+// exits with status 1 when something failed.
+package main
+
+func clamp(v: int, lo: int, hi: int) -> int
+    if v < lo
+        return lo
+    end
+    if v > hi
+        return hi
+    end
+    return v
+end
+
+// A helper that checks something is a function that returns `error`, called with `try`.
+func check_range(v: int) -> error
+    assert(v >= 0 and v <= 10, "{v} is out of range")
+    return
+end
+
+#[test]
+func clamp_keeps_values_inside() -> error
+    assert_eq(clamp(5, 0, 10), 5)
+    assert_eq(clamp(0 - 3, 0, 10), 0)
+    assert_eq(clamp(99, 0, 10), 10)
+    return
+end
+
+#[test]
+func clamp_results_stay_in_range() -> error
+    try check_range(clamp(7, 0, 10))
+    try check_range(clamp(0 - 7, 0, 10))
+    try check_range(clamp(70, 0, 10))
+    return
+end
+
+#[test]
+func text_and_floats_compare() -> error
+    assert_eq("ab" + "c", "abc")
+    assert_eq(1.5 + 1.0, 2.5)
+    assert(not (1 > 2))
+    return
+end

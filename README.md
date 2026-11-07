@@ -176,10 +176,11 @@ Brasa is **pre-alpha**. The design is settling, but breaking changes are still p
 | Floating point | ✅ Works: `float`/`f64`/`f32`, `use math`, C calls; Windows x64 only |
 | Generics and interfaces | ✅ Works: generic functions and records, inferred type arguments, structural interfaces as bounds |
 | Maps (`Map<K, V>`) | ✅ Works: text and integer keys, insertion order |
-| Text, list, format, set and sorted libraries | ✅ `use text`, `use list`, `use format` (`%` templates, padding, hex, thousands), `use set`, `use sorted` (sorted maps and sets, ordered by a function) and `use bufio` (the buffers behind line reading and buffered writing in `fs` and `net`). More to come |
+| Text, list, format, set and sorted libraries | ✅ `use text`, `use list`, `use format` (`%` templates, padding, hex, thousands, and `format.fmt` for values of any type with `%(08x)`, `%(>10,)` and `%(.2f)`, native only), `use set`, `use sorted` (sorted maps and sets, ordered by a function) and `use bufio` (the buffers behind line reading and buffered writing in `fs` and `net`). More to come |
 | Optimizer | 🔧 Constant folding, direct operands, compare-and-branch, peephole cleanups, integer variables in registers and inlining of small functions (`--no-opt` turns them off) |
 | Formatter (`--fmt`, `--fmt-check`) | ✅ Standard style for `.br` files; only whitespace changes, comments kept |
-| Test runner, package manager, language server | ⏳ Not started |
+| Test runner (`--test`, `#[test]`, `assert`, `assert_eq`) | ✅ Runs the tests of a file natively and reports `ok`/`FAIL` with the line |
+| Package manager, language server | ⏳ Not started |
 | Linux, macOS, ARM64, Android, iOS | ⏳ Windows x64 and bare-metal x86-64 only |
 
 ---
@@ -190,8 +191,8 @@ This is the plan, in roughly the order we intend to do it. **Every item is a pla
 
 | # | Work | What it involves | Difficulty |
 |---|---|---|---|
-| 1 | Standard library, next steps | Formatting values of any type, UDP, TLS, async DNS. Mostly written in Brasa. | ⭐ – ⭐⭐ |
-| 2 | Tooling | `brasa test`, a package manager, a language server, a richer VS Code extension. | ⭐⭐ – ⭐⭐⭐ |
+| 1 | Standard library, next steps | UDP, TLS, async DNS. Mostly written in Brasa. | ⭐ – ⭐⭐ |
+| 2 | Tooling | A package manager, a language server, a richer VS Code extension. | ⭐⭐ – ⭐⭐⭐ |
 | 3 | More platforms | **Linux x86-64 first** (ELF and the System V ABI), then macOS. Apple Silicon, Android and iOS need an ARM64 backend. WebAssembly later. | ⭐⭐⭐ – ⭐⭐⭐⭐ |
 | 4 | Self-hosting | A Brasa compiler written in Brasa. | long term |
 
@@ -239,6 +240,7 @@ brasa-parse program.br --ast           # show the syntax tree
 brasa-parse program.br --tokens        # show the tokens
 brasa-parse --os os/boot.br os/kernel.br -o brasa-os.img   # build a bootable disk image
 brasa-parse --fmt file.br              # format files in the standard style (--fmt-check only lists them)
+brasa-parse --test file.br             # run the #[test] functions of a file
 brasa-parse --docs                     # refresh the examples on the documentation site
 ```
 

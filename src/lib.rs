@@ -11,6 +11,7 @@ pub mod interp;
 pub mod lexer;
 pub mod parser;
 pub mod regalloc;
+pub mod testrun;
 
 pub use codegen_x64::compile_to_native;
 pub use interp::{float_text, float_text_f32, Interpreter};

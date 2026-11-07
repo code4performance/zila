@@ -143,3 +143,115 @@ fn the_report_example_agrees_with_the_interpreter() {
         assert_eq!(out, interp);
     }
 }
+
+// ---- values of any type (native only) ----
+
+/// `format.fmt(template, args)` printed (or the error message).
+fn fmt_show(template: &str, args: &str) -> String {
+    format!(
+        "match format.fmt(\"{}\"{})\n    ok(v) -> print(\"[\" + v + \"]\")\n    err(e) -> print(\"error: \" + e.message)\nend\n",
+        template,
+        if args.is_empty() { String::new() } else { format!(", {}", args) }
+    )
+}
+
+#[test]
+fn values_of_any_type_fill_the_placeholders() {
+    expect(
+        "print(format.fmt(\"% has % items and costs % (paid: %)\", \"ana\", 3, 2.5, true) ?? \"?\")\nprint(format.fmt(\"%1 %0 %1\", 7, \"x\") ?? \"?\")\nprint(format.fmt(\"[%(>5)]\", 42) ?? \"?\")\nprint(format.fmt(\"100%% sure\") ?? \"?\")\n",
+        "ana has 3 items and costs 2.5 (paid: true)\nx 7 x\n[   42]\n100% sure\n",
+        false,
+    );
+}
+
+#[test]
+fn other_integer_widths_and_f32_are_values_too() {
+    expect(
+        "let small: i32 = 7\nlet tiny: u8 = 200\nlet big: u64 = 5\nlet half: f32 = 1.5\nprint(format.fmt(\"% % % %(.1f)\", small, tiny, big, half) ?? \"?\")\n",
+        "7 200 5 1.5\n",
+        false,
+    );
+}
+
+#[test]
+fn a_type_of_the_program_is_formatted_through_to_value() {
+    let src = "package main\n\nuse format\n\ntype Point = record\n    x: int\n    y: int\nend\n\nfunc (p: Point) to_value() -> format.Value\n    return format.Text(\"({p.x}, {p.y})\")\nend\n\nfunc main()\n    print(format.fmt(\"at %, %(>8)|\", Point { x: 1, y: 2 }, Point { x: 3, y: 4 }) ?? \"?\")\nend\n";
+    if let Some(out) = native(src) {
+        assert_eq!(out, "at (1, 2),   (3, 4)|\n");
+    }
+}
+
+#[test]
+fn type_letters_format_integers() {
+    expect(
+        &fmt_show("%(x) %(X) %(b) %(,) %(d)", "255, 255, 5, 1234567, 0 - 9"),
+        "[ff FF 101 1,234,567 -9]\n",
+        false,
+    );
+}
+
+#[test]
+fn width_fill_and_zeros_combine_with_types() {
+    expect(&fmt_show("%(08x)|%(>10,)|%(*^9d)", "255, 1234567, 0 - 42"), "[000000ff| 1,234,567|***-42***]\n", false);
+}
+
+#[test]
+fn floats_take_a_precision_and_round_halves_away_from_zero() {
+    expect(
+        &fmt_show("%(.2f)|%(f)|%(>8.1f)|%(.0f)|%(.1)", "3.14159, 2.5, 0.0 - 0.05, 2.5, 0.25"),
+        "[3.14|2.500000|    -0.1|3|0.3]\n",
+        false,
+    );
+}
+
+#[test]
+fn the_extreme_integers_work_with_types() {
+    expect(
+        &fmt_show("%(x) %(b)", "9223372036854775807, 0 - 1"),
+        "[7fffffffffffffff -1]\n",
+        false,
+    );
+}
+
+#[test]
+fn letters_that_do_not_fit_are_errors_that_name_them() {
+    let body = fmt_show("%(x)", "\"text\"") + &fmt_show("%(f)", "3") + &fmt_show("%(.2)", "3") + &fmt_show("%(,)", "1.5") + &fmt_show("%(.2d)", "3") + &fmt_show("%(q)", "1") + &fmt_show("%(.f)", "1.5");
+    expect(
+        &body,
+        "error: 'x' needs an integer, got text\nerror: 'f' needs a float, got integer\nerror: a precision needs a float, got integer\nerror: ',' needs an integer, got float\nerror: a precision goes with 'f', not 'd'\nerror: bad layout 'q'\nerror: bad layout '.f'\n",
+        false,
+    );
+}
+
+#[test]
+fn template_errors_are_the_same_with_values() {
+    expect(
+        &(fmt_show("% %", "1") + &fmt_show("a %(<5", "1") + &fmt_show("%2", "1")),
+        "error: missing argument 1\nerror: unclosed '(' in placeholder\nerror: missing argument 2\n",
+        false,
+    );
+}
+
+#[test]
+fn eight_values_are_allowed_and_nine_are_not() {
+    expect("print(format.fmt(\"%%%%%%%%%%%%%%%%\", 1, 2, 3, 4, 5, 6, 7, 8) ?? \"?\")\n", "%%%%%%%%\n", false);
+    let nine = main_of("print(format.fmt(\"%\", 1, 2, 3, 4, 5, 6, 7, 8, 9) ?? \"?\")\n");
+    let file = parse_source(&nine).unwrap();
+    let e = brasa::codegen_x64::generate_asm(&file).unwrap_err();
+    assert!(e.contains("format.fmt takes at most eight values"), "{}", e);
+}
+
+#[test]
+fn text_and_the_helpers_still_run_in_the_interpreter() {
+    let body = "print(format.text(\"%(>5)|%(05)\", [\"ab\", \"42\"]) ?? \"?\")\nprint(format.hex(255))\nprint(format.thousands(1234567))\n";
+    expect(body, "   ab|00042\nff\n1,234,567\n", true);
+}
+
+#[test]
+fn the_values_example_runs() {
+    let src = std::fs::read_to_string("examples/values.br").unwrap();
+    if let Some(out) = native(&src) {
+        assert!(out.contains("Apples  |   1,200|      1.50") && out.contains("hex 000000ff, binary 1010, upper BEEF"), "{}", out);
+        assert!(out.contains("ready: true, ratio: 0.3, at (3, 4)"), "{}", out);
+    }
+}

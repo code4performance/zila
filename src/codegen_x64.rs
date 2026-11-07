@@ -895,6 +895,62 @@ impl Compiler {
         }
     }
 
+    /// `assert(cond)`, `assert(cond, "message")` and `assert_eq(a, b)`: when the check fails
+    /// the enclosing function returns an error `line N: ...`. Written as the statements a
+    /// program could have written itself.
+    fn assert_stmt(&mut self, name: &str, args: &[Arg], line: u32) -> R<()> {
+        if !matches!(self.fs.ret, Ty::Result(_)) {
+            return self.err(format!("{} needs a function that returns an error: write `func name() -> error`", name));
+        }
+        let (min, max) = if name == "assert" { (1, 2) } else { (2, 2) };
+        if args.len() < min || args.len() > max || args.iter().any(|a| a.name.is_some() || a.by_ref || a.spread) {
+            return self.err(if name == "assert" {
+                "assert takes a condition and an optional message"
+            } else {
+                "assert_eq takes two values"
+            });
+        }
+        let mk = |kind: ExprKind| Expr { kind, line };
+        let fail = |parts: Vec<TextPart>| {
+            let call = mk(ExprKind::Call {
+                callee: Box::new(mk(ExprKind::Ident("error".into()))),
+                args: vec![Arg { name: None, by_ref: false, spread: false, value: mk(ExprKind::Text(parts)) }],
+            });
+            vec![Stmt { kind: StmtKind::Return(Some(call)), line }]
+        };
+        let prefix = TextPart::Lit(format!("line {}: ", line));
+        let mut stmts: Vec<Stmt> = Vec::new();
+        let (cond, body) = if name == "assert" {
+            let mut parts = vec![prefix];
+            match args.get(1).map(|a| &a.value) {
+                None => parts.push(TextPart::Lit("assertion failed".into())),
+                Some(Expr { kind: ExprKind::Text(p), .. }) => parts.extend(p.iter().cloned()),
+                Some(other) => parts.push(TextPart::Expr(other.clone())),
+            }
+            (mk(ExprKind::Unary { op: "not", expr: Box::new(args[0].value.clone()) }), fail(parts))
+        } else {
+            for (var, arg) in [("__assert_left", &args[0]), ("__assert_right", &args[1])] {
+                stmts.push(Stmt { kind: StmtKind::Var(VarDecl { name: var.into(), ty: None, value: Some(arg.value.clone()), mutable: false }), line });
+            }
+            let id = |n: &str| mk(ExprKind::Ident(n.into()));
+            let parts = vec![
+                prefix,
+                TextPart::Lit("assertion failed: left ".into()),
+                TextPart::Expr(id("__assert_left")),
+                TextPart::Lit(", right ".into()),
+                TextPart::Expr(id("__assert_right")),
+            ];
+            (mk(ExprKind::Binary { op: "!=", lhs: Box::new(id("__assert_left")), rhs: Box::new(id("__assert_right")) }), fail(parts))
+        };
+        stmts.push(Stmt { kind: StmtKind::Expr(mk(ExprKind::If { branches: vec![(cond, body)], else_body: None })), line });
+        self.push_scope();
+        for st in &stmts {
+            self.stmt(st)?;
+        }
+        self.pop_scope();
+        Ok(())
+    }
+
     fn push_scope(&mut self) {
         self.fs.scopes.push(Scope::default());
     }
@@ -2088,6 +2144,13 @@ end
                 }
                 ExprKind::Match { scrutinee, arms } => {
                     self.match_expr(scrutinee, arms, None, false)?;
+                }
+                ExprKind::Call { callee, args }
+                    if matches!(&callee.kind, ExprKind::Ident(n) if (n == "assert" || n == "assert_eq")
+                        && !self.funcs.contains_key(&(self.cur_mod.clone(), n.clone()))) =>
+                {
+                    let ExprKind::Ident(name) = &callee.kind else { unreachable!() };
+                    self.assert_stmt(name, args, e.line)?;
                 }
                 _ => {
                     let t = self.expr(e, None)?;
@@ -4104,6 +4167,20 @@ end
                         if m == "c" {
                             return self.c_intrinsic(name, args);
                         }
+                        // `format.fmt(template, a, b)` is `format.fmt2(template, a, b)`
+                        let renamed;
+                        let name = if m == "format" && name == "fmt" && !self.funcs.contains_key(&(m.clone(), name.clone())) {
+                            if args.is_empty() {
+                                return self.err("format.fmt needs a template");
+                            }
+                            if args.len() > 9 {
+                                return self.err("format.fmt takes at most eight values");
+                            }
+                            renamed = format!("fmt{}", args.len() - 1);
+                            &renamed
+                        } else {
+                            name
+                        };
                         let key = (m.clone(), name.clone());
                         if let Some((fd, line)) = self.tmpl_funcs.get(&key).cloned() {
                             return self.call_generic(&key.0, &fd, line, args, want);

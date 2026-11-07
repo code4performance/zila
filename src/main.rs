@@ -9,6 +9,7 @@ fn usage() -> ! {
     eprintln!("       brasa-parse --os <boot.br> <kernel.br> -o <disk.img>");
     eprintln!("       brasa-parse --docs");
     eprintln!("       brasa-parse --fmt | --fmt-check <file.br>...");
+    eprintln!("       brasa-parse --test <file.br>... [--no-opt]");
     exit(2);
 }
 
@@ -66,6 +67,11 @@ fn main() {
         let mut files = vec![path];
         files.extend(opts.extra.iter().cloned());
         run_fmt(&files, mode == Mode::FmtCheck);
+    }
+    if mode == Mode::Test {
+        let mut files = vec![path];
+        files.extend(opts.extra.iter().cloned());
+        exit(brasa::testrun::run(&files, opts.optimize));
     }
     if mode == Mode::Os {
         build_os_image(&path, &opts.extra, out_exe);

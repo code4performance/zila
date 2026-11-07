@@ -409,6 +409,18 @@ ages.remove(<span class="str">"alan"</span>)                      <span class="c
       <p>See the <a href="examples.html#ffi">FFI &amp; low-level example</a> for a fuller walkthrough, and the project's <code>brasa-ffi.md</code> for the full specification (ABIs, <code>#[c_layout]</code>, <code>#[link]</code>/<code>#[link_src]</code>, <code>#[cfg]</code>, and naked functions).</p>
     </section>
 
+    <section id="testing">
+      <h2>Testing</h2>
+      <p>A test is a function marked <code>#[test]</code> that takes nothing and returns <code>error</code> (or nothing). <code>assert(cond)</code>, <code>assert(cond, "message")</code> and <code>assert_eq(a, b)</code> (numbers, booleans, floats and text) end the test with an error that names the line when a check fails, the same way <code>try</code> ends a function, so they are only allowed in a function that returns <code>error</code> or <code>T or error</code>. A helper that checks things is written <code>-&gt; error</code> and called with <code>try</code>.</p>
+      <pre><code>#[test]
+<span class="kw">func</span> clamp_keeps_values_inside() -&gt; error
+    assert_eq(clamp(5, 0, 10), 5)
+    assert(clamp(99, 0, 10) &lt;= 10, <span class="str">"above the range"</span>)
+    <span class="kw">return</span>
+<span class="kw">end</span></code></pre>
+      <p>Run them with <code>brasa-parse --test file.br</code> (the file must be in <code>package main</code>). A failed check prints <code>FAIL clamp_keeps_values_inside: line 7: assertion failed: left 3, right 4</code>; a test that crashes the program stops the run of that file. <code>examples/testing.br</code> is a complete example.</p>
+    </section>
+
     <div class="note">
       <strong>Note:</strong> <code>html ... end</code> templates (a markup-aware syntax extension for <code>use web</code>) and explicit generic arguments at call sites (<code>first&lt;i32&gt;(x)</code>) are described in the grammar but not yet implemented by the parser.
     </div>

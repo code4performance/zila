@@ -74,6 +74,9 @@ cargo test</code></pre>
         <dt>--fmt-check file.br ...</dt>
         <dd>Changes nothing: lists the files that are not in the standard style and exits with status 1 when there are any (and 0 otherwise), so a build can check formatting.</dd>
 
+        <dt>--test file.br ...</dt>
+        <dd>Builds each file with a generated entry point that runs its <code>#[test]</code> functions in order and prints <code>ok name</code> or <code>FAIL name: message</code> for each, then <code>test result: N passed, M failed</code>. The exit status is 1 when a test failed, a file does not compile or the run stopped early (a crash such as a division by zero is reported with its exit code). The file's own <code>main</code> is not used; combine with <code>--no-opt</code> to test without the optimizer. See <a href="syntax.html#testing">Testing</a>.</dd>
+
         <dt>--os boot.br kernel.br -o disk.img</dt>
         <dd>Builds a bootable disk image from a boot sector and a kernel, both written in Brasa (see <code>os/</code> in the repository). Run it with QEMU.</dd>
       </dl>

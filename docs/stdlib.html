@@ -94,12 +94,15 @@ print(format.float(3.14159, 2))                                           <span 
         <thead><tr><th>Function</th><th>What it gives</th></tr></thead>
         <tbody>
           <tr><td><code>text(template, args)</code></td><td>The template with its placeholders replaced by the list of texts <code>args</code>. It returns a result: a missing argument, an unclosed <code>(</code> or an unknown layout is an error, never partial text.</td></tr>
+          <tr><td><code>fmt(template, a, b, ...)</code></td><td>Like <code>text</code>, but the values can be integers, floats, booleans or text, up to eight of them: <code>format.fmt("%(&lt;8)|%(&gt;8.2f)", name, price)</code>. A value of your own type is formatted through a method <code>to_value()</code> that returns a <code>format.Value</code>, usually <code>format.Text("...")</code>. Native compiler only; <code>text</code> and the helpers also run in the interpreter. Without a type letter a value shows the way <code>print</code> shows it.</td></tr>
           <tr><td><code>pad_left(s, width)</code>, <code>pad_right(s, width)</code>, <code>center(s, width)</code></td><td><code>s</code> filled with spaces to <code>width</code> characters. A third argument gives another fill: <code>pad_left("7", 3, "0")</code>.</td></tr>
           <tr><td><code>int(n)</code>, <code>hex(n)</code>, <code>bin(n)</code></td><td>The digits of an integer in base 10, 16 (lowercase) or 2, with no prefix. Negative numbers get a leading <code>-</code>.</td></tr>
           <tr><td><code>thousands(n)</code></td><td>The integer with <code>,</code> between groups of three digits: <code>1,234,567</code>.</td></tr>
           <tr><td><code>float(x, digits)</code></td><td>The float with exactly <code>digits</code> decimals, halves away from zero.</td></tr>
         </tbody>
       </table>
+      <p>With <code>fmt</code> a layout can end with a precision and a type: <code>[[fill]align][0][width][.precision][type]</code>. The types are <code>d</code> (decimal), <code>x</code> and <code>X</code> (hexadecimal), <code>b</code> (binary), <code>,</code> (thousands separators), <code>f</code> (fixed decimals, 6 unless a precision says otherwise) and <code>s</code> (as printed). A precision alone, like <code>%(.2)</code>, means <code>f</code> and needs a float. A letter that does not fit the value, such as <code>%(x)</code> on text, is an error that names the letter and the kind of value.</p>
+      <pre><code>format.fmt("%(08x)|%(&gt;10,)|%(.2f)", 255, 1234567, 3.14159)   <span class="cm">// 000000ff| 1,234,567|3.14</span></code></pre>
     </section>
 
     <section id="set">
@@ -178,7 +181,7 @@ scores.put(<span class="str">"ana"</span>, 90)
       <ul>
         <li>The modules are compiled with your program, so only the functions you use add to its size. They need the Windows target (<code>use text</code> also brings in the float printing library, which is why it is not available in a bare-metal kernel).</li>
         <li>The interpreter behind <code>--run</code> runs them too. It handles errors only through <code>??</code> (it has no <code>match</code> on results), and a lambda in it cannot use variables of the function around it.</li>
-        <li>Not here yet: regular expressions, Unicode case mapping, placeholders that format values of any type (<code>format.text</code> takes texts).</li>
+        <li>Not here yet: regular expressions, Unicode case mapping, and <code>format.fmt</code> in the interpreter.</li>
       </ul>
     </section>
   </main>

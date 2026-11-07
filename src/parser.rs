@@ -584,6 +584,35 @@ impl Parser {
         Ok(RetType { ty: Some(ty), fallible: false })
     }
 
+    /// Speculatively parse `<T, U>` followed by `(` at a call site. On success the tokens up to (not
+    /// including) the `(` are consumed; otherwise nothing is consumed and `None` is returned.
+    fn try_type_args(&mut self) -> Option<Vec<Type>> {
+        let pos = self.pos;
+        // `f<T>(x)` has no spaces around the brackets; `a < b, c > (d)` does, and stays a comparison
+        if pos == 0 || self.toks[pos].span.0 != self.toks[pos - 1].span.1 {
+            return None;
+        }
+        let end = (pos + 64).min(self.toks.len());
+        let saved: Vec<Token> = self.toks[pos..end].to_vec();
+        let r = (|| -> R<Vec<Type>> {
+            self.expect_op("<")?;
+            let mut v = vec![self.ty()?];
+            while self.eat_op(",") {
+                v.push(self.ty()?);
+            }
+            self.expect_gt()?;
+            if !self.is_op("(") || self.toks[self.pos].span.0 != self.toks[self.pos - 1].span.1 {
+                return self.err("not a call");
+            }
+            Ok(v)
+        })();
+        if r.is_err() {
+            self.pos = pos;
+            self.toks.splice(pos..end, saved);
+        }
+        r.ok()
+    }
+
     fn ty(&mut self) -> R<Type> {
         let t = self.base_type()?;
         if self.eat_op("?") {
@@ -945,7 +974,13 @@ impl Parser {
                 Tok::Op("(") => {
                     self.bump();
                     let args = self.args()?;
-                    e = Expr { kind: ExprKind::Call { callee: Box::new(e), args }, line };
+                    e = Expr { kind: ExprKind::Call { callee: Box::new(e), args, targs: Vec::new() }, line };
+                }
+                Tok::Op("<") if path_of(&e).is_some() => {
+                    let Some(targs) = self.try_type_args() else { break };
+                    self.bump();
+                    let args = self.args()?;
+                    e = Expr { kind: ExprKind::Call { callee: Box::new(e), args, targs }, line };
                 }
                 Tok::Op("^") => {
                     self.bump();

@@ -746,7 +746,7 @@ impl Interpreter {
                 let right = self.eval_expr(rhs, env)?;
                 self.eval_binary(op, left, right)
             }
-            ExprKind::Call { callee, args } => {
+            ExprKind::Call { callee, args, .. } => {
                 // Check if it's a method call: target.method(args)
                 if let ExprKind::Field { expr: target_expr, name: method_name, .. } = &callee.kind {
                     if let ExprKind::Ident(m) = &target_expr.kind {

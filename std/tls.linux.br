@@ -1,0 +1,287 @@
+// =====================================================================
+// Brasa standard library: TLS client (`use tls`) (Linux layer)
+//
+// The Linux counterpart of std/tls.br, with the same functions and behavior. It uses OpenSSL 3
+// (libssl.so.3, which every current distribution ships) through `extern`. OpenSSL works on
+// memory buffers (BIOs) here: the bytes it wants to send are written to the socket with
+// `net`, and the bytes that arrive are handed to it, so waiting never blocks the other tasks.
+// The server certificate is checked against the system's trusted certificates and the host
+// name. A program that uses `tls` is dynamically linked (like any program that calls C).
+//
+//   let conn = try await tls.connect("example.com", 443)
+//   try await conn.write("GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
+//   let reply = try await conn.read(4096)
+//
+// `read` returns empty text when the server closed the connection.
+// =====================================================================
+
+package tls
+
+use c
+use sys
+use net
+
+#[link("ssl")]
+extern "C" func TLS_client_method() -> usize
+extern "C" func SSL_CTX_new(method: usize) -> usize
+extern "C" func SSL_CTX_free(ctx: usize)
+extern "C" func SSL_CTX_set_default_verify_paths(ctx: usize) -> i32
+extern "C" func SSL_new(ctx: usize) -> usize
+extern "C" func SSL_free(ssl: usize)
+extern "C" func SSL_set_bio(ssl: usize, rbio: usize, wbio: usize)
+extern "C" func SSL_set_connect_state(ssl: usize)
+extern "C" func SSL_set_verify(ssl: usize, mode: i32, callback: usize)
+extern "C" func SSL_set1_host(ssl: usize, host: *u8) -> i32
+extern "C" func SSL_ctrl(ssl: usize, command: i32, larg: i64, parg: *u8) -> i64
+extern "C" func SSL_do_handshake(ssl: usize) -> i32
+extern "C" func SSL_get_error(ssl: usize, result: i32) -> i32
+extern "C" func SSL_read(ssl: usize, buffer: *u8, count: i32) -> i32
+extern "C" func SSL_write(ssl: usize, buffer: *u8, count: i32) -> i32
+extern "C" func SSL_shutdown(ssl: usize) -> i32
+extern "C" func SSL_get_verify_result(ssl: usize) -> i64
+extern "C" func BIO_s_mem() -> usize
+extern "C" func BIO_new(method: usize) -> usize
+extern "C" func BIO_read(bio: usize, buffer: *u8, count: i32) -> i32
+extern "C" func BIO_write(bio: usize, buffer: *u8, count: i32) -> i32
+extern "C" func BIO_ctrl_pending(bio: usize) -> usize
+
+#[link("crypto")]
+extern "C" func ERR_get_error() -> u64
+extern "C" func ERR_error_string_n(code: u64, buffer: *u8, size: usize)
+extern "C" func X509_verify_cert_error_string(code: i64) -> *u8
+
+let SSL_ERROR_SSL = 1
+let SSL_ERROR_WANT_READ = 2
+let SSL_ERROR_WANT_WRITE = 3
+let SSL_ERROR_ZERO_RETURN = 6
+let SSL_VERIFY_PEER = 1
+let SSL_CTRL_SET_TLSEXT_HOSTNAME = 55
+
+// An open TLS connection. Releases its OpenSSL state when the last reference goes away.
+#[shared]
+type Conn = record
+    raw: net.Conn
+    ssl: usize
+    rbio: usize
+    wbio: usize
+    open: bool
+end
+
+func (ref conn: Conn) drop()
+    release(conn)
+end
+
+func release(conn: Conn)
+    if conn.open
+        unsafe
+            SSL_free(conn.ssl)
+        end
+        conn.open = false
+    end
+end
+
+// The newest OpenSSL error as text, or `fallback` when there is none.
+func last_error(fallback: text) -> text
+    var code: u64 = 0
+    unsafe
+        code = ERR_get_error()
+    end
+    if code == u64(0)
+        return fallback
+    end
+    let b = sys.buffer(256)
+    unsafe
+        ERR_error_string_n(code, b.ptr, usize(256))
+    end
+    return c.from_cstr(b.ptr)
+end
+
+// Copies `n` bytes of `data` starting at `from` into raw memory at `dest`.
+func put_text(dest: *u8, data: text, from: int, n: int)
+    unsafe
+        for i in 0..n
+            dest[i] = int(data[from + i])
+        end
+    end
+end
+
+// Sends what OpenSSL has queued for the server.
+async func flush(conn: Conn) -> error
+    while true
+        var pending = 0
+        unsafe
+            pending = int(BIO_ctrl_pending(conn.wbio))
+        end
+        if pending == 0
+            return
+        end
+        let b = sys.buffer(pending)
+        var n = 0
+        unsafe
+            n = int(BIO_read(conn.wbio, b.ptr, i32(pending)))
+        end
+        if n <= 0
+            return
+        end
+        try await conn.raw.write(c.from_bytes(b.ptr, n))
+    end
+    return
+end
+
+// Hands bytes received from the server to OpenSSL; false when the server closed the connection.
+async func feed(conn: Conn) -> bool or error
+    let more = try await conn.raw.read(16384)
+    if more.len == 0
+        return false
+    end
+    let b = sys.buffer(more.len)
+    put_text(b.ptr, more, 0, more.len)
+    unsafe
+        BIO_write(conn.rbio, b.ptr, i32(more.len))
+    end
+    return true
+end
+
+// Opens a TCP connection and runs the TLS handshake.
+async func connect(host: text, port: int) -> Conn or error
+    let raw = try await net.connect(host, port)
+    let conn = Conn{ raw: raw, ssl: usize(0), rbio: usize(0), wbio: usize(0), open: false }
+    var ctx = usize(0)
+    unsafe
+        ctx = SSL_CTX_new(TLS_client_method())
+    end
+    if ctx == usize(0)
+        return error(last_error("TLS: cannot create a context (is OpenSSL 3 installed?)"))
+    end
+    var ok = 0
+    unsafe
+        ok = int(SSL_CTX_set_default_verify_paths(ctx))
+        conn.ssl = SSL_new(ctx)
+        SSL_CTX_free(ctx)
+    end
+    if conn.ssl == usize(0)
+        return error(last_error("TLS: cannot create a connection"))
+    end
+    conn.open = true
+    unsafe
+        conn.rbio = BIO_new(BIO_s_mem())
+        conn.wbio = BIO_new(BIO_s_mem())
+        SSL_set_bio(conn.ssl, conn.rbio, conn.wbio)
+        SSL_set_connect_state(conn.ssl)
+        SSL_set_verify(conn.ssl, i32(SSL_VERIFY_PEER), usize(0))
+        SSL_set1_host(conn.ssl, c.cstr(host))
+        SSL_ctrl(conn.ssl, i32(SSL_CTRL_SET_TLSEXT_HOSTNAME), i64(0), c.cstr(host))
+    end
+    while true
+        var r = 0
+        var e = 0
+        unsafe
+            r = int(SSL_do_handshake(conn.ssl))
+            if r != 1
+                e = int(SSL_get_error(conn.ssl, i32(r)))
+            end
+        end
+        if r != 1 and e != SSL_ERROR_WANT_READ and e != SSL_ERROR_WANT_WRITE
+            var why = last_error("the handshake was refused")
+            var vr = 0
+            unsafe
+                vr = int(SSL_get_verify_result(conn.ssl))
+            end
+            if vr != 0
+                unsafe
+                    why = c.from_cstr(X509_verify_cert_error_string(i64(vr)))
+                end
+            end
+            release(conn)
+            return error("TLS handshake with {host} failed: {why}")
+        end
+        try await flush(conn)
+        if r == 1
+            break
+        end
+        if e == SSL_ERROR_WANT_READ
+            let alive = try await feed(conn)
+            if not alive
+                release(conn)
+                return error("TLS handshake with {host} failed: the connection was closed")
+            end
+        end
+    end
+    return conn
+end
+
+// Encrypts and sends all of `data`.
+async func (conn: Conn) write(data: text) -> error
+    if not conn.open
+        return error("write: the connection is closed")
+    end
+    var done = 0
+    while done < data.len
+        var n = 0
+        var e = 0
+        unsafe
+            n = int(SSL_write(conn.ssl, c.cstr(data) + done, i32(data.len - done)))
+            if n <= 0
+                e = int(SSL_get_error(conn.ssl, i32(n)))
+            end
+        end
+        try await flush(conn)
+        if n > 0
+            done += n
+            continue
+        end
+        if e == SSL_ERROR_WANT_READ
+            let alive = try await feed(conn)
+            if not alive
+                return error("write: the connection is closed")
+            end
+        else
+            if e != SSL_ERROR_WANT_WRITE
+                return error("TLS: " + last_error("cannot send"))
+            end
+        end
+    end
+    return
+end
+
+// Receives up to `max` bytes; empty text means the server closed the connection.
+async func (conn: Conn) read(max: int) -> text or error
+    if not conn.open
+        return ""
+    end
+    let b = sys.buffer(max + 1)
+    while true
+        var n = 0
+        var e = 0
+        unsafe
+            n = int(SSL_read(conn.ssl, b.ptr, i32(max)))
+            if n <= 0
+                e = int(SSL_get_error(conn.ssl, i32(n)))
+            end
+        end
+        try await flush(conn)
+        if n > 0
+            return c.from_bytes(b.ptr, n)
+        end
+        if e == SSL_ERROR_ZERO_RETURN
+            return ""
+        end
+        if e == SSL_ERROR_WANT_READ
+            let alive = try await feed(conn)
+            if not alive
+                return ""
+            end
+        else
+            if e != SSL_ERROR_WANT_WRITE
+                return error("TLS: " + last_error("cannot receive"))
+            end
+        end
+    end
+    return ""
+end
+
+// Closes the connection now.
+async func (conn: Conn) close()
+    release(conn)
+    await conn.raw.close()
+end

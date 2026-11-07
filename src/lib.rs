@@ -9,6 +9,7 @@ pub mod docs;
 pub mod fmt;
 pub mod interp;
 pub mod lexer;
+pub mod lsp;
 pub mod parser;
 pub mod regalloc;
 pub mod testrun;

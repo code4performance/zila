@@ -398,3 +398,48 @@ fn the_interpreter_agrees_with_the_native_compiler() {
         assert_eq!(native, interp);
     }
 }
+
+#[test]
+fn explicit_type_arguments() {
+    expect(
+        r#"package main
+
+func empty<T>() -> []T
+    let xs: []T = []
+    return xs
+end
+
+func pair<A, B>(a: A, b: B) -> text
+    return "{a}/{b}"
+end
+
+func main()
+    let n = empty<int>()
+    println(n.len)
+    println(pair<int, text>(1, "x"))
+    let a = 1
+    let b = 2
+    let c = 3
+    println(a < b, b > (c))
+end
+"#,
+        "0\n1/x\ntrue false\n",
+    );
+}
+
+#[test]
+fn too_many_type_arguments() {
+    let e = compile_error(
+        r#"package main
+
+func id<T>(x: T) -> T
+    return x
+end
+
+func main()
+    println(id<int, int>(1))
+end
+"#,
+    );
+    assert!(e.contains("type argument"), "{}", e);
+}

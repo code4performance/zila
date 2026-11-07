@@ -5,7 +5,7 @@
 //! entry and nothing else.
 
 /// Every option `brasa-parse` accepts.
-pub const FLAGS: &[&str] = &["--ast", "--tokens", "--asm", "--run", "--build", "-o", "--os", "--docs", "--no-opt", "--fmt", "--fmt-check", "--test", "--target"];
+pub const FLAGS: &[&str] = &["--ast", "--tokens", "--asm", "--run", "--build", "-o", "--os", "--docs", "--no-opt", "--fmt", "--fmt-check", "--test", "--target", "--lsp"];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Mode {
@@ -26,6 +26,8 @@ pub enum Mode {
     FmtCheck,
     /// Build each file with a generated entry point that runs its `#[test]` functions.
     Test,
+    /// Run the language server on standard input and output.
+    Lsp,
 }
 
 #[derive(Debug)]
@@ -62,6 +64,7 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
             "--fmt" => o.mode = Mode::Fmt,
             "--fmt-check" => o.mode = Mode::FmtCheck,
             "--test" => o.mode = Mode::Test,
+            "--lsp" => o.mode = Mode::Lsp,
             "--no-opt" => o.optimize = false,
             "--build" | "build" => o.mode = Mode::Build,
             "--target" => {

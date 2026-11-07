@@ -47,13 +47,14 @@ pub fn std_linux_source(name: &str) -> Option<&'static str> {
         "task" => Some(include_str!("../std/task.linux.br")),
         "fs" => Some(include_str!("../std/fs.linux.br")),
         "net" => Some(include_str!("../std/net.linux.br")),
+        "tls" => Some(include_str!("../std/tls.linux.br")),
         _ => None,
     }
 }
 
 /// Libraries that are written on the Windows API and need a Linux layer to be used on Linux.
 /// `ui` and `ws` never get one (see the Linux target's documentation).
-const OS_LIBRARIES: &[&str] = &["task", "fs", "net", "sys"];
+const OS_LIBRARIES: &[&str] = &["task", "fs", "net", "sys", "tls"];
 
 /// The source of library `name` for a target: the Linux layer on Linux when there is one.
 pub fn std_source_for(name: &str, target: Target) -> Option<&'static str> {
@@ -75,6 +76,7 @@ pub fn std_source(name: &str) -> Option<&'static str> {
         "net" => Some(include_str!("../std/net.br")),
         "sys" => Some(include_str!("../std/sys.br")),
         "ws" => Some(include_str!("../std/ws.br")),
+        "tls" => Some(include_str!("../std/tls.br")),
         "float" => Some(include_str!("../std/float.br")),
         "math" => Some(include_str!("../std/math.br")),
         "text" => Some(include_str!("../std/text.br")),
@@ -384,7 +386,7 @@ fn inline_size(e: &Expr, me: &str) -> Option<usize> {
                 inline_size(expr, me)?
             }
             ExprKind::Binary { lhs, rhs, .. } => inline_size(lhs, me)? + inline_size(rhs, me)?,
-            ExprKind::Call { callee, args } => {
+            ExprKind::Call { callee, args, .. } => {
                 let mut n = match &callee.kind {
                     ExprKind::Ident(f) if f != me => 1,
                     ExprKind::Field { expr, safe: false, .. } if matches!(expr.kind, ExprKind::Ident(_)) => 2,
@@ -949,6 +951,7 @@ impl Compiler {
             let call = mk(ExprKind::Call {
                 callee: Box::new(mk(ExprKind::Ident("error".into()))),
                 args: vec![Arg { name: None, by_ref: false, spread: false, value: mk(ExprKind::Text(parts)) }],
+                targs: Vec::new(),
             });
             vec![Stmt { kind: StmtKind::Return(Some(call)), line }]
         };
@@ -1035,7 +1038,7 @@ impl Compiler {
                 wanted.push("float".into());
             }
             for m in wanted {
-                if self.target == Target::Bare && (matches!(m.as_str(), "ui" | "task" | "future" | "fs" | "net" | "sys" | "ws")) {
+                if self.target == Target::Bare && (matches!(m.as_str(), "ui" | "task" | "future" | "fs" | "net" | "sys" | "ws" | "tls")) {
                     return Err(format!("'{}' needs Windows and cannot be used in a bare-metal kernel", m));
                 }
                 if self.target == Target::Linux
@@ -2259,7 +2262,7 @@ end
                 ExprKind::Match { scrutinee, arms } => {
                     self.match_expr(scrutinee, arms, None, false)?;
                 }
-                ExprKind::Call { callee, args }
+                ExprKind::Call { callee, args, .. }
                     if matches!(&callee.kind, ExprKind::Ident(n) if (n == "assert" || n == "assert_eq")
                         && !self.funcs.contains_key(&(self.cur_mod.clone(), n.clone()))) =>
                 {
@@ -2841,7 +2844,7 @@ end
                 if !self.fs.allow_await {
                     return self.err("`await` can only be used inside an `async func` or inside `main`");
                 }
-                if let ExprKind::Call { callee, args } = &inner.kind {
+                if let ExprKind::Call { callee, args, .. } = &inner.kind {
                     if let ExprKind::Ident(n) = &callee.kind {
                         if (n == "all" || n == "race")
                             && args.len() == 1
@@ -2954,7 +2957,7 @@ end
                 self.free(t);
                 Ok(res)
             }
-            ExprKind::Call { callee, args } => self.call(callee, args, want),
+            ExprKind::Call { callee, args, targs } => self.call(callee, args, targs, want),
         }
     }
 
@@ -4115,7 +4118,7 @@ end
         self.e(format!("call qword ptr GOT_{}", sym));
     }
 
-    fn call(&mut self, callee: &Expr, args: &[Arg], want: Option<&Ty>) -> R<Ty> {
+    fn call(&mut self, callee: &Expr, args: &[Arg], targs: &[Type], want: Option<&Ty>) -> R<Ty> {
         match &callee.kind {
             ExprKind::Ident(name) if self.lookup(name).is_none() && matches!(name.as_str(), "__from_bits" | "__bits") => {
                 if args.len() != 1 {
@@ -4323,7 +4326,7 @@ end
                     return self.call_sig(&sig, None, args);
                 }
                 if let Some((fd, line)) = self.tmpl_funcs.get(&key).cloned() {
-                    return self.call_generic(&key.0, &fd, line, args, want);
+                    return self.call_generic(&key.0, &fd, line, args, targs, want);
                 }
                 if let Some((q, idx)) = self.variants.get(&key).cloned() {
                     return self.enum_construct(&q, idx, args);
@@ -4356,7 +4359,7 @@ end
                         };
                         let key = (m.clone(), name.clone());
                         if let Some((fd, line)) = self.tmpl_funcs.get(&key).cloned() {
-                            return self.call_generic(&key.0, &fd, line, args, want);
+                            return self.call_generic(&key.0, &fd, line, args, targs, want);
                         }
                         return match self.funcs.get(&key).cloned() {
                             Some(sig) => self.call_sig(&sig, None, args),
@@ -5552,9 +5555,17 @@ impl Compiler {
     }
 
     /// A call to a generic function: infer the type arguments, make (or reuse) the instance, call it.
-    fn call_generic(&mut self, module: &str, fd: &FuncDecl, decl_line: u32, args: &[Arg], want: Option<&Ty>) -> R<Ty> {
+    fn call_generic(&mut self, module: &str, fd: &FuncDecl, decl_line: u32, args: &[Arg], targs: &[Type], want: Option<&Ty>) -> R<Ty> {
         let names: Vec<String> = fd.generics.iter().map(|g| g.name.clone()).collect();
         let mut b: HashMap<String, Ty> = HashMap::new();
+        if targs.len() > names.len() {
+            return self.err(format!("'{}' takes {} type argument(s), but {} were given", fd.name, names.len(), targs.len()));
+        }
+        let caller = self.cur_mod.clone();
+        for (n, t) in names.iter().zip(targs) {
+            let ty = self.resolve(t, &caller)?;
+            b.insert(n.clone(), ty);
+        }
         let mut next = 0;
         let mut lambdas: Vec<(Type, &Expr)> = Vec::new();
         for a in args {
@@ -6376,7 +6387,7 @@ fn collect_expr(e: &Expr, out: &mut Vec<String>) {
             collect_expr(expr, out);
             collect_expr(index, out);
         }
-        ExprKind::Call { callee, args } => {
+        ExprKind::Call { callee, args, .. } => {
             collect_expr(callee, out);
             args.iter().for_each(|a| collect_expr(&a.value, out));
         }
@@ -7499,6 +7510,8 @@ fn linux_needed(asm: &str) -> Vec<String> {
             "dl" => "libdl.so.2".to_string(),
             "pthread" => "libpthread.so.0".to_string(),
             "rt" => "librt.so.1".to_string(),
+            "ssl" => "libssl.so.3".to_string(),
+            "crypto" => "libcrypto.so.3".to_string(),
             other => format!("lib{}.so", other),
         })
         .collect()

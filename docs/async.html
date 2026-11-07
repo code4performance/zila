@@ -173,13 +173,31 @@
       </ul>
     </section>
 
+    <section id="tls">
+      <h2>TLS (HTTPS)</h2>
+      <p><code>use tls</code> adds encrypted client connections. <code>tls.connect(host, port)</code> opens a TCP connection and runs the TLS handshake; the connection then has <code>read(max)</code>, <code>write(data)</code> and <code>close()</code>, like a plain <code>net.Conn</code>. The server certificate is checked against the Windows trust store and the host name, and a bad certificate (expired, self-signed, wrong name) makes <code>connect</code> fail with an error.</p>
+      <pre><code><span class="kw">use</span> tls
+
+<span class="kw">func</span> main() -&gt; error
+    <span class="kw">let</span> conn = <span class="kw">try</span> <span class="kw">await</span> tls.connect(<span class="str">"example.com"</span>, 443)
+    <span class="kw">try</span> <span class="kw">await</span> conn.write(<span class="str">"GET / HTTP/1.1
+Host: example.com
+Connection: close
+
+"</span>)
+    print(<span class="kw">try</span> <span class="kw">await</span> conn.read(4096))
+    <span class="kw">return</span>
+<span class="kw">end</span></code></pre>
+      <p>It is written in Brasa on the Windows SChannel package, and on Linux on OpenSSL 3 (<code>libssl.so.3</code> must be installed, as it is on current distributions; the program is then dynamically linked). The functions and the errors are the same on both. Client side only, no client certificates, no renegotiation.</p>
+    </section>
+
     <section id="limits">
       <h2>Limits in this version</h2>
       <ul>
         <li>Windows x64 and Linux x86-64 (<code>--target linux</code>; see <a href="native.html#linux">the Linux target</a>). A bare-metal kernel that uses <code>async</code> fails to build with a message saying so.</li>
         <li>No parallelism (one thread) and no cancellation.</li>
         <li>A future is awaited once.</li>
-        <li>Only TCP and UDP over IPv4: no TLS, connected UDP sockets, broadcast, multicast or directory operations, and the <code>ui</code> message loop does not yet run other tasks.</li>
+        <li>Only TCP and UDP over IPv4: TLS only as a client, connected UDP sockets, broadcast, multicast or directory operations, and the <code>ui</code> message loop does not yet run other tasks.</li>
       </ul>
     </section>
   </main>

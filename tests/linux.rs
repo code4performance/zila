@@ -1077,6 +1077,47 @@ fn every_library_is_in_the_compatibility_table() {
     }
 }
 
+// ---- tls ----
+
+fn online() -> bool {
+    use std::net::ToSocketAddrs;
+    "example.com:443".to_socket_addrs().map(|mut a| a.next().is_some()).unwrap_or(false)
+}
+
+#[test]
+fn tls_makes_an_https_request_and_refuses_a_bad_certificate() {
+    if !online() {
+        eprintln!("offline: skipping");
+        return;
+    }
+    let src = r#"package main
+
+use tls
+
+func main() -> error
+    let conn = try await tls.connect("example.com", 443)
+    try await conn.write("GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
+    var all = ""
+    while true
+        let part = try await conn.read(4096)
+        if part.len == 0
+            break
+        end
+        all = all + part
+    end
+    print(all.slice(0, 9))
+    print(all.len > 500)
+    match await tls.connect("expired.badssl.com", 443)
+        ok(c) -> print("unexpected success")
+        err(e) -> print("refused")
+    end
+    return
+end
+"#;
+    let Some((out, code)) = run_linux(src) else { return };
+    assert_eq!((out.as_str(), code), ("HTTP/1.1 \ntrue\nrefused\n", 0));
+}
+
 // ---- the limits that were lifted ----
 
 #[test]

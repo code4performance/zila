@@ -151,7 +151,7 @@ impl Walk {
                 self.expr(expr, depth);
                 self.expr(index, depth);
             }
-            ExprKind::Call { callee, args } => {
+            ExprKind::Call { callee, args, .. } => {
                 self.expr(callee, depth);
                 for a in args {
                     if a.by_ref || a.spread {

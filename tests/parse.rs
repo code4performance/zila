@@ -40,7 +40,7 @@ fn shape(e: &Expr) -> String {
         ExprKind::Field { expr, name, safe } => {
             format!("({}{} {})", if *safe { "?." } else { "." }, shape(expr), name)
         }
-        ExprKind::Call { callee, args } => {
+        ExprKind::Call { callee, args, .. } => {
             let a: Vec<String> = args.iter().map(|a| shape(&a.value)).collect();
             format!("(call {} [{}])", shape(callee), a.join(" "))
         }

@@ -63,6 +63,9 @@ fn main() {
         sync_docs();
         return;
     }
+    if mode == Mode::Lsp {
+        exit(brasa::lsp::run());
+    }
     let path = opts.path.clone().unwrap_or_else(|| usage());
     if mode == Mode::Fmt || mode == Mode::FmtCheck {
         let mut files = vec![path];

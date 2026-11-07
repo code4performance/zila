@@ -214,7 +214,8 @@ pub enum ExprKind {
     /// `a.b` or, with `safe`, `a?.b`
     Field { expr: Box<Expr>, name: String, safe: bool },
     Index { expr: Box<Expr>, index: Box<Expr> },
-    Call { callee: Box<Expr>, args: Vec<Arg> },
+    /// `f(args)`; `targs` holds explicit type arguments (`f<i32>(args)`).
+    Call { callee: Box<Expr>, args: Vec<Arg>, targs: Vec<Type> },
     /// `p^`
     Deref(Box<Expr>),
     /// `try e` (propagate error)

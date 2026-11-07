@@ -123,7 +123,7 @@ Everything in this list is implemented and covered by tests.
 
 **A standard library written in Brasa**
 
-- `ui` (native Windows controls), `task`, `future`, `fs`, `net`. They talk to the operating system through Brasa's own `extern` declarations. No Rust or C glue.
+- `ui` (native Windows controls), `task`, `future`, `fs`, `net`, `tls`. They talk to the operating system through Brasa's own `extern` declarations. No Rust or C glue.
 
 **Systems programming**
 
@@ -192,7 +192,7 @@ This is the plan, in roughly the order we intend to do it. **Every item is a pla
 
 | # | Work | What it involves | Difficulty |
 |---|---|---|---|
-| 1 | Standard library, next steps | TLS. Mostly written in Brasa. | ⭐ – ⭐⭐ |
+| 1 | Standard library, next steps | TLS for servers (`use tls` is a client on both Windows and Linux). Mostly written in Brasa. | ⭐ – ⭐⭐ |
 | 2 | Tooling | A package manager, a language server, a richer VS Code extension. | ⭐⭐ – ⭐⭐⭐ |
 | 3 | More platforms | A window toolkit for Linux (`ui`). Then macOS. Apple Silicon, Android and iOS need an ARM64 backend. WebAssembly later. | ⭐⭐⭐ – ⭐⭐⭐⭐ |
 | 4 | Self-hosting | A Brasa compiler written in Brasa. | long term |

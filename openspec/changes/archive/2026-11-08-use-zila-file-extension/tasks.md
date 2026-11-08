@@ -17,6 +17,6 @@
 
 ## 4. Verification
 
-- [ ] 4.1 `cargo build`, then the whole suite (Windows, Linux under WSL, the docs check, the extension tests, the boot image) passes; verify the formatter check on every `.zila` file with `zila-parse --fmt-check`
-- [ ] 4.2 Update the pages and Markdown that describe files (the repository listing in `README.md`, `docs/getting-started.html`, the example labels checked by `cargo test --test docs`), the main specs (`openspec/specs/`, text only), and run `zila-parse --docs`; verify `cargo test --test docs` and `openspec validate --specs`
-- [ ] 4.3 `git grep -n '\.br\b'` outside the archive finds nothing, and `openspec validate use-zila-file-extension` passes
+- [x] 4.1 `cargo build`, then the whole suite (Windows, Linux under WSL, the docs check, the extension tests, the boot image) passes; verify the formatter check on every `.zila` file with `zila-parse --fmt-check`
+- [x] 4.2 Update the pages and Markdown that describe files (the repository listing in `README.md`, `docs/getting-started.html`, the example labels checked by `cargo test --test docs`), the main specs (`openspec/specs/`, text only), and run `zila-parse --docs`; verify `cargo test --test docs` and `openspec validate --specs`
+- [x] 4.3 `git grep -n '\.br\b'` outside the archive finds nothing, and `openspec validate use-zila-file-extension` passes

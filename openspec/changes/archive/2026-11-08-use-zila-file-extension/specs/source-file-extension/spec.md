@@ -34,7 +34,7 @@ Errors that name a source file SHALL use `.zila` (`main.zila:12: message`, `util
 - **THEN** the message starts with `main.zila:7:`
 
 ### Requirement: The repository uses only .zila
-Every source file of the repository (examples, the standard library, the official packages, the operating-system sources, test data) SHALL end in `.zila`, and no tracked file outside `openspec/changes/archive/` SHALL name `.br` as an extension. A test SHALL fail naming the file or line otherwise.
+Every source file of the repository (examples, the standard library, the official packages, the operating-system sources, test data) SHALL end in `.zila`, and no tracked file outside `openspec/changes/` (the archive records history, and a change in progress may be about the extension itself) SHALL name `.br` as an extension. A test SHALL fail naming the file or line otherwise.
 
 #### Scenario: A leftover
 - **WHEN** a tracked file still ends in `.br`, or a page says `examples/x.br`

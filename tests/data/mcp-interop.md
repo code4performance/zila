@@ -6,7 +6,7 @@ this file is the record of the checks that need other implementations.
 
 ## Done: a full stdio session with the real example (2026-11-08)
 
-`examples/mcp_server.br` built to an executable (with its PostgreSQL URL pointed at a local server) and
+`examples/mcp_server.zila` built to an executable (with its PostgreSQL URL pointed at a local server) and
 driven by writing JSON-RPC lines to its standard input, as a host would. Nine requests, nine answers,
 in order, one JSON object per line, nothing else on standard output:
 
@@ -24,7 +24,7 @@ in order, one JSON object per line, nothing else on standard output:
 ## Done: the official MCP Inspector, version 2.13.0 (2026-11-08)
 
 Run with `npx -y @modelcontextprotocol/inspector --cli ...` against the executable built from
-`examples/mcp_server.br` (stdio) and against a small program with `serve_http` and a bearer token
+`examples/mcp_server.zila` (stdio) and against a small program with `serve_http` and a bearer token
 (Streamable HTTP, listening on 127.0.0.1:8765).
 
 | check | result |

@@ -485,8 +485,9 @@ fn no_tracked_file_uses_the_old_source_extension() {
     let ext = old_extension();
     let mut problems = Vec::new();
     for path in tracked_files() {
-        // the archive records what was true when each change was archived
-        if path.starts_with("openspec/changes/archive/") || !Path::new(&path).is_file() {
+        // the archive records what was true when each change was archived, and a change in progress
+        // plans work that may be about the old extension itself
+        if path.starts_with("openspec/changes/") || !Path::new(&path).is_file() {
             continue;
         }
         if path.ends_with(&ext) {

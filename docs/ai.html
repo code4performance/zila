@@ -28,7 +28,7 @@
 
   <main>
     <h1>AI</h1>
-    <p class="note"><code>ai</code>, <code>mcp</code> and <code>rag</code> are libraries that are becoming packages of their own: their sources are in <code>packages/</code>, and using them as part of the standard library prints a warning (see <a href="packages.html#use">Packages</a>).</p>
+    <p class="note"><code>ai</code>, <code>mcp</code> and <code>rag</code> are packages of the Brasa repository (<code>packages/</code>) that the compiler embeds, so <code>use ai</code> needs no manifest; a package of your project with the same name replaces them (see <a href="packages.html#use">Packages</a>).</p>
     <p><code>use ai</code> talks to a language model: the Anthropic Messages API (<code>ai.anthropic</code>) or any OpenAI-compatible server (<code>ai.openai_compatible</code>), including local ones such as Ollama over plain <code>http</code>. It is written in Brasa on <code>web</code> and <code>json</code>; nothing in the compiler knows about models. The program names the model every time; the library has no default.</p>
 
     <section id="chat">

@@ -1,6 +1,6 @@
 //! The standard libraries that are not core (spec `package-manager`, change `language-design-review`):
 //! they exist as packages in `packages/`, a project's package may shadow one of them, the core names
-//! stay reserved, and using one as part of the standard library warns.
+//! stay reserved, and a program with no manifest still uses them as part of the standard library.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -40,13 +40,14 @@ fn norm(s: String) -> String {
 }
 
 #[test]
-fn the_packages_mirror_the_standard_library() {
+fn the_non_core_libraries_live_in_packages_and_the_compiler_embeds_them_from_there() {
     for n in NON_CORE {
-        let std = norm(std::fs::read_to_string(format!("std/{}.br", n)).unwrap());
-        let pkg = norm(std::fs::read_to_string(format!("packages/{}/{}.br", n, n)).unwrap());
-        assert!(std == pkg, "packages/{n}/{n}.br differs from std/{n}.br: copy it again (see packages/README.md)");
+        assert!(!Path::new(&format!("std/{}.br", n)).exists(), "std/{}.br should not exist: the source is packages/{}/{}.br", n, n, n);
         let manifest = std::fs::read_to_string(format!("packages/{}/brasa.toml", n)).unwrap();
         assert!(manifest.contains(&format!("name = \"{}\"", n)) && manifest.contains("version = "), "packages/{}/brasa.toml", n);
+        // the compiler's copy is the package's file
+        let embedded = norm(brasa::codegen_x64::std_source(n).unwrap().to_string());
+        assert!(embedded == norm(std::fs::read_to_string(format!("packages/{}/{}.br", n, n)).unwrap()), "{}", n);
     }
     assert!(Path::new("packages/brasa.toml").is_file());
 }
@@ -61,7 +62,6 @@ fn every_package_builds_as_a_local_package_and_says_it_shadows_the_standard_one(
         let (_, err) = text(&o);
         assert!(o.status.success(), "package {} does not build: {}", n, err);
         assert!(err.contains(&format!("shadows the standard library's '{}'", n)), "{}: {}", n, err);
-        assert!(!err.contains("is moving out of the standard library"), "{}: {}", n, err);
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -109,18 +109,22 @@ fn core_names_stay_reserved_and_other_names_may_be_dependencies() {
 }
 
 #[test]
-fn using_a_non_core_library_as_standard_warns_and_core_ones_do_not() {
-    let dir = scratch("warn");
-    std::fs::write(dir.join("main.br"), "package main\n\nuse json\nuse text\n\nfunc main()\n    print(\"hi\")\nend\n").unwrap();
+fn using_a_non_core_library_as_standard_needs_no_manifest_and_prints_no_warning() {
+    let dir = scratch("nowarn");
+    std::fs::write(dir.join("main.br"), "package main
+
+use json
+use db
+use postgres
+
+func main()
+    print(\"hi\")
+end
+").unwrap();
     let o = brasa(&dir, &["main.br", "--run"]);
     let (out, err) = text(&o);
-    assert_eq!(out, "hi\n", "{}", err);
-    assert!(err.contains("'json' is moving out of the standard library") && err.contains("packages/json"), "{}", err);
-    assert!(!err.contains("'text'"), "{}", err);
-    // the warning comes once per library, and building a library that uses another does not
-    // warn about the inner one
-    std::fs::write(dir.join("main.br"), "package main\n\nuse db\nuse postgres\n\nfunc main()\n    print(\"hi\")\nend\n").unwrap();
-    let (_, err) = text(&brasa(&dir, &["main.br", "--asm"]));
-    assert_eq!(err.matches("is moving out").count(), 2, "{}", err);
+    assert_eq!(out, "hi
+", "{}", err);
+    assert_eq!(err, "", "{}", err);
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -726,7 +726,13 @@ fn no_example_uses_a_package_that_exists_nowhere() {
 #[test]
 fn std_and_os_use_only_standard_names() {
     let mut problems = Vec::new();
-    for dir in ["std", "os"] {
+    let mut dirs: Vec<String> = vec!["std".into(), "os".into()];
+    for e in std::fs::read_dir("packages").unwrap().flatten() {
+        if e.path().is_dir() {
+            dirs.push(e.path().to_string_lossy().to_string());
+        }
+    }
+    for dir in dirs {
         for e in std::fs::read_dir(dir).unwrap().flatten() {
             let p = e.path();
             if p.extension().and_then(|x| x.to_str()) != Some("br") {

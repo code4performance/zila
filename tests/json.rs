@@ -334,7 +334,7 @@ end
         }
     }
     assert_eq!(hits.len(), 1, "{:?}", hits);
-    assert!(hits[0].contains("\"json\" => Some(include_str!(\"../std/json.br\"))"), "{:?}", hits);
+    assert!(hits[0].contains("\"json\" => Some(include_str!(\"../packages/json/json.br\"))"), "{:?}", hits);
 }
 
 #[test]

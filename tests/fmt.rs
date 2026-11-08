@@ -222,7 +222,17 @@ fn formatting_twice_changes_nothing() {
 
 fn repo_files() -> Vec<String> {
     let mut out = Vec::new();
-    for dir in ["std", "examples", "os"] {
+    let mut dirs: Vec<String> = ["std", "examples", "os"].iter().map(|s| s.to_string()).collect();
+    for entry in std::fs::read_dir("packages").unwrap() {
+        let p = entry.unwrap().path();
+        if p.is_dir() {
+            dirs.push(p.to_str().unwrap().to_string());
+            if p.join("linux").is_dir() {
+                dirs.push(p.join("linux").to_str().unwrap().to_string());
+            }
+        }
+    }
+    for dir in dirs {
         for entry in std::fs::read_dir(dir).unwrap() {
             let p = entry.unwrap().path();
             if p.extension().map_or(false, |e| e == "br") {

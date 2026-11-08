@@ -28,7 +28,7 @@
 
   <main>
     <h1>Databases</h1>
-    <p class="note"><code>db</code>, <code>postgres</code> and <code>sqlserver</code> are libraries that are becoming packages of their own: their sources are in <code>packages/</code>, and using them as part of the standard library prints a warning (see <a href="packages.html#use">Packages</a>).</p>
+    <p class="note"><code>db</code>, <code>postgres</code> and <code>sqlserver</code> are packages of the Brasa repository (<code>packages/</code>) that the compiler embeds, so <code>use db</code> needs no manifest; a package of your project with the same name replaces them (see <a href="packages.html#use">Packages</a>).</p>
     <p>Three libraries, all written in Brasa on <code>net</code> and <code>tls</code> (no C library is linked): <code>db</code> is what a program uses, <code>postgres</code> and <code>sqlserver</code> are the drivers. A driver's <code>open</code> returns a <code>db.Conn</code>; everything after that is the same on both databases. <a href="stdlib.html#db">The library page</a> lists every function; this page shows how they fit together.</p>
 
     <section id="query">

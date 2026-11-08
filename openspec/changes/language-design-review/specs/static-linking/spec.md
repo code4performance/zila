@@ -50,14 +50,3 @@ For each standard library with a Linux layer, every public function, type and gl
 #### Scenario: A fixed difference
 - **WHEN** a listed difference is removed from the code but not from the list
 - **THEN** the parity test fails asking to remove the entry
-
-### Requirement: Incremental builds give identical output
-When a compiled-object cache is used, a build SHALL produce an executable byte-identical to the build with the cache disabled, and SHALL recompile a package whenever its source, its dependencies' sources or the compiler version changes.
-
-#### Scenario: Warm cache
-- **WHEN** a project is built twice without changes, the second time with a warm cache
-- **THEN** both executables are identical and the second build recompiles no dependency
-
-#### Scenario: Changed dependency
-- **WHEN** one source file of a dependency changes
-- **THEN** that package and the packages that use it are recompiled and the others are taken from the cache

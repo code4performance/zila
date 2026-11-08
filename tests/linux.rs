@@ -1116,6 +1116,13 @@ fn every_library_is_in_the_compatibility_table() {
         }
         assert!(section.contains(&format!("<code>{}</code>", lib)), "the Linux compatibility table does not mention '{}'", lib);
     }
+    for entry in std::fs::read_dir("packages").unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            let lib = path.file_name().unwrap().to_string_lossy().to_string();
+            assert!(section.contains(&format!("<code>{}</code>", lib)), "the Linux compatibility table does not mention '{}'", lib);
+        }
+    }
 }
 
 // ---- tls ----
@@ -1402,15 +1409,27 @@ fn pub_names(path: &str) -> std::collections::BTreeSet<String> {
 #[test]
 fn a_library_and_its_linux_variant_export_the_same_names() {
     let mut checked = 0;
+    // the layers of the core libraries are in std/, those of the other libraries in packages/<name>/linux/
+    let mut layers: Vec<(String, String, String)> = Vec::new();
     for entry in std::fs::read_dir("std").unwrap() {
+        let file = entry.unwrap().file_name().to_string_lossy().to_string();
+        if let Some(base) = file.strip_suffix(".linux.br") {
+            layers.push((base.to_string(), format!("std/{}.br", base), format!("std/{}.linux.br", base)));
+        }
+    }
+    for entry in std::fs::read_dir("packages").unwrap() {
         let path = entry.unwrap().path();
-        let file = path.file_name().unwrap().to_string_lossy().to_string();
-        let Some(base) = file.strip_suffix(".linux.br") else { continue };
+        let base = path.file_name().unwrap().to_string_lossy().to_string();
+        if path.join("linux").is_dir() {
+            layers.push((base.clone(), format!("packages/{}/{}.br", base, base), format!("packages/{}/linux/{}.br", base, base)));
+        }
+    }
+    for (base, win_path, lin_path) in layers {
         if base == "sys" || base == "task" {
             continue; // the operating-system layer and the scheduler: each platform has its own calls
         }
-        let win = pub_names(&format!("std/{}.br", base));
-        let lin = pub_names(&format!("std/{}.linux.br", base));
+        let win = pub_names(&win_path);
+        let lin = pub_names(&lin_path);
         let only_win: Vec<_> = win.difference(&lin).collect();
         // a program written against the Windows variant must find every public name on Linux; the
         // Linux variants may export extra names (the resolver of `net` and the X protocol of `ui`

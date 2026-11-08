@@ -35,19 +35,19 @@ The work is in three phases, each shippable on its own. Phases 2 and 3 start onl
 - A `std/X.br` vs `std/X.linux.br` surface parity test.
 - `--fetch` and `--explain-link` show, per package, whether it uses `unsafe`, `extern` or `asm` (the **effects** of a package).
 
-**Phase 2 — Small std, official packages (BREAKING only when removal lands, a later change)**
+**Phase 2 — Small std, official packages**
 - Define the **core std**: `text`, `list`, `map`/`set`, `sorted`, `fs`, `net`, `sync`, `task`, `future`, `thread`, `math`, `float`, `errors`, `format`, `bufio`, `reflect`, `derive`, `sys`.
-- Publish the domain libraries (`json`, `crypto`, `tls`, `ui`, `web`, `ai`, `mcp`, `rag`, `db`, `postgres`, `sqlserver`) as official packages, each with its own `brasa.toml`, version and tests, and add a deprecation warning when they are used as `std`. Removing them from the compiler is a separate later change.
+- Move the domain libraries (`json`, `crypto`, `tls`, `ui`, `web`, `ai`, `mcp`, `rag`, `db`, `postgres`, `sqlserver`) to `packages/<name>/`, each with its own `brasa.toml`, as the only copy; the compiler embeds them from there, so programs need no manifest. No deprecation phase: nothing outside this repository uses Brasa.
 - Only core std names are reserved; a dependency may shadow any other name with a warning.
 
-**Phase 3 — Compiler structure and incremental builds**
-- Split type checking from code generation: the checker produces a typed intermediate form and code generation only consumes it. Move `src/codegen_x64.rs` into modules (layout, calls, generics, drop, derive). Replace the `unreachable!()` sites reachable from user code with diagnostics.
-- A compiled-object cache keyed by source hash, so unchanged packages are not recompiled.
+**Phase 3 — Compiler structure (partly moved)**
+- `src/codegen_x64.rs` is split into modules under `src/codegen_x64/` (analysis, calls, drop, expressions, fold, generics, layout, lifecycle, memory, output, runtime, statements, threads); the main file went from about 10,750 to about 2,100 lines with no change in behaviour. The one dead branch in the list of `unreachable!()` sites is deleted.
+- The typed intermediate form between checking and code generation, and the cache of checked packages built on it, are the change `add-typed-pipeline-and-cache`.
 
 ## Open questions for the later removal change
 
 - After the domain libraries are removed from the compiler, does a program with no `brasa.toml` keep seeing them bundled, or must it have a manifest to `use json`?
-- Where are the official packages hosted? Until that is decided the deprecation warning names `packages/<name>` in this repository and cannot give a `--add` URL.
+- When someone outside this repository uses Brasa: where are the official packages hosted, and does a program with no `brasa.toml` keep seeing the embedded libraries? Today it does.
 
 ## Capabilities
 
@@ -61,6 +61,6 @@ The work is in three phases, each shippable on its own. Phases 2 and 3 start onl
 ## Impact
 
 - Phase 1: `src/codegen_x64.rs` (reachability, initialisation), `src/cli.rs`, `src/main.rs`, `src/fetch.rs` (report), `tests/`, `docs/packages.html`, `docs/native.html`.
-- Phase 2: a `packages/` area or separate repositories for the official packages, `src/package.rs` (reserved names, shadowing), `std_source` table (deprecation warning), `docs/stdlib.html`, `docs/packages.html`, `README.md`.
-- Phase 3: `src/codegen_x64.rs` split into modules, new checker output type, cache under `$BRASA_HOME`.
+- Phase 2: `packages/` (the libraries, moved out of `std/`), `src/package.rs` (reserved names), `src/codegen_x64.rs` (core list, shadowing, embedding from `packages/`), `docs/stdlib.html`, `docs/packages.html`, `README.md`.
+- Phase 3: `src/codegen_x64.rs` split into modules under `src/codegen_x64/`.
 - No syntax change. Output binaries become smaller or equal. The one breaking step (deleting the domain libraries from the compiler) is deliberately out of this change.

@@ -42,14 +42,23 @@ fn surface(src: &str) -> BTreeMap<String, String> {
     out
 }
 
-fn read(name: &str) -> String {
-    std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("std").join(name)).unwrap()
+/// The file of one layer of a library: the core ones are in `std/`, the others are packages whose
+/// Linux layer is `packages/<lib>/linux/<lib>.br`.
+fn layer(lib: &str, linux: bool) -> String {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let pkg = root.join("packages").join(lib);
+    let path = if pkg.is_dir() {
+        if linux { pkg.join("linux").join(format!("{}.br", lib)) } else { pkg.join(format!("{}.br", lib)) }
+    } else {
+        root.join("std").join(if linux { format!("{}.linux.br", lib) } else { format!("{}.br", lib) })
+    };
+    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {}", path.display(), e))
 }
 
 /// How one library's two layers differ: `"<lib>: only in <file>: <decl>"` or `"<lib>: signature: <decl>"`.
 fn differences(lib: &str) -> BTreeSet<String> {
-    let win = surface(&read(&format!("{}.br", lib)));
-    let lin = surface(&read(&format!("{}.linux.br", lib)));
+    let win = surface(&layer(lib, false));
+    let lin = surface(&layer(lib, true));
     let mut out = BTreeSet::new();
     for (k, v) in &win {
         match lin.get(k) {
@@ -71,12 +80,17 @@ fn differences(lib: &str) -> BTreeSet<String> {
 }
 
 fn libraries() -> Vec<String> {
-    let std_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("std");
-    let mut libs: Vec<String> = std::fs::read_dir(&std_dir)
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut libs: Vec<String> = std::fs::read_dir(root.join("std"))
         .unwrap()
         .filter_map(|e| e.ok())
         .filter_map(|e| e.file_name().to_str().and_then(|n| n.strip_suffix(".linux.br")).map(|n| n.to_string()))
         .collect();
+    for e in std::fs::read_dir(root.join("packages")).unwrap().flatten() {
+        if e.path().join("linux").is_dir() {
+            libs.push(e.file_name().to_string_lossy().to_string());
+        }
+    }
     libs.sort();
     libs
 }

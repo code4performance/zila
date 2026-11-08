@@ -26,19 +26,12 @@
 
 - [x] 5.1 Write the core std list into `std_source` as data (core vs non-core) and update `is_reserved` to reserve only core names
 - [x] 5.2 Implement shadowing of non-core std names by dependencies and local packages, with the warning, and tests for both scenarios in the delta spec
-- [x] 5.3 Create `packages/<name>/` with its own `brasa.toml` for `json`, `crypto`, `tls`, `ui`, `web`, `ai`, `mcp`, `rag`, `db`, `postgres`, `sqlserver`; each builds and passes its tests as a local package
-- [x] 5.4 Print the deprecation warning when a non-core library is used as `std`, naming the library and its place in `packages/` (no `--add` command yet: the hosting question is open, recorded in the proposal); the programs and tests keep working
+- [x] 5.3 Move the libraries to `packages/<name>/` (with their `brasa.toml`, Linux layers in `linux/`), delete the `std/` copies and embed from `packages/`; each builds as a local package (`tests/packages.rs`)
+- [x] 5.4 No deprecation warning: nothing outside the repository uses Brasa (user decision, 2026-11-08); using a non-core library as `std` keeps working with no message
 - [x] 5.5 Update `docs/stdlib.html`, `docs/packages.html`, `docs/databases.html`, `docs/ai.html` and the README: which libraries are core, which are official packages, the deprecation; verify with `cargo test --test docs`
-- [x] 5.6 Record the open question (bundled copy for manifest-less builds) in the proposal of the later removal change
+- [x] 5.6 Record the open question (hosting, manifest-less builds) in the proposal for when someone outside the repository uses Brasa
 
-## 6. Phase 3: compiler structure (start only after 1 to 5 are merged)
+## 6. Phase 3: compiler structure (the typed form and the cache moved to the change `add-typed-pipeline-and-cache`)
 
-- [ ] 6.1 Define the typed program form produced by the checker and move type resolution, generics instantiation and call binding into it, with no change in output (the whole suite and byte-identical executables for the examples are the check)
-- [ ] 6.2 Split `src/codegen_x64.rs` into modules (layout, calls, generics, drop, derive) over the typed form
-- [ ] 6.3 Convert any `unreachable!()` site that a user program turns out to reach into a diagnostic with a negative test (none known after task 1.2); delete the dead `&& false` branch under `StmtKind::Return`
-
-## 7. Phase 3: object cache
-
-- [ ] 7.1 Define the cache key and storage under `$BRASA_HOME` and decide, from the generics obstacle, whether machine code or the checked form is cached; record the decision in design.md
-- [ ] 7.2 Implement the cache with a `--no-cache` flag; tests that outputs are byte-identical with and without it, and that a changed dependency recompiles only what depends on it
-- [ ] 7.3 Update `docs/packages.html` and the CLI listing in `docs/native.html`; verify with `cargo test --test docs`
+- [x] 6.2 `src/codegen_x64.rs` split into `src/codegen_x64/` modules (analysis, calls, drop, expressions, fold, generics, layout, lifecycle, memory, output, runtime, statements, threads); the main file went from 10,750 to about 2,100 lines, with no change in behaviour (the whole suite is the check)
+- [x] 6.3 No `unreachable!()` site is known to be reachable (task 1.2); the dead `&& false` branch under `StmtKind::Return` is deleted

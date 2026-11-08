@@ -207,9 +207,9 @@ fn shared_region(path: &str) -> String {
 
 #[test]
 fn the_shared_region_is_the_same_text_in_both_layers() {
-    let windows = shared_region("std/ui.br");
-    let linux = shared_region("std/ui.linux.br");
-    assert_eq!(windows, linux, "the shared region of std/ui.br and std/ui.linux.br differ");
+    let windows = shared_region("packages/ui/ui.br");
+    let linux = shared_region("packages/ui/linux/ui.br");
+    assert_eq!(windows, linux, "the shared region of packages/ui/ui.br and packages/ui/linux/ui.br differ");
     assert!(windows.contains("func Window(") && windows.contains("func alert(") && windows.contains("func run()"));
     // nothing platform-shaped in the public surface
     assert!(!windows.contains("hwnd") && !windows.contains("HWND"));
@@ -222,9 +222,9 @@ fn both_layers_implement_the_same_backend_functions() {
         let start = text.find(&format!("func {}(", name))?;
         Some(text[start..].lines().next().unwrap().trim().to_string())
     };
-    let windows = std::fs::read_to_string("std/ui.br").unwrap().replace("\r\n", "\n");
-    let linux = std::fs::read_to_string("std/ui.linux.br").unwrap().replace("\r\n", "\n");
-    let shared = shared_region("std/ui.br");
+    let windows = std::fs::read_to_string("packages/ui/ui.br").unwrap().replace("\r\n", "\n");
+    let linux = std::fs::read_to_string("packages/ui/linux/ui.br").unwrap().replace("\r\n", "\n");
+    let shared = shared_region("packages/ui/ui.br");
     let mut names: Vec<String> = Vec::new();
     for word in shared.split(|c: char| !(c.is_alphanumeric() || c == '_')) {
         if word.starts_with("be_") && word.len() > 3 && !names.contains(&word.to_string()) {
@@ -233,8 +233,8 @@ fn both_layers_implement_the_same_backend_functions() {
     }
     assert!(names.len() > 20, "found {:?}", names);
     for n in &names {
-        let w = sig(&windows, n).unwrap_or_else(|| panic!("std/ui.br does not define {}", n));
-        let l = sig(&linux, n).unwrap_or_else(|| panic!("std/ui.linux.br does not define {}", n));
+        let w = sig(&windows, n).unwrap_or_else(|| panic!("packages/ui/ui.br does not define {}", n));
+        let l = sig(&linux, n).unwrap_or_else(|| panic!("packages/ui/linux/ui.br does not define {}", n));
         assert_eq!(w, l, "{} differs between the layers", n);
     }
 }

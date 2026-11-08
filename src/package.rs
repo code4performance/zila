@@ -294,6 +294,8 @@ pub struct Manifest {
     /// Reserved: stored, not interpreted before 1.0.
     pub edition: Option<String>,
     pub deps: Vec<Dep>,
+    /// `[policy] forbid`: `unsafe`, `extern` or `asm`; a dependency with that effect is refused.
+    pub forbid: Option<String>,
 }
 
 impl Manifest {
@@ -344,7 +346,20 @@ impl Manifest {
                     }
                     m.deps.push(dep);
                 }
-                _ => return Err(format!("line {}: unknown table [{}] (known: package, dependencies.<name>)", t.line, t.path.join("."))),
+                ["policy"] => {
+                    for (k, v, line) in &t.entries {
+                        match k.as_str() {
+                            "forbid" => {
+                                if !matches!(v.as_str(), "unsafe" | "extern" | "asm") {
+                                    return Err(format!("line {}: forbid must be \"unsafe\", \"extern\" or \"asm\" (one value; lists are not supported)", line));
+                                }
+                                m.forbid = Some(v.clone());
+                            }
+                            other => return Err(format!("line {}: unknown key '{}' in [policy] (known: forbid)", line, other)),
+                        }
+                    }
+                }
+                _ => return Err(format!("line {}: unknown table [{}] (known: package, dependencies.<name>, policy)", t.line, t.path.join("."))),
             }
         }
         Ok(m)
@@ -360,6 +375,9 @@ impl Manifest {
         }
         if let Some(e) = &self.edition {
             s.push_str(&format!("edition = {}\n", quote(e)));
+        }
+        if let Some(f) = &self.forbid {
+            s.push_str(&format!("\n[policy]\nforbid = {}\n", quote(f)));
         }
         for d in &self.deps {
             s.push_str(&format!("\n[dependencies.{}]\ngit = {}\nversion = {}\n", d.name, quote(&d.git), quote(&d.version.to_string())));
@@ -768,6 +786,11 @@ pub fn load_project(root: &Path, home: &Path) -> Result<Project, String> {
         let found = tree_hash(&dir)?;
         if found != e.hash {
             return Err(format!("package '{}' in the cache does not match brasa.lock (expected {}, found {}); run brasa-parse --fetch to restore it", id, e.hash, found));
+        }
+        if let Some(kind) = &manifest.forbid {
+            if let Some(file) = crate::effects::first_with(&dir, kind) {
+                return Err(format!("package '{}' uses `{}` (in {}), which brasa.toml forbids with [policy] forbid = \"{}\"", id, kind, file, kind));
+            }
         }
         let m = if dir.join(MANIFEST).is_file() { read_manifest(&dir)? } else { Manifest::default() };
         packages.insert(e.module.clone(), (dir, m));

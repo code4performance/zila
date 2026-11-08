@@ -13,6 +13,7 @@ fn usage() -> ! {
     eprintln!("       brasa-parse <file.br> --target linux -o <program>");
     eprintln!("       packages: --init [name] | --add <git-url>[@version] [--as <name>] | --fetch | --tidy | --update [name] [--offline]");
     eprintln!("       comptime: [--comptime-timeout <seconds>] [--no-comptime-cache] [--comptime-dump]");
+    eprintln!("       link: <file.br> --explain-link [-o output]   (bytes of code and data per package)");
     exit(2);
 }
 
@@ -73,6 +74,9 @@ fn main() {
     }
     if let Some(secs) = opts.comptime_timeout {
         brasa::comptime::set_timeout_secs(secs);
+    }
+    if opts.no_prune {
+        brasa::prune::set_enabled(false);
     }
     if opts.no_comptime_cache {
         brasa::comptime::set_cache_enabled(false);
@@ -138,6 +142,19 @@ fn main() {
 
     match parse_source(&src) {
         Ok(file) => {
+            if opts.explain_link {
+                let target = if opts.target == "linux" { brasa::codegen_x64::Target::Linux } else { brasa::codegen_x64::Target::Windows };
+                match brasa::codegen_x64::link_report(&file, &brasa::codegen_x64::CompileOptions { optimize: opts.optimize, test_mode: false }, target) {
+                    Ok(r) => print!("{}", r),
+                    Err(e) => {
+                        eprintln!("error: {}", e);
+                        exit(1);
+                    }
+                }
+                if mode != Mode::Build {
+                    return;
+                }
+            }
             if mode == Mode::Ast {
                 println!("{:#?}", file);
             } else if mode == Mode::Asm {

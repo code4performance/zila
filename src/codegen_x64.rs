@@ -678,6 +678,16 @@ pub enum Target {
     Linux,
 }
 
+/// The parts of the program that survive pruning, as assembly text.
+struct Pruned {
+    procs: Vec<String>,
+    thunks: Vec<String>,
+    globals: Vec<String>,
+    closures: Vec<String>,
+    statics: Vec<String>,
+    data: Vec<String>,
+}
+
 /// Options of a compilation.
 #[derive(Clone, Copy, Debug)]
 pub struct CompileOptions {
@@ -757,6 +767,8 @@ pub struct Compiler {
     line: u32,
     fs: FnState,
     uses_ui: bool,
+    /// `use thread` was written; counts become atomic only if a function of it is reachable.
+    uses_thread_lib: bool,
     /// The program uses `shared` or `spawn_thread`: counts and `rt_live` use `lock` instructions.
     threads: bool,
     // ---- generics and interfaces ----
@@ -864,6 +876,7 @@ impl Compiler {
             line: 0,
             fs: FnState::new(Ty::Void, String::new()),
             uses_ui: false,
+            uses_thread_lib: false,
             threads: false,
             tmpl_funcs: HashMap::new(),
             tmpl_recs: HashMap::new(),
@@ -1331,7 +1344,7 @@ impl Compiler {
                     }
                 }
                 if m == "thread" {
-                    self.threads = true;
+                    self.uses_thread_lib = true;
                 }
                 if m == "ui" {
                     self.uses_ui = true;
@@ -1994,6 +2007,7 @@ end
         for q in rcs {
             self.gen_rc_drop(&q);
         }
+        let pruned = self.prune_units(&main_mod, &mut inits);
 
         let bare = self.target == Target::Bare;
         let linux = self.target == Target::Linux;
@@ -2145,7 +2159,7 @@ brasa_start endp
                 out.push_str(&heap_runtime(RUNTIME_LINUX.to_string()));
             }
             out.push('\n');
-            if self.procs.iter().any(|p| p.contains("rt_map_")) {
+            if pruned.procs.iter().any(|p| p.contains("rt_map_")) {
                 out.push_str(RUNTIME_MAP);
                 out.push('\n');
             }
@@ -2153,24 +2167,24 @@ brasa_start endp
             out.push_str(&common);
             out.push_str(&heap_runtime(RUNTIME_WIN.to_string()));
             out.push('\n');
-            if self.procs.iter().any(|p| p.contains("rt_map_")) {
+            if pruned.procs.iter().any(|p| p.contains("rt_map_")) {
                 out.push_str(RUNTIME_MAP);
                 out.push('\n');
             }
             out.push_str(&start);
         }
-        if self.procs.iter().any(|p| p.contains("rt_dv_")) {
+        if pruned.procs.iter().any(|p| p.contains("rt_dv_")) {
             out.push_str(RUNTIME_DERIVE);
             out.push('\n');
         }
-        for p in &self.procs {
+        for p in &pruned.procs {
             out.push_str(p);
             out.push('\n');
         }
         // C reaches a callback with the System V convention (arguments in rdi, rsi, rdx, rcx):
         // the thunk moves up to four of them where Brasa functions expect them
-        for (cb, (kinds, ret)) in &self.callbacks {
-            out.push_str(&callback_thunk(cb, kinds, *ret));
+        for t in &pruned.thunks {
+            out.push_str(t);
         }
         out.push_str(".data
 ");
@@ -2206,25 +2220,17 @@ brasa_start endp
         } else {
             out.push_str(data);
         }
-        let mut globals: Vec<&Global> = self.globals.values().filter(|g| g.konst.is_none()).collect();
-        globals.sort_by(|a, b| a.sym.cmp(&b.sym));
-        for g in globals {
-            out.push_str(&format!("{} dq 0
-", g.sym));
+        for g in &pruned.globals {
+            out.push_str(g);
         }
-        for f in &self.fn_closures {
-            out.push_str(&format!("dq {}, 0
-C_{} dq {}, 0
-", IMMORTAL, f, f));
+        for f in &pruned.closures {
+            out.push_str(f);
         }
-        for (q, i) in &self.enum_statics {
-            out.push_str(&format!("dq {}, 0
-E_{}_{} dq {}
-", IMMORTAL, sym_of(q), i, i));
+        for e in &pruned.statics {
+            out.push_str(e);
         }
-        for d in &self.data {
+        for d in &pruned.data {
             out.push_str(d);
-            out.push('\n');
         }
         if linux {
             // the heap starts on the page after this
@@ -2237,6 +2243,83 @@ E_{}_{} dq {}
 end
 ");
         Ok(out)
+    }
+
+    /// Keeps what can be reached (module `prune`) and returns the text of each part of the program.
+    /// With pruning off everything is kept. Also drops the C imports nobody calls and clears
+    /// `uses_ui` when no `ui` function is reachable.
+    fn prune_units(&mut self, main_mod: &str, inits: &mut Vec<String>) -> Pruned {
+        use crate::prune::{data_units, idents, reachable, Kind, Unit};
+        let mut units: Vec<Unit> = Vec::new();
+        let mut cuts = [0usize; 5];
+        for p in &self.procs {
+            let defs: Vec<String> = p.lines().filter_map(|l| l.strip_suffix(" proc")).map(|n| n.to_string()).collect();
+            let kind = if defs.iter().any(|d| d.starts_with("B_init_")) { Kind::Init } else { Kind::Plain };
+            units.push(Unit { text: p.clone(), defs, kind });
+        }
+        cuts[0] = units.len();
+        for (cb, (kinds, ret)) in &self.callbacks {
+            let text = callback_thunk(cb, kinds, *ret);
+            units.push(Unit { text, defs: vec![format!("CB_{}", cb)], kind: Kind::Plain });
+        }
+        cuts[1] = units.len();
+        let mut globals: Vec<&Global> = self.globals.values().filter(|g| g.konst.is_none()).collect();
+        globals.sort_by(|a, b| a.sym.cmp(&b.sym));
+        for g in globals {
+            units.push(Unit { text: format!("{} dq 0\n", g.sym), defs: vec![g.sym.clone()], kind: Kind::Plain });
+        }
+        cuts[2] = units.len();
+        for f in &self.fn_closures {
+            units.push(Unit { text: format!("dq {}, 0\nC_{} dq {}, 0\n", IMMORTAL, f, f), defs: vec![format!("C_{}", f)], kind: Kind::Plain });
+        }
+        cuts[3] = units.len();
+        for (q, i) in &self.enum_statics {
+            let def = format!("E_{}_{}", sym_of(q), i);
+            units.push(Unit { text: format!("dq {}, 0\n{} dq {}\n", IMMORTAL, def, i), defs: vec![def], kind: Kind::Plain });
+        }
+        cuts[4] = units.len();
+        units.extend(data_units(&self.data));
+
+        let keep: Vec<bool> = if crate::prune::enabled() {
+            let mut roots = format!("B_{}_main B_{}_console_write\n", main_mod, main_mod);
+            for e in &self.exported {
+                roots.push_str(e);
+                roots.push('\n');
+            }
+            if let Some(c) = &self.custom_allocator {
+                roots.push_str(&custom_runtime(c));
+            }
+            reachable(&units, &[&roots])
+        } else {
+            vec![true; units.len()]
+        };
+        let pick = |from: usize, to: usize| -> Vec<String> { (from..to).filter(|i| keep[*i]).map(|i| units[i].text.clone()).collect() };
+        let out = Pruned {
+            procs: pick(0, cuts[0]),
+            thunks: pick(cuts[0], cuts[1]),
+            globals: pick(cuts[1], cuts[2]),
+            closures: pick(cuts[2], cuts[3]),
+            statics: pick(cuts[3], cuts[4]),
+            data: pick(cuts[4], units.len()),
+        };
+        if crate::prune::enabled() {
+            let alive: HashSet<String> = (0..units.len()).filter(|i| keep[*i]).flat_map(|i| units[i].defs.clone()).collect();
+            inits.retain(|i| alive.contains(i));
+            let mut mentioned: HashSet<&str> = HashSet::new();
+            for i in 0..units.len() {
+                if keep[i] {
+                    mentioned.extend(idents(&units[i].text));
+                }
+            }
+            // runtime imports are named by the runtime itself and are always kept
+            const RUNTIME_IMPORTS: [&str; 6] = ["ExitProcess", "GetStdHandle", "WriteFile", "SetConsoleOutputCP", "GetProcessHeap", "HeapAlloc"];
+            self.extern_syms.retain(|s| mentioned.contains(format!("GOT_{}", s).as_str()) || RUNTIME_IMPORTS.contains(&s.as_str()));
+            self.uses_ui = self.uses_ui && mentioned.iter().any(|t| t.starts_with("B_ui_"));
+            self.threads = self.threads || (self.uses_thread_lib && mentioned.iter().any(|t| t.starts_with("B_thread_")));
+        } else {
+            self.threads = self.threads || self.uses_thread_lib;
+        }
+        out
     }
 
     fn finish_proc(&mut self, sym: &str, prologue: Vec<String>, naked: bool) -> String {
@@ -10109,6 +10192,134 @@ pub fn compile_to_linux(file: &File, output: &str, options: &CompileOptions) -> 
         let _ = std::fs::set_permissions(output, std::fs::Permissions::from_mode(0o755));
     }
     Ok(())
+}
+
+/// What a symbol of the generated assembly belongs to, for the link report: the key of a module,
+/// or one of the shared groups.
+fn symbol_owner(sym: &str, modules: &[(String, String)]) -> Option<(String, bool)> {
+    // (owner, is_code)
+    let in_module = |rest: &str| -> Option<String> {
+        modules.iter().filter(|(_, s)| rest.starts_with(&format!("{}_", s)) || rest == s.as_str()).max_by_key(|(_, s)| s.len()).map(|(k, _)| k.clone())
+    };
+    if let Some(rest) = sym.strip_prefix("B_init_") {
+        return Some((in_module(rest).unwrap_or_else(|| "(helpers)".into()), true));
+    }
+    if sym.starts_with("B_drop_") || sym.starts_with("B_copy_") || sym.starts_with("B_eq_") || sym.starts_with("B_hash_") {
+        return Some(("(helpers)".into(), true));
+    }
+    if let Some(rest) = sym.strip_prefix("B_") {
+        return Some((in_module(rest).unwrap_or_else(|| "(helpers)".into()), true));
+    }
+    if let Some(rest) = sym.strip_prefix("G_") {
+        return Some((in_module(rest).unwrap_or_else(|| "(helpers)".into()), false));
+    }
+    if sym.starts_with("S_") {
+        return Some(("(strings)".into(), false));
+    }
+    if sym.starts_with("E_") || sym.starts_with("C_") {
+        return Some(("(helpers)".into(), false));
+    }
+    if sym.starts_with("rt_msg_") || sym == "rt_heap" || sym == "rt_image_end" {
+        return Some(("(runtime)".into(), false));
+    }
+    if sym.starts_with("rt_") || sym.starts_with("CB_") || sym == "brasa_start" {
+        return Some(("(runtime)".into(), true));
+    }
+    None
+}
+
+/// `--explain-link`: the bytes of code and data each package contributes to the program, from the
+/// positions of the symbols in the assembled image (the same assembly the executable is made of).
+pub fn link_report(file: &File, options: &CompileOptions, target: Target) -> Result<String, String> {
+    let mut c = Compiler::new(target);
+    c.opt = options.optimize;
+    c.test_mode = options.test_mode;
+    c.load(file).map_err(crate::comptime::map_error)?;
+    c.declare().map_err(crate::comptime::map_error)?;
+    let asm = c.generate().map_err(crate::comptime::map_error)?;
+    let program = c.modules.first().map(|m| m.name.clone()).unwrap_or_default();
+    let modules: Vec<(String, String)> = c.modules.iter().map(|m| (m.name.clone(), sym_of(&m.name))).collect();
+    let (text, org) = match target {
+        Target::Linux => (asm.clone(), LINUX_BASE + ELF_HEADERS),
+        _ => (asm.replacen("\n.data\n", "\nrt_text_end:\nalign 4096\nrt_data_start:\n", 1), crate::pe::PE_BASE + 0x1000),
+    };
+    let assembled = crate::asm_x86::assemble(&text, org, 64)?;
+    let end = org + assembled.bytes.len() as u64;
+    let mut syms: Vec<(&String, u64)> = assembled.symbols.iter().map(|(k, v)| (k, *v)).filter(|(_, v)| *v >= org && *v <= end).collect();
+    syms.sort_by(|a, b| a.1.cmp(&b.1).then(a.0.cmp(b.0)));
+    // bytes between one symbol and the next belong to the owner of the last symbol that has one
+    let mut sizes: BTreeMap<String, (u64, u64)> = BTreeMap::new();
+    let mut owner: Option<(String, bool)> = None;
+    for (i, (name, at)) in syms.iter().enumerate() {
+        if let Some(o) = symbol_owner(name, &modules) {
+            owner = Some(o);
+        }
+        let next = syms.get(i + 1).map(|s| s.1).unwrap_or(end);
+        if let Some((o, is_code)) = &owner {
+            if matches!(name.as_str(), "rt_text_end" | "rt_data_start") {
+                continue;
+            }
+            let e = sizes.entry(o.clone()).or_insert((0, 0));
+            if *is_code {
+                e.0 += next - at;
+            } else {
+                e.1 += next - at;
+            }
+        }
+    }
+    // what each package's reachable code can do: a function counts when its symbol is in the
+    // program, an `extern` when its import slot is; generic code is always counted
+    let effects_of = |m: &Module| -> crate::effects::Effects {
+        let ms = sym_of(&m.name);
+        let keep = |d: &Decl| -> bool {
+            match &d.kind {
+                DeclKind::Func(f) => {
+                    if !f.generics.is_empty() {
+                        return true;
+                    }
+                    let name = match &f.receiver {
+                        Some(r) => match &r.ty {
+                            Type::Named { path, args } if args.is_empty() => format!("B_{}_{}_{}", ms, path.last().cloned().unwrap_or_default(), f.name),
+                            _ => return true,
+                        },
+                        None => format!("B_{}_{}", ms, f.name),
+                    };
+                    assembled.symbols.contains_key(&name)
+                }
+                DeclKind::Extern(e) => assembled.symbols.contains_key(&format!("GOT_{}", e.name)),
+                _ => false,
+            }
+        };
+        crate::effects::of_decls(&m.file.decls, &keep)
+    };
+    let effects: BTreeMap<String, String> = c.modules.iter().map(|m| (m.name.clone(), effects_of(m).show())).collect();
+    let mut rows: Vec<(String, &str, u64, u64)> = sizes
+        .into_iter()
+        .map(|(k, (code, data))| {
+            let kind = if k.starts_with('(') {
+                "-"
+            } else if k == program {
+                "program"
+            } else if std_source(&k).is_some() {
+                "std"
+            } else {
+                "package"
+            };
+            (k, kind, code, data)
+        })
+        .collect();
+    rows.sort_by(|a, b| (b.2 + b.3).cmp(&(a.2 + a.3)).then(a.0.cmp(&b.0)));
+    let width = rows.iter().map(|r| r.0.len()).max().unwrap_or(7).max(7);
+    let mut out = format!("{:<w$}  {:<8} {:>8} {:>8}  {}\n", "package", "kind", "code", "data", "effects", w = width);
+    let (mut tc, mut td) = (0, 0);
+    for (k, kind, code, data) in &rows {
+        out.push_str(&format!("{:<w$}  {:<8} {:>8} {:>8}  {}\n", k, kind, code, data, effects.get(k).map(|s| s.as_str()).unwrap_or(""), w = width));
+        tc += code;
+        td += data;
+    }
+    out.push_str(&format!("{:<w$}  {:<8} {:>8} {:>8}\n", "total", "", tc, td, w = width));
+    out.push_str(&format!("{} bytes of code and data\n", tc + td));
+    Ok(out)
 }
 
 /// Compiles to a native Windows x86-64 executable. The compiler writes the PE file itself

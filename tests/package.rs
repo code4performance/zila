@@ -741,3 +741,82 @@ fn std_and_os_use_only_standard_names() {
     }
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
+
+// ---------------------------------------------------------------- effects and policy
+
+const PURE_LIB: &str = "package lib\n\npub func n() -> int\n    return 1\nend\n";
+const UNSAFE_LIB: &str = "package lib\n\npub func n() -> int\n    unsafe\n        let x = 1\n    end\n    return 1\nend\n";
+const ASM_LIB: &str = "package lib\n\npub func n() -> int\n    asm\n        nop\n    end\n    return 1\nend\n";
+const USES_LIB: &str = "package main\nuse lib\n\nfunc main()\n    print(\"{lib.n()}\")\nend\n";
+
+#[test]
+fn fetching_shows_the_effects_of_a_new_package_and_an_update_marks_a_gained_one() {
+    need_git!();
+    let (home, repos) = (scratch("home"), scratch("repos"));
+    let lib = repos.join("lib");
+    repo(&lib, &[("lib.br", PURE_LIB)]);
+    git(&lib, &["tag", "v1.0.0"]);
+    let p = project("effects", USES_LIB);
+    init(&p, &home);
+    let a = brasa(&p, &home, &["--add", &format!("{}@1.0.0", url_of(&lib))]);
+    assert_eq!(a.code, 0, "{}{}", a.out, a.err);
+    assert!(a.out.contains("lib@1.0.0: effects: none"), "{}", a.out);
+    commit(&lib, &[("lib.br", UNSAFE_LIB)], "second");
+    git(&lib, &["tag", "v1.1.0"]);
+    // nothing changed: nothing is reported
+    let f = brasa(&p, &home, &["--fetch"]);
+    assert!(!f.out.contains("effects"), "{}", f.out);
+    let u = brasa(&p, &home, &["--update", "lib"]);
+    assert_eq!(u.code, 0, "{}{}", u.out, u.err);
+    assert!(u.out.contains("lib@1.1.0: effects: unsafe") && u.out.contains("CHANGED: was none, gained unsafe"), "{}", u.out);
+}
+
+#[test]
+fn a_policy_refuses_a_dependency_with_the_forbidden_effect_and_survives_add() {
+    need_git!();
+    let (home, repos) = (scratch("home"), scratch("repos"));
+    let lib = repos.join("lib");
+    repo(&lib, &[("lib.br", ASM_LIB)]);
+    git(&lib, &["tag", "v1.0.0"]);
+    let p = project("policy", USES_LIB);
+    init(&p, &home);
+    let toml = std::fs::read_to_string(p.join("brasa.toml")).unwrap();
+    std::fs::write(p.join("brasa.toml"), format!("{}\n[policy]\nforbid = \"asm\"\n", toml)).unwrap();
+    let a = brasa(&p, &home, &["--add", &format!("{}@1.0.0", url_of(&lib))]);
+    assert_eq!(a.code, 0, "{}{}", a.out, a.err);
+    assert!(a.out.contains("effects: asm"), "{}", a.out);
+    // --add rewrote the manifest and kept the policy
+    assert!(std::fs::read_to_string(p.join("brasa.toml")).unwrap().contains("forbid = \"asm\""));
+    let b = brasa(&p, &home, &["main.br", "-o", p.join("app.exe").to_str().unwrap()]);
+    assert_eq!(b.code, 1, "{}{}", b.out, b.err);
+    assert!(b.err.contains("uses `asm` (in lib.br)") && b.err.contains("forbids"), "{}", b.err);
+}
+
+#[test]
+fn a_policy_does_not_check_the_projects_own_code_or_allowed_effects() {
+    need_git!();
+    let (home, repos) = (scratch("home"), scratch("repos"));
+    let lib = repos.join("lib");
+    repo(&lib, &[("lib.br", UNSAFE_LIB)]);
+    git(&lib, &["tag", "v1.0.0"]);
+    let p = project("policy_ok", "package main\nuse lib\n\nfunc main()\n    asm\n        nop\n    end\n    print(\"{lib.n()}\")\nend\n");
+    init(&p, &home);
+    let toml = std::fs::read_to_string(p.join("brasa.toml")).unwrap();
+    std::fs::write(p.join("brasa.toml"), format!("{}\n[policy]\nforbid = \"asm\"\n", toml)).unwrap();
+    assert_eq!(brasa(&p, &home, &["--add", &format!("{}@1.0.0", url_of(&lib))]).code, 0);
+    assert_eq!(build_and_run(&p, &home).unwrap(), "1\n");
+}
+
+#[test]
+fn the_policy_table_accepts_one_known_value_only() {
+    assert_eq!(Manifest::parse("[policy]\nforbid = \"unsafe\"\n").unwrap().forbid.as_deref(), Some("unsafe"));
+    let e = Manifest::parse("[policy]\nforbid = \"network\"\n").unwrap_err();
+    assert!(e.contains("line 2") && e.contains("\"unsafe\", \"extern\" or \"asm\""), "{}", e);
+    let e = Manifest::parse("[policy]\nforbid = [\"asm\", \"unsafe\"]\n").unwrap_err();
+    assert!(e.contains("arrays are not supported"), "{}", e);
+    let e = Manifest::parse("[policy]\nallow = \"asm\"\n").unwrap_err();
+    assert!(e.contains("unknown key 'allow'"), "{}", e);
+    // written back as it was read
+    let m = Manifest::parse("[policy]\nforbid = \"extern\"\n").unwrap();
+    assert_eq!(Manifest::parse(&m.write()).unwrap(), m);
+}

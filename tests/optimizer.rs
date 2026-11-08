@@ -1099,8 +1099,8 @@ fn only_small_ordinary_functions_lose_their_call() {
         assert!(calls(&on, "B_main_main", callee), "{} must still be called", callee);
         assert!(calls(&off, "B_main_main", callee), "{} must be called with --no-opt", callee);
     }
-    // the function itself is still there
-    assert!(!proc_body(&on, "B_main_square").is_empty());
+    // nothing else refers to it, so after inlining the function itself is pruned
+    assert!(proc_body(&on, "B_main_square").is_empty());
 }
 
 #[test]

@@ -128,7 +128,7 @@ fn dlls(imports: &[(String, Vec<String>)]) -> Vec<&str> {
     imports.iter().map(|(d, _)| d.trim_end_matches(".dll")).collect()
 }
 
-const WINDOW_AND_SOCKETS: &str = "package main\nuse ui\nuse net\nuse task\nfunc main() -> error\n    let l = try await net.listen(0)\n    await l.close()\n    ui.run()\n    return\nend\n";
+const WINDOW_AND_SOCKETS: &str = "package main\nuse ui\nuse net\nuse task\nfunc main() -> error\n    let l = try await net.listen(0)\n    await l.close()\n    var win = ui.Window(\"t\", 64, 48)\n    win.layout(ui.vstack(ui.TextBox()))\n    win.show()\n    ui.run()\n    return\nend\n";
 
 #[test]
 fn imports_come_from_link_attributes() {

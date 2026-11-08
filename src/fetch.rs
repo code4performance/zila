@@ -193,7 +193,7 @@ pub fn init(dir: &Path, name: Option<&str>) -> Result<String, String> {
     }
     let default = dir.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "app".into());
     let name = name.map(|s| s.to_string()).unwrap_or(default);
-    let m = Manifest { name: Some(name), version: Version::parse("0.1.0"), edition: None, deps: Vec::new() };
+    let m = Manifest { name: Some(name), version: Version::parse("0.1.0"), edition: None, deps: Vec::new(), forbid: None };
     std::fs::write(&path, m.write()).map_err(|e| format!("cannot write {}: {}", path.display(), e))?;
     Ok(format!("created {}", path.display()))
 }
@@ -206,6 +206,32 @@ fn split_spec(spec: &str) -> (String, Option<Version>) {
         }
     }
     (spec.to_string(), None)
+}
+
+/// What the packages that were downloaded or changed can do (spec `package-effects`): one line per
+/// package whose version or commit is new, and a marked line when an update gave it an effect it
+/// did not have.
+pub fn effects_report(home: &Path, prev: &Lock, now: &Lock) -> String {
+    let mut out = String::new();
+    for e in &now.entries {
+        let old = prev.for_module(&e.module);
+        if old.map_or(false, |o| o.version == e.version && o.commit == e.commit) {
+            continue;
+        }
+        let Some(dir) = cache_lookup(home, &e.module, &e.version, &e.commit) else { continue };
+        let eff = crate::effects::of_dir(&dir);
+        out.push_str(&format!("\n  {}@{}: effects: {}", e.module, e.version, eff.show()));
+        if let Some(o) = old {
+            if let Some(od) = cache_lookup(home, &o.module, &o.version, &o.commit) {
+                let was = crate::effects::of_dir(&od);
+                let gained = eff.gained_over(&was);
+                if !gained.is_empty() {
+                    out.push_str(&format!("  [CHANGED: was {}, gained {}]", was.show(), gained.join(", ")));
+                }
+            }
+        }
+    }
+    out
 }
 
 pub fn add(cwd: &Path, home: &Path, spec: &str, as_name: Option<&str>, offline: bool) -> Result<String, String> {
@@ -236,8 +262,9 @@ pub fn add(cwd: &Path, home: &Path, spec: &str, as_name: Option<&str>, offline: 
     manifest.deps.push(Dep { name: name.clone(), git: url, version });
     let before = std::fs::read_to_string(root.join(MANIFEST)).ok();
     std::fs::write(root.join(MANIFEST), manifest.write()).map_err(|e| format!("cannot write {}: {}", MANIFEST, e))?;
+    let prev = read_lock(&root).ok().flatten().unwrap_or_default();
     match fetch(&root, home, offline) {
-        Ok(_) => Ok(format!("added {} ({}@{})", name, module, version)),
+        Ok(lock) => Ok(format!("added {} ({}@{}){}", name, module, version, effects_report(home, &prev, &lock))),
         Err(e) => {
             // leave the manifest as it was
             if let Some(b) = before {
@@ -250,8 +277,9 @@ pub fn add(cwd: &Path, home: &Path, spec: &str, as_name: Option<&str>, offline: 
 
 pub fn run_fetch(cwd: &Path, home: &Path, offline: bool) -> Result<String, String> {
     let root = project_root(cwd)?;
+    let prev = read_lock(&root).ok().flatten().unwrap_or_default();
     let lock = fetch(&root, home, offline)?;
-    Ok(format!("locked {} package(s)", lock.entries.len()))
+    Ok(format!("locked {} package(s){}", lock.entries.len(), effects_report(home, &prev, &lock)))
 }
 
 /// Removes the dependencies no source uses and rewrites the lock to the graph that is needed.
@@ -302,8 +330,9 @@ pub fn update(cwd: &Path, home: &Path, name: Option<&str>, offline: bool) -> Res
         }
     }
     std::fs::write(root.join(MANIFEST), manifest.write()).map_err(|e| format!("cannot write {}: {}", MANIFEST, e))?;
+    let prev = read_lock(&root).ok().flatten().unwrap_or_default();
     let lock = fetch_with(&root, home, false, true)?;
-    Ok(format!("{}; locked {} package(s)", if changed.is_empty() { "already up to date".to_string() } else { changed.join(", ") }, lock.entries.len()))
+    Ok(format!("{}; locked {} package(s){}", if changed.is_empty() { "already up to date".to_string() } else { changed.join(", ") }, lock.entries.len(), effects_report(home, &prev, &lock)))
 }
 
 /// Runs the package command of `opts`; returns the exit code.

@@ -93,6 +93,18 @@ brasa-parse --add https://github.com/someone/codec/v2@2.0.0     <span class="cm"
       <p>They act on the project that holds the current directory (the nearest <code>brasa.toml</code> upward) and need no source file.</p>
     </section>
 
+    <section id="effects">
+      <h2>What a package can do</h2>
+      <p>A matching hash proves that you got the code that was locked, not that the code is harmless. So the tool also tells you what each package contains that can break memory safety or reach outside the language: an <code>unsafe</code> block, an <code>extern</code> declaration (with the libraries it names) or an <code>asm</code> block. These are a package's <em>effects</em>; a package with none is written <code>none</code>.</p>
+      <p><code>--add</code>, <code>--fetch</code> and <code>--update</code> print the effects of every package they download or whose version changed, and <code>--update</code> marks a package that gained one:</p>
+      <pre><code>locked 1 package(s)
+  example.org/codec@1.1.0: effects: unsafe  [CHANGED: was none, gained unsafe]</code></pre>
+      <p><code>brasa-parse file.br --explain-link</code> shows the effects of the code your program actually reaches next to the size of each package. To refuse an effect, add a policy to <code>brasa.toml</code>:</p>
+      <pre><code>[policy]
+forbid = "asm"</code></pre>
+      <p>The value is one of <code>"unsafe"</code>, <code>"extern"</code> or <code>"asm"</code> (one value; the manifest has no lists). A build then fails when any dependency, direct or indirect, has that effect, naming the package and the file. Your own code is not checked.</p>
+    </section>
+
     <section id="git">
       <h2>Git</h2>
       <p>Only the commands that download (<code>--add</code>, <code>--fetch</code>, <code>--update</code>) run <code>git</code>, found on your <code>PATH</code>, with fixed arguments and no shell, and with password prompts turned off (ssh agents and credential helpers work as you configured them). URLs may be <code>https://</code>, <code>ssh://</code>, <code>git@host:path</code> or <code>file://</code>. If git is missing the tool says <code>git was not found on PATH. It is used only to download dependencies</code>. Building from a populated cache needs neither git nor a network, and the compiler needs no other external tool: <code>brasa-parse</code> writes executables itself.</p>
@@ -107,6 +119,12 @@ stream.next()</code></pre>
       <p>A package is the <code>.br</code> files directly in its directory, merged into one module: they see each other's names, a name declared twice is an error that names both files, and each file's <code>package</code> line must be the package's name (the directory name; for a dependency, its <code>name</code> in <code>[package]</code>). Files ending in <code>_test.br</code> are left out of builds; <code>brasa-parse --test dir/name_test.br</code> runs their <code>#[test]</code> functions together with the package's own files. A dependency's own <code>use</code>s are looked up with <em>its</em> manifest, not yours.</p>
       <p>A name found nowhere is an error: <code>unknown package 'x' (not in the standard library, brasa.toml or the project directory); to add one: brasa-parse --add &lt;git-url&gt;</code>. A program with no <code>brasa.toml</code> still sees the standard library and the <code>name.br</code> files next to it, as before.</p>
       <p>Across a package boundary only <code>pub</code> items are visible; see <a href="syntax.html#visibility">visibility</a>.</p>
+    </section>
+
+    <section id="linking">
+      <h2>What goes into the executable</h2>
+      <p>Every package a program names with <code>use</code>, from the standard library or from a dependency, is compiled together with the program into one executable. Nothing is loaded when it runs: the program does not read <code>.br</code> files, the cache, <code>brasa.toml</code> or <code>brasa.lock</code>, and there are no shared libraries of Brasa code. The only thing the operating system links at run time is C code that the program declares with <code>extern</code>.</p>
+      <p>Only what the program can reach is kept. A function, global or string that nothing reachable refers to is left out, and a package's start-up code runs only when it does something the program can observe or sets a global that kept code reads. So <code>use json</code> without calling it adds no bytes, and a program that never opens a window does not import the window system. <code>brasa-parse --no-prune</code> turns this off, and <code>brasa-parse file.br --explain-link</code> shows how many bytes of code and data each package adds to the program.</p>
     </section>
 
     <section id="sample">

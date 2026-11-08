@@ -71,6 +71,12 @@ cargo test</code></pre>
         <dt>--no-opt</dt>
         <dd>Compiles without the optimizer (see <a href="native.html#optimizer">Native compilation</a>). Use it to check whether a problem comes from an optimization: the program must behave the same either way. Combine it with <code>-o</code> or <code>--asm</code>.</dd>
 
+        <dt>--no-prune</dt>
+        <dd>Keeps every function, global and string of every library the program names with <code>use</code>, even when nothing reaches it. By default only what the program can reach is in the executable, so a <code>use</code> that is never called costs nothing (see <a href="packages.html#linking">Packages</a>). Use this flag to check whether a problem comes from pruning: the program must behave the same either way.</dd>
+
+        <dt>--explain-link</dt>
+        <dd>Prints how many bytes of code and data each package contributes to the program (the program itself, each library or dependency named by <code>use</code>, the runtime, strings and generated helpers), largest first, and the total. It writes no executable unless <code>-o</code> is also given. Combine it with <code>--target linux</code> for the Linux program. See <a href="packages.html#linking">Packages</a>.</dd>
+
         <dt>--docs</dt>
         <dd>Rewrites the example blocks of this documentation site from <code>examples/*.br</code>. Run it after changing an example; <code>cargo test</code> fails when the pages are out of date.</dd>
 

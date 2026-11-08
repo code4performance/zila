@@ -19,8 +19,8 @@ fn examples_compile() {
 
 #[test]
 fn ui_is_compiled_from_brasa_source() {
-    let a = asm("package main\nuse ui\nfunc main()\n    ui.run()\nend\n").unwrap();
-    // The std library's functions are emitted as Brasa procedures...
+    let a = asm("package main\nuse ui\nfunc main()\n    var win = ui.Window(\"t\", 64, 48)\n    win.layout(ui.vstack(ui.TextBox()))\n    win.show()\n    ui.run()\nend\n").unwrap();
+    // The std library's functions the program reaches are emitted as Brasa procedures...
     assert!(a.contains("B_ui_wndproc proc"));
     assert!(a.contains("B_ui_Control_layout proc"));
     // ...and call Win32 directly.
@@ -101,6 +101,7 @@ func helper() -> int
     return await g()
 end
 func main()
+    let n = helper()
 end
 ").unwrap();
     assert!(e.contains("helper"), "{}", e);

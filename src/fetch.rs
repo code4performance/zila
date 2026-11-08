@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-pub const GIT_MISSING: &str = "git was not found on PATH. It is used only to download dependencies (zila-parse --fetch); building from an already populated cache does not need it.";
+pub const GIT_MISSING: &str = "git was not found on PATH. It is used only to download dependencies (zila --fetch); building from an already populated cache does not need it.";
 
 // ---------------------------------------------------------------------------
 // git
@@ -120,7 +120,7 @@ impl<'a> Fetcher<'a> {
             let found = tree_hash(d)?;
             if found != e.hash {
                 if self.offline {
-                    return Err(format!("package '{}' in the cache does not match zila.lock (expected {}, found {}); run zila-parse --fetch to restore it", id, e.hash, found));
+                    return Err(format!("package '{}' in the cache does not match zila.lock (expected {}, found {}); run zila --fetch to restore it", id, e.hash, found));
                 }
                 eprintln!("note: the cached copy of '{}' did not match zila.lock; downloading it again", id);
                 let _ = std::fs::remove_dir_all(d);
@@ -131,7 +131,7 @@ impl<'a> Fetcher<'a> {
             Some(d) => d,
             None => {
                 if self.offline {
-                    return Err(format!("package '{}' is not in the cache; run zila-parse --fetch (without --offline)", id));
+                    return Err(format!("package '{}' is not in the cache; run zila --fetch (without --offline)", id));
                 }
                 let tmp = cache_tmp(self.home, module, version, &commit)?;
                 if let Err(e) = clone_commit(url, &commit, &tmp) {
@@ -183,7 +183,7 @@ pub fn fetch_with(root: &Path, home: &Path, offline: bool, accept_moved: bool) -
 // ---------------------------------------------------------------------------
 
 fn project_root(cwd: &Path) -> Result<PathBuf, String> {
-    find_manifest_dir(cwd).ok_or_else(|| format!("no {} found here or above; run zila-parse --init first", MANIFEST))
+    find_manifest_dir(cwd).ok_or_else(|| format!("no {} found here or above; run zila --init first", MANIFEST))
 }
 
 pub fn init(dir: &Path, name: Option<&str>) -> Result<String, String> {

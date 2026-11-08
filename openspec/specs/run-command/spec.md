@@ -6,10 +6,10 @@ TBD - created by archiving change remove-interpreter. Update Purpose after archi
 ## Requirements
 
 ### Requirement: Run compiles and executes the program
-`zila-parse <file.zila> --run` SHALL compile the program with the native compiler to a temporary executable for the machine it runs on (a PE on Windows, an ELF on Linux), run it, and delete the executable when it ends. There SHALL be no other implementation of the language behind `--run`: the output, the panics and the behavior of every library and feature SHALL be those of the executable that `--build` makes from the same file with the same optimization setting.
+`zila <file.zila> --run` SHALL compile the program with the native compiler to a temporary executable for the machine it runs on (a PE on Windows, an ELF on Linux), run it, and delete the executable when it ends. There SHALL be no other implementation of the language behind `--run`: the output, the panics and the behavior of every library and feature SHALL be those of the executable that `--build` makes from the same file with the same optimization setting.
 
 #### Scenario: A plain program
-- **WHEN** `zila-parse examples/hello.zila --run` is executed
+- **WHEN** `zila examples/hello.zila --run` is executed
 - **THEN** the greeting is printed, the exit status is 0 and no executable is left in the temporary directory
 
 #### Scenario: A native-only feature
@@ -21,11 +21,11 @@ TBD - created by archiving change remove-interpreter. Update Purpose after archi
 - **THEN** the program is built without the optimizer, as `--build --no-opt` would
 
 ### Requirement: Output and status pass through
-The program SHALL inherit the standard input, output and error of `zila-parse`, with nothing added or buffered by the tool, and `zila-parse` SHALL exit with the program's exit status (101 after a panic, as the executable would); on Linux a program ended by a signal SHALL give `128` plus the signal number.
+The program SHALL inherit the standard input, output and error of `zila`, with nothing added or buffered by the tool, and `zila` SHALL exit with the program's exit status (101 after a panic, as the executable would); on Linux a program ended by a signal SHALL give `128` plus the signal number.
 
 #### Scenario: Exit status
 - **WHEN** a program that panics is run with `--run`
-- **THEN** its `panic:` line is printed as the executable prints it and `zila-parse` exits with 101
+- **THEN** its `panic:` line is printed as the executable prints it and `zila` exits with 101
 
 #### Scenario: Standard input
 - **WHEN** a program that reads a line from standard input is run with `--run` with text piped in

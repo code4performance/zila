@@ -1,7 +1,7 @@
 ## 1. The typed program form
 
-- [ ] 1.1 Read what `declare`, `layout` and `func_sig` return and write down, in design.md, which state of `Compiler` is checked information and which is emission state (the open question)
-- [ ] 1.2 Add `TypedProgram` for declarations (records, enums, interfaces, signatures, globals, methods) and make emission read it; assembly of every example is byte-identical to before
+- [x] 1.1 Read what `declare`, `layout` and `func_sig` return and write down, in design.md, which state of `Compiler` is checked information and which is emission state (the open question)
+- [x] 1.2 Add `TypedProgram` for declarations (records, enums, interfaces, signatures, globals, methods) and make emission read it; assembly of every example is byte-identical to before
 - [ ] 1.3 Move generics instantiation and call binding into the checker output; byte-identical assembly and the whole suite
 - [ ] 1.4 Move function bodies (expression and statement types, closures with their captures); byte-identical assembly and the whole suite
 - [ ] 1.5 Delete the old path in each area as it is covered, and the `unreachable!()` sites that the typed form makes impossible

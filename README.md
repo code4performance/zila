@@ -2,11 +2,15 @@
 
 # Zila Lang
 
+**Version 0.1.0** · [Changelog](CHANGELOG.md)
+
 **A small, readable language that compiles straight to machine code.**
 
 Zila Lang is a compiled, statically typed language with readable syntax, where blocks close with the word end. Its compiler, written in Rust with no dependencies, produces x86-64 programs for Windows and Linux itself: no virtual machine, no garbage collector, no runtime to install. Errors are values, memory is reference-counted, and the same language writes applications, C bindings and a kernel.
 
-**What it is for:** command-line tools and servers, native desktop windows, bindings to C libraries, and operating-system code.
+**What it is for:** a modern language without the overhead: the good features of modern languages (static types, generics, interfaces, errors as values, async and threads), simple to learn, compiled straight to machine code. It was born to work with AI, both as a client (models, tools, MCP, RAG) and as the language that serves a variety of services, with native connections to the main databases (PostgreSQL and SQL Server today) and made for the web, IoT and mobile. It is extensible through packages and open source.
+
+Today it writes command-line tools and servers, native desktop windows, bindings to C libraries and operating-system code. IoT and mobile are targets, not yet built.
 
 Zila Lang is young and honest about what it cannot do yet. If you like compilers and language design, come build it with us: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -70,7 +74,7 @@ end
 ```
 
 ```text
-$ zila-parse demo.zila -o demo.exe
+$ zila demo.zila -o demo.exe
 $ ./demo.exe
 areas: 12 and 12
 doubled in parallel: 10 and 12
@@ -287,7 +291,7 @@ Zila Lang is **pre-alpha**. The design is settling, but breaking changes are sti
 
 | Area | State |
 |---|---|
-| Lexer and parser | ✅ Complete for the grammar in [`zila.ebnf`](zila.ebnf) |
+| Lexer and parser | ✅ Complete for the grammar in [`docs/zila.ebnf`](docs/zila.ebnf) |
 | Native compiler (Windows x64) | ✅ Works for a large, useful subset. Writes the PE `.exe` itself: no Visual Studio, `ml64` or `link` (the OpenSpec change `add-direct-pe-output` is still open for review) |
 | Bare-metal target and Zila Lang OS | ✅ Boots and runs |
 | `async` / `await`, timers, files, TCP, UDP | ✅ Works |
@@ -392,31 +396,31 @@ cd zila
 cargo build --release
 ```
 
-The tool is called `zila-parse` (`target/release/zila-parse`).
+The tool is called `zila` (`target/release/zila`).
 
 **Use it**
 
 ```sh
-zila-parse program.zila                 # check a program and print a summary
-zila-parse program.zila -o program.exe  # compile to a native Windows executable
-zila-parse program.zila --target linux -o program   # compile to a static Linux ELF
-zila-parse program.zila --run           # compile and run it
-zila-parse program.zila --asm           # show the generated assembly
-zila-parse program.zila --ast           # show the syntax tree
-zila-parse program.zila --tokens        # show the tokens
-zila-parse --os os/boot.zila os/kernel.zila -o zila-os.img   # build a bootable disk image
-zila-parse --fmt file.zila              # format files in the standard style (--fmt-check only lists them)
-zila-parse --test file.zila             # run the #[test] functions of a file
-zila-parse --lsp                      # run the language server on standard input and output
-zila-parse --docs                     # refresh the examples on the documentation site
+zila program.zila                 # check a program and print a summary
+zila program.zila -o program.exe  # compile to a native Windows executable
+zila program.zila --target linux -o program   # compile to a static Linux ELF
+zila program.zila --run           # compile and run it
+zila program.zila --asm           # show the generated assembly
+zila program.zila --ast           # show the syntax tree
+zila program.zila --tokens        # show the tokens
+zila --os os/boot.zila os/kernel.zila -o zila-os.img   # build a bootable disk image
+zila --fmt file.zila              # format files in the standard style (--fmt-check only lists them)
+zila --test file.zila             # run the #[test] functions of a file
+zila --lsp                      # run the language server on standard input and output
+zila --docs                     # refresh the examples on the documentation site
 ```
 
 **Try the examples**
 
 ```sh
-zila-parse examples/hello.zila -o hello.exe && ./hello.exe
-zila-parse examples/async.zila -o async.exe && ./async.exe
-zila-parse examples/hello.zila --target linux -o hello && ./hello   # on Linux (or WSL)
+zila examples/hello.zila -o hello.exe && ./hello.exe
+zila examples/async.zila -o async.exe && ./async.exe
+zila examples/hello.zila --target linux -o hello && ./hello   # on Linux (or WSL)
 .\os\run.ps1                            # build and boot Zila Lang OS in QEMU
 ```
 
@@ -428,7 +432,7 @@ cargo test
 
 Tests that need the Windows toolchain or QEMU skip themselves when those are missing, so the suite is designed to run anywhere Rust does.
 
-**Use it in VS Code.** The extension in [`editors/vscode`](editors/vscode) gives highlighting, syntax errors as you type and Format Document. Put `zila-parse` on your `PATH`, then `npx @vscode/vsce package` and install the `.vsix`.
+**Use it in VS Code.** The extension in [`editors/vscode`](editors/vscode) gives highlighting, syntax errors as you type and Format Document. Put `zila` on your `PATH`, then `npx @vscode/vsce package` and install the `.vsix`.
 
 **Read the docs.** Open [`docs/index.html`](docs/index.html) in a browser. It is a static site, no server needed.
 
@@ -457,12 +461,10 @@ packages/          the other libraries, as packages: json, crypto, tls, ui, web,
 tools/             the rename tool and the icon generator
 os/                Zila Lang OS: boot.zila (boot sector) and kernel.zila
 examples/          example programs
-docs/              the documentation site (static HTML)
+docs/              the documentation site (static HTML), the formal grammar (zila.ebnf) and the C interop and inline assembly spec (zila-ffi.md)
 editors/vscode/    VS Code extension: highlighting, syntax errors and formatting through the language server
 openspec/          proposals, specs and design notes for every language change
 tests/             parser, compiler, async, OS and documentation tests
-zila.ebnf         the formal grammar
-zila-ffi.md       C interop and inline assembly specification
 ```
 
 ---

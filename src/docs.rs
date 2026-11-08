@@ -2,7 +2,7 @@
 //!
 //! A code block preceded by `<div class="file-label">examples/NAME.zila</div>` shows that file in
 //! full; one labelled `examples/NAME.zila (excerpt)` shows a contiguous part of it. `sync` (the
-//! `zila-parse --docs` command) rewrites the full blocks from the files, and `tests/docs.rs`
+//! `zila --docs` command) rewrites the full blocks from the files, and `tests/docs.rs`
 //! fails when a block no longer matches.
 
 use crate::lexer::KEYWORDS;

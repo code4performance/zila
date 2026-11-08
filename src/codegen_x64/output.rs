@@ -50,7 +50,7 @@ pub fn build_os(boot: &File, kernel: &File) -> Result<Vec<u8>, String> {
     c.load(kernel)?;
     c.declare()?;
     let ok = matches!(
-        c.funcs.get(&(kernel.package.clone(), "console_write".to_string())),
+        c.tp.funcs.get(&(kernel.package.clone(), "console_write".to_string())),
         Some(s) if s.params.len() == 1 && s.params[0].ty == Ty::Text && s.ret == Ty::Void
     );
     if !ok {

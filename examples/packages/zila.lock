@@ -1,4 +1,4 @@
-# zila.lock: written by zila-parse; commit it, do not edit it
+# zila.lock: written by zila; commit it, do not edit it
 
 [package."example.org/zila/greeter@1.0.0"]
 commit = "0123456789012345678901234567890123456789"

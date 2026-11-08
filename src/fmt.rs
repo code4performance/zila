@@ -1,4 +1,4 @@
-//! `zila-parse --fmt`: rewrites source in the standard style.
+//! `zila --fmt`: rewrites source in the standard style.
 //!
 //! The formatter works on the token stream and the original text of each token, and changes
 //! only whitespace: indentation (from the block structure the parser records), the spaces

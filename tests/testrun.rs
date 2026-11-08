@@ -1,4 +1,4 @@
-//! `zila-parse --test`, `#[test]`, `assert` and `assert_eq`. The runner builds native
+//! `zila --test`, `#[test]`, `assert` and `assert_eq`. The runner builds native
 //! executables (a toolchain-less machine is detected by the exit status 2 and the tests skip).
 
 use std::path::PathBuf;
@@ -15,7 +15,7 @@ fn temp_file(text: &str) -> PathBuf {
 
 /// Runs `--test` on the files; `None` when there is no native toolchain.
 fn run_tests(files: &[&PathBuf], extra: &[&str]) -> Option<(String, String, i32)> {
-    let out = Command::new(env!("CARGO_BIN_EXE_zila-parse")).arg("--test").args(files).args(extra).output().unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_zila")).arg("--test").args(files).args(extra).output().unwrap();
     let (stdout, stderr) = (String::from_utf8_lossy(&out.stdout).replace('\r', ""), String::from_utf8_lossy(&out.stderr).replace('\r', ""));
     let code = out.status.code().unwrap();
     if code == 2 && stderr.contains("could not find Visual Studio") {

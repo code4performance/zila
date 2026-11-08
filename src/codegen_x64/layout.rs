@@ -81,7 +81,7 @@ impl Compiler {
                             _ if segs[0] == "c" => None,
                             _ => {
                                 return Err(format!(
-                                    "unknown package '{}' (not in the standard library, zila.toml or the project directory); to add one: zila-parse --add <git-url>",
+                                    "unknown package '{}' (not in the standard library, zila.toml or the project directory); to add one: zila --add <git-url>",
                                     segs.join(".")
                                 ))
                             }
@@ -140,7 +140,7 @@ end
         for d in f.decls {
             if let DeclKind::Type(td) = d.kind {
                 if let TypeBody::Interface(sigs) = td.body {
-                    self.interfaces.insert(format!("std.{}", td.name), ("std".to_string(), sigs));
+                    self.tp.interfaces.insert(format!("std.{}", td.name), ("std".to_string(), sigs));
                 }
             }
         }
@@ -158,7 +158,7 @@ end
                 if let DeclKind::Type(td) = &d.kind {
                     let q = format!("{}.{}", mname, td.name);
                     if d.public {
-                        self.pub_types.insert(q.clone());
+                        self.tp.pub_types.insert(q.clone());
                     }
                     if td.name == "Rc" || td.name == "Weak" {
                         return self.err(format!("type '{}' is defined twice: '{}' is a built-in type (shared references)", td.name, td.name));
@@ -178,9 +178,9 @@ end
                     match &td.body {
                         TypeBody::Record(fields) => {
                             if d.attrs.iter().any(|a| a.name == "shared") {
-                                self.shared_recs.insert(q.clone());
+                                self.tp.shared_recs.insert(q.clone());
                             }
-                            self.rec_decls.insert(q, (mname.clone(), fields.clone()));
+                            self.tp.rec_decls.insert(q, (mname.clone(), fields.clone()));
                         }
                         TypeBody::Interface(sigs) => {
                             let mut seen = HashSet::new();
@@ -189,23 +189,23 @@ end
                                     return self.err(format!("interface '{}' declares method '{}' twice", td.name, sg.name));
                                 }
                             }
-                            self.interfaces.insert(q, (mname.clone(), sigs.clone()));
+                            self.tp.interfaces.insert(q, (mname.clone(), sigs.clone()));
                         }
                         TypeBody::Enum(vs) => {
                             if vs.iter().any(|v| !v.fields.is_empty()) {
-                                self.enum_payload.insert(q.clone());
+                                self.tp.enum_payload.insert(q.clone());
                             }
                             for (i, v) in vs.iter().enumerate() {
                                 let key = (mname.clone(), v.name.clone());
-                                if self.variants.contains_key(&key) {
+                                if self.tp.variants.contains_key(&key) {
                                     return self.err(format!("variant name '{}' is used by two enums in this module", v.name));
                                 }
-                                self.variants.insert(key, (q.clone(), i));
+                                self.tp.variants.insert(key, (q.clone(), i));
                             }
-                            self.enum_decls.insert(q, (mname.clone(), vs.clone()));
+                            self.tp.enum_decls.insert(q, (mname.clone(), vs.clone()));
                         }
                         TypeBody::Alias(t) => {
-                            self.aliases.insert(q, (mname.clone(), t.clone()));
+                            self.tp.aliases.insert(q, (mname.clone(), t.clone()));
                         }
                     }
                 }
@@ -235,15 +235,15 @@ end
         }
         // Record layouts.
         let decls: Vec<(String, String, Vec<Field>)> =
-            self.rec_decls.iter().map(|(q, (m, f))| (q.clone(), m.clone(), f.clone())).collect();
+            self.tp.rec_decls.iter().map(|(q, (m, f))| (q.clone(), m.clone(), f.clone())).collect();
         for (q, m, fields) in decls {
             self.cur_mod = m.clone();
             let info = self.layout(&fields, &m)?;
-            self.records.insert(q, info);
+            self.tp.records.insert(q, info);
         }
         // Enum layouts.
         let edecls: Vec<(String, String, Vec<Variant>)> =
-            self.enum_decls.iter().map(|(q, (m, v))| (q.clone(), m.clone(), v.clone())).collect();
+            self.tp.enum_decls.iter().map(|(q, (m, v))| (q.clone(), m.clone(), v.clone())).collect();
         for (q, m, vs) in edecls {
             self.cur_mod = m.clone();
             let mut variants = Vec::new();
@@ -256,8 +256,8 @@ end
                 maxf = maxf.max(tys.len());
                 variants.push((v.name.clone(), tys));
             }
-            let payload = self.enum_payload.contains(&q);
-            self.enums.insert(q, EnumInfo { variants, payload, size: 8 + 8 * maxf as u32 });
+            let payload = self.tp.enum_payload.contains(&q);
+            self.tp.enums.insert(q, EnumInfo { variants, payload, size: 8 + 8 * maxf as u32 });
         }
         // Functions, methods, externs, globals.
         let mods: Vec<(String, Vec<Decl>)> = self.modules.iter().map(|m| (m.name.clone(), m.file.decls.clone())).collect();
@@ -281,17 +281,17 @@ end
                                 return self.err(format!("methods cannot be declared on {}", rt.show()));
                             }
                             let key = method_key(rt);
-                            if self.methods.contains_key(&(key.clone(), fd.name.clone())) {
+                            if self.tp.methods.contains_key(&(key.clone(), fd.name.clone())) {
                                 return self.err(format!("{} already has a method '{}'", rt.show(), fd.name));
                             }
-                            self.methods.insert((key, fd.name.clone()), sig);
+                            self.tp.methods.insert((key, fd.name.clone()), sig);
                         } else {
                             if self.opt && !d.attrs.iter().any(|a| a.name == "naked") {
                                 if let Some(body) = inlinable(fd, &sig) {
                                     self.inline_bodies.insert(sig.sym.clone(), (body, m.clone()));
                                 }
                             }
-                            self.funcs.insert((m.clone(), fd.name.clone()), sig);
+                            self.tp.funcs.insert((m.clone(), fd.name.clone()), sig);
                         }
                     }
                     DeclKind::Extern(ed) => {
@@ -324,7 +324,7 @@ end
                             Some(t) => self.resolve(t, m)?,
                             None => Ty::Void,
                         };
-                        self.funcs.insert(
+                        self.tp.funcs.insert(
                             (m.clone(), ed.name.clone()),
                             Sig {
                                 sym: ed.name.clone(),
@@ -352,7 +352,7 @@ end
                             }
                             (None, None) => self.infer_global(vd.value.as_ref(), m)?,
                         };
-                        self.globals.insert(
+                        self.tp.globals.insert(
                             (m.clone(), vd.name.clone()),
                             Global { sym: format!("G_{}_{}", m, vd.name), ty, konst, mutable: vd.mutable, public: d.public },
                         );
@@ -371,7 +371,7 @@ end
         }
         let mods: Vec<(String, File)> = self.modules.iter().map(|m| (m.name.clone(), m.file.clone())).collect();
         let mut ifaces = HashSet::new();
-        for k in self.interfaces.keys() {
+        for k in self.tp.interfaces.keys() {
             ifaces.insert(k.clone());
         }
         self.custom_allocator = crate::noalloc::check_program(&mods, &ifaces)?;
@@ -460,7 +460,7 @@ end
             ExprKind::Float(_) => Ty::Float { bits: 64 },
             ExprKind::Record { path, .. } => Ty::Rec(self.record_name(path, m)?),
             ExprKind::Call { callee, .. } => match &callee.kind {
-                ExprKind::Ident(f) => match self.funcs.get(&(m.to_string(), f.clone())) {
+                ExprKind::Ident(f) => match self.tp.funcs.get(&(m.to_string(), f.clone())) {
                     Some(s) => s.ret.clone(),
                     None => return self.err("cannot infer the type of this global; add a type annotation"),
                 },
@@ -474,7 +474,7 @@ end
         match &e.kind {
             ExprKind::Int(n) => Some(*n as i64),
             ExprKind::Char(c) => Some(*c as i64),
-            ExprKind::Ident(n) => self.globals.get(&(m.to_string(), n.clone())).and_then(|g| g.konst),
+            ExprKind::Ident(n) => self.tp.globals.get(&(m.to_string(), n.clone())).and_then(|g| g.konst),
             ExprKind::Unary { op: "-", expr } => self.const_eval(expr, m).map(|v| v.wrapping_neg()),
             ExprKind::Unary { op: "bitnot", expr } => self.const_eval(expr, m).map(|v| !v),
             ExprKind::Binary { op, lhs, rhs } => {
@@ -502,10 +502,10 @@ end
         if path.len() > 1 && !self.type_visible(&q, m) && self.type_exists(&q) {
             return self.private_name(path.last().unwrap(), type_owner(&q));
         }
-        if self.rec_decls.contains_key(&q) {
+        if self.tp.rec_decls.contains_key(&q) {
             return Ok(q);
         }
-        if let Some((am, t)) = self.aliases.get(&q).cloned() {
+        if let Some((am, t)) = self.tp.aliases.get(&q).cloned() {
             if let Ty::Rec(r) = self.resolve(&t, &am)? {
                 return Ok(r);
             }
@@ -582,7 +582,7 @@ end
                 }
                 for n in names {
                     let q = format!("{}.{}", m, n);
-                    if self.type_exists(&q) && !self.pub_types.contains(&q) {
+                    if self.type_exists(&q) && !self.tp.pub_types.contains(&q) {
                         return self.err(format!(
                             "pub {} '{}' exposes private type '{}'; mark '{}' pub or make '{}' private",
                             kind, name, n, n, name
@@ -596,10 +596,10 @@ end
 
     pub(super) fn type_exists(&self, q: &str) -> bool {
         self.tmpl_recs.contains_key(q)
-            || self.rec_decls.contains_key(q)
-            || self.interfaces.contains_key(q)
-            || self.enum_decls.contains_key(q)
-            || self.aliases.contains_key(q)
+            || self.tp.rec_decls.contains_key(q)
+            || self.tp.interfaces.contains_key(q)
+            || self.tp.enum_decls.contains_key(q)
+            || self.tp.aliases.contains_key(q)
     }
 
     pub(super) fn resolve(&mut self, t: &Type, m: &str) -> R<Ty> {
@@ -654,27 +654,27 @@ end
                 if self.tmpl_recs.contains_key(&q) {
                     return self.instantiate_record(&q, args, m);
                 }
-                if self.rec_decls.contains_key(&q) {
+                if self.tp.rec_decls.contains_key(&q) {
                     return Ok(Ty::Rec(q));
                 }
-                if self.interfaces.contains_key(&q) {
+                if self.tp.interfaces.contains_key(&q) {
                     return self.err(format!(
                         "'{}' is an interface: interfaces can only bound type parameters; write `<T: {}>` and use `T`",
                         path.join("."),
                         path.last().unwrap()
                     ));
                 }
-                if self.enum_decls.contains_key(&q) {
+                if self.tp.enum_decls.contains_key(&q) {
                     return Ok(Ty::Enum(q));
                 }
-                if let Some((am, at)) = self.aliases.get(&q).cloned() {
+                if let Some((am, at)) = self.tp.aliases.get(&q).cloned() {
                     return self.resolve(&at, &am);
                 }
                 if path.len() == 1 && path[0] == "Self" {
                     return self.err("`Self` is only valid inside an interface method signature");
                 }
                 if path.len() == 1 && path[0] == "Type" {
-                    if self.driver && self.rec_decls.contains_key("reflect.Type") {
+                    if self.driver && self.tp.rec_decls.contains_key("reflect.Type") {
                         return Ok(Ty::Rec("reflect.Type".to_string()));
                     }
                     return self.err("`Type` exists only at compile time: use it in a `comptime func` or as a `comptime` parameter");

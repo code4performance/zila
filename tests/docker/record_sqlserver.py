@@ -62,7 +62,7 @@ def main():
     src = open(CLIENT, encoding="utf-8").read().replace("@PORT@", str(PORT))
     br = os.path.join(os.path.dirname(exe), "rec.zila")
     open(br, "w", encoding="utf-8").write(src)
-    compiler = os.path.join(ROOT, "target", "debug", "zila-parse.exe")
+    compiler = os.path.join(ROOT, "target", "debug", "zila.exe")
     subprocess.run([compiler, br, "-o", exe], check=True)
     listener = socket.socket()
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

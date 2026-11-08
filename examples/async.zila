@@ -1,6 +1,6 @@
 // async/await: waiting, files and TCP in one program.
 //
-//   zila-parse examples/async.zila -o async.exe
+//   zila examples/async.zila -o async.exe
 //
 // An `async func` starts running when it is called and returns a Future.
 // `await` waits for a future without blocking the other tasks.

@@ -38,17 +38,17 @@
       <h2>Build</h2>
       <pre><code>cargo build --release
 cargo test</code></pre>
-      <p><code>cargo build --release</code> compiles the <code>zila-parse</code> command-line tool; <code>cargo test</code> runs the parser's test suite (precedence, newline rules, match arms, generics, and error-position checks).</p>
+      <p><code>cargo build --release</code> compiles the <code>zila</code> command-line tool; <code>cargo test</code> runs the parser's test suite (precedence, newline rules, match arms, generics, and error-position checks).</p>
     </section>
 
     <section>
       <h2>Run a program</h2>
-      <p>Once built, point <code>zila-parse</code> at any <code>.zila</code> file:</p>
-      <pre><code>./target/release/zila-parse examples/rest_api.zila            <span class="cm"># OK + summary</span>
-./target/release/zila-parse examples/hello.zila --ast          <span class="cm"># dump the AST</span>
-./target/release/zila-parse examples/hello.zila --tokens       <span class="cm"># dump tokens</span>
-./target/release/zila-parse examples/hello.zila --run          <span class="cm"># compile, run, delete the executable</span>
-./target/release/zila-parse examples/async.zila -o async.exe   <span class="cm"># compile to a native executable</span></code></pre>
+      <p>Once built, point <code>zila</code> at any <code>.zila</code> file:</p>
+      <pre><code>./target/release/zila examples/rest_api.zila            <span class="cm"># OK + summary</span>
+./target/release/zila examples/hello.zila --ast          <span class="cm"># dump the AST</span>
+./target/release/zila examples/hello.zila --tokens       <span class="cm"># dump tokens</span>
+./target/release/zila examples/hello.zila --run          <span class="cm"># compile, run, delete the executable</span>
+./target/release/zila examples/async.zila -o async.exe   <span class="cm"># compile to a native executable</span></code></pre>
 
       <dl class="cli">
         <dt>(no flag)</dt>
@@ -94,7 +94,7 @@ cargo test</code></pre>
         <dd>Builds each file with a generated entry point that runs its <code>#[test]</code> functions in order and prints <code>ok name</code> or <code>FAIL name: message</code> for each, then <code>test result: N passed, M failed</code>. The exit status is 1 when a test failed, a file does not compile or the run stopped early (a crash such as a division by zero is reported with its exit code). The file's own <code>main</code> is not used; combine with <code>--no-opt</code> to test without the optimizer. See <a href="syntax.html#testing">Testing</a>.</dd>
 
         <dt>--lsp</dt>
-        <dd>Runs a language server on standard input and output (Language Server Protocol). It reports syntax errors as you type and formats documents in the standard style, like <code>--fmt</code>. Any editor with an LSP client can use it by starting <code>zila-parse --lsp</code> for <code>.zila</code> files.</dd>
+        <dd>Runs a language server on standard input and output (Language Server Protocol). It reports syntax errors as you type and formats documents in the standard style, like <code>--fmt</code>. Any editor with an LSP client can use it by starting <code>zila --lsp</code> for <code>.zila</code> files.</dd>
 
         <dt>--comptime-timeout seconds</dt>
         <dd>The time one run of comptime generators may take (default 5). A generator that takes longer is stopped and the build fails with an error naming it. See <a href="syntax.html#comptime">Compile-time code generation</a>.</dd>
@@ -133,11 +133,11 @@ cargo test</code></pre>
 
     <section id="editors">
       <h2>Editor support</h2>
-      <p>The repository has a VS Code extension in <code>editors/vscode</code>: syntax highlighting, syntax errors as you type and Format Document, using the language server (<code>zila-parse --lsp</code>). It has no npm dependencies and needs no build step. Put <code>zila-parse</code> on your <code>PATH</code> (or set <code>zila.server.path</code>), then package and install it:</p>
+      <p>The repository has a VS Code extension in <code>editors/vscode</code>: syntax highlighting, syntax errors as you type and Format Document, using the language server (<code>zila --lsp</code>). It has no npm dependencies and needs no build step. Put <code>zila</code> on your <code>PATH</code> (or set <code>zila.server.path</code>), then package and install it:</p>
       <pre><code>cd editors/vscode
 npx @vscode/vsce package
 code --install-extension zila-lang-0.4.0.vsix</code></pre>
-      <p>The settings are <code>zila.server.path</code> (the executable, default <code>zila-parse</code>), <code>zila.server.enabled</code> and <code>zila.trace</code> (log the protocol to the <strong>Zila Lang Language Server</strong> output channel), and the command <strong>Zila Lang: Restart Language Server</strong>. If the executable cannot be started you get one message and highlighting keeps working. Other editors can run <code>zila-parse --lsp</code> with any Language Server Protocol client.</p>
+      <p>The settings are <code>zila.server.path</code> (the executable, default <code>zila</code>), <code>zila.server.enabled</code> and <code>zila.trace</code> (log the protocol to the <strong>Zila Lang Language Server</strong> output channel), and the command <strong>Zila Lang: Restart Language Server</strong>. If the executable cannot be started you get one message and highlighting keeps working. Other editors can run <code>zila --lsp</code> with any Language Server Protocol client.</p>
     </section>
 
     <section>
@@ -160,7 +160,7 @@ code --install-extension zila-lang-0.4.0.vsix</code></pre>
   </main>
 
   <footer class="site-footer">
-    Zila Lang &middot; A small, readable language that compiles straight to machine code. The examples are checked against <code>examples/*.zila</code>; the grammar is <code>zila.ebnf</code>.
+    Zila Lang &middot; A small, readable language that compiles straight to machine code. The examples are checked against <code>examples/*.zila</code>; the grammar is <code>docs/zila.ebnf</code>.
   </footer>
 </body>
 </html>

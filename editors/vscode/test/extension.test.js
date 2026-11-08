@@ -1,5 +1,5 @@
 // Tests of extension.js with a stand-in for the `vscode` module, against the real
-// `zila-parse --lsp`. Run with: node --test editors/vscode/test/extension.test.js
+// `zila --lsp`. Run with: node --test editors/vscode/test/extension.test.js
 
 'use strict';
 
@@ -11,10 +11,10 @@ const os = require('os');
 const Module = require('module');
 
 function binary() {
-  if (process.env.ZILA_PARSE) return process.env.ZILA_PARSE;
+  if (process.env.ZILA_BIN) return process.env.ZILA_BIN;
   const root = path.join(__dirname, '..', '..', '..');
   for (const dir of ['debug', 'release']) {
-    for (const name of ['zila-parse.exe', 'zila-parse']) {
+    for (const name of ['zila.exe', 'zila']) {
       const p = path.join(root, 'target', dir, name);
       if (fs.existsSync(p)) return p;
     }
@@ -23,7 +23,7 @@ function binary() {
 }
 
 const exe = binary();
-const skip = exe ? false : 'zila-parse is not built (cargo build)';
+const skip = exe ? false : 'zila is not built (cargo build)';
 const GOOD = 'package main\n\nfunc main()\nend\n';
 const BAD = 'package main\n\nfunc main()\n    let = 3\nend\n';
 const UNFORMATTED = 'package main\n\nfunc main()\nprintln(1,2)\nend\n';
@@ -157,7 +157,7 @@ test('errors appear as you type and clear when fixed; formatting returns edits',
 });
 
 test('a missing executable gives one message with an Open Settings button and no crash', async () => {
-  const missing = path.join(os.tmpdir(), 'no such dir', 'zila-parse');
+  const missing = path.join(os.tmpdir(), 'no such dir', 'zila');
   const { vscode, extension } = load({ 'server.path': missing });
   await extension.activate(context());
   assert.strictEqual(vscode.log.errors.length, 1);
@@ -172,7 +172,7 @@ test('a missing executable gives one message with an Open Settings button and no
 });
 
 test('a disabled server starts nothing', async () => {
-  const missing = path.join(os.tmpdir(), 'no such dir', 'zila-parse');
+  const missing = path.join(os.tmpdir(), 'no such dir', 'zila');
   const { vscode, extension } = load({ 'server.path': missing, 'server.enabled': false });
   await extension.activate(context());
   assert.strictEqual(vscode.log.errors.length, 0);

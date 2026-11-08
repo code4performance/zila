@@ -30,3 +30,22 @@
 ## Open Questions
 
 - Which parts of `Compiler`'s state belong in the typed form and which are emission state (labels, temporaries, register use)? The answer shapes the first step and is settled by reading what `declare`, `layout` and `func_sig` already return.
+
+## Findings
+
+**Which state of `Compiler` is checked information and which is emission state (task 1.1).** Read from `src/codegen_x64.rs` (`struct Compiler`, `Snapshot`, `generate`) and `layout.rs` (`load`, `declare`, `layout`, `func_sig`). `declare` fills the declaration tables in one pass over every module, `generate` then compiles each function body and the pending instances, and only after that prunes and writes text.
+
+*Checked information (belongs in `TypedProgram`, step 1.2):*
+- Type tables: `rec_decls`, `records` (`RecInfo`: size and field offsets), `enum_decls`, `enums` (`EnumInfo`), `variants`, `aliases`, `shared_recs`, `rc_recs`, `enum_payload`, `pub_types`, `interfaces`.
+- Signatures and globals: `funcs`, `methods` (`Sig`), `globals` (`Global`), `derived`, `exported`, `await_syms`, `inline_bodies` (a decision from the body, with `opt`).
+- Packages: `modules`, `imports`, `mod_aliases` (what `load` resolved).
+- Generics: the templates (`tmpl_funcs`, `tmpl_recs`, `tmpl_methods`) are source and stay in the AST; the results (`inst_args`, `inst_funcs`, `pending`, `inst_count`, `map_thunks`) are checked information but are decided by the whole program, so they are the part of the typed form that cannot be cached per package (Decision 2).
+- Extern facts: `extern_syms`, `extern_lib`, `callbacks`, `libs`, `uses_ui`, `uses_thread_lib`, `threads`, `custom_allocator`.
+
+*Emission state (stays in the code generator, never cached):* `data`, `procs`, `strings`, `fn_closures`, `labels`, `fs` (`FnState`: `code`, `scopes`, frame slots, `loops`, temporaries, `defer_*`, `has_asm`, `may_own`), `win_imports`, `div_nonzero`, `inline_depth`, `next_lambda_share`, `next_lambda_ignore_result`, `cur_mod`, `line`, `bindings` (while one instance is compiled), and `deferred_bounds` / `deferred_keys` (checks waiting for `declared`).
+
+*What blocks the split:* expression and statement methods return `Ty` and push assembly in the same call (`Compiler::expr` and its siblings), and speculative compilation (`Snapshot`: inference, checking a generic body) relies on rolling back both the type tables and the emitted text together. Steps 1.3 and 1.4 therefore need a checker that can type an expression without emitting, which today does not exist; every body-level `Ty` decision has to be lifted out of the 6,000 lines of `expressions`, `calls`, `statements`, `generics` and `memory`. The declaration tables alone (step 1.2) can be extracted first because `declare` already fills them before any emission.
+
+**Step 1.2 done.** `src/codegen_x64/typed.rs` defines `TypedProgram`, which holds the declaration tables (`rec_decls`, `records`, `enum_decls`, `enums`, `variants`, `aliases`, `shared_recs`, `rc_recs`, `enum_payload`, `pub_types`, `interfaces`, `funcs`, `methods`, `globals`, `derived`, `exported`); `Compiler` has one field `tp` and emission reads everything through it. Generic instance results stay in `Compiler` until step 1.3. Check used for byte-identical output: the assembly (`--asm`) of every `examples/*.zila` and `examples/packages/*.zila`, for the default build, `--target linux` and `--no-opt` (228 files), compared with a snapshot taken before the change; plus the suite without `tests/async.rs`.
+
+**Output was not deterministic before this change.** `generate` walked `records` and `enums` (hash maps) in an unspecified order, so two runs of the same compile produced the same lines in a different order. The incremental-build requirement (identical executables with and without the cache) cannot hold on top of that, so both loops now sort their keys. The snapshots above were taken after this fix, three runs identical. Other iterations over hash maps were checked by the same repeated-snapshot comparison, not by reading every site.

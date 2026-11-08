@@ -6,7 +6,7 @@ Defines how Zila Lang builds Windows executables using only the compiler, so tha
 ## Requirements
 
 ### Requirement: Building a Windows executable needs only the compiler
-`zila-parse prog.zila -o prog.exe` (and `--target windows`) SHALL write a 64-bit Windows executable without running any other program and without reading any Visual Studio, Windows SDK or other toolchain file. It SHALL succeed on a machine where none of `ml64`, `link`, `vcvars64.bat` and `vswhere` exist.
+`zila prog.zila -o prog.exe` (and `--target windows`) SHALL write a 64-bit Windows executable without running any other program and without reading any Visual Studio, Windows SDK or other toolchain file. It SHALL succeed on a machine where none of `ml64`, `link`, `vcvars64.bat` and `vswhere` exist.
 
 #### Scenario: A machine with no Visual Studio
 - **WHEN** a hello-world program is built on Windows with no Visual Studio installed and no `ml64` or `link` on the path

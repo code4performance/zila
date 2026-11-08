@@ -1,5 +1,5 @@
 //! The VS Code extension (`editors/vscode`): its Node tests run against the freshly built
-//! `zila-parse --lsp`. Skipped when `node` is not installed.
+//! `zila --lsp`. Skipped when `node` is not installed.
 
 use std::process::Command;
 
@@ -15,7 +15,7 @@ fn the_extension_client_and_layer_pass_their_tests_against_the_real_server() {
     }
     let out = Command::new("node")
         .args(["--test", "editors/vscode/test/client.test.js", "editors/vscode/test/extension.test.js"])
-        .env("ZILA_PARSE", env!("CARGO_BIN_EXE_zila-parse"))
+        .env("ZILA_BIN", env!("CARGO_BIN_EXE_zila"))
         .output()
         .unwrap();
     let text = String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);

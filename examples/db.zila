@@ -1,6 +1,6 @@
 // Databases: the same function on PostgreSQL and on SQL Server.
 //
-//   zila-parse examples/db.zila -o db.exe
+//   zila examples/db.zila -o db.exe
 //
 // `postgres.open` and `sqlserver.open` both return a `db.Conn`, so everything after opening is
 // written once: typed rows (`db.query_sql` builds `[]Customer` from the columns by name) and

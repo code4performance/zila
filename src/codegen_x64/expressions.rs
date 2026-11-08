@@ -175,7 +175,7 @@ impl Compiler {
                     None => self.record_name(path, &self.cur_mod.clone())?,
                 };
                 self.check_constructible(&r)?;
-                self.rc_recs.insert(r.clone());
+                self.tp.rc_recs.insert(r.clone());
                 self.record_alloc(&r, fields, true)?;
                 Ok(Ty::Rc(Box::new(Ty::Rec(r))))
             }
@@ -188,7 +188,7 @@ impl Compiler {
                         if (n == "all" || n == "race")
                             && args.len() == 1
                             && self.lookup(n).is_none()
-                            && !self.funcs.contains_key(&(self.cur_mod.clone(), n.clone()))
+                            && !self.tp.funcs.contains_key(&(self.cur_mod.clone(), n.clone()))
                         {
                             return self.await_combinator(n, &args[0].value);
                         }
@@ -361,7 +361,7 @@ impl Compiler {
     /// A global, constant, enum variant or function of module `m`, used as a value.
     pub(super) fn member(&mut self, m: &str, name: &str, want: Option<&Ty>) -> R<Ty> {
         let key = (m.to_string(), name.to_string());
-        if let Some(g) = self.globals.get(&key) {
+        if let Some(g) = self.tp.globals.get(&key) {
             self.check_member_vis(m, name, g.public)?;
             let ty = g.ty.clone();
             match g.konst {
@@ -380,7 +380,7 @@ impl Compiler {
                 }
             }
         }
-        if let Some(sig) = self.funcs.get(&key).cloned() {
+        if let Some(sig) = self.tp.funcs.get(&key).cloned() {
             self.check_member_vis(m, name, sig.public)?;
             if sig.is_extern {
                 return self.err(format!("extern function '{}' cannot be used as a value", name));
@@ -407,8 +407,8 @@ impl Compiler {
             }
             return Ok(sig.func_ty(ext));
         }
-        if let Some((q, idx)) = self.variants.get(&key).cloned() {
-            self.check_member_vis(m, name, self.pub_types.contains(&q))?;
+        if let Some((q, idx)) = self.tp.variants.get(&key).cloned() {
+            self.check_member_vis(m, name, self.tp.pub_types.contains(&q))?;
             return self.enum_construct(&q, idx, &[]);
         }
         if self.imports.get(&self.cur_mod).map_or(false, |i| i.contains(name)) {
@@ -422,7 +422,7 @@ impl Compiler {
 
     /// Builds a value of enum `q`, variant `idx`, from call arguments.
     pub(super) fn enum_construct(&mut self, q: &str, idx: usize, args: &[Arg]) -> R<Ty> {
-        let info = self.enums[q].clone();
+        let info = self.tp.enums[q].clone();
         let (vname, tys) = info.variants[idx].clone();
         if args.len() != tys.len() {
             return self.err(format!("'{}' takes {} value(s), found {}", vname, tys.len(), args.len()));
@@ -469,7 +469,7 @@ impl Compiler {
                     return Ok(Ty::Ptr(Box::new(l.ty)));
                 }
                 let key = (self.cur_mod.clone(), name.clone());
-                if let Some(g) = self.globals.get(&key) {
+                if let Some(g) = self.tp.globals.get(&key) {
                     if g.konst.is_none() {
                         let (s, t) = (g.sym.clone(), g.ty.clone());
                         if let Ty::Rec(_) = &t {
@@ -795,7 +795,7 @@ impl Compiler {
                 return self.err(format!("cannot compare {} with {}", lt.show(), rt.show()));
             }
             if let (Ty::Enum(a), Ty::Enum(_)) = (lt, rt) {
-                if self.enum_payload.contains(a) {
+                if self.tp.enum_payload.contains(a) {
                     return self.err("enums with data cannot be compared with '=='; use `match`");
                 }
             }
@@ -959,7 +959,7 @@ impl Compiler {
                 return self.member(&mk, name, want);
             }
             if let Some(q) = self.enum_type_named(m) {
-                let Some(idx) = self.enums[&q].variants.iter().position(|v| v.0 == name) else {
+                let Some(idx) = self.tp.enums[&q].variants.iter().position(|v| v.0 == name) else {
                     return self.err(format!("enum {} has no variant '{}'", m, name));
                 };
                 return self.enum_construct(&q, idx, &[]);
@@ -1049,7 +1049,7 @@ impl Compiler {
             self.retain_if(&fty);
             return Ok(fty);
         }
-        if let Some(sig) = self.methods.get(&(r.to_string(), name.to_string())).cloned() {
+        if let Some(sig) = self.tp.methods.get(&(r.to_string(), name.to_string())).cloned() {
             if sig.params.is_empty() && sig.ret != Ty::Void {
                 self.check_method_vis(&sig, name)?;
                 if !own {
@@ -1081,7 +1081,7 @@ impl Compiler {
         self.alloc(size, &drop);
         let t = self.temp();
         self.e(format!("mov qword ptr [rbp - {}], rax", t));
-        let decl: Vec<(String, Ty, u32)> = self.records[r].fields.clone();
+        let decl: Vec<(String, Ty, u32)> = self.tp.records[r].fields.clone();
         for (fname, _) in fields {
             if !decl.iter().any(|d| &d.0 == fname) {
                 return self.err(format!("{} has no field '{}'", r, fname));
@@ -1189,7 +1189,7 @@ impl Compiler {
                     }
                     PatAtom::Name { name, bindings } => match &st {
                         Ty::Enum(q) => {
-                            let info = self.enums[q].clone();
+                            let info = self.tp.enums[q].clone();
                             if let Some(idx) = info.variants.iter().position(|v| &v.0 == name) {
                                 let want_n = info.variants[idx].1.len();
                                 let got_n = bindings.as_ref().map_or(0, |b| b.len());
@@ -1267,7 +1267,7 @@ impl Compiler {
             }
             if let Some((vname, names)) = binds {
                 let tys: Vec<Ty> = match &st {
-                    Ty::Enum(q) => self.enums[q].variants.iter().find(|v| v.0 == vname).map(|v| v.1.clone()).unwrap_or_default(),
+                    Ty::Enum(q) => self.tp.enums[q].variants.iter().find(|v| v.0 == vname).map(|v| v.1.clone()).unwrap_or_default(),
                     Ty::Result(inner) => {
                         if vname == "ok" {
                             vec![(**inner).clone()]
@@ -1306,7 +1306,7 @@ impl Compiler {
         // exhaustiveness
         if !catch_all {
             let missing: Vec<String> = match &st {
-                Ty::Enum(q) => self.enums[q].variants.iter().map(|v| v.0.clone()).filter(|n| !covered.contains(n)).collect(),
+                Ty::Enum(q) => self.tp.enums[q].variants.iter().map(|v| v.0.clone()).filter(|n| !covered.contains(n)).collect(),
                 Ty::Result(_) => ["ok", "err"].iter().map(|s| s.to_string()).filter(|n| !covered.contains(n)).collect(),
                 _ => vec![],
             };
@@ -1464,7 +1464,7 @@ impl Compiler {
             self.e(format!("mov qword ptr [rbp - {}], rax", env));
             for (i, (_, l)) in caps.iter().enumerate() {
                 self.load_local("rax", &l);
-                if !share_records && matches!(&l.ty, Ty::Rec(r) if !self.shared_recs.contains(r)) {
+                if !share_records && matches!(&l.ty, Ty::Rec(r) if !self.tp.shared_recs.contains(r)) {
                     let Ty::Rec(r) = &l.ty else { unreachable!() };
                     self.e("mov rcx, rax");
                     self.e(format!("call B_copy_{}", sym_of(r)));

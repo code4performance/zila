@@ -1,5 +1,5 @@
 //! Zila Lang front end: lexer, AST and parser.
-//! The grammar is defined in `zila.ebnf`.
+//! The grammar is defined in `docs/zila.ebnf`.
 
 pub mod asm_x86;
 pub mod ast;

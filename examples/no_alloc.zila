@@ -1,6 +1,6 @@
 // no_alloc: the compiler checks that a function never allocates.
 //
-//   zila-parse examples/no_alloc.zila -o no_alloc.exe
+//   zila examples/no_alloc.zila -o no_alloc.exe
 //
 // `#[no_alloc]` is a promise the compiler holds you to: the function and everything it
 // calls must be free of text interpolation, list and map literals, `new`, closures that

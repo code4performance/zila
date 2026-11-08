@@ -225,7 +225,7 @@ fn the_compiler_needs_no_visual_studio() {
     let _ = std::fs::remove_file(&exe);
     let src = scratch("clean_env.zila");
     std::fs::write(&src, "package main\nfunc main()\n    print(\"hello\")\nend\n").unwrap();
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_zila-parse"))
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_zila"))
         .env_clear()
         .env("PATH", "")
         .arg(&src)

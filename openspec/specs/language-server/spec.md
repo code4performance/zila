@@ -6,7 +6,7 @@ A Language Server Protocol server (`zila --lsp`) that reports syntax errors and 
 
 
 ### Requirement: Starting the server
-`zila-parse --lsp` SHALL run a Language Server Protocol server on standard input and output, reading messages framed with `Content-Length` and answering the same way, until `exit` or the end of the input. It SHALL need no file argument. After `shutdown` followed by `exit` it SHALL exit with status 0; `exit` without `shutdown` SHALL give status 1.
+`zila --lsp` SHALL run a Language Server Protocol server on standard input and output, reading messages framed with `Content-Length` and answering the same way, until `exit` or the end of the input. It SHALL need no file argument. After `shutdown` followed by `exit` it SHALL exit with status 0; `exit` without `shutdown` SHALL give status 1.
 
 #### Scenario: Handshake
 - **WHEN** the client sends `initialize`

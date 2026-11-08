@@ -1,6 +1,6 @@
-// Tests of the language client against the real `zila-parse --lsp` (no VS Code needed).
+// Tests of the language client against the real `zila --lsp` (no VS Code needed).
 // Run with: node --test editors/vscode/test
-// The binary is found in $ZILA_PARSE, or target/debug, or target/release.
+// The binary is found in $ZILA_BIN, or target/debug, or target/release.
 
 'use strict';
 
@@ -12,10 +12,10 @@ const os = require('os');
 const { Client } = require('../client');
 
 function binary() {
-  if (process.env.ZILA_PARSE) return process.env.ZILA_PARSE;
+  if (process.env.ZILA_BIN) return process.env.ZILA_BIN;
   const root = path.join(__dirname, '..', '..', '..');
   for (const dir of ['debug', 'release']) {
-    for (const name of ['zila-parse.exe', 'zila-parse']) {
+    for (const name of ['zila.exe', 'zila']) {
       const p = path.join(root, 'target', dir, name);
       if (fs.existsSync(p)) return p;
     }
@@ -51,7 +51,7 @@ function make(options) {
   return client;
 }
 
-const skip = exe ? false : 'zila-parse is not built (cargo build)';
+const skip = exe ? false : 'zila is not built (cargo build)';
 
 test('the handshake completes and the server stops cleanly', { skip }, async () => {
   const c = make();
@@ -132,7 +132,7 @@ test('formatting flushes a pending change first', { skip }, async () => {
 
 test('a missing executable is reported once and start resolves false', async () => {
   const errors = [];
-  const c = new Client({ command: path.join(os.tmpdir(), 'no such dir', 'zila-parse'), onError: (e) => errors.push(e) });
+  const c = new Client({ command: path.join(os.tmpdir(), 'no such dir', 'zila'), onError: (e) => errors.push(e) });
   assert.strictEqual(await c.start(), false);
   assert.strictEqual(errors.length, 1);
   assert.strictEqual(errors[0].code, 'ENOENT');

@@ -549,7 +549,7 @@ fn an_unclosed_block_is_an_error() {
 
 #[test]
 fn the_grammar_has_no_html_expression() {
-    let g = std::fs::read_to_string("zila.ebnf").unwrap();
+    let g = std::fs::read_to_string("docs/zila.ebnf").unwrap();
     assert!(!g.contains("html_expr"));
     assert!(g.contains("block_expr") && g.contains("comptime"));
 }

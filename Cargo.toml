@@ -9,7 +9,7 @@ name = "zila"
 path = "src/lib.rs"
 
 [[bin]]
-name = "zila-parse"
+name = "zila"
 path = "src/main.rs"
 
 [dependencies]

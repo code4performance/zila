@@ -1,6 +1,6 @@
 // Maps: look values up by key.
 //
-//   zila-parse examples/maps.zila -o maps.exe
+//   zila examples/maps.zila -o maps.exe
 //
 // A Map<K, V> keeps values under keys (any type that is Hash: text, integers, records,
 // enums, lists...) and remembers the order

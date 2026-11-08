@@ -1,4 +1,4 @@
-//! Recursive-descent parser for Zila Lang (see `zila.ebnf`).
+//! Recursive-descent parser for Zila Lang (see `docs/zila.ebnf`).
 //!
 //! Newline handling:
 //! - A newline ends a statement or declaration.

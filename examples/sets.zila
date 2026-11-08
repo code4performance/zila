@@ -1,6 +1,6 @@
 // Sets: which words appear in one text but not in the other.
 //
-//   zila-parse examples/sets.zila -o sets.exe
+//   zila examples/sets.zila -o sets.exe
 //
 // `use set` is a library written in Zila Lang. A set holds values of any type that is Hash (text,
 // integers, records, enums...), each at most once,

@@ -81,7 +81,7 @@ fn zila(cwd: &Path, home: &Path, args: &[&str]) -> Out {
 }
 
 fn zila_env(cwd: &Path, home: &Path, args: &[&str], path: Option<&str>) -> Out {
-    let mut c = Command::new(env!("CARGO_BIN_EXE_zila-parse"));
+    let mut c = Command::new(env!("CARGO_BIN_EXE_zila"));
     c.args(args).current_dir(cwd).env("ZILA_HOME", home);
     if let Some(p) = path {
         c.env("PATH", p);
@@ -298,7 +298,7 @@ fn git_missing_is_explained() {
     write(&p, "zila.toml", "[package]\nname = \"a\"\n\n[dependencies.lib]\ngit = \"https://example.org/x/lib\"\nversion = \"1.0.0\"\n");
     let r = zila_env(&p, &home, &["--fetch"], Some(""));
     assert_eq!(r.code, 1);
-    assert!(r.err.contains("error: git was not found on PATH. It is used only to download dependencies (zila-parse --fetch); building from an already populated cache does not need it."), "{}", r.err);
+    assert!(r.err.contains("error: git was not found on PATH. It is used only to download dependencies (zila --fetch); building from an already populated cache does not need it."), "{}", r.err);
 }
 
 #[test]
@@ -340,7 +340,7 @@ fn a_missing_cache_entry_and_offline_fetch_name_the_package() {
     std::fs::remove_dir_all(home.join("src")).unwrap();
     let b = zila(&p, &home, &["main.zila", "--ast"]);
     assert_eq!(b.code, 1);
-    assert!(b.err.contains("package '") && b.err.contains("/codec@1.0.0' is not in the cache; run zila-parse --fetch"), "{}", b.err);
+    assert!(b.err.contains("package '") && b.err.contains("/codec@1.0.0' is not in the cache; run zila --fetch"), "{}", b.err);
     let f = zila(&p, &home, &["--fetch", "--offline"]);
     assert_eq!(f.code, 1);
     assert!(f.err.contains("/codec@1.0.0") && f.err.contains("not in the cache"), "{}", f.err);
@@ -367,7 +367,7 @@ fn a_tampered_cache_and_a_stale_lock_are_refused() {
     std::fs::write(&file, original.replace("codec 1", "codec X")).unwrap();
     let b = zila(&p, &home, &["main.zila", "--ast"]);
     assert_eq!(b.code, 1);
-    assert!(b.err.contains("does not match zila.lock") && b.err.contains(&format!("expected {}", e.hash)) && b.err.contains("found sha256:") && b.err.contains("run zila-parse --fetch to restore it"), "{}", b.err);
+    assert!(b.err.contains("does not match zila.lock") && b.err.contains(&format!("expected {}", e.hash)) && b.err.contains("found sha256:") && b.err.contains("run zila --fetch to restore it"), "{}", b.err);
     // --fetch puts it back
     assert_eq!(zila(&p, &home, &["--fetch"]).code, 0);
     assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
@@ -381,7 +381,7 @@ fn a_tampered_cache_and_a_stale_lock_are_refused() {
     std::fs::write(p.join("zila.toml"), m.write()).unwrap();
     let b = zila(&p, &home, &["main.zila", "--ast"]);
     assert_eq!(b.code, 1);
-    assert!(b.err.contains("zila.lock is out of date; run zila-parse --fetch"), "{}", b.err);
+    assert!(b.err.contains("zila.lock is out of date; run zila --fetch"), "{}", b.err);
 }
 
 #[test]
@@ -561,7 +561,7 @@ fn an_unknown_name_is_an_error_with_the_hint() {
     let p = project("unknown", "package main\nuse nothing\n\nfunc main()\nend\n");
     let b = zila(&p, &home, &["main.zila", "-o", p.join(exe_name("x")).to_str().unwrap()]);
     assert_eq!(b.code, 1);
-    assert!(b.err.contains("unknown package 'nothing'") && b.err.contains("zila-parse --add <git-url>"), "{}{}", b.out, b.err);
+    assert!(b.err.contains("unknown package 'nothing'") && b.err.contains("zila --add <git-url>"), "{}{}", b.out, b.err);
 }
 
 #[test]

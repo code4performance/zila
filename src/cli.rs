@@ -1,10 +1,10 @@
-//! Command-line parsing for `zila-parse`.
+//! Command-line parsing for `zila`.
 //!
 //! `FLAGS` is the single list of options the tool accepts. The argument parser is
 //! driven by it, and `tests/docs.rs` checks that the documentation describes every
 //! entry and nothing else.
 
-/// Every option `zila-parse` accepts.
+/// Every option `zila` accepts.
 pub const FLAGS: &[&str] = &["--ast", "--tokens", "--asm", "--run", "--build", "-o", "--os", "--docs", "--no-opt", "--no-prune", "--explain-link", "--fmt", "--fmt-check", "--test", "--target", "--lsp", "--comptime-timeout", "--no-comptime-cache", "--comptime-dump", "--init", "--add", "--as", "--fetch", "--tidy", "--update", "--offline"];
 
 #[derive(Clone, Copy, Debug, PartialEq)]

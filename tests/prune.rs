@@ -84,7 +84,7 @@ fn no_prune_keeps_everything() {
     let src = dir.join("a.zila");
     std::fs::write(&src, with_use("json")).unwrap();
     let run = |extra: &[&str]| {
-        let out = Command::new(env!("CARGO_BIN_EXE_zila-parse")).arg(&src).arg("--asm").args(extra).output().unwrap();
+        let out = Command::new(env!("CARGO_BIN_EXE_zila")).arg(&src).arg("--asm").args(extra).output().unwrap();
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
         String::from_utf8_lossy(&out.stdout).to_string()
     };
@@ -101,7 +101,7 @@ fn explain_link_lists_each_package_and_adds_up() {
     std::fs::create_dir_all(&dir).unwrap();
     let src = dir.join("a.zila");
     std::fs::write(&src, "package main\n\nuse text\n\nfunc main()\n    print(text.upper(\"a\"))\nend\n").unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_zila-parse")).arg(&src).arg("--explain-link").current_dir(&dir).output().unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_zila")).arg(&src).arg("--explain-link").current_dir(&dir).output().unwrap();
     let report = String::from_utf8_lossy(&out.stdout).to_string();
     let wrote = dir.join("a.exe").exists();
     let _ = std::fs::remove_dir_all(&dir);

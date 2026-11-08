@@ -36,7 +36,7 @@
 
     <section id="build">
       <h2>Build a program</h2>
-      <pre><code>zila-parse examples/hello.zila -o hello.exe
+      <pre><code>zila examples/hello.zila -o hello.exe
 ./hello.exe</code></pre>
       <p>The compiler writes assembly, assembles it with its own assembler and writes the Windows executable (PE) itself: it needs no Visual Studio, <code>ml64</code> or <code>link</code>, and starts no other program. Imports come from each <code>#[link("library")]</code> (<code>#[link_src]</code>, which compiles C files, is an error on Windows). Windows x64 is the only target for programs; <a href="os.html">Zila Lang OS</a> uses a second, bare-metal target. <code>--asm</code> prints the generated assembly instead of building.</p>
       <p>The executable holds everything the program uses: the libraries named with <code>use</code> are compiled in, only what the program can reach is kept, and nothing is loaded from source or from a cache when it runs. <code>--explain-link</code> prints how many bytes each package adds. See <a href="packages.html#linking">Packages</a>.</p>
@@ -141,7 +141,7 @@
 
     <section id="linux">
       <h2>Linux</h2>
-      <p><code>zila-parse prog.zila --target linux -o prog</code> writes an x86-64 ELF executable. The compiler does everything itself (its own assembler, no linker, no Visual Studio) and the program talks to the kernel with system calls. A program that does not call C needs no library at all (a static executable); one that declares <code>extern</code> functions is dynamically linked and starts through <code>/lib64/ld-linux-x86-64.so.2</code>. <code>--asm --target linux</code> prints the assembly instead. The result was checked under WSL with Ubuntu (glibc).</p>
+      <p><code>zila prog.zila --target linux -o prog</code> writes an x86-64 ELF executable. The compiler does everything itself (its own assembler, no linker, no Visual Studio) and the program talks to the kernel with system calls. A program that does not call C needs no library at all (a static executable); one that declares <code>extern</code> functions is dynamically linked and starts through <code>/lib64/ld-linux-x86-64.so.2</code>. <code>--asm --target linux</code> prints the assembly instead. The result was checked under WSL with Ubuntu (glibc).</p>
       <p>The language is the same and so is the output. A program whose <code>main</code> returns an error prints <code>error: ...</code> and exits with status 1, an <code>abort</code> writes <code>abort: file.zila:line: ...</code> to standard error and exits with 101, and an integer division by zero is an abort (<code>abort: main.zila:7: division by zero</code>) on both targets. Objects are reference counted as on Windows and <code>live_objects()</code> counts them. Small objects come from a 256 MiB region that the executable asks the kernel for, and large ones from <code>mmap</code>, given back when freed (this is the default allocator; <code>#[allocator]</code> replaces it); running out of memory is <code>abort: out of memory</code> (no file and line: the allocator has none).</p>
       <p>The libraries have the same functions on both targets. Where a library talks to the operating system, a file called <code>std/&lt;name&gt;.linux.zila</code> replaces <code>std/&lt;name&gt;.zila</code> when you build for Linux (the Linux layers use <code>epoll</code>, <code>pread</code>/<code>pwrite</code>, sockets and a DNS client written in Zila Lang), so one source builds for both.</p>
       <table class="compat">
@@ -187,7 +187,7 @@
   </main>
 
   <footer class="site-footer">
-    Zila Lang &middot; A small, readable language that compiles straight to machine code. The examples are checked against <code>examples/*.zila</code>; the grammar is <code>zila.ebnf</code>.
+    Zila Lang &middot; A small, readable language that compiles straight to machine code. The examples are checked against <code>examples/*.zila</code>; the grammar is <code>docs/zila.ebnf</code>.
   </footer>
 </body>
 </html>

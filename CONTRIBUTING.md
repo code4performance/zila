@@ -54,7 +54,7 @@ A quick tour of the code is in the [README](README.md#what-is-in-the-repository)
 A good bug report lets someone else see the problem in a minute. Please include:
 
 1. **The smallest Zila Lang program** that shows it (a few lines, not your whole project).
-2. **What you ran**, for example `zila-parse bug.zila -o bug.exe`.
+2. **What you ran**, for example `zila bug.zila -o bug.exe`.
 3. **What you expected** and **what happened** (paste the exact message or output).
 4. Your **Windows version** if the problem is in compiling.
 
@@ -113,7 +113,7 @@ These rules are what reviewers will check.
 
 The documentation site (`docs/`) is checked by tests, and some of it is generated.
 
-- If you change a program in `examples/`, run `zila-parse --docs` to refresh the copies on the site. `cargo test` fails if they differ.
+- If you change a program in `examples/`, run `zila --docs` to refresh the copies on the site. `cargo test` fails if they differ.
 - If you add or remove a command-line option, document it in `docs/getting-started.html`.
 - If you add or remove a keyword, mention it on `docs/syntax.html`.
 - If you add a page, link it from the navigation of **every** page.
@@ -160,7 +160,7 @@ Copy this into your pull request description.
 - [ ] If it changes the language: it links an accepted proposal
 - [ ] `cargo test` passes
 - [ ] New or changed behavior has tests
-- [ ] Documentation is updated (`zila-parse --docs` run if examples changed)
+- [ ] Documentation is updated (`zila --docs` run if examples changed)
 - [ ] No new dependencies in the compiler
 - [ ] No generated files committed
 - [ ] I can explain every line of this change

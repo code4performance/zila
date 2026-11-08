@@ -52,7 +52,7 @@ impl Compiler {
                 if !seen.insert(name.clone()) {
                     return None;
                 }
-                let info = self.records.get(name)?;
+                let info = self.tp.records.get(name)?;
                 for (f, fty, _) in &info.fields {
                     if let Some(p) = self.transfer_problem(fty, &format!("{}.{}", path, f), seen) {
                         return Some(p);
@@ -64,7 +64,7 @@ impl Compiler {
                 if !seen.insert(name.clone()) {
                     return None;
                 }
-                let info = self.enums.get(name)?;
+                let info = self.tp.enums.get(name)?;
                 for (v, tys) in &info.variants {
                     for t in tys {
                         if let Some(p) = self.transfer_problem(t, &format!("{}.{}", path, v), seen) {
@@ -122,7 +122,7 @@ impl Compiler {
                 if locals.contains(&n) {
                     continue;
                 }
-                if let Some(g) = self.globals.get(&(m.clone(), n.clone())) {
+                if let Some(g) = self.tp.globals.get(&(m.clone(), n.clone())) {
                     if g.mutable && g.konst.is_none() && !self.thread_safe_global(&g.ty) {
                         return self.err(format!(
                             "global variable '{}' is mutable and is used by '{}', which runs on another thread: threads cannot share a plain global; use `shared Atomic` or `shared Mutex<{}>` instead",
@@ -131,7 +131,7 @@ impl Compiler {
                             g.ty.show()
                         ));
                     }
-                } else if self.funcs.contains_key(&(m.clone(), n.clone())) {
+                } else if self.tp.funcs.contains_key(&(m.clone(), n.clone())) {
                     todo.push((m.clone(), n));
                 }
             }
@@ -172,7 +172,7 @@ impl Compiler {
 
     /// `spawn_thread f(args)`: the arguments are evaluated here, then the call runs on a new thread.
     pub(super) fn spawn_thread(&mut self, call: &Expr, line: u32) -> R<Ty> {
-        let Some(sig) = self.funcs.get(&("thread".to_string(), "start".to_string())).cloned() else {
+        let Some(sig) = self.tp.funcs.get(&("thread".to_string(), "start".to_string())).cloned() else {
             return self.err("'spawn_thread' needs the thread library");
         };
         let ExprKind::Call { callee, args, targs } = &call.kind else {

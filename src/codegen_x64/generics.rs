@@ -61,11 +61,11 @@ impl Compiler {
             procs: self.procs.len(),
             data: self.data.len(),
             strings: self.strings.clone(),
-            records: self.records.clone(),
-            rec_decls: self.rec_decls.clone(),
-            shared_recs: self.shared_recs.clone(),
-            methods: self.methods.clone(),
-            funcs: self.funcs.clone(),
+            records: self.tp.records.clone(),
+            rec_decls: self.tp.rec_decls.clone(),
+            shared_recs: self.tp.shared_recs.clone(),
+            methods: self.tp.methods.clone(),
+            funcs: self.tp.funcs.clone(),
             inst_args: self.inst_args.clone(),
             inst_funcs: self.inst_funcs.clone(),
             pending: std::mem::take(&mut self.pending),
@@ -73,7 +73,7 @@ impl Compiler {
             bindings: self.bindings.clone(),
             cur_mod: self.cur_mod.clone(),
             line: self.line,
-            derived: self.derived.clone(),
+            derived: self.tp.derived.clone(),
             map_thunks: self.map_thunks.clone(),
         }
     }
@@ -83,11 +83,11 @@ impl Compiler {
         self.procs.truncate(s.procs);
         self.data.truncate(s.data);
         self.strings = s.strings;
-        self.records = s.records;
-        self.rec_decls = s.rec_decls;
-        self.shared_recs = s.shared_recs;
-        self.methods = s.methods;
-        self.funcs = s.funcs;
+        self.tp.records = s.records;
+        self.tp.rec_decls = s.rec_decls;
+        self.tp.shared_recs = s.shared_recs;
+        self.tp.methods = s.methods;
+        self.tp.funcs = s.funcs;
         self.inst_args = s.inst_args;
         self.inst_funcs = s.inst_funcs;
         self.pending = s.pending;
@@ -95,7 +95,7 @@ impl Compiler {
         self.bindings = s.bindings;
         self.cur_mod = s.cur_mod;
         self.line = s.line;
-        self.derived = s.derived;
+        self.tp.derived = s.derived;
         self.map_thunks = s.map_thunks;
     }
 
@@ -117,9 +117,9 @@ impl Compiler {
     /// The qualified interface a bound (`Printable`, `pkg.Printable`) written in module `m` names.
     pub(super) fn bound_name(&self, bound: &[String], m: &str) -> R<String> {
         let q = if bound.len() == 1 { format!("{}.{}", m, bound[0]) } else { bound.join(".") };
-        if self.interfaces.contains_key(&q) {
+        if self.tp.interfaces.contains_key(&q) {
             Ok(q)
-        } else if self.rec_decls.contains_key(&q) || self.enum_decls.contains_key(&q) || self.tmpl_recs.contains_key(&q) {
+        } else if self.tp.rec_decls.contains_key(&q) || self.tp.enum_decls.contains_key(&q) || self.tmpl_recs.contains_key(&q) {
             self.err(format!("the bound '{}' must be an interface", bound.join(".")))
         } else if bound.len() == 1 && matches!(bound[0].as_str(), "Eq" | "Ord" | "Hash") {
             Ok(format!("std.{}", bound[0]))
@@ -152,12 +152,12 @@ impl Compiler {
 
     /// The method `mname` a bound provides: its own, or `eq` when the bound is `Ord` or `Hash`.
     pub(super) fn bound_sig(&self, bound: &str, mname: &str) -> Option<(String, MethodSig)> {
-        let (bm, bsigs) = self.interfaces.get(bound)?;
+        let (bm, bsigs) = self.tp.interfaces.get(bound)?;
         if let Some(x) = bsigs.iter().find(|x| x.name == mname) {
             return Some((bm.clone(), x.clone()));
         }
         if mname == "eq" && matches!(bound, "std.Ord" | "std.Hash") {
-            let (em, esigs) = self.interfaces.get("std.Eq")?;
+            let (em, esigs) = self.tp.interfaces.get("std.Eq")?;
             return esigs.iter().find(|x| x.name == "eq").map(|x| (em.clone(), x.clone()));
         }
         None
@@ -165,7 +165,7 @@ impl Compiler {
 
     /// Checks that `ty` has every method of the interface `iface`, with the same signature.
     pub(super) fn satisfies(&mut self, ty: &Ty, iface: &str) -> R<()> {
-        let (im, sigs) = self.interfaces[iface].clone();
+        let (im, sigs) = self.tp.interfaces[iface].clone();
         let iname = display_name(iface);
         let standard = matches!(iface, "std.Eq" | "std.Ord" | "std.Hash");
         for sg in &sigs {
@@ -177,7 +177,7 @@ impl Compiler {
                 },
                 Ty::Param { .. } => None,
                 _ => {
-                    let found = self.methods.get(&(method_key(ty), sg.name.clone())).cloned();
+                    let found = self.tp.methods.get(&(method_key(ty), sg.name.clone())).cloned();
                     if let Some(m) = &found {
                         if !standard && !m.public && m.module != im {
                             return self.private_name(&sg.name, &m.module);
@@ -285,21 +285,21 @@ impl Compiler {
         }
         let full: Vec<String> = tys.iter().map(ty_full).collect();
         let name = format!("{}<{}>", q, full.join(","));
-        if self.rec_decls.contains_key(&name) {
+        if self.tp.rec_decls.contains_key(&name) {
             return Ok(Ty::Rec(name));
         }
         self.bump_instances()?;
         // registered before the layout, so a record may mention itself (`next: Node<T>?`)
-        self.rec_decls.insert(name.clone(), (tm.clone(), Vec::new()));
+        self.tp.rec_decls.insert(name.clone(), (tm.clone(), Vec::new()));
         self.inst_args.insert(name.clone(), (q.to_string(), tys.clone()));
         if shared {
-            self.shared_recs.insert(name.clone());
+            self.tp.shared_recs.insert(name.clone());
         }
         let binds: HashMap<String, Ty> = td.generics.iter().map(|g| g.name.clone()).zip(tys.iter().cloned()).collect();
         let saved = std::mem::replace(&mut self.bindings, binds);
         let info = self.layout(fields, &tm);
         self.bindings = saved;
-        self.records.insert(name.clone(), info?);
+        self.tp.records.insert(name.clone(), info?);
         let methods = self.tmpl_methods.get(q).cloned().unwrap_or_default();
         for (mm, fd, line) in methods {
             self.instantiate_method(&name, &mm, &fd, line, &tys)?;
@@ -308,7 +308,7 @@ impl Compiler {
     }
 
     pub(super) fn instantiate_method(&mut self, rec_inst: &str, module: &str, fd: &FuncDecl, line: u32, tys: &[Ty]) -> R<()> {
-        if self.methods.contains_key(&(rec_inst.to_string(), fd.name.clone())) {
+        if self.tp.methods.contains_key(&(rec_inst.to_string(), fd.name.clone())) {
             return Ok(());
         }
         let Some(Type::Named { args: rargs, .. }) = fd.receiver.as_ref().map(|r| r.ty.clone()) else { unreachable!() };
@@ -332,7 +332,7 @@ impl Compiler {
         self.cur_mod = saved_mod;
         self.line = saved_line;
         let sig = sig?;
-        self.methods.insert((rec_inst.to_string(), fd.name.clone()), sig);
+        self.tp.methods.insert((rec_inst.to_string(), fd.name.clone()), sig);
         self.pending.push(Pending { module: module.to_string(), decl: fd.clone(), bindings: binds, line });
         Ok(())
     }
@@ -582,13 +582,13 @@ impl Compiler {
                 let sig = self.func_sig(module, &decl);
                 self.bindings = saved;
                 self.cur_mod = saved_mod;
-                self.funcs.insert((module.to_string(), inst.clone()), sig?);
+                self.tp.funcs.insert((module.to_string(), inst.clone()), sig?);
                 self.inst_funcs.insert(key, inst.clone());
                 self.pending.push(Pending { module: module.to_string(), decl, bindings: b, line: decl_line });
                 inst
             }
         };
-        let sig = self.funcs[&(module.to_string(), inst)].clone();
+        let sig = self.tp.funcs[&(module.to_string(), inst)].clone();
         self.call_sig(&sig, None, args)
     }
 
@@ -655,7 +655,7 @@ impl Compiler {
         decl.generics.clear();
         decl.name = format!("__check_{}", fd.name);
         let sig = self.func_sig(m, &decl)?;
-        self.funcs.insert((m.to_string(), decl.name.clone()), sig);
+        self.tp.funcs.insert((m.to_string(), decl.name.clone()), sig);
         let r = self.gen_func(m, &decl, false);
         self.bindings.clear();
         r

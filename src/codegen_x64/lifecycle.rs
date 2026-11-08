@@ -64,7 +64,7 @@ impl Compiler {
     // ---------------- futures ----------------
 
     pub(super) fn future_fn(&self, name: &str) -> R<Sig> {
-        match self.funcs.get(&("future".to_string(), name.to_string())) {
+        match self.tp.funcs.get(&("future".to_string(), name.to_string())) {
             Some(s) => Ok(s.clone()),
             None => self.err("async needs the future library"),
         }
@@ -220,7 +220,7 @@ impl Compiler {
     // ---------------- channels ----------------
 
     pub(super) fn task_fn(&self, name: &str) -> R<Sig> {
-        match self.funcs.get(&("task".to_string(), name.to_string())) {
+        match self.tp.funcs.get(&("task".to_string(), name.to_string())) {
             Some(s) => Ok(s.clone()),
             None => self.err("channels need the task library"),
         }

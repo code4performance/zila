@@ -1,4 +1,4 @@
-// A small Language Server Protocol client for `zila-parse --lsp`.
+// A small Language Server Protocol client for `zila --lsp`.
 //
 // It has no dependencies and does not import `vscode`, so it can be tested with plain Node
 // (see test/client.test.js). It speaks the part of the protocol the Zila Lang server offers:
@@ -15,7 +15,7 @@ const FORMAT_TIMEOUT_MS = 5000;
 class Client {
   /**
    * options:
-   *   command      executable to start (default "zila-parse")
+   *   command      executable to start (default "zila")
    *   args         its arguments (default ["--lsp"])
    *   spawn        function like child_process.spawn (for tests)
    *   debounce     ms to wait before sending a burst of changes (default 150)
@@ -25,7 +25,7 @@ class Client {
    *   log(line)        protocol trace
    */
   constructor(options) {
-    this.command = options.command || 'zila-parse';
+    this.command = options.command || 'zila';
     this.args = options.args || ['--lsp'];
     this.spawn = options.spawn || childProcess.spawn;
     this.debounce = options.debounce === undefined ? 150 : options.debounce;

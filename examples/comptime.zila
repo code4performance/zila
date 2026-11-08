@@ -1,6 +1,6 @@
 // Compile-time code generation: a function that writes code for your types.
 //
-//   zila-parse examples/comptime.zila -o comptime.exe
+//   zila examples/comptime.zila -o comptime.exe
 //
 // A `comptime func` receives a `Type` (what the compiler knows about a type: its name, kind,
 // fields, variants and attributes) and returns Zila Lang source text. The compiler builds the

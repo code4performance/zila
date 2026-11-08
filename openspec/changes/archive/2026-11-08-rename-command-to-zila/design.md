@@ -1,6 +1,6 @@
 ## Context
 
-`zila-parse` appears in about 80 files outside the archive and the active changes: the `[[bin]]` name in `Cargo.toml`, the usage lines in `src/main.rs`, hints in `src/package.rs` and `src/fetch.rs`, the language server's name in `src/lsp.rs`, the tests that find the executable with `env!("CARGO_BIN_EXE_zila-parse")` or a path under `target/`, the Node tests of the extension (which take the executable from `ZILA_PARSE`-style environment and from the default setting), the header comments of 31 examples (`zila-parse examples/x.zila -o x.exe`), `os/run.ps1`, the documentation, the Markdown files and 23 lines of the main specs. The earlier renames (the name, then the file extension) were done by one mechanical step checked by the whole suite; this one has the same shape.
+`zila-parse` appears in about 80 files outside the archive and the active changes: the `[[bin]]` name in `Cargo.toml`, the usage lines in `src/main.rs`, hints in `src/package.rs` and `src/fetch.rs`, the language server's name in `src/lsp.rs`, the tests that find the executable with `env!("CARGO_BIN_EXE_zila-parse")` or a path under `target/`, the Node tests of the extension (which take the executable from `ZILA_BIN`-style environment and from the default setting), the header comments of 31 examples (`zila-parse examples/x.zila -o x.exe`), `os/run.ps1`, the documentation, the Markdown files and 23 lines of the main specs. The earlier renames (the name, then the file extension) were done by one mechanical step checked by the whole suite; this one has the same shape.
 
 ## Goals / Non-Goals
 
@@ -30,3 +30,9 @@
 ## Open Questions
 
 None that block the change. If the compiler later grows subcommands (`zila build`), it is a separate change with its own compatibility story.
+
+## Findings
+
+**Collision check (task 1.1).** `where zila` finds nothing on this machine's `PATH`. On a throw-away copy with `[[bin]] name = "zila"` (the library kept `[lib] name = "zila"`), `cargo build` succeeded and produced `zila.exe`, `zila.pdb`, `libzila.rlib` side by side with no collision, and `cargo test --test fmt` passed (32 tests) with `CARGO_BIN_EXE_zila`. The fallback of Decision 3 (renaming the library to `zila_lang`) is not needed.
+
+**Survey (task 1.2).** 82 tracked files outside `openspec/changes/` name the old command: 189 plain `zila-parse`, 13 `CARGO_BIN_EXE_zila-parse`, 5 `zila-parse.exe`, and 7 uses of the environment variable `ZILA_BIN` (`tests/vscode.rs`, the two Node tests of the extension, its README). Fixed paths: `os/run.ps1` (`target\release\zila-parse.exe`, `target\debug\zila-parse.exe`), `README.md` and `docs/getting-started.html` (`target/release/zila-parse`), the extension README and `client.test.js`. No file is itself named after the command. Exception to the plain-text rule: `ZILA_BIN` is not matched by it, and is renamed by hand to `ZILA_BIN` (the old name still says "parse").

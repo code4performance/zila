@@ -1,4 +1,4 @@
-//! `zila-parse --test`: finds the `#[test]` functions of a file, builds the file with a
+//! `zila --test`: finds the `#[test]` functions of a file, builds the file with a
 //! generated entry point that runs them in order, runs it and reports.
 
 use crate::ast::*;

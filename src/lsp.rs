@@ -1,4 +1,4 @@
-//! A small language server (`zila-parse --lsp`) speaking the Language Server Protocol over
+//! A small language server (`zila --lsp`) speaking the Language Server Protocol over
 //! standard input and output. It reports syntax errors as you type and formats documents with the
 //! standard style (`--fmt`). No dependencies: it carries its own tiny JSON reader and writer.
 
@@ -359,7 +359,7 @@ pub fn handle(msg: &Json, docs: &mut HashMap<String, String>, out: &mut dyn Writ
             out,
             obj(vec![
                 ("capabilities", obj(vec![("textDocumentSync", num(1)), ("documentFormattingProvider", Json::Bool(true))])),
-                ("serverInfo", obj(vec![("name", Json::Str("zila-parse".into()))])),
+                ("serverInfo", obj(vec![("name", Json::Str("zila".into()))])),
             ]),
         ),
         "shutdown" => {

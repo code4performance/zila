@@ -37,7 +37,7 @@ function showDiagnostics(uri, list) {
 
 async function startServer() {
   if (!settings().get('server.enabled', true)) return;
-  const command = settings().get('server.path', 'zila-parse') || 'zila-parse';
+  const command = settings().get('server.path', 'zila') || 'zila';
   const trace = settings().get('trace', false);
   warnedMissing = false;
   client = new Client({
@@ -50,7 +50,7 @@ async function startServer() {
       warnedMissing = true;
       vscode.window
         .showErrorMessage(
-          'Zila Lang: cannot start the language server "' + command + '" (' + e.message + '). Highlighting still works; set zila.server.path to the zila-parse executable.',
+          'Zila Lang: cannot start the language server "' + command + '" (' + e.message + '). Highlighting still works; set zila.server.path to the zila executable.',
           'Open Settings'
         )
         .then((choice) => {

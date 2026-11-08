@@ -5,7 +5,7 @@ A static documentation website that explains what the Zila Lang language is, how
 ## Requirements
 
 ### Requirement: Overview page
-The site SHALL provide a landing page that states what Zila Lang is, its design goals, and who it is for, without requiring the reader to consult `zila.ebnf` or the Rust source.
+The site SHALL provide a landing page that states what Zila Lang is, its design goals, and who it is for, without requiring the reader to consult `docs/zila.ebnf` or the Rust source.
 
 #### Scenario: Visitor opens the site
 - **WHEN** a visitor opens the site's home page
@@ -13,14 +13,14 @@ The site SHALL provide a landing page that states what Zila Lang is, its design 
 
 ### Requirement: Syntax reference
 The site SHALL document Zila Lang's core syntax constructs — packages and `use` declarations, `record`/`union`/`enum`/`interface` types, functions (including generics and `ref` parameters), `var`/`let` bindings, control flow (`if`, `match`, `for`, `while`), error handling (`!` return types and `?` propagation), `defer`, string interpolation, attributes (`#[...]`), and `extern`/`asm` FFI blocks — each with at least one short code sample.
-Documented syntax SHALL be consistent with the grammar in `zila.ebnf` at the time the page is written (no documented construct may contradict the grammar).
+Documented syntax SHALL be consistent with the grammar in `docs/zila.ebnf` at the time the page is written (no documented construct may contradict the grammar).
 
 #### Scenario: Visitor looks up a language construct
 - **WHEN** a visitor opens the syntax reference and looks for a specific construct (e.g., `match` expressions or error propagation with `?`)
 - **THEN** the page shows a description of that construct and a code sample demonstrating it
 
 #### Scenario: Documented construct matches the grammar
-- **WHEN** a documented syntax construct is compared against `zila.ebnf`
+- **WHEN** a documented syntax construct is compared against `docs/zila.ebnf`
 - **THEN** the documented form is valid according to the grammar (no documented syntax is contradicted by the grammar)
 
 ### Requirement: Annotated examples
@@ -82,8 +82,8 @@ A code block that shows an example file SHALL be labelled `examples/NAME.zila` (
 
 #### Scenario: A labelled block
 - **WHEN** a page has a block labelled `examples/hello.zila`
-- **THEN** `zila-parse --docs` and `cargo test --test docs` compare it with that file
+- **THEN** `zila --docs` and `cargo test --test docs` compare it with that file
 
 #### Scenario: A stale label
-- **WHEN** a block is labelled `examples/hello.br`
+- **WHEN** a block is labelled `examples/missing.zila`
 - **THEN** the docs check fails, saying the file does not exist

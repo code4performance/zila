@@ -36,7 +36,7 @@
 
     <section id="build">
       <h2>Build and run</h2>
-      <pre><code>zila-parse --os os/boot.zila os/kernel.zila -o zila-os.img
+      <pre><code>zila --os os/boot.zila os/kernel.zila -o zila-os.img
 .\os\run.ps1              <span class="cm"># boots it in QEMU, with a window</span>
 .\os\run.ps1 -Serial      <span class="cm"># headless: the shell runs on your terminal</span></code></pre>
       <p>You need <a href="https://www.qemu.org/">QEMU</a> to run the image (<code>winget install SoftwareFreedomConservancy.QEMU</code>, or unpack its installer into <code>%USERPROFILE%\qemu</code>). The kernel itself needs only a PC: the disk image can also be written to a USB stick.</p>
@@ -87,7 +87,7 @@
   </main>
 
   <footer class="site-footer">
-    Zila Lang &middot; A small, readable language that compiles straight to machine code. The examples are checked against <code>examples/*.zila</code>; the grammar is <code>zila.ebnf</code>.
+    Zila Lang &middot; A small, readable language that compiles straight to machine code. The examples are checked against <code>examples/*.zila</code>; the grammar is <code>docs/zila.ebnf</code>.
   </footer>
 </body>
 </html>

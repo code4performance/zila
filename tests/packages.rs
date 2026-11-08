@@ -8,7 +8,7 @@ use std::process::{Command, Output};
 const NON_CORE: [&str; 11] = ["json", "crypto", "tls", "ui", "web", "ai", "mcp", "rag", "db", "postgres", "sqlserver"];
 
 fn zila(dir: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_zila-parse")).args(args).current_dir(dir).output().unwrap()
+    Command::new(env!("CARGO_BIN_EXE_zila")).args(args).current_dir(dir).output().unwrap()
 }
 
 fn text(o: &Output) -> (String, String) {

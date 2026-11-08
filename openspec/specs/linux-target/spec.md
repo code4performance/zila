@@ -5,7 +5,7 @@ Builds static x86-64 Linux executables with `--target linux`, using only the com
 ## Requirements
 
 ### Requirement: Building a Linux executable
-`zila-parse prog.zila --target linux -o prog` SHALL write a static x86-64 ELF executable that needs no external tool to build and no shared library to run, and SHALL work on a machine without the Windows build tools. `--target windows` SHALL be the same as the default. `--target` with any other value SHALL be an error that lists the valid targets. With `--asm`, `--target linux` SHALL print the Linux assembly instead of building.
+`zila prog.zila --target linux -o prog` SHALL write a static x86-64 ELF executable that needs no external tool to build and no shared library to run, and SHALL work on a machine without the Windows build tools. `--target windows` SHALL be the same as the default. `--target` with any other value SHALL be an error that lists the valid targets. With `--asm`, `--target linux` SHALL print the Linux assembly instead of building.
 
 #### Scenario: A hello program
 - **WHEN** a program that prints `hello` is built with `--target linux -o hello` and run on Linux

@@ -212,7 +212,7 @@ impl Compiler {
                     self.norm(&t);
                     return Ok(t);
                 }
-                if (name == "__abort" || name == "abort" && !self.funcs.contains_key(&(self.cur_mod.clone(), name.clone()))) && args.len() == 1 {
+                if (name == "__abort" || name == "abort" && !self.tp.funcs.contains_key(&(self.cur_mod.clone(), name.clone()))) && args.len() == 1 {
                     let t = self.expr(&args[0].value, Some(&Ty::Text))?;
                     self.check(&Ty::Text, &t, "abort message")?;
                     self.e("mov rcx, rax");
@@ -297,7 +297,7 @@ impl Compiler {
                     self.free(k);
                     return Ok(Ty::Err);
                 }
-                if name == "char" && args.len() == 1 && !self.funcs.contains_key(&(self.cur_mod.clone(), name.clone())) {
+                if name == "char" && args.len() == 1 && !self.tp.funcs.contains_key(&(self.cur_mod.clone(), name.clone())) {
                     let t = self.expr(&args[0].value, None)?;
                     if !t.is_int() {
                         return self.err(format!("char() needs an integer code point, found {}", t.show()));
@@ -329,7 +329,7 @@ impl Compiler {
                     self.e("sub rax, 2097152");
                     return Ok(Ty::i64());
                 }
-                if name == "weak" && !self.funcs.contains_key(&(self.cur_mod.clone(), name.clone())) {
+                if name == "weak" && !self.tp.funcs.contains_key(&(self.cur_mod.clone(), name.clone())) {
                     return self.weak_of(args);
                 }
                 if name == "live_objects" && args.is_empty() {
@@ -339,10 +339,10 @@ impl Compiler {
                 if name == "channel" {
                     return self.channel_new(args);
                 }
-                if name == "timeout" && args.len() == 2 && !self.funcs.contains_key(&(self.cur_mod.clone(), name.clone())) {
+                if name == "timeout" && args.len() == 2 && !self.tp.funcs.contains_key(&(self.cur_mod.clone(), name.clone())) {
                     return self.timeout_future(&args[0].value, &args[1].value);
                 }
-                if name == "sleep" && args.len() == 1 && !self.funcs.contains_key(&(self.cur_mod.clone(), name.clone())) {
+                if name == "sleep" && args.len() == 1 && !self.tp.funcs.contains_key(&(self.cur_mod.clone(), name.clone())) {
                     let t = self.expr(&args[0].value, Some(&Ty::i64()))?;
                     if !t.is_int() {
                         return self.err(format!("sleep() needs a number of milliseconds, found {}", t.show()));
@@ -355,16 +355,16 @@ impl Compiler {
                     return Ok(Ty::Future(Box::new(Ty::Void)));
                 }
                 let key = (self.cur_mod.clone(), name.clone());
-                if let Some(sig) = self.funcs.get(&key).cloned() {
+                if let Some(sig) = self.tp.funcs.get(&key).cloned() {
                     return self.call_sig(&sig, None, args);
                 }
                 if let Some((fd, line)) = self.tmpl_funcs.get(&key).cloned() {
                     return self.call_generic(&key.0, &fd, line, args, targs, want);
                 }
-                if let Some((q, idx)) = self.variants.get(&key).cloned() {
+                if let Some((q, idx)) = self.tp.variants.get(&key).cloned() {
                     return self.enum_construct(&q, idx, args);
                 }
-                if self.globals.contains_key(&key) {
+                if self.tp.globals.contains_key(&key) {
                     let t = self.expr(callee, None)?;
                     return self.call_value(t, args);
                 }
@@ -383,7 +383,7 @@ impl Compiler {
                         let m = &mk;
                         // `format.fmt(template, a, b)` is `format.fmt2(template, a, b)`
                         let renamed;
-                        let name = if m == "format" && name == "fmt" && !self.funcs.contains_key(&(m.clone(), name.clone())) {
+                        let name = if m == "format" && name == "fmt" && !self.tp.funcs.contains_key(&(m.clone(), name.clone())) {
                             if args.is_empty() {
                                 return self.err("format.fmt needs a template");
                             }
@@ -400,17 +400,17 @@ impl Compiler {
                             self.check_member_vis(m, name, fd.public)?;
                             return self.call_generic(&key.0, &fd, line, args, targs, want);
                         }
-                        return match self.funcs.get(&key).cloned() {
+                        return match self.tp.funcs.get(&key).cloned() {
                             Some(sig) => {
                                 self.check_member_vis(m, name, sig.public)?;
                                 self.call_sig(&sig, None, args)
                             }
                             None if self.modules.iter().any(|x| &x.name == m) => {
-                                if let Some((q, idx)) = self.variants.get(&key).cloned() {
-                                    self.check_member_vis(m, name, self.pub_types.contains(&q))?;
+                                if let Some((q, idx)) = self.tp.variants.get(&key).cloned() {
+                                    self.check_member_vis(m, name, self.tp.pub_types.contains(&q))?;
                                     return self.enum_construct(&q, idx, args);
                                 }
-                                if self.globals.contains_key(&key) {
+                                if self.tp.globals.contains_key(&key) {
                                     let t = self.member(&m.clone(), name, None)?;
                                     return self.call_value(t, args);
                                 }
@@ -420,7 +420,7 @@ impl Compiler {
                         };
                     }
                     if let Some(q) = self.enum_type_named(m) {
-                        let Some(idx) = self.enums[&q].variants.iter().position(|v| &v.0 == name) else {
+                        let Some(idx) = self.tp.enums[&q].variants.iter().position(|v| &v.0 == name) else {
                             return self.err(format!("enum {} has no variant '{}'", m, name));
                         };
                         return self.enum_construct(&q, idx, args);
@@ -443,7 +443,7 @@ impl Compiler {
                     return self.param_method_call("", bound, tname, name, args);
                 }
                 if !matches!(ot, Ty::Rec(_)) {
-                    let mut found = self.methods.get(&(method_key(&ot), name.clone())).cloned();
+                    let mut found = self.tp.methods.get(&(method_key(&ot), name.clone())).cloned();
                     if let Some(sg) = &found {
                         self.check_method_vis(sg, name)?;
                     }
@@ -463,7 +463,7 @@ impl Compiler {
                     _ => None,
                 };
                 if let Some(r) = r {
-                    let mut found = self.methods.get(&(r.clone(), name.clone())).cloned();
+                    let mut found = self.tp.methods.get(&(r.clone(), name.clone())).cloned();
                     if let Some(sg) = &found {
                         self.check_method_vis(sg, name)?;
                     }

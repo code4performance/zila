@@ -36,9 +36,9 @@
 
     <section id="quickstart">
       <h2>In practice</h2>
-      <pre><code>zila-parse --init myapp                                   <span class="cm"># writes zila.toml</span>
-zila-parse --add https://github.com/someone/codec@1.2.0   <span class="cm"># adds, downloads, writes zila.lock</span>
-zila-parse main.zila -o main.exe                            <span class="cm"># builds from the cache, offline</span></code></pre>
+      <pre><code>zila --init myapp                                   <span class="cm"># writes zila.toml</span>
+zila --add https://github.com/someone/codec@1.2.0   <span class="cm"># adds, downloads, writes zila.lock</span>
+zila main.zila -o main.exe                            <span class="cm"># builds from the cache, offline</span></code></pre>
       <p>and in <code>main.zila</code>:</p>
       <pre><code><span class="kw">package</span> main
 
@@ -47,7 +47,7 @@ zila-parse main.zila -o main.exe                            <span class="cm"># b
 <span class="kw">func</span> main()
     print(codec.version())
 <span class="kw">end</span></code></pre>
-      <p>Commit <code>zila.toml</code> and <code>zila.lock</code>. Anyone who clones the project and runs <code>zila-parse --fetch</code> gets the same sources, checked byte by byte.</p>
+      <p>Commit <code>zila.toml</code> and <code>zila.lock</code>. Anyone who clones the project and runs <code>zila --fetch</code> gets the same sources, checked byte by byte.</p>
     </section>
 
     <section id="manifest">
@@ -67,15 +67,15 @@ version = "1.2.0"</code></pre>
       <h2>Versions</h2>
       <p>A version is <code>MAJOR.MINOR.PATCH</code> and the tags of the repository are <code>vMAJOR.MINOR.PATCH</code>. The tool picks versions by <strong>minimal version selection</strong>: for each package, the highest of the minimums that your manifest and the manifests of the packages you use ask for. It never picks a newer version just because one exists, and it has no solver, so you can work the result out by hand and adding a package never upgrades another. <code>--update</code> is what raises a minimum, to the newest tag of the same major.</p>
       <p>A different <strong>major version</strong> is a different package. Version 2 and up ends its module path with <code>/v2</code> (the same repository, tags <code>v2.*</code>) and gets its own import name, so both can be used, even by different dependencies, and their types are different types:</p>
-      <pre><code>zila-parse --add https://github.com/someone/codec@1.2.0
-zila-parse --add https://github.com/someone/codec/v2@2.0.0     <span class="cm"># named codec_v2</span></code></pre>
+      <pre><code>zila --add https://github.com/someone/codec@1.2.0
+zila --add https://github.com/someone/codec/v2@2.0.0     <span class="cm"># named codec_v2</span></code></pre>
       <p>A package whose manifest asks for another major than yours is compiled against its own: two packages can each <code>use codec</code> and mean different ones, without clashing. Major 0 is one package like any other.</p>
     </section>
 
     <section id="lock">
       <h2>The lock file and the cache</h2>
       <p><code>zila.lock</code> is written by the tool. For every package in the final selection it records the version, the full 40-character commit the tag points to and a <code>sha256:</code> hash of the files. Fetched sources go to <code>~/.zila</code> (<code>%USERPROFILE%\.zila</code> on Windows, or the directory named by <code>ZILA_HOME</code>), one directory per package version and commit, shared by all your projects and written atomically.</p>
-      <p>Every build recomputes the hash of each package in the cache and compares it with the lock. A changed file stops the build and says what was expected and what was found; a manifest the lock does not cover says <code>zila.lock is out of date</code>; a missing cache entry says <code>package 'X' is not in the cache; run zila-parse --fetch</code>. If a tag is later moved to another commit, <code>--fetch</code> reports it and leaves the lock alone; <code>--update</code> accepts it.</p>
+      <p>Every build recomputes the hash of each package in the cache and compares it with the lock. A changed file stops the build and says what was expected and what was found; a manifest the lock does not cover says <code>zila.lock is out of date</code>; a missing cache entry says <code>package 'X' is not in the cache; run zila --fetch</code>. If a tag is later moved to another commit, <code>--fetch</code> reports it and leaves the lock alone; <code>--update</code> accepts it.</p>
     </section>
 
     <section id="commands">
@@ -103,7 +103,7 @@ zila-parse --add https://github.com/someone/codec/v2@2.0.0     <span class="cm">
       <p><code>--add</code>, <code>--fetch</code> and <code>--update</code> print the effects of every package they download or whose version changed, and <code>--update</code> marks a package that gained one:</p>
       <pre><code>locked 1 package(s)
   example.org/codec@1.1.0: effects: unsafe  [CHANGED: was none, gained unsafe]</code></pre>
-      <p><code>zila-parse file.zila --explain-link</code> shows the effects of the code your program actually reaches next to the size of each package. To refuse an effect, add a policy to <code>zila.toml</code>:</p>
+      <p><code>zila file.zila --explain-link</code> shows the effects of the code your program actually reaches next to the size of each package. To refuse an effect, add a policy to <code>zila.toml</code>:</p>
       <pre><code>[policy]
 forbid = "asm"</code></pre>
       <p>The value is one of <code>"unsafe"</code>, <code>"extern"</code> or <code>"asm"</code> (one value; the manifest has no lists). A build then fails when any dependency, direct or indirect, has that effect, naming the package and the file. Your own code is not checked.</p>
@@ -111,7 +111,7 @@ forbid = "asm"</code></pre>
 
     <section id="git">
       <h2>Git</h2>
-      <p>Only the commands that download (<code>--add</code>, <code>--fetch</code>, <code>--update</code>) run <code>git</code>, found on your <code>PATH</code>, with fixed arguments and no shell, and with password prompts turned off (ssh agents and credential helpers work as you configured them). URLs may be <code>https://</code>, <code>ssh://</code>, <code>git@host:path</code> or <code>file://</code>. If git is missing the tool says <code>git was not found on PATH. It is used only to download dependencies</code>. Building from a populated cache needs neither git nor a network, and the compiler needs no other external tool: <code>zila-parse</code> writes executables itself.</p>
+      <p>Only the commands that download (<code>--add</code>, <code>--fetch</code>, <code>--update</code>) run <code>git</code>, found on your <code>PATH</code>, with fixed arguments and no shell, and with password prompts turned off (ssh agents and credential helpers work as you configured them). URLs may be <code>https://</code>, <code>ssh://</code>, <code>git@host:path</code> or <code>file://</code>. If git is missing the tool says <code>git was not found on PATH. It is used only to download dependencies</code>. Building from a populated cache needs neither git nor a network, and the compiler needs no other external tool: <code>zila</code> writes executables itself.</p>
     </section>
 
     <section id="use">
@@ -120,15 +120,15 @@ forbid = "asm"</code></pre>
       <pre><code><span class="kw">use</span> codec.stream        <span class="cm">// the directory stream/ of the dependency codec</span>
 ...
 stream.next()</code></pre>
-      <p>A package is the <code>.zila</code> files directly in its directory, merged into one module: they see each other's names, a name declared twice is an error that names both files, and each file's <code>package</code> line must be the package's name (the directory name; for a dependency, its <code>name</code> in <code>[package]</code>). Files ending in <code>_test.zila</code> are left out of builds; <code>zila-parse --test dir/name_test.zila</code> runs their <code>#[test]</code> functions together with the package's own files. A dependency's own <code>use</code>s are looked up with <em>its</em> manifest, not yours.</p>
-      <p>A name found nowhere is an error: <code>unknown package 'x' (not in the standard library, zila.toml or the project directory); to add one: zila-parse --add &lt;git-url&gt;</code>. A program with no <code>zila.toml</code> still sees the standard library and the <code>name.zila</code> files next to it, as before.</p>
+      <p>A package is the <code>.zila</code> files directly in its directory, merged into one module: they see each other's names, a name declared twice is an error that names both files, and each file's <code>package</code> line must be the package's name (the directory name; for a dependency, its <code>name</code> in <code>[package]</code>). Files ending in <code>_test.zila</code> are left out of builds; <code>zila --test dir/name_test.zila</code> runs their <code>#[test]</code> functions together with the package's own files. A dependency's own <code>use</code>s are looked up with <em>its</em> manifest, not yours.</p>
+      <p>A name found nowhere is an error: <code>unknown package 'x' (not in the standard library, zila.toml or the project directory); to add one: zila --add &lt;git-url&gt;</code>. A program with no <code>zila.toml</code> still sees the standard library and the <code>name.zila</code> files next to it, as before.</p>
       <p>Across a package boundary only <code>pub</code> items are visible; see <a href="syntax.html#visibility">visibility</a>.</p>
     </section>
 
     <section id="linking">
       <h2>What goes into the executable</h2>
       <p>Every package a program names with <code>use</code>, from the standard library or from a dependency, is compiled together with the program into one executable. Nothing is loaded when it runs: the program does not read <code>.zila</code> files, the cache, <code>zila.toml</code> or <code>zila.lock</code>, and there are no shared libraries of Zila Lang code. The only thing the operating system links at run time is C code that the program declares with <code>extern</code>.</p>
-      <p>Only what the program can reach is kept. A function, global or string that nothing reachable refers to is left out, and a package's start-up code runs only when it does something the program can observe or sets a global that kept code reads. So <code>use json</code> without calling it adds no bytes, and a program that never opens a window does not import the window system. <code>zila-parse --no-prune</code> turns this off, and <code>zila-parse file.zila --explain-link</code> shows how many bytes of code and data each package adds to the program.</p>
+      <p>Only what the program can reach is kept. A function, global or string that nothing reachable refers to is left out, and a package's start-up code runs only when it does something the program can observe or sets a global that kept code reads. So <code>use json</code> without calling it adds no bytes, and a program that never opens a window does not import the window system. <code>zila --no-prune</code> turns this off, and <code>zila file.zila --explain-link</code> shows how many bytes of code and data each package adds to the program.</p>
     </section>
 
     <section id="sample">
@@ -138,7 +138,7 @@ stream.next()</code></pre>
   </main>
 
   <footer class="site-footer">
-    Zila Lang &middot; A small, readable language that compiles straight to machine code. The examples are checked against <code>examples/*.zila</code>; the grammar is <code>zila.ebnf</code>.
+    Zila Lang &middot; A small, readable language that compiles straight to machine code. The examples are checked against <code>examples/*.zila</code>; the grammar is <code>docs/zila.ebnf</code>.
   </footer>
 </body>
 </html>

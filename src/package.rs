@@ -446,7 +446,7 @@ impl Lock {
     pub fn write(&self) -> String {
         let mut entries = self.entries.clone();
         entries.sort_by(|a, b| (a.module.as_str(), a.version).cmp(&(b.module.as_str(), b.version)));
-        let mut s = String::from("# zila.lock: written by zila-parse; commit it, do not edit it\n");
+        let mut s = String::from("# zila.lock: written by zila; commit it, do not edit it\n");
         for e in &entries {
             let mut needs = e.needs.clone();
             needs.sort();
@@ -749,7 +749,7 @@ pub struct Project {
     pub packages: BTreeMap<String, (PathBuf, Manifest)>,
 }
 
-const OUT_OF_DATE: &str = "zila.lock is out of date; run zila-parse --fetch";
+const OUT_OF_DATE: &str = "zila.lock is out of date; run zila --fetch";
 
 fn covers(lock: &Lock, dep_module: &str, min: &Version) -> bool {
     lock.for_module(dep_module).map_or(false, |e| e.version >= *min)
@@ -783,10 +783,10 @@ pub fn load_project(root: &Path, home: &Path) -> Result<Project, String> {
     let mut packages = BTreeMap::new();
     for e in &lock.entries {
         let id = e.id();
-        let dir = cache_lookup(home, &e.module, &e.version, &e.commit).ok_or_else(|| format!("package '{}' is not in the cache; run zila-parse --fetch", id))?;
+        let dir = cache_lookup(home, &e.module, &e.version, &e.commit).ok_or_else(|| format!("package '{}' is not in the cache; run zila --fetch", id))?;
         let found = tree_hash(&dir)?;
         if found != e.hash {
-            return Err(format!("package '{}' in the cache does not match zila.lock (expected {}, found {}); run zila-parse --fetch to restore it", id, e.hash, found));
+            return Err(format!("package '{}' in the cache does not match zila.lock (expected {}, found {}); run zila --fetch to restore it", id, e.hash, found));
         }
         if let Some(kind) = &manifest.forbid {
             if let Some(file) = crate::effects::first_with(&dir, kind) {
@@ -1036,7 +1036,7 @@ pub struct Resolved {
 }
 
 fn unknown(name: &str) -> String {
-    format!("unknown package '{}' (not in the standard library, {} or the project directory); to add one: zila-parse --add <git-url>", name, MANIFEST)
+    format!("unknown package '{}' (not in the standard library, {} or the project directory); to add one: zila --add <git-url>", name, MANIFEST)
 }
 
 impl Registry {
@@ -1047,7 +1047,7 @@ impl Registry {
             None => match self.project.manifest.deps.iter().find(|d| d.name == *first) {
                 Some(d) => {
                     let m = d.module();
-                    let (dir, _) = self.project.packages.get(&m).ok_or_else(|| format!("package '{}' is not in the cache; run zila-parse --fetch", m))?;
+                    let (dir, _) = self.project.packages.get(&m).ok_or_else(|| format!("package '{}' is not in the cache; run zila --fetch", m))?;
                     (dir.clone(), Some(m), true)
                 }
                 None => {
@@ -1066,7 +1066,7 @@ impl Registry {
                         let m2 = d.module();
                         let lock_ver = self.project.lock.for_module(&m2).ok_or_else(|| OUT_OF_DATE.to_string())?;
                         let _ = lock_ver;
-                        let (dir, _) = self.project.packages.get(&m2).ok_or_else(|| format!("package '{}' is not in the cache; run zila-parse --fetch", m2))?;
+                        let (dir, _) = self.project.packages.get(&m2).ok_or_else(|| format!("package '{}' is not in the cache; run zila --fetch", m2))?;
                         (dir.clone(), Some(m2), true)
                     }
                     None => {

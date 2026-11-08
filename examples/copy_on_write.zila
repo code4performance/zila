@@ -1,7 +1,7 @@
 // Lists and maps are values: copying one costs nothing, and the first write to a list that
 // someone else still holds copies it.
 //
-//   zila-parse examples/copy_on_write.zila -o copy_on_write.exe
+//   zila examples/copy_on_write.zila -o copy_on_write.exe
 //
 // `var b = a` gives `b` its own list, even when the list sits inside a record: a write to `b`
 // never shows through `a`. The copy is made lazily, when the write happens. A function that

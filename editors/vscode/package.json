@@ -3,7 +3,7 @@
   "displayName": "Zila Lang Programming Language",
   "description": "A small, readable language that compiles straight to machine code.",
   "icon": "icon.png",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "publisher": "zila",
   "license": "MIT OR Apache-2.0",
   "repository": {
@@ -53,9 +53,9 @@
       "properties": {
         "zila.server.path": {
           "type": "string",
-          "default": "zila-parse",
+          "default": "zila",
           "scope": "machine-overridable",
-          "markdownDescription": "The `zila-parse` executable that runs the language server (`zila-parse --lsp`). A name is looked up on `PATH`."
+          "markdownDescription": "The `zila` executable that runs the language server (`zila --lsp`). A name is looked up on `PATH`."
         },
         "zila.server.enabled": {
           "type": "boolean",

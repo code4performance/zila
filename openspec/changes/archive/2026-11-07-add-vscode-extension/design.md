@@ -24,7 +24,7 @@
 5. **Finding the executable.** `zila.server.path` defaults to `zila-parse`; the process is started with `spawn` (no shell). A spawn error (`ENOENT`) shows one message with the path and a button that opens the setting; highlighting keeps working. No search of the workspace for a `target/` directory: the setting is explicit.
 6. **Lifetime.** The server starts lazily on the first `onLanguage:zila` activation. An unexpected exit restarts it up to three times within a minute, resending open documents, then stops with a message. `deactivate` sends `shutdown` and `exit`, then kills after 2 seconds.
 7. **Packaging.** `@vscode/vsce` is used through `npx` and is not a dependency; `.vscodeignore` excludes `test/` and `*.vsix`. `engines.vscode` is raised to `^1.75.0` for the APIs used.
-8. **Tests.** `editors/vscode/test/client.test.js` runs with `node --test` and uses the built `target/debug/zila-parse` (or `ZILA_PARSE`), covering handshake, diagnostics on a bad and a fixed file, formatting, a crash and restart (a fake server script), and framing of split reads. The Rust test suite gets one test that runs it when `node` is available.
+8. **Tests.** `editors/vscode/test/client.test.js` runs with `node --test` and uses the built `target/debug/zila-parse` (or `ZILA_BIN`), covering handshake, diagnostics on a bad and a fixed file, formatting, a crash and restart (a fake server script), and framing of split reads. The Rust test suite gets one test that runs it when `node` is available.
 
 ## Risks / Trade-offs
 

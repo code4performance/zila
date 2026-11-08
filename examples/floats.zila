@@ -1,6 +1,6 @@
 // Floating point: fractional numbers.
 //
-//   zila-parse examples/floats.zila -o floats.exe
+//   zila examples/floats.zila -o floats.exe
 //
 // `float` is a 64-bit number with a fractional part. It never mixes with `int`
 // by accident: convert with float(n) and int(x).

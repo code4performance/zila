@@ -32,7 +32,7 @@
 
   <main id="content">
     <h1>Syntax Guide</h1>
-    <p>Every construct below follows <code>zila.ebnf</code>, the project's formal grammar. Blocks end with <code>end</code>; a newline ends a statement (there's no <code>;</code>).</p>
+    <p>Every construct below follows <code>docs/zila.ebnf</code>, the project's formal grammar. Blocks end with <code>end</code>; a newline ends a statement (there's no <code>;</code>).</p>
 
     <nav class="toc">
       <h2>On this page</h2>
@@ -557,7 +557,7 @@ print(char(231).to_text())    <span class="cm">// ç</span></code></pre>
     <span class="kw">return</span> u64(hi) &lt;&lt; 32 bitor u64(lo)
 <span class="kw">end</span></code></pre>
       <p>SQL is written the same way, in a <code>sql</code> block: <code>sql postgres</code> or <code>sql tsql</code> on a line, the statement as raw lines, and a line that is just <code>end</code>. The block is a value (<code>db.Sql</code>); a <code>{value}</code> in it becomes a bound parameter and is never pasted into the text. <code>sql</code> opens a block only when a dialect name and the end of the line follow, so a variable or parameter called <code>sql</code> still works. See <a href="databases.html#sql">Databases</a>.</p>
-      <p>See the <a href="examples.html#ffi">FFI &amp; low-level example</a> for a fuller walkthrough, and the project's <code>zila-ffi.md</code> for the full specification (ABIs, <code>#[c_layout]</code>, <code>#[link]</code>/<code>#[link_src]</code>, <code>#[cfg]</code>, and naked functions).</p>
+      <p>See the <a href="examples.html#ffi">FFI &amp; low-level example</a> for a fuller walkthrough, and the project's <code>docs/zila-ffi.md</code> for the full specification (ABIs, <code>#[c_layout]</code>, <code>#[link]</code>/<code>#[link_src]</code>, <code>#[cfg]</code>, and naked functions).</p>
     </section>
 
     <section id="testing">
@@ -569,7 +569,7 @@ print(char(231).to_text())    <span class="cm">// ç</span></code></pre>
     assert(clamp(99, 0, 10) &lt;= 10, <span class="str">"above the range"</span>)
     <span class="kw">return</span>
 <span class="kw">end</span></code></pre>
-      <p>Run them with <code>zila-parse --test file.zila</code> (the file must be in <code>package main</code>). A failed check prints <code>FAIL clamp_keeps_values_inside: line 7: assertion failed: left 3, right 4</code>; a test that crashes the program stops the run of that file. <code>examples/testing.zila</code> is a complete example.</p>
+      <p>Run them with <code>zila --test file.zila</code> (the file must be in <code>package main</code>). A failed check prints <code>FAIL clamp_keeps_values_inside: line 7: assertion failed: left 3, right 4</code>; a test that crashes the program stops the run of that file. <code>examples/testing.zila</code> is a complete example.</p>
     </section>
 
     <div class="note">
@@ -578,7 +578,7 @@ print(char(231).to_text())    <span class="cm">// ç</span></code></pre>
   </main>
 
   <footer class="site-footer">
-    Zila Lang &middot; A small, readable language that compiles straight to machine code. The examples are checked against <code>examples/*.zila</code>; the grammar is <code>zila.ebnf</code>.
+    Zila Lang &middot; A small, readable language that compiles straight to machine code. The examples are checked against <code>examples/*.zila</code>; the grammar is <code>docs/zila.ebnf</code>.
   </footer>
 </body>
 </html>

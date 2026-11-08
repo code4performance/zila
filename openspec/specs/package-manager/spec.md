@@ -42,10 +42,10 @@ For each module path the selected version SHALL be the highest of the minimum ve
 - **THEN** both are fetched and locked, `use json` and `use json_v2` both work, and a value of one package's type is not accepted where the other's is expected
 
 ### Requirement: Commands
-`zila-parse` SHALL accept `--init`, `--add <git-url>[@version]` (with `--as <name>`), `--fetch`, `--tidy`, `--update [name]` and `--offline`, which act on the project containing the current directory and need no source file. `--add` SHALL append the dependency to the manifest and then fetch. `--fetch` SHALL resolve the graph, download what the cache lacks, verify the hashes and write the lock. `--tidy` SHALL remove dependencies that no source uses and rewrite the lock to exactly the needed graph, without network access. `--update` SHALL raise minimums to the newest tag of the same major and fetch. With `--offline`, no command SHALL contact a remote, and one that needs to SHALL fail naming what is missing.
+`zila` SHALL accept `--init`, `--add <git-url>[@version]` (with `--as <name>`), `--fetch`, `--tidy`, `--update [name]` and `--offline`, which act on the project containing the current directory and need no source file. `--add` SHALL append the dependency to the manifest and then fetch. `--fetch` SHALL resolve the graph, download what the cache lacks, verify the hashes and write the lock. `--tidy` SHALL remove dependencies that no source uses and rewrite the lock to exactly the needed graph, without network access. `--update` SHALL raise minimums to the newest tag of the same major and fetch. With `--offline`, no command SHALL contact a remote, and one that needs to SHALL fail naming what is missing.
 
 #### Scenario: Adding a dependency
-- **WHEN** `zila-parse --add https://example.org/x/json@1.2.0` runs in a project
+- **WHEN** `zila --add https://example.org/x/json@1.2.0` runs in a project
 - **THEN** `zila.toml` gains `[dependencies.json]` with that URL and version, the code is in the cache and `zila.lock` lists it
 
 #### Scenario: Tidy
@@ -57,7 +57,7 @@ For each module path the selected version SHALL be the highest of the minimum ve
 - **THEN** the tool names the package and fails without contacting any remote
 
 ### Requirement: Git is used for fetching only
-Fetching SHALL run the `git` executable found on `PATH`, with fixed arguments and never through a shell, and no other part of the toolchain SHALL run it. Prompts for credentials SHALL be disabled. When `git` cannot be started the tool SHALL print `error: git was not found on PATH. It is used only to download dependencies (zila-parse --fetch); building from an already populated cache does not need it.` and exit with a failure. A build from a populated cache SHALL NOT need `git`.
+Fetching SHALL run the `git` executable found on `PATH`, with fixed arguments and never through a shell, and no other part of the toolchain SHALL run it. Prompts for credentials SHALL be disabled. When `git` cannot be started the tool SHALL print `error: git was not found on PATH. It is used only to download dependencies (zila --fetch); building from an already populated cache does not need it.` and exit with a failure. A build from a populated cache SHALL NOT need `git`.
 
 #### Scenario: git is missing
 - **WHEN** `--fetch` runs on a machine where `git` is not on `PATH`
@@ -65,10 +65,10 @@ Fetching SHALL run the `git` executable found on `PATH`, with fixed arguments an
 
 #### Scenario: Build without git
 - **WHEN** the lock and cache are complete and `git` is not on `PATH`
-- **THEN** `zila-parse prog.zila -o prog` builds normally
+- **THEN** `zila prog.zila -o prog` builds normally
 
 ### Requirement: Cache and offline builds
-Fetched sources SHALL be stored under `$ZILA_HOME` (default `~/.zila`) in one immutable directory per package version and commit, shared by projects and written atomically. A build SHALL read only `zila.lock` and the cache, SHALL NOT use the network, and SHALL fail with `package 'X' is not in the cache; run zila-parse --fetch` when an entry is missing.
+Fetched sources SHALL be stored under `$ZILA_HOME` (default `~/.zila`) in one immutable directory per package version and commit, shared by projects and written atomically. A build SHALL read only `zila.lock` and the cache, SHALL NOT use the network, and SHALL fail with `package 'X' is not in the cache; run zila --fetch` when an entry is missing.
 
 #### Scenario: Offline build
 - **WHEN** the project has been fetched once and the network is then unavailable
@@ -134,5 +134,5 @@ A package SHALL be the `.zila` files directly in its directory, merged into one 
 - **THEN** the error names `a.zila` and `b.zila`
 
 #### Scenario: Only .zila files
-- **WHEN** a dependency's directory contains `lib.zila` and a leftover `lib.br`
+- **WHEN** a dependency's directory contains `lib.zila` and a leftover `lib.src`
 - **THEN** the dependency is `lib.zila` and its tree hash still covers every file in the directory

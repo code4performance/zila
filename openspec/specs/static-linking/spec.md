@@ -35,7 +35,7 @@ For every library, a function, type helper or global that cannot be reached from
 - **THEN** `parse` and everything it calls are in the executable
 
 ### Requirement: The link report
-`zila-parse <file> --explain-link` SHALL print, for each package in the build, its name, its kind (`program`, `std` or `package`) and the bytes of code and data it contributes, with the runtime, the strings and the generated helpers as separate lines, then the total of code and data, and SHALL NOT write the executable unless `-o` is also given. The numbers SHALL be measured on the assembled program, so they change when the program changes.
+`zila <file> --explain-link` SHALL print, for each package in the build, its name, its kind (`program`, `std` or `package`) and the bytes of code and data it contributes, with the runtime, the strings and the generated helpers as separate lines, then the total of code and data, and SHALL NOT write the executable unless `-o` is also given. The numbers SHALL be measured on the assembled program, so they change when the program changes.
 
 #### Scenario: Report
 - **WHEN** a program uses `json` and one dependency and `--explain-link` is passed

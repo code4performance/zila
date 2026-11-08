@@ -1,7 +1,7 @@
 // Text is UTF-8: `len` counts bytes, `char_count()` counts characters, `for c in s` visits the
 // characters and `slice` cuts by byte positions (it aborts inside a character).
 //
-//   zila-parse examples/unicode.zila -o unicode.exe
+//   zila examples/unicode.zila -o unicode.exe
 
 package main
 

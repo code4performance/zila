@@ -57,14 +57,14 @@ impl Compiler {
     /// The method `name` the program declared on `ty` (not one the compiler derived).
     pub(super) fn user_method(&self, ty: &Ty, name: &str) -> Option<Sig> {
         let key = (method_key(ty), name.to_string());
-        if self.derived.contains(&key) {
+        if self.tp.derived.contains(&key) {
             return None;
         }
-        self.methods.get(&key).cloned()
+        self.tp.methods.get(&key).cloned()
     }
 
     fn is_identity(&self, ty: &Ty) -> bool {
-        matches!(ty, Ty::Rec(q) if self.shared_recs.contains(q))
+        matches!(ty, Ty::Rec(q) if self.tp.shared_recs.contains(q))
     }
 
     /// Why `ty` is not `cap`, or `None` when it is. The flag is true for a basic reason that reads
@@ -118,7 +118,7 @@ impl Compiler {
         seen.push(key);
         let r = match ty {
             Ty::Rec(q) => {
-                if self.shared_recs.contains(q) {
+                if self.tp.shared_recs.contains(q) {
                     if cap == Cap::Ord {
                         Some((false, "it is held by reference, so it is only ordered by a `compare` method".to_string()))
                     } else {
@@ -126,7 +126,7 @@ impl Compiler {
                     }
                 } else {
                     let mut found = None;
-                    if let Some(info) = self.records.get(q) {
+                    if let Some(info) = self.tp.records.get(q) {
                         for (n, fty, _) in &info.fields {
                             if let Some(inner) = self.lacks_in(fty, cap, seen) {
                                 found = Some((false, format!("field `{}: {}` is not {}{}", n, fty.show(), cap.name(), because(Some(inner)))));
@@ -139,7 +139,7 @@ impl Compiler {
             }
             Ty::Enum(q) => {
                 let mut found = None;
-                if let Some(info) = self.enums.get(q) {
+                if let Some(info) = self.tp.enums.get(q) {
                     'v: for (vn, tys) in &info.variants {
                         for t in tys {
                             if let Some(inner) = self.lacks_in(t, cap, seen) {
@@ -175,7 +175,7 @@ impl Compiler {
             return Ok(None);
         }
         let key = (method_key(ty), name.to_string());
-        if let Some(s) = self.methods.get(&key) {
+        if let Some(s) = self.tp.methods.get(&key) {
             return Ok(Some(s.clone()));
         }
         if !self.declared {
@@ -189,8 +189,8 @@ impl Compiler {
             return Ok(None);
         }
         let module = match ty {
-            Ty::Rec(q) => self.rec_decls.get(q).map(|d| d.0.clone()),
-            Ty::Enum(q) => self.enum_decls.get(q).map(|d| d.0.clone()),
+            Ty::Rec(q) => self.tp.rec_decls.get(q).map(|d| d.0.clone()),
+            Ty::Enum(q) => self.tp.enum_decls.get(q).map(|d| d.0.clone()),
             _ => None,
         }
         .unwrap_or_else(|| self.modules[0].name.clone());
@@ -210,8 +210,8 @@ impl Compiler {
         self.cur_mod = saved_mod;
         let mut sig = sig?;
         sig.public = true;
-        self.methods.insert(key.clone(), sig.clone());
-        self.derived.insert(key);
+        self.tp.methods.insert(key.clone(), sig.clone());
+        self.tp.derived.insert(key);
         self.pending.push(Pending { module, decl: fd, bindings: binds, line: self.line });
         Ok(Some(sig))
     }
@@ -232,15 +232,15 @@ impl Compiler {
         };
         match ty {
             Ty::Int { .. } | Ty::Char | Ty::Bool | Ty::Text | Ty::Float { .. } => s.push_str(scalar(cap)),
-            Ty::Enum(q) if !self.enum_payload.contains(q) => s.push_str(scalar(cap)),
-            Ty::Rec(q) if self.shared_recs.contains(q) => {
+            Ty::Enum(q) if !self.tp.enum_payload.contains(q) => s.push_str(scalar(cap)),
+            Ty::Rec(q) if self.tp.shared_recs.contains(q) => {
                 s.push_str(match cap {
                     Cap::Ord => "    return 0\n",
                     _ => scalar(cap),
                 });
             }
             Ty::Rec(q) => {
-                let fields: Vec<String> = self.records.get(q).map(|i| i.fields.iter().map(|f| f.0.clone()).collect()).unwrap_or_default();
+                let fields: Vec<String> = self.tp.records.get(q).map(|i| i.fields.iter().map(|f| f.0.clone()).collect()).unwrap_or_default();
                 match cap {
                     Cap::Eq => {
                         let parts: Vec<String> = fields.iter().map(|f| format!("__eq(a.{f}, b.{f})")).collect();
@@ -263,7 +263,7 @@ impl Compiler {
                 }
             }
             Ty::Enum(q) => {
-                let variants: Vec<Vec<Ty>> = self.enums.get(q).map(|i| i.variants.iter().map(|v| v.1.clone()).collect()).unwrap_or_default();
+                let variants: Vec<Vec<Ty>> = self.tp.enums.get(q).map(|i| i.variants.iter().map(|v| v.1.clone()).collect()).unwrap_or_default();
                 match cap {
                     Cap::Eq => {
                         s.push_str("    let t = __tag(a)\n    if t != __tag(b)\n        return false\n    end\n");
@@ -341,7 +341,7 @@ impl Compiler {
             Cap::Ord => Ty::int(),
             Cap::Hash => Ty::i64(),
         };
-        let int_like = ty.is_int() || matches!(ty, Ty::Char | Ty::Bool) || matches!(ty, Ty::Enum(q) if !self.enum_payload.contains(q));
+        let int_like = ty.is_int() || matches!(ty, Ty::Char | Ty::Bool) || matches!(ty, Ty::Enum(q) if !self.tp.enum_payload.contains(q));
         match ty {
             Ty::Param { .. } => {
                 self.e("xor eax, eax");
@@ -583,7 +583,7 @@ impl Compiler {
             "__tag" => {
                 let (t, own) = self.operand(&args[0].value, None)?;
                 let Ty::Enum(q) = &t else { return self.err("__tag() takes an enum") };
-                if self.enum_payload.contains(q) {
+                if self.tp.enum_payload.contains(q) {
                     let s = self.temp();
                     self.e(format!("mov qword ptr [rbp - {}], rax", s));
                     self.e("mov rax, qword ptr [rax]");
@@ -604,7 +604,7 @@ impl Compiler {
                     return self.err("__payload() takes an enum and two numbers");
                 };
                 let Ty::Enum(q) = &t else { return self.err("__payload() takes an enum") };
-                let ty = self.enums[q].variants[*v as usize].1[*i as usize].clone();
+                let ty = self.tp.enums[q].variants[*v as usize].1[*i as usize].clone();
                 let s = self.temp();
                 self.e(format!("mov qword ptr [rbp - {}], rax", s));
                 self.e(format!("mov rax, qword ptr [rax + {}]", 8 + 8 * *i));
@@ -696,7 +696,7 @@ impl Compiler {
         }
         let composite = match (lt, rt) {
             (Ty::Rec(a), Ty::Rec(b)) => a == b,
-            (Ty::Enum(a), Ty::Enum(b)) => a == b && self.enum_payload.contains(a),
+            (Ty::Enum(a), Ty::Enum(b)) => a == b && self.tp.enum_payload.contains(a),
             (Ty::List(_), Ty::List(_)) | (Ty::Map(..), Ty::Map(..)) => lt == rt,
             _ => false,
         };

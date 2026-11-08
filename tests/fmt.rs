@@ -289,7 +289,7 @@ fn scrambled_indentation_formats_back_to_the_same_text() {
 fn the_repository_is_formatted() {
     let unformatted: Vec<String> =
         repo_files().into_iter().filter(|f| format_source(&std::fs::read_to_string(f).unwrap()).unwrap() != std::fs::read_to_string(f).unwrap()).collect();
-    assert!(unformatted.is_empty(), "not formatted: {:?} (run `zila-parse --fmt std/*.zila examples/*.zila os/*.zila`)", unformatted);
+    assert!(unformatted.is_empty(), "not formatted: {:?} (run `zila --fmt std/*.zila examples/*.zila os/*.zila`)", unformatted);
 }
 
 // ---- the command line ----
@@ -301,7 +301,7 @@ fn temp_file(name: &str, text: &str) -> std::path::PathBuf {
 }
 
 fn run(args: &[&std::path::Path], flag: &str) -> (String, String, i32) {
-    let out = Command::new(env!("CARGO_BIN_EXE_zila-parse")).arg(flag).args(args).output().unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_zila")).arg(flag).args(args).output().unwrap();
     (String::from_utf8_lossy(&out.stdout).replace('\r', ""), String::from_utf8_lossy(&out.stderr).replace('\r', ""), out.status.code().unwrap())
 }
 

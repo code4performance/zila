@@ -7,7 +7,7 @@ impl Compiler {
         match t {
             Ty::Text | Ty::Kind | Ty::Rec(_) | Ty::List(_) | Ty::Map(..) | Ty::Err | Ty::Result(_) | Ty::Chan(_) | Ty::Future(_) | Ty::Rc(_) | Ty::Weak(_) => true,
             Ty::Func { ext, .. } => !*ext,
-            Ty::Enum(q) => self.enum_payload.contains(q),
+            Ty::Enum(q) => self.tp.enum_payload.contains(q),
             _ => false,
         }
     }
@@ -78,7 +78,7 @@ impl Compiler {
 
     /// Keys kept as plain numbers: integers, `bool` and enums without data.
     pub(super) fn plain_key(&self, k: &Ty) -> bool {
-        k.is_int() || matches!(k, Ty::Char | Ty::Bool | Ty::Param { .. }) || matches!(k, Ty::Enum(q) if !self.enum_payload.contains(q))
+        k.is_int() || matches!(k, Ty::Char | Ty::Bool | Ty::Param { .. }) || matches!(k, Ty::Enum(q) if !self.tp.enum_payload.contains(q))
     }
 
     /// rax = new empty map of type `t`.
@@ -108,12 +108,12 @@ impl Compiler {
     }
 
     pub(super) fn rec_has_rc(&self, q: &str) -> bool {
-        self.records[q].fields.iter().any(|f| self.is_rc(&f.1))
+        self.tp.records[q].fields.iter().any(|f| self.is_rc(&f.1))
     }
 
     /// `func (ref x: T) drop()` runs when the last reference to a `T` goes away.
     pub(super) fn drop_hook(&self, q: &str) -> Option<String> {
-        self.methods.get(&(q.to_string(), "drop".to_string())).map(|s| s.sym.clone())
+        self.tp.methods.get(&(q.to_string(), "drop".to_string())).map(|s| s.sym.clone())
     }
 
     pub(super) fn rec_drop(&self, q: &str) -> String {
@@ -125,7 +125,7 @@ impl Compiler {
     }
 
     pub(super) fn enum_drop(&self, q: &str) -> String {
-        let info = &self.enums[q];
+        let info = &self.tp.enums[q];
         if info.variants.iter().any(|v| v.1.iter().any(|t| self.is_rc(t))) {
             format!("B_edrop_{}", sym_of(q))
         } else {

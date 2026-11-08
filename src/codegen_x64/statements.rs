@@ -137,7 +137,7 @@ impl Compiler {
                 }
                 ExprKind::Call { callee, args, .. }
                     if matches!(&callee.kind, ExprKind::Ident(n) if (n == "assert" || n == "assert_eq")
-                        && !self.funcs.contains_key(&(self.cur_mod.clone(), n.clone()))) =>
+                        && !self.tp.funcs.contains_key(&(self.cur_mod.clone(), n.clone()))) =>
                 {
                     let ExprKind::Ident(name) = &callee.kind else { unreachable!() };
                     self.assert_stmt(name, args, e.line)?;
@@ -154,7 +154,7 @@ impl Compiler {
             },
             StmtKind::Defer(e) => self.defer_stmt(e, s.line)?,
             StmtKind::Spawn(call) => {
-                let task_spawn = self.funcs.get(&("task".to_string(), "start".to_string())).cloned();
+                let task_spawn = self.tp.funcs.get(&("task".to_string(), "start".to_string())).cloned();
                 let Some(sig) = task_spawn else { return self.err("'spawn' needs the task library") };
                 if !matches!(call.kind, ExprKind::Call { .. }) {
                     return self.err("'spawn' needs a function call, like `spawn work(x)`");
@@ -185,7 +185,7 @@ impl Compiler {
                 if let Some(l) = self.lookup(n) {
                     return Some(l.ty);
                 }
-                let g = self.globals.get(&(self.cur_mod.clone(), n.clone()))?;
+                let g = self.tp.globals.get(&(self.cur_mod.clone(), n.clone()))?;
                 if g.konst.is_some() {
                     None
                 } else {
@@ -209,7 +209,7 @@ impl Compiler {
     /// when they are retained as they are.
     pub(super) fn clone_fn_for(&self, el: &Ty) -> String {
         match el {
-            Ty::Rec(r) if !self.shared_recs.contains(r) => format!("lea rdx, B_copy_{}", sym_of(r)),
+            Ty::Rec(r) if !self.tp.shared_recs.contains(r) => format!("lea rdx, B_copy_{}", sym_of(r)),
             _ => "xor edx, edx".to_string(),
         }
     }
@@ -318,7 +318,7 @@ impl Compiler {
                     return Ok(l.ty);
                 }
                 let key = (self.cur_mod.clone(), n.clone());
-                if let Some(g) = self.globals.get(&key) {
+                if let Some(g) = self.tp.globals.get(&key) {
                     let (sym, ty) = (g.sym.clone(), g.ty.clone());
                     self.e(format!("lea rax, {}", sym));
                     return Ok(ty);
@@ -357,7 +357,7 @@ impl Compiler {
                     return Ok(l.ty);
                 }
                 let key = (self.cur_mod.clone(), n.clone());
-                if let Some(g) = self.globals.get(&key) {
+                if let Some(g) = self.tp.globals.get(&key) {
                     let (sym, ty) = (g.sym.clone(), g.ty.clone());
                     self.e(format!("mov rax, qword ptr {}", sym));
                     return Ok(ty);
@@ -393,10 +393,10 @@ impl Compiler {
     /// where the receiver is a variable, field or element path: the write goes to the receiver's own
     /// place. `Ok(None)` when the call is not one of these.
     pub(super) fn cow_method(&mut self, obj: &Expr, pt: &Ty, name: &str, args: &[Arg]) -> R<Option<Ty>> {
-        if matches!(name, "push" | "add" | "clear" | "take" | "remove" | "insert" | "pop") && !self.methods.contains_key(&(method_key(pt), name.to_string())) {
+        if matches!(name, "push" | "add" | "clear" | "take" | "remove" | "insert" | "pop") && !self.tp.methods.contains_key(&(method_key(pt), name.to_string())) {
             self.shared_write_check(obj, true)?;
         }
-        if self.methods.contains_key(&(method_key(pt), name.to_string())) {
+        if self.tp.methods.contains_key(&(method_key(pt), name.to_string())) {
             return Ok(None);
         }
         match (pt, name) {
@@ -557,7 +557,7 @@ impl Compiler {
                     return Ok(());
                 }
                 let key = (self.cur_mod.clone(), name.clone());
-                let Some(g) = self.globals.get(&key) else { return self.err(format!("undefined variable '{}'", name)) };
+                let Some(g) = self.tp.globals.get(&key) else { return self.err(format!("undefined variable '{}'", name)) };
                 if !g.mutable {
                     return self.err(format!("cannot assign to '{}': declared with 'let'", name));
                 }
@@ -601,7 +601,7 @@ impl Compiler {
                     } else {
                         self.store_mem(&fty, &format!("rcx + {}", off));
                     }
-                } else if let Some(sig) = self.methods.get(&(r.clone(), format!("set_{}", name))).cloned() {
+                } else if let Some(sig) = self.tp.methods.get(&(r.clone(), format!("set_{}", name))).cloned() {
                     self.check_method_vis(&sig, &format!("set_{}", name))?;
                     // property setter: `w.text = v` -> `w.set_text(v)`
                     let Some(p) = sig.params.first().cloned() else {
@@ -837,7 +837,7 @@ impl Compiler {
             self.e("cmp rdx, qword ptr [rcx]");
             self.e(format!("jge {}", end));
             self.e("call rt_list_get");
-            if matches!(&*el, Ty::Rec(r) if !self.shared_recs.contains(r)) {
+            if matches!(&*el, Ty::Rec(r) if !self.tp.shared_recs.contains(r)) {
                 let Ty::Rec(r) = &*el else { unreachable!() };
                 self.e("mov rcx, rax");
                 self.e(format!("call B_copy_{}", sym_of(r)));
@@ -871,7 +871,7 @@ impl Compiler {
     /// Stores the borrowed element in rax into the loop variable at `slot`: a copy for plain
     /// records, a retained reference for other heap values; the previous value is released.
     pub(super) fn bind_loop_var(&mut self, el: &Ty, slot: i32) {
-        if matches!(el, Ty::Rec(r) if !self.shared_recs.contains(r)) {
+        if matches!(el, Ty::Rec(r) if !self.tp.shared_recs.contains(r)) {
             let Ty::Rec(r) = el else { unreachable!() };
             self.e("mov rcx, rax");
             self.e(format!("call B_copy_{}", sym_of(r)));

@@ -1,4 +1,4 @@
-//! `zila-parse --run`: the program is built for this machine, run with the terminal's input and
+//! `zila --run`: the program is built for this machine, run with the terminal's input and
 //! output passed through, and deleted afterwards; its exit status becomes the tool's.
 
 use std::io::Write;
@@ -15,7 +15,7 @@ struct Ran {
     left: Vec<String>,
 }
 
-/// Writes `src` to a file, runs `zila-parse <file> --run [extra]` with `input` on standard input
+/// Writes `src` to a file, runs `zila <file> --run [extra]` with `input` on standard input
 /// and a private temporary directory, and collects the result.
 fn run(src: &str, extra: &[&str], input: &str) -> Ran {
     let dir = std::env::temp_dir().join(format!("zila-runtest-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
@@ -23,7 +23,7 @@ fn run(src: &str, extra: &[&str], input: &str) -> Ran {
     std::fs::create_dir_all(&tmp).unwrap();
     let file = dir.join("prog.zila");
     std::fs::write(&file, src).unwrap();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_zila-parse"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_zila"))
         .arg(&file)
         .arg("--run")
         .args(extra)

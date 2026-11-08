@@ -111,7 +111,7 @@ fn the_linux_assembly_uses_system_calls_and_no_windows_api() {
 
 #[test]
 fn the_target_option_is_checked() {
-    let run = |args: &[&str]| Command::new(env!("CARGO_BIN_EXE_zila-parse")).args(args).output().unwrap();
+    let run = |args: &[&str]| Command::new(env!("CARGO_BIN_EXE_zila")).args(args).output().unwrap();
     let out = run(&["x.zila", "--target", "solaris"]);
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(!out.status.success() && err.contains("unknown target 'solaris'") && err.contains("windows") && err.contains("linux"), "{}", err);

@@ -1,6 +1,6 @@
 // defer: run a call when the function ends, however it ends.
 //
-//   zila-parse examples/defer.zila -o defer.exe
+//   zila examples/defer.zila -o defer.exe
 //
 // Deferred calls run last in, first out, on `return`, at the end of the
 // function, and when a `try` fails.

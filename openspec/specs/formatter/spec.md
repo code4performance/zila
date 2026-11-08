@@ -1,11 +1,11 @@
 ## Purpose
 
-Gives Zila Lang source one standard style, applied by `zila-parse --fmt` and checked by `--fmt-check`, changing only whitespace and never the program.
+Gives Zila Lang source one standard style, applied by `zila --fmt` and checked by `--fmt-check`, changing only whitespace and never the program.
 
 ## Requirements
 
 ### Requirement: Formatting files
-`zila-parse --fmt file.zila [more.zila ...]` SHALL rewrite each file in the standard style and print the names of the files it changed. `zila-parse --fmt-check file.zila ...` SHALL change nothing, print the names of the files that are not in the standard style and exit with status 1 when there are any (0 otherwise). A file that does not parse SHALL be reported with its error and left untouched, and the exit status SHALL be 1.
+`zila --fmt file.zila [more.zila ...]` SHALL rewrite each file in the standard style and print the names of the files it changed. `zila --fmt-check file.zila ...` SHALL change nothing, print the names of the files that are not in the standard style and exit with status 1 when there are any (0 otherwise). A file that does not parse SHALL be reported with its error and left untouched, and the exit status SHALL be 1.
 
 #### Scenario: Rewriting
 - **WHEN** a badly indented file is given to `--fmt`

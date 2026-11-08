@@ -1,6 +1,6 @@
 // Formatting: a right-aligned table of names and amounts.
 //
-//   zila-parse examples/report.zila -o report.exe
+//   zila examples/report.zila -o report.exe
 //
 // `use format` is a library written in Zila Lang. A template is a text with `%` placeholders
 // (`%` is the next argument, `%1` the second one, `%(>8)` pads to 8 characters, right

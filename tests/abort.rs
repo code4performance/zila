@@ -223,7 +223,7 @@ fn test_mode_is_off_by_default() {
 fn run_tests(src: &str) -> Option<(String, String, i32)> {
     let p = temp("tests.zila");
     std::fs::write(&p, src).unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_zila-parse")).arg("--test").arg(&p).output().unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_zila")).arg("--test").arg(&p).output().unwrap();
     let _ = std::fs::remove_file(&p);
     let (stdout, stderr) = (String::from_utf8_lossy(&out.stdout).replace('\r', ""), String::from_utf8_lossy(&out.stderr).replace('\r', ""));
     let code = out.status.code().unwrap();

@@ -1,4 +1,4 @@
-//! `zila-parse --run`: builds the program for this machine into a temporary executable,
+//! `zila --run`: builds the program for this machine into a temporary executable,
 //! runs it with the terminal's input and output, deletes it and returns its exit status.
 
 use crate::ast::File;

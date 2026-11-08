@@ -41,7 +41,7 @@ def frame(html, tagline):
     html = re.sub(r"<main(?: id=\"content\")?>", '<main id="content">', html, count=1)
     footer = (
         '<footer class="site-footer">\n'
-        "    Zila Lang &middot; " + tagline + " The examples are checked against <code>examples/*.zila</code>; the grammar is <code>zila.ebnf</code>.\n"
+        "    Zila Lang &middot; " + tagline + " The examples are checked against <code>examples/*.zila</code>; the grammar is <code>docs/zila.ebnf</code>.\n"
         "  </footer>"
     )
     html = re.sub(r'<footer class="site-footer">.*?</footer>', lambda m: footer, html, count=1, flags=re.S)

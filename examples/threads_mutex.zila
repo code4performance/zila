@@ -1,6 +1,6 @@
 // Threads: a counter shared by eight threads, once with a Mutex and once with an Atomic.
 //
-//   zila-parse examples/threads_mutex.zila -o threads_mutex.exe
+//   zila examples/threads_mutex.zila -o threads_mutex.exe
 
 package main
 

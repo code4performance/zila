@@ -1,6 +1,6 @@
 // Sorted maps and sets: entries come out in key order, and the nearest key is one lookup away.
 //
-//   zila-parse examples/sorted.zila --run
+//   zila examples/sorted.zila --run
 package main
 
 use sorted

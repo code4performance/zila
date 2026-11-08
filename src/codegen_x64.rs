@@ -60,6 +60,8 @@ mod generics;
 mod output;
 mod runtime;
 mod threads;
+mod typed;
+use typed::TypedProgram;
 use analysis::*;
 use fold::*;
 use generics::*;
@@ -745,31 +747,16 @@ pub struct Compiler {
     /// Compiling the program that runs comptime generators: `Type` is `reflect.Type`.
     driver: bool,
     modules: Vec<Module>,
+    /// The declarations of the program: types, signatures and globals (see `typed.rs`).
+    tp: TypedProgram,
     imports: HashMap<String, HashSet<String>>,
     /// `(importing module, qualifier)` to the module key when a package is imported under a name
     /// that is not its key (two packages with the same name, or one package under two names).
     mod_aliases: HashMap<(String, String), String>,
-    rec_decls: HashMap<String, (String, Vec<Field>)>,
-    /// `#[shared]` records have reference semantics: never copied on assignment, capture or iteration.
-    shared_recs: HashSet<String>,
-    /// records that `new` allocates (they get a `B_rcdrop_*` wrapper); never rolled back
-    rc_recs: HashSet<String>,
-    enum_decls: HashMap<String, (String, Vec<Variant>)>,
-    /// qualified names of the types written with `pub`
-    pub_types: HashSet<String>,
-    enum_payload: HashSet<String>,
-    aliases: HashMap<String, (String, Type)>,
-    records: HashMap<String, RecInfo>,
-    enums: HashMap<String, EnumInfo>,
-    /// (module, variant name) -> (enum, index)
-    variants: HashMap<(String, String), (String, usize)>,
     enum_statics: BTreeSet<(String, usize)>,
-    funcs: HashMap<(String, String), Sig>,
-    methods: HashMap<(String, String), Sig>,
     /// Functions whose calls are compiled in place (with `opt`): symbol -> (body, module).
     inline_bodies: HashMap<String, (Expr, String)>,
     inline_depth: usize,
-    globals: HashMap<(String, String), Global>,
     libs: BTreeSet<String>,
     extern_syms: BTreeSet<String>,
     /// the library of each extern symbol, from the `#[link]` before it (Windows imports)
@@ -788,8 +775,6 @@ pub struct Compiler {
     /// the next `lambda()` is the body of an async function: `await` is allowed in it
     /// symbols of functions whose body contains a direct `await`
     await_syms: std::collections::HashSet<String>,
-    /// functions marked `#[export]`
-    exported: std::collections::HashSet<String>,
     /// the next `lambda()` shares the records it captures instead of copying them
     next_lambda_share: bool,
     /// the next `lambda()` may ignore the result of a call that can fail
@@ -809,8 +794,6 @@ pub struct Compiler {
     tmpl_recs: HashMap<String, (String, TypeDecl, bool)>,
     /// Methods of generic records: qualified record name -> (module, declaration, line).
     tmpl_methods: HashMap<String, Vec<(String, FuncDecl, u32)>>,
-    /// Interfaces: qualified name -> (module, method signatures).
-    interfaces: HashMap<String, (String, Vec<MethodSig>)>,
     /// Type parameters bound to types while an instance is compiled.
     bindings: HashMap<String, Ty>,
     /// Instance of a generic record -> (template, type arguments).
@@ -825,8 +808,6 @@ pub struct Compiler {
     deferred_bounds: Vec<(Ty, String, u32)>,
     inst_count: usize,
     custom_allocator: Option<crate::noalloc::CustomAllocatorInfo>,
-    /// Methods the compiler wrote itself (derived `eq`, `compare`, `hash`): (type key, name).
-    derived: HashSet<(String, String)>,
     /// Hash and equality thunks of general map keys, by key type: (hash symbol, equality symbol).
     map_thunks: BTreeMap<String, (String, String)>,
     /// Map key types met before every method was known: (key type, line, module).
@@ -870,24 +851,12 @@ impl Compiler {
             test_mode: false,
             driver: crate::comptime::driver_mode(),
             modules: Vec::new(),
+            tp: TypedProgram::default(),
             imports: HashMap::new(),
             mod_aliases: HashMap::new(),
-            rec_decls: HashMap::new(),
-            shared_recs: HashSet::new(),
-            rc_recs: HashSet::new(),
-            enum_decls: HashMap::new(),
-            pub_types: HashSet::new(),
-            enum_payload: HashSet::new(),
-            aliases: HashMap::new(),
-            records: HashMap::new(),
-            enums: HashMap::new(),
-            variants: HashMap::new(),
             enum_statics: BTreeSet::new(),
-            funcs: HashMap::new(),
-            methods: HashMap::new(),
             inline_bodies: HashMap::new(),
             inline_depth: 0,
-            globals: HashMap::new(),
             libs: BTreeSet::new(),
             extern_syms: BTreeSet::new(),
             extern_lib: BTreeMap::new(),
@@ -900,7 +869,6 @@ impl Compiler {
             fn_closures: BTreeSet::new(),
             labels: 0,
             await_syms: std::collections::HashSet::new(),
-            exported: std::collections::HashSet::new(),
             next_lambda_share: false,
             next_lambda_ignore_result: false,
             cur_mod: String::new(),
@@ -912,7 +880,6 @@ impl Compiler {
             tmpl_funcs: HashMap::new(),
             tmpl_recs: HashMap::new(),
             tmpl_methods: HashMap::new(),
-            interfaces: HashMap::new(),
             bindings: HashMap::new(),
             inst_args: HashMap::new(),
             inst_funcs: HashMap::new(),
@@ -921,7 +888,6 @@ impl Compiler {
             deferred_bounds: Vec::new(),
             inst_count: 0,
             custom_allocator: None,
-            derived: HashSet::new(),
             map_thunks: BTreeMap::new(),
             deferred_keys: Vec::new(),
         }
@@ -1164,7 +1130,7 @@ impl Compiler {
     fn generate(&mut self) -> R<String> {
         let mods: Vec<(String, Vec<Decl>)> = self.modules.iter().map(|m| (m.name.clone(), m.file.decls.clone())).collect();
         let main_mod = mods[0].0.clone();
-        let main_ret = match self.funcs.get(&(main_mod.clone(), "main".to_string())) {
+        let main_ret = match self.tp.funcs.get(&(main_mod.clone(), "main".to_string())) {
             Some(s) => s.ret.clone(),
             None => return Err(format!("{}.zila: no 'main' function found", main_mod)),
         };
@@ -1178,8 +1144,8 @@ impl Compiler {
                 if let DeclKind::Func(fd) = &d.kind {
                     if fd.generics.is_empty() && self.generic_receiver(m, fd).is_none() {
                         if d.attrs.iter().any(|a| a.name == "export") {
-                            if let Some(sg) = self.funcs.get(&(m.to_string(), fd.name.clone())) {
-                                self.exported.insert(sg.sym.clone());
+                            if let Some(sg) = self.tp.funcs.get(&(m.to_string(), fd.name.clone())) {
+                                self.tp.exported.insert(sg.sym.clone());
                             }
                         }
                         self.gen_func(m, fd, d.attrs.iter().any(|a| a.name == "naked"))?;
@@ -1188,15 +1154,17 @@ impl Compiler {
             }
         }
         self.drain_pending()?;
-        let recs: Vec<String> = self.records.keys().cloned().collect();
+        let mut recs: Vec<String> = self.tp.records.keys().cloned().collect();
+        recs.sort();
         for q in recs {
             self.gen_record_helpers(&q);
         }
-        let enums: Vec<String> = self.enums.keys().cloned().collect();
+        let mut enums: Vec<String> = self.tp.enums.keys().cloned().collect();
+        enums.sort();
         for q in enums {
             self.gen_enum_drop(&q);
         }
-        let mut rcs: Vec<String> = self.rc_recs.iter().filter(|q| self.records.contains_key(*q)).cloned().collect();
+        let mut rcs: Vec<String> = self.tp.rc_recs.iter().filter(|q| self.tp.records.contains_key(*q)).cloned().collect();
         rcs.sort();
         for q in rcs {
             self.gen_rc_drop(&q);
@@ -1457,7 +1425,7 @@ end
             units.push(Unit { text, defs: vec![format!("CB_{}", cb)], kind: Kind::Plain });
         }
         cuts[1] = units.len();
-        let mut globals: Vec<&Global> = self.globals.values().filter(|g| g.konst.is_none()).collect();
+        let mut globals: Vec<&Global> = self.tp.globals.values().filter(|g| g.konst.is_none()).collect();
         globals.sort_by(|a, b| a.sym.cmp(&b.sym));
         for g in globals {
             units.push(Unit { text: format!("{} dq 0\n", g.sym), defs: vec![g.sym.clone()], kind: Kind::Plain });
@@ -1476,7 +1444,7 @@ end
 
         let keep: Vec<bool> = if crate::prune::enabled() {
             let mut roots = format!("B_{}_main B_{}_console_write\n", main_mod, main_mod);
-            for e in &self.exported {
+            for e in &self.tp.exported {
                 roots.push_str(e);
                 roots.push('\n');
             }
@@ -1670,7 +1638,7 @@ end
         for d in decls {
             self.line = d.line;
             if let DeclKind::Var(vd) = &d.kind {
-                let g = &self.globals[&(m.to_string(), vd.name.clone())];
+                let g = &self.tp.globals[&(m.to_string(), vd.name.clone())];
                 if g.konst.is_some() {
                     continue;
                 }
@@ -1696,9 +1664,9 @@ end
         let sig = match &fd.receiver {
             Some(_) => {
                 let rt = self.resolve(&fd.receiver.as_ref().unwrap().ty, m)?;
-                self.methods[&(method_key(&rt), fd.name.clone())].clone()
+                self.tp.methods[&(method_key(&rt), fd.name.clone())].clone()
             }
-            None => self.funcs[&(m.to_string(), fd.name.clone())].clone(),
+            None => self.tp.funcs[&(m.to_string(), fd.name.clone())].clone(),
         };
         let rl = self.lbl("ret");
         self.fs = FnState::new(sig.ret.clone(), rl);
@@ -1711,7 +1679,7 @@ end
         if has_await && fd.name == "drop" && fd.receiver.is_some() {
             return self.err("`await` cannot be used in a `drop` method");
         }
-        if has_await && self.exported.contains(&sig.sym) {
+        if has_await && self.tp.exported.contains(&sig.sym) {
             return self.err("`await` cannot be used in a function called from C");
         }
         if self.opt && !naked && self.target != Target::Bare {
@@ -1857,7 +1825,7 @@ end
     }
 
     fn rec_size(&self, r: &str) -> u32 {
-        self.records[r].size
+        self.tp.records[r].size
     }
 
     /// The error for a name that exists but is not `pub`, used from another package.
@@ -1876,12 +1844,12 @@ end
 
     /// The type `q` (qualified) is `pub` or declared in package `from`.
     fn type_visible(&self, q: &str, from: &str) -> bool {
-        self.pub_types.contains(q) || type_owner(q) == from
+        self.tp.pub_types.contains(q) || type_owner(q) == from
     }
 
     /// The declared fields of record `r` (an instance of a generic record uses its template's).
     fn rec_field_decls(&self, r: &str) -> Option<(&str, &[Field])> {
-        let (m, f) = self.rec_decls.get(r)?;
+        let (m, f) = self.tp.rec_decls.get(r)?;
         if f.is_empty() {
             if let Some((tq, _)) = self.inst_args.get(r) {
                 if let Some((tm, td, _)) = self.tmpl_recs.get(tq) {
@@ -1931,7 +1899,7 @@ end
     }
 
     fn field_of(&self, r: &str, name: &str) -> Option<(Ty, u32)> {
-        self.records.get(r)?.fields.iter().find(|f| f.0 == name).map(|f| (f.1.clone(), f.2))
+        self.tp.records.get(r)?.fields.iter().find(|f| f.0 == name).map(|f| (f.1.clone(), f.2))
     }
 
     fn lookup(&self, name: &str) -> Option<Local> {
@@ -1960,7 +1928,7 @@ end
 
     fn is_module(&self, name: &str) -> bool {
         self.lookup(name).is_none()
-            && !self.globals.contains_key(&(self.cur_mod.clone(), name.to_string()))
+            && !self.tp.globals.contains_key(&(self.cur_mod.clone(), name.to_string()))
             && self.imports.get(&self.cur_mod).map_or(false, |i| i.contains(name))
     }
 
@@ -1970,7 +1938,7 @@ end
             return None;
         }
         let q = format!("{}.{}", self.cur_mod, name);
-        self.enum_decls.contains_key(&q).then_some(q)
+        self.tp.enum_decls.contains_key(&q).then_some(q)
     }
 
     fn zero_value(&mut self, t: &Ty) -> R<()> {
@@ -1993,7 +1961,7 @@ end
     fn value(&mut self, e: &Expr, want: Option<&Ty>) -> R<Ty> {
         if is_place(e) {
             let (t, own) = self.operand(e, want)?;
-            if matches!(&t, Ty::Rec(r) if !self.shared_recs.contains(r)) {
+            if matches!(&t, Ty::Rec(r) if !self.tp.shared_recs.contains(r)) {
                 let Ty::Rec(r) = &t else { unreachable!() };
                 let s = self.temp();
                 self.e(format!("mov qword ptr [rbp - {}], rax", s));
@@ -2039,7 +2007,7 @@ end
                 self.e("call rt_text_from_char");
             }
             Ty::Float { bits } => {
-                let sig = match self.funcs.get(&("float".to_string(), "to_text".to_string())) {
+                let sig = match self.tp.funcs.get(&("float".to_string(), "to_text".to_string())) {
                     Some(s) => s.clone(),
                     None => return self.err("printing a float needs the float library"),
                 };

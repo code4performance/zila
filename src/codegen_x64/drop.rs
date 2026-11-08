@@ -5,7 +5,7 @@ use super::*;
 impl Compiler {
     /// Per-record `B_drop_*` (releases heap fields) and `B_copy_*` (shallow copy: nested plain records are copied, lists, maps and text are retained, so they are copied by their first write).
     pub(super) fn gen_record_helpers(&mut self, q: &str) {
-        let info = &self.records[q];
+        let info = &self.tp.records[q];
         let size = info.size;
         let rc_fields: Vec<(Ty, u32)> =
             info.fields.iter().filter(|f| self.is_rc(&f.1)).map(|f| (f.1.clone(), f.2)).collect();
@@ -30,7 +30,7 @@ impl Compiler {
             "B_copy_{s} proc\n    push rbp\n    mov rbp, rsp\n    sub rsp, 48\n    test rcx, rcx\n    jnz Lgo_{s}\n    xor eax, eax\n    jmp Lend_{s}\nLgo_{s}:\n    mov qword ptr [rbp - 8], rcx\n    mov ecx, {size}\n    {drop_arg}\n    call rt_alloc\n    mov qword ptr [rbp - 16], rax\n    mov rcx, rax\n    mov rdx, qword ptr [rbp - 8]\n    mov r8d, {size}\n    call rt_memcpy\n"
         );
         for (ty, off) in &rc_fields {
-            if matches!(ty, Ty::Rec(f) if !self.shared_recs.contains(f)) {
+            if matches!(ty, Ty::Rec(f) if !self.tp.shared_recs.contains(f)) {
                 let Ty::Rec(f) = ty else { unreachable!() };
                 c.push_str(&format!(
                     "    mov rcx, qword ptr [rbp - 16]\n    mov rcx, qword ptr [rcx + {off}]\n    call B_copy_{f}\n    mov rcx, qword ptr [rbp - 16]\n    mov qword ptr [rcx + {off}], rax\n",
@@ -136,7 +136,7 @@ impl Compiler {
         if self.enum_drop(q) == "0" {
             return;
         }
-        let info = self.enums[q].clone();
+        let info = self.tp.enums[q].clone();
         let s = sym_of(q);
         let mut d = format!(
             "B_edrop_{s} proc\n    push rbp\n    mov rbp, rsp\n    sub rsp, 48\n    mov qword ptr [rbp - 8], rcx\n    mov rax, qword ptr [rcx]\n    mov qword ptr [rbp - 16], rax\n"

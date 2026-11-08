@@ -1,4 +1,4 @@
-<img src="docs/assets/zila.svg" alt="Zila Lang" width="48" height="48">
+<img src="assets/zila.svg" alt="Zila Lang" width="48" height="48">
 
 # Zila Lang FFI & Inline Assembly Specification
 

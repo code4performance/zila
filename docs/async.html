@@ -6,10 +6,14 @@
   <title>Async — Zila Lang</title>
   <meta name="description" content="async/await in Zila Lang: futures, timers, files and TCP networking that never block the other tasks.">
   <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="assets/zila.svg" type="image/svg+xml">
 </head>
 <body>
+  <a class="skip" href="#content">Skip to content</a>
   <header class="site-header">
-    <a class="brand" href="index.html">zila<span class="ember-dot">.</span><small>lang docs</small></a>
+    <a class="brand" href="index.html"><img src="assets/zila.svg" alt="" width="28" height="28"><span>Zila Lang</span><small>docs</small></a>
+    <input type="checkbox" id="menu" class="menu-toggle">
+    <label for="menu" class="menu-button">Menu</label>
     <nav class="site-nav">
       <a href="index.html">Overview</a>
       <a href="syntax.html">Syntax</a>
@@ -26,7 +30,7 @@
     </nav>
   </header>
 
-  <main>
+  <main id="content">
     <h1>Async</h1>
     <p>Programs that wait — for time, a file, a network peer — should not freeze while they wait. In Zila Lang <code>await</code> is the one place where a task gives up the processor so another can run. Everything here is compiled natively and needs the Windows target.</p>
 
@@ -134,7 +138,7 @@
     <span class="kw">try</span> <span class="kw">await</span> server
     <span class="kw">return</span>
 <span class="kw">end</span></code></pre>
-      <p>This is <code>examples/async.br</code> in miniature; the full program also reads and writes a file and waits for three sleeps at once. Sockets close when the last reference goes away, or earlier with <code>close()</code>. The first <code>write</code> after the other side closed may still succeed (that is how TCP works); the next one fails with an error.</p>
+      <p>This is <code>examples/async.zila</code> in miniature; the full program also reads and writes a file and waits for three sleeps at once. Sockets close when the last reference goes away, or earlier with <code>close()</code>. The first <code>write</code> after the other side closed may still succeed (that is how TCP works); the next one fails with an error.</p>
     </section>
 
     <section id="dns">
@@ -155,7 +159,7 @@
 <span class="kw">try</span> <span class="kw">await</span> sock.send_to(<span class="str">"127.0.0.1"</span>, 9000, <span class="str">"ping"</span>)
 <span class="kw">let</span> p = <span class="kw">try</span> <span class="kw">await</span> sock.recv()                     <span class="cm">// p.data, p.host, p.port</span>
 <span class="kw">try</span> <span class="kw">await</span> sock.send_to(p.host, p.port, <span class="str">"pong"</span>)   <span class="cm">// answer whoever sent it</span></code></pre>
-      <p>Each <code>recv</code> is exactly one datagram, so the boundaries you sent are the boundaries you get, and an empty datagram is a packet with empty <code>data</code>. A datagram larger than <code>max</code> is an error (<code>datagram larger than 10 bytes</code>) and the next <code>recv</code> works normally. Use <code>timeout(ms, sock.recv())</code> for a deadline; a receive that timed out keeps waiting in the background, so the next datagram that arrives goes to it. <code>close()</code> closes the socket now (using it afterwards is an error); sockets also close when the last reference goes away. See <code>examples/udp.br</code>.</p>
+      <p>Each <code>recv</code> is exactly one datagram, so the boundaries you sent are the boundaries you get, and an empty datagram is a packet with empty <code>data</code>. A datagram larger than <code>max</code> is an error (<code>datagram larger than 10 bytes</code>) and the next <code>recv</code> works normally. Use <code>timeout(ms, sock.recv())</code> for a deadline; a receive that timed out keeps waiting in the background, so the next datagram that arrives goes to it. <code>close()</code> closes the socket now (using it afterwards is an error); sockets also close when the last reference goes away. See <code>examples/udp.zila</code>.</p>
     </section>
 
     <section id="buffered">
@@ -220,7 +224,7 @@ Connection: close
   </main>
 
   <footer class="site-footer">
-    Zila Lang — a language with a human face. Docs generated from <code>zila.ebnf</code> and <code>examples/*.br</code>.
+    Zila Lang &middot; A small, readable language that compiles straight to machine code. The examples are checked against <code>examples/*.zila</code>; the grammar is <code>zila.ebnf</code>.
   </footer>
 </body>
 </html>

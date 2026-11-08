@@ -1,6 +1,6 @@
 // The web library: a server, an HTML template and the client in one program.
 //
-//   zila-parse examples/web.br -o web.exe
+//   zila-parse examples/web.zila -o web.exe
 //
 // The server listens on a free port (0) in the background; the client asks it for a page. An
 // `html` block is markup with `{expression}` holes: every value is escaped, so the user name below

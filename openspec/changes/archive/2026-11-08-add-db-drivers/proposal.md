@@ -1,6 +1,6 @@
 ## Why
 
-`examples/rest_api.br` already shows `db.open("postgres://...")` and `conn.query(Customer, "select ...")`, and `db` does not exist: Brasa programs cannot talk to a database at all. Databases are also the base of the AI work that follows (`add-ai-client`, `add-mcp`, `add-rag`: tools that query data, retrieval over pgvector). This change adds the missing foundations, written in Brasa over `net` and `tls`: a driver-neutral `db` library, PostgreSQL and SQL Server drivers, the `crypto` primitives their logins need, the two small `tls` additions they depend on, and a Docker environment with real PostgreSQL 19 and SQL Server 2025 servers to test against.
+`examples/rest_api.br` already shows `db.open("postgres://...")` and `conn.query(Customer, "select ...")`, and `db` does not exist: Zila Lang programs cannot talk to a database at all. Databases are also the base of the AI work that follows (`add-ai-client`, `add-mcp`, `add-rag`: tools that query data, retrieval over pgvector). This change adds the missing foundations, written in Zila Lang over `net` and `tls`: a driver-neutral `db` library, PostgreSQL and SQL Server drivers, the `crypto` primitives their logins need, the two small `tls` additions they depend on, and a Docker environment with real PostgreSQL 19 and SQL Server 2025 servers to test against.
 
 ## What Changes
 
@@ -9,7 +9,7 @@
 - **`use postgres`**: PostgreSQL wire protocol v3 over `net`/`tls`, extended query protocol, SCRAM-SHA-256 (and md5), `sslmode`, `sslrootcert`, pgvector values.
 - **`use sqlserver`**: TDS 7.4 over `net`/`tls`, SQL login, `sp_executesql` parameters, `encrypt=strict` (TDS 8.0) and `encrypt=off`, `cafile`.
 - **`use tls`** gains `tls.upgrade(conn, host)` (start TLS on an open connection, for PostgreSQL), `tls.connect_with` with ALPN (for TDS 8.0) and `ca_file` for private certificate authorities (needed to test against a development CA without touching the system trust store).
-- **Docker test environment** in `tests/docker/`: PostgreSQL 19 with pgvector (SCRAM and TLS) and SQL Server 2025 (plain and strict ports), the same seeded `shop` database in both, a development CA, scripts to set the `BRASA_TEST_*` variables. Real-server tests run only when those variables are set.
+- **Docker test environment** in `tests/docker/`: PostgreSQL 19 with pgvector (SCRAM and TLS) and SQL Server 2025 (plain and strict ports), the same seeded `shop` database in both, a development CA, scripts to set the `ZILA_TEST_*` variables. Real-server tests run only when those variables are set.
 - **Example** `examples/db.br` (the same function on both databases); `examples/rest_api.br` and `examples/hello.br` stop referring to the non-existent `db.postgres`.
 - **Documentation**: a new `docs/databases.html` page plus stdlib, native and navigation updates.
 

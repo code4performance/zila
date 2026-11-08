@@ -614,14 +614,14 @@ fn the_os_libraries_and_kernel_still_compile() {
             }
         }
     }
-    let boot = parse_source(&std::fs::read_to_string("os/boot.br").unwrap()).unwrap();
-    let kernel = parse_source(&std::fs::read_to_string("os/kernel.br").unwrap()).unwrap();
+    let boot = parse_source(&std::fs::read_to_string("os/boot.zila").unwrap()).unwrap();
+    let kernel = parse_source(&std::fs::read_to_string("os/kernel.zila").unwrap()).unwrap();
     build_os(&boot, &kernel).unwrap();
 }
 
 #[test]
 fn the_derive_example_runs() {
-    let src = std::fs::read_to_string("examples/derive.br").unwrap();
+    let src = std::fs::read_to_string("examples/derive.zila").unwrap();
     let Some((out, code)) = run(&src) else { return };
     assert_eq!(code, 0, "{}", out);
     for line in ["apples: 3", "pears: 5", "pair seen: true", "latest: 2.1.0", "bigger: 9", "same user: true", "users: 1"] {

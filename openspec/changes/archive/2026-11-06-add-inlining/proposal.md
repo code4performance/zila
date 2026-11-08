@@ -1,6 +1,6 @@
 ## Why
 
-Small helper functions (`square(x)`, `is_even(n)`, `clamp(v, lo, hi)`, record getters written as functions) are everywhere in Brasa code, and each call pays for an argument shuffle, a `call`, a prologue that builds a stack frame, an epilogue and a `ret`, which is often more work than the one expression the function computes. The optimizer and register allocation made the rest of a hot loop cheap, so the calls now dominate. Inlining them is the next roadmap step.
+Small helper functions (`square(x)`, `is_even(n)`, `clamp(v, lo, hi)`, record getters written as functions) are everywhere in Zila Lang code, and each call pays for an argument shuffle, a `call`, a prologue that builds a stack frame, an epilogue and a `ret`, which is often more work than the one expression the function computes. The optimizer and register allocation made the rest of a hot loop cheap, so the calls now dominate. Inlining them is the next roadmap step.
 
 ## What Changes
 

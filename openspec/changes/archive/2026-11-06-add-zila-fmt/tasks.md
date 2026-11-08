@@ -21,4 +21,4 @@
 
 - [x] 4.1 Format `std/`, `examples/` and `os/` with `--fmt`, regenerate the docs examples (`--docs`) if needed, and show `--fmt-check` is clean
 - [x] 4.2 Describe `--fmt` and `--fmt-check` in `docs/getting-started.html`, the README tooling row and the usage text
-- [x] 4.3 Full test suite (async skipped) and `openspec validate add-brasa-fmt`
+- [x] 4.3 Full test suite (async skipped) and `openspec validate add-zila-fmt`

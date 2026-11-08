@@ -5,15 +5,15 @@ use zila::{parse_source, Diag};
 use std::process::exit;
 
 fn usage() -> ! {
-    eprintln!("usage: zila-parse <file.br> [-o output.exe] [--build] [--ast | --tokens | --asm | --run]");
-    eprintln!("       zila-parse --os <boot.br> <kernel.br> -o <disk.img>");
+    eprintln!("usage: zila-parse <file.zila> [-o output.exe] [--build] [--ast | --tokens | --asm | --run]");
+    eprintln!("       zila-parse --os <boot.zila> <kernel.zila> -o <disk.img>");
     eprintln!("       zila-parse --docs");
-    eprintln!("       zila-parse --fmt | --fmt-check <file.br>...");
-    eprintln!("       zila-parse --test <file.br>... [--no-opt]");
-    eprintln!("       zila-parse <file.br> --target linux -o <program>");
+    eprintln!("       zila-parse --fmt | --fmt-check <file.zila>...");
+    eprintln!("       zila-parse --test <file.zila>... [--no-opt]");
+    eprintln!("       zila-parse <file.zila> --target linux -o <program>");
     eprintln!("       packages: --init [name] | --add <git-url>[@version] [--as <name>] | --fetch | --tidy | --update [name] [--offline]");
     eprintln!("       comptime: [--comptime-timeout <seconds>] [--no-comptime-cache] [--comptime-dump]");
-    eprintln!("       link: <file.br> --explain-link [-o output]   (bytes of code and data per package)");
+    eprintln!("       link: <file.zila> --explain-link [-o output]   (bytes of code and data per package)");
     exit(2);
 }
 

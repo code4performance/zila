@@ -65,7 +65,7 @@ Fetching SHALL run the `git` executable found on `PATH`, with fixed arguments an
 
 #### Scenario: Build without git
 - **WHEN** the lock and cache are complete and `git` is not on `PATH`
-- **THEN** `zila-parse prog.br -o prog` builds normally
+- **THEN** `zila-parse prog.zila -o prog` builds normally
 
 ### Requirement: Cache and offline builds
 Fetched sources SHALL be stored under `$ZILA_HOME` (default `~/.zila`) in one immutable directory per package version and commit, shared by projects and written atomically. A build SHALL read only `zila.lock` and the cache, SHALL NOT use the network, and SHALL fail with `package 'X' is not in the cache; run zila-parse --fetch` when an entry is missing.
@@ -90,11 +90,11 @@ Every build that uses a package SHALL recompute the SHA-256 tree hash of its cac
 - **THEN** the build fails saying `zila.lock` is out of date
 
 ### Requirement: Resolving `use`
-For `use a.b.c`, the first segment SHALL be looked up among the core standard library, the project's declared dependencies, the local package directories next to `zila.toml` and the standard libraries outside the core; a name SHALL exist in only one of the first three, and only the core standard names SHALL be reserved. A dependency or local package whose name equals a standard library outside the core SHALL shadow it, and the build SHALL print a warning naming both. Later segments SHALL select a subdirectory of the package, and the name bound in code SHALL be the last segment. A package SHALL be the `.br` files directly in its directory, merged into one module; a duplicate declaration across them SHALL be an error naming both files; files ending in `_test.br` SHALL be left out of builds. A dependency's own `use` SHALL be resolved with its own manifest. A name found nowhere SHALL be an error that suggests `--add`.
+For `use a.b.c`, the first segment SHALL be looked up among the core standard library, the project's declared dependencies, the local package directories next to `zila.toml` and the standard libraries outside the core; a name SHALL exist in only one of the first three, and only the core standard names SHALL be reserved. A dependency or local package whose name equals a standard library outside the core SHALL shadow it, and the build SHALL print a warning naming both. Later segments SHALL select a subdirectory of the package, and the name bound in code SHALL be the last segment. A package SHALL be the `.zila` files directly in its directory, merged into one module; a duplicate declaration across them SHALL be an error naming both files; files ending in `_test.zila` SHALL be left out of builds. A dependency's own `use` SHALL be resolved with its own manifest. A name found nowhere SHALL be an error that suggests `--add`.
 
 #### Scenario: Dependency and sub-package
 - **WHEN** `use json.stream` is written and `json` is a locked dependency with a `stream/` directory
-- **THEN** `stream.<name>` refers to the declarations of `stream/*.br`
+- **THEN** `stream.<name>` refers to the declarations of `stream/*.zila`
 
 #### Scenario: Reserved name
 - **WHEN** `--add` would give a dependency the import name `text`, a core standard library
@@ -123,5 +123,5 @@ Only `pub` declarations of a package SHALL be usable from another package (the r
 A source file with no `zila.toml` above it SHALL compile exactly as before, with only the standard library available, except that unknown package names are errors.
 
 #### Scenario: Single-file program
-- **WHEN** `examples/hello.br` is built in a directory tree with no manifest
+- **WHEN** `examples/hello.zila` is built in a directory tree with no manifest
 - **THEN** it builds and runs as before

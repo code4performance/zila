@@ -35,5 +35,5 @@
 
 - [x] 6.1 Write `tests/json.rs` covering every scenario of the spec (skipping native runs when the toolchain is missing, like `tests/stdlib.rs`); verify `cargo test --test json` passes
 - [x] 6.2 Check `examples/errors.br` and `examples/types.br` still parse and, where the program is complete, compile with the final `json.parse` signature; adjust the examples if the signature differs; verify with `cargo test --test parse`
-- [x] 6.3 Add `examples/json.br` (read a config text with a rename and an optional field, print it pretty) and its section in `docs/examples.html` via `brasa-parse --docs`; verify it builds and prints the documented output
+- [x] 6.3 Add `examples/json.br` (read a config text with a rename and an optional field, print it pretty) and its section in `docs/examples.html` via `zila-parse --docs`; verify it builds and prints the documented output
 - [x] 6.4 Add a `json` section to `docs/stdlib.html` (functions, mapping table, attributes, errors, limits) and update the status table and roadmap in `README.md`; verify `cargo test --test docs` passes (navigation, links, code samples) and `cargo test` passes (leaving out `tests/async.rs`, per the routine)

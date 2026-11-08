@@ -235,7 +235,7 @@ fn repo_files() -> Vec<String> {
     for dir in dirs {
         for entry in std::fs::read_dir(dir).unwrap() {
             let p = entry.unwrap().path();
-            if p.extension().map_or(false, |e| e == "br") {
+            if p.extension().map_or(false, |e| e == "zila") {
                 out.push(p.to_str().unwrap().to_string());
             }
         }
@@ -289,7 +289,7 @@ fn scrambled_indentation_formats_back_to_the_same_text() {
 fn the_repository_is_formatted() {
     let unformatted: Vec<String> =
         repo_files().into_iter().filter(|f| format_source(&std::fs::read_to_string(f).unwrap()).unwrap() != std::fs::read_to_string(f).unwrap()).collect();
-    assert!(unformatted.is_empty(), "not formatted: {:?} (run `zila-parse --fmt std/*.br examples/*.br os/*.br`)", unformatted);
+    assert!(unformatted.is_empty(), "not formatted: {:?} (run `zila-parse --fmt std/*.zila examples/*.zila os/*.zila`)", unformatted);
 }
 
 // ---- the command line ----
@@ -307,15 +307,15 @@ fn run(args: &[&std::path::Path], flag: &str) -> (String, String, i32) {
 
 #[test]
 fn fmt_rewrites_files_and_check_lists_them() {
-    let bad = temp_file("bad.br", "package t\nfunc main()\nprint(1)\nend\n");
-    let good = temp_file("good.br", "package t\nfunc main()\n    print(1)\nend\n");
+    let bad = temp_file("bad.zila", "package t\nfunc main()\nprint(1)\nend\n");
+    let good = temp_file("good.zila", "package t\nfunc main()\n    print(1)\nend\n");
     let (out, _, code) = run(&[&bad, &good], "--fmt-check");
     assert_eq!(code, 1);
-    assert!(out.contains("not formatted") && out.contains("bad.br") && !out.contains("good.br"), "{}", out);
+    assert!(out.contains("not formatted") && out.contains("bad.zila") && !out.contains("good.zila"), "{}", out);
     assert_eq!(std::fs::read_to_string(&bad).unwrap(), "package t\nfunc main()\nprint(1)\nend\n", "--fmt-check must not write");
     let (out, _, code) = run(&[&bad, &good], "--fmt");
     assert_eq!(code, 0);
-    assert!(out.contains("formatted") && out.contains("bad.br") && !out.contains("good.br"), "{}", out);
+    assert!(out.contains("formatted") && out.contains("bad.zila") && !out.contains("good.zila"), "{}", out);
     assert_eq!(std::fs::read_to_string(&bad).unwrap(), "package t\nfunc main()\n    print(1)\nend\n");
     let (out, _, code) = run(&[&bad, &good], "--fmt-check");
     assert_eq!((out.as_str(), code), ("", 0));
@@ -326,10 +326,10 @@ fn fmt_rewrites_files_and_check_lists_them() {
 
 #[test]
 fn fmt_leaves_a_broken_file_alone() {
-    let broken = temp_file("broken.br", "package t\nfunc f(\n");
+    let broken = temp_file("broken.zila", "package t\nfunc f(\n");
     let (_, err, code) = run(&[&broken], "--fmt");
     assert_eq!(code, 1);
-    assert!(err.contains("broken.br"), "{}", err);
+    assert!(err.contains("broken.zila"), "{}", err);
     assert_eq!(std::fs::read_to_string(&broken).unwrap(), "package t\nfunc f(\n");
     let _ = std::fs::remove_file(&broken);
 }

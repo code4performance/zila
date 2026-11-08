@@ -27,7 +27,7 @@ Methods live in a table keyed by receiver type, not by package. A package is one
 - `add-direct-pe-output` (already written): independent; only the order of final test runs matters.
 - `add-package-manager`: introduces multi-file and external packages; `visible()` must compare package names so the rule holds there. Until then each package is one file.
 - `remove-interpreter`: if it lands first, the `src/interp.rs` part of this change disappears.
-- Every change that adds or edits std or example code (`add-json`, `add-web`, `add-threads-and-shared`, `add-no-alloc-and-allocator`, `add-text-bytes-and-char`, `add-weak-refs`, `add-int-long-aliases`, `add-error-kind`, `remove-async-coloring`, `remove-panic-add-abort`, `add-copy-on-write`, `restrict-ref-escape`): whichever lands later writes its Brasa code with `pub`; whichever lands earlier gets migrated by tasks 5 to 7 here.
+- Every change that adds or edits std or example code (`add-json`, `add-web`, `add-threads-and-shared`, `add-no-alloc-and-allocator`, `add-text-bytes-and-char`, `add-weak-refs`, `add-int-long-aliases`, `add-error-kind`, `remove-async-coloring`, `remove-panic-add-abort`, `add-copy-on-write`, `restrict-ref-escape`): whichever lands later writes its Zila Lang code with `pub`; whichever lands earlier gets migrated by tasks 5 to 7 here.
 - `add-comptime-reflection` and `add-derived-eq-ord-hash`: reflection does not bypass privacy (out of scope here); derivations are generated inside the type's own package, so they may use private fields.
 - Not touched: `add-ui-linux` (work in progress by someone else). It edits `std/ui.linux.br`; whoever merges second applies `pub` there (task 5.9).
 

@@ -36,5 +36,5 @@
 
 ## 8. Documentation and examples
 
-- [x] 8.1 Add `examples/floats.br` and its section on `docs/examples.html` (via `brasa-parse --docs`); verify it builds and prints the documented output
+- [x] 8.1 Add `examples/floats.br` and its section on `docs/examples.html` (via `zila-parse --docs`); verify it builds and prints the documented output
 - [x] 8.2 Document floats on `docs/syntax.html` and `docs/native.html` (removing them from the not-yet-supported lists), and update the status table and roadmap in `README.md`; verify `cargo test` passes, including the docs tests

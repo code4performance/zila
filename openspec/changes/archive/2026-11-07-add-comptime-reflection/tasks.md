@@ -2,13 +2,13 @@
 
 - [x] 1.1 Add the keyword `comptime` and `Type` to the lexer and parser: `comptime func` declarations and `comptime` parameters (`FuncDecl` in `src/ast.rs` gets a flag and per-parameter flag; `Parser` in `src/parser.rs`); verify with parse tests in `tests/parse.rs` for valid forms and for `comptime` on a non-function
 - [x] 1.2 Parse the attributes `derive`, `generated(name)` and `block` and allow a body-less `#[generated]` function (parser currently requires a body for non-extern functions); verify with parse tests, including a missing generator name
-- [x] 1.3 Add the block form: pre-scan the `use` lines for `#[block]` names, raw capture in `src/lexer.rs` modelled on `in_asm`/`asm_line`, `Tok::Block`, `Expr::Block` and the statement form in the parser; verify with tests for an expression block, a statement block, an unknown name (ordinary identifier) and a block whose content is not valid Brasa
-- [x] 1.4 Update `brasa.ebnf`: remove `html_expr` and its section, add `comptime`, `Type`, `block_expr`; verify by grep that `html_expr` is gone and `cargo test --test parse` passes
+- [x] 1.3 Add the block form: pre-scan the `use` lines for `#[block]` names, raw capture in `src/lexer.rs` modelled on `in_asm`/`asm_line`, `Tok::Block`, `Expr::Block` and the statement form in the parser; verify with tests for an expression block, a statement block, an unknown name (ordinary identifier) and a block whose content is not valid Zila Lang
+- [x] 1.4 Update `zila.ebnf`: remove `html_expr` and its section, add `comptime`, `Type`, `block_expr`; verify by grep that `html_expr` is gone and `cargo test --test parse` passes
 
 ## 2. Formatter and language server
 
 - [x] 2.1 Make `src/fmt.rs` keep block content byte for byte and re-indent only the name and `end`, running the same pre-scan; verify with `tests/fmt.rs` cases (idempotent, content untouched, unresolved name formats as ordinary code)
-- [x] 2.2 Make `src/lsp.rs` never parse block content and never run comptime code; verify with a `tests/lsp.rs` case where the block content is invalid Brasa and no diagnostics are published
+- [x] 2.2 Make `src/lsp.rs` never parse block content and never run comptime code; verify with a `tests/lsp.rs` case where the block content is invalid Zila Lang and no diagnostics are published
 
 ## 3. Reflection data and the subset check
 
@@ -37,9 +37,9 @@
 ## 7. Standard library, examples, docs
 
 - [x] 7.1 Check `std/text.br`, `std/list.br`, `std/format.br` and `std/math.br` against the subset checker and fix anything impure they reach; verify with a comptime test importing each
-- [x] 7.2 Add `examples/comptime.br` (a `describe` derive, a type-indexed `#[generated]` function and a small block) as a package-local generator pair of files, and its section on `docs/examples.html` through `brasa-parse --docs`; verify it builds and prints the documented output
+- [x] 7.2 Add `examples/comptime.br` (a `describe` derive, a type-indexed `#[generated]` function and a small block) as a package-local generator pair of files, and its section on `docs/examples.html` through `zila-parse --docs`; verify it builds and prints the documented output
 - [x] 7.3 Update `docs/syntax.html` (comptime, `Type`, derive, generated, blocks, limits, cross-compilation, trust model), `docs/native.html` (the comptime pipeline and cache), `docs/stdlib.html` (`reflect`), and `README.md` (status table and roadmap); verify `cargo test` passes, including the docs tests, with `tests/async.rs` left out of routine runs
-- [x] 7.4 Final check: no remaining mention of the `html ... end` special syntax in `brasa.ebnf`, docs or README (grep), `os/` and the rest of `examples/` still build, and `openspec validate add-comptime-reflection --strict` passes
+- [x] 7.4 Final check: no remaining mention of the `html ... end` special syntax in `zila.ebnf`, docs or README (grep), `os/` and the rest of `examples/` still build, and `openspec validate add-comptime-reflection --strict` passes
 
 ## Notes
 
@@ -48,10 +48,10 @@ Defaults taken while implementing (no clarification was possible):
 - **Derived `eq`/`compare`/`hash` stay in the compiler.** Nothing in this change's design, tasks or spec asks to move them to comptime, so `src/derive_ops.rs` is unchanged. Moving them later means writing `#[derive]` generators over `reflect`.
 - **Packages.** The compiler still has no package manager, so "imported package" means the standard library, packages registered with `comptime::register_package`, and the files next to the source file that a `use` names (`<dir>/<name>.br`, registered by the command line, formatter, test runner and language server). A program's own package may hold generators too.
 - **Splicing.** Generated declarations are spliced into the module of the type instead of a synthetic module `<module>.__gen<n>`: module names with dots are not safe in the compiler. Hygiene is kept by renaming the generated top-level functions, types and constants to `__g<n>_<name>`; methods attach to their receiver. Specializations of a `#[generated]` function go to the module that declares it.
-- **Driver input.** The type tables are written in the line-oriented wire format (cache key, `--comptime-dump`, tests) and the driver program rebuilds them with `reflect.add_type(...)` calls generated by the compiler, instead of a Brasa parser reading standard input. `reflect.fail` prints a `fail` record and aborts; the first failure ends the batch.
+- **Driver input.** The type tables are written in the line-oriented wire format (cache key, `--comptime-dump`, tests) and the driver program rebuilds them with `reflect.add_type(...)` calls generated by the compiler, instead of a Zila Lang parser reading standard input. `reflect.fail` prints a `fail` record and aborts; the first failure ends the batch.
 - **Variant payloads** may be named (`Circle(r: float)`); positional ones are called `_0`, `_1`. Attributes may stand on the line before a field or variant.
 - **Type arguments.** A `comptime` argument is a type name (`Config`, `pkg.T`, a built-in), or `f<T>(...)` with an explicit type argument; a bare `[]User` argument is not an expression.
-- **Cache.** Directory: `BRASA_COMPTIME_CACHE`, else `brasa-comptime` in the system temporary directory. The key also includes the target name (`reflect.target()` is an input). Tests count runs with `comptime::launch_log()`.
+- **Cache.** Directory: `ZILA_COMPTIME_CACHE`, else `zila-comptime` in the system temporary directory. The key also includes the target name (`reflect.target()` is an input). Tests count runs with `comptime::launch_log()`.
 - **Language server** does not compile a program that asks for code generation (it would run generators); it reports parse errors only for such files.
 - **Block names** cannot be qualified (`pkg.name` is not a block); the name must be unambiguous among the imports.
 - **Not run (user rule):** `tests/async.rs`, `buffered_io`, `udp`, `dns`, `tls`, `linux`, `os`, `ui`, `error_kinds` were only compiled (`cargo test --no-run`). The Linux-host path of the driver (ELF build, `setrlimit`) was not run; on this Windows host `--target linux` was checked by building the ELF (header check) and by the generator being told `linux`.

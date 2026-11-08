@@ -61,7 +61,7 @@ A numeric literal with a fraction or exponent SHALL have type `float`, or `f32` 
 
 #### Scenario: Out of range
 - **WHEN** a program evaluates `int(1.0 / 0.0)`
-- **THEN** it aborts with `abort: <file>.br:<line>: float out of range` and exits with 101
+- **THEN** it aborts with `abort: <file>.zila:<line>: float out of range` and exits with 101
 
 #### Scenario: Narrowing
 - **WHEN** a program prints `f64(f32(0.1))`
@@ -79,7 +79,7 @@ A numeric literal with a fraction or exponent SHALL have type `float`, or `f32` 
 - **THEN** it prints `3.0`, `1e21` and `1e-7`
 
 ### Requirement: Math helpers
-`use math` (`std/math.br`) SHALL provide `math.sqrt`, `math.abs`, `math.floor`, `math.ceil`, `math.trunc`, `math.round` (half away from zero), `math.min`, `math.max`, `math.pow` (integer exponent) and `math.fixed(x, digits)` (text with a fixed number of decimals) for `float`.
+`use math` (`std/math.zila`) SHALL provide `math.sqrt`, `math.abs`, `math.floor`, `math.ceil`, `math.trunc`, `math.round` (half away from zero), `math.min`, `math.max`, `math.pow` (integer exponent) and `math.fixed(x, digits)` (text with a fixed number of decimals) for `float`.
 
 #### Scenario: Helpers
 - **WHEN** a program that says `use math` prints `math.sqrt(2.25)`, `math.floor(-1.5)`, `math.ceil(1.2)`, `math.round(2.5)` and `math.fixed(3.14159, 2)`

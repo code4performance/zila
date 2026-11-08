@@ -1,11 +1,11 @@
 ## Purpose
 
-Define what a Brasa executable contains and what it loads at run time, so users know the cost of `use` and that packages are never fetched or loaded after the build.
+Define what a Zila Lang executable contains and what it loads at run time, so users know the cost of `use` and that packages are never fetched or loaded after the build.
 
 ## ADDED Requirements
 
 ### Requirement: Packages are compiled into the executable
-Every package named by `use`, whether from the standard library or a dependency, SHALL be compiled together with the program into the single output executable. The executable SHALL NOT read `.br` files, the package cache, `brasa.toml` or `brasa.lock` when it runs, and SHALL NOT load Brasa packages from shared libraries or plugins.
+Every package named by `use`, whether from the standard library or a dependency, SHALL be compiled together with the program into the single output executable. The executable SHALL NOT read `.br` files, the package cache, `zila.toml` or `zila.lock` when it runs, and SHALL NOT load Zila Lang packages from shared libraries or plugins.
 
 #### Scenario: Running without sources
 - **WHEN** a program that uses `json` and a locked dependency is built and then run on a machine without the compiler, the cache or the project directory
@@ -34,7 +34,7 @@ For every library, a function, type helper or global that cannot be reached from
 - **THEN** `parse` and everything it calls are in the executable
 
 ### Requirement: The link report
-`brasa-parse <file> --explain-link` SHALL print, for each package in the build, its name, its kind (`program`, `std` or `package`) and the bytes of code and data it contributes, with the runtime, the strings and the generated helpers as separate lines, then the total of code and data, and SHALL NOT write the executable unless `-o` is also given. The numbers SHALL be measured on the assembled program, so they change when the program changes.
+`zila-parse <file> --explain-link` SHALL print, for each package in the build, its name, its kind (`program`, `std` or `package`) and the bytes of code and data it contributes, with the runtime, the strings and the generated helpers as separate lines, then the total of code and data, and SHALL NOT write the executable unless `-o` is also given. The numbers SHALL be measured on the assembled program, so they change when the program changes.
 
 #### Scenario: Report
 - **WHEN** a program uses `json` and one dependency and `--explain-link` is passed

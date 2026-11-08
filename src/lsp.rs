@@ -262,12 +262,12 @@ pub fn diagnostics(text: &str) -> Json {
     let parsed = parse_source(text);
     if let Ok(file) = &parsed {
         // a program that parses is compiled, so the compiler's own errors (types, `#[no_alloc]`,
-        // `#[allocator]`) show up as you type: they start with `main.br:LINE:`
+        // `#[allocator]`) show up as you type: they start with `main.zila:LINE:`
         // a program that asks for code generation is not compiled here: the server never runs
         // comptime code, so opening a file from an untrusted package executes nothing
         if file.package == "main" && !crate::comptime::uses_comptime(file) {
             if let Err(e) = crate::codegen_x64::generate_asm(file) {
-                let line = e.strip_prefix("main.br:").and_then(|r| r.split(':').next()).and_then(|n| n.trim().parse::<i64>().ok()).unwrap_or(1);
+                let line = e.strip_prefix("main.zila:").and_then(|r| r.split(':').next()).and_then(|n| n.trim().parse::<i64>().ok()).unwrap_or(1);
                 let line = (line.max(1) - 1) as i64;
                 let src_line = text.lines().nth(line as usize).unwrap_or("");
                 let end = src_line.chars().count();
@@ -326,7 +326,7 @@ fn register_neighbours(uri: &str, text: &str) {
         path.push(b[i] as char);
         i += 1;
     }
-    // `file:///c:/dir/x.br` -> `c:/dir/x.br`
+    // `file:///c:/dir/x.zila` -> `c:/dir/x.zila`
     let path = if path.len() > 2 && path.as_bytes()[0] == b'/' && path.as_bytes()[2] == b':' { path[1..].to_string() } else { path };
     // the editor never fetches; a project that does not check out simply has no dependencies here
     if crate::package::install_for(std::path::Path::new(&path)).is_err() {

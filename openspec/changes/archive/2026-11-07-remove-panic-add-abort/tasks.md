@@ -15,8 +15,8 @@
 
 ## 3. Wrapping and checked arithmetic
 
-- [x] 3.1 In `brasa.ebnf`, replace "Integer overflow: panic in debug, wraparound with --fast." with "Integer arithmetic wraps at the width of the type." Verify: `cargo test --test docs` and `cargo test --test parse` pass and `rg "panic in debug" .` finds nothing.
-- [x] 3.2 Add `checked_add`, `checked_sub`, `checked_mul`, `checked_div` to `std/math.br`, written in Brasa, returning `int or error` (kind `Overflow` for overflow and `InvalidInput` for a zero divisor once `add-error-kind` has landed; before that, plain `error("overflow")` and `error("division by zero")`). Verify in `tests/abort.rs` (with the other tests of this change; `tests/stdlib.rs` has none of the integer functions): results at `MAX + 1`, `MIN - 1`, `MIN * -1`, `MAX * 2`, `MIN / -1`, division by zero, and an ordinary case for each function, with and without `--no-opt`.
+- [x] 3.1 In `zila.ebnf`, replace "Integer overflow: panic in debug, wraparound with --fast." with "Integer arithmetic wraps at the width of the type." Verify: `cargo test --test docs` and `cargo test --test parse` pass and `rg "panic in debug" .` finds nothing.
+- [x] 3.2 Add `checked_add`, `checked_sub`, `checked_mul`, `checked_div` to `std/math.br`, written in Zila Lang, returning `int or error` (kind `Overflow` for overflow and `InvalidInput` for a zero divisor once `add-error-kind` has landed; before that, plain `error("overflow")` and `error("division by zero")`). Verify in `tests/abort.rs` (with the other tests of this change; `tests/stdlib.rs` has none of the integer functions): results at `MAX + 1`, `MIN - 1`, `MIN * -1`, `MAX * 2`, `MIN / -1`, division by zero, and an ordinary case for each function, with and without `--no-opt`.
 - [x] 3.3 Verify wrapping is identical in all builds: a test prints `9223372036854775807 + 1` computed at run time (through a function parameter) and by folding, for `--no-opt`, the default, and `--target linux`, plus an `i32` wrap at its width.
 
 ## 4. Lists
@@ -30,13 +30,13 @@
 - [x] 5.1 `std/text.br`: change `panic("split needs a separator")` to `abort("split needs a separator")`. Verify: `rg "panic\(" std os examples` finds nothing, and the text-library test for an empty separator expects `abort: text.br:N: split needs a separator` and exit 101.
 - [x] 5.2 Update expectations in `tests/floats.rs` (`out_of_range_conversion_panics`, rename to `..._aborts`), `tests/maps.rs` (`missing_key_panics` and the second `panic: map key not found` check), `tests/optimizer.rs` (the division-by-zero test), `tests/linux.rs` (the tests using `panic("stop")` become `abort("stop")`, the dynamic-program test, division by zero, out of memory). Verify: `cargo test` passes, leaving out `tests/async.rs`.
 - [x] 5.3 (not applicable: `remove-interpreter` landed first and `src/interp.rs` is gone) In `src/interp.rs`, rename the `"panic"` entries (the native-name list near line 261 and the `"panic" =>` case) to `abort` only if the file still exists (`remove-interpreter` deletes it). Verify: `--run` prints `abort: ...` and exits 101 on a failing program, or the task is marked not applicable because the file is gone.
-- [x] 5.4 Sweep for leftovers. Verify: `rg -i "panic" src std os examples docs README.md brasa.ebnf openspec/specs` shows no Brasa-language mention (Rust `panic!` in test helpers is allowed), and `cargo test --test os` still passes with the kernel's own division-fault handling unchanged.
+- [x] 5.4 Sweep for leftovers. Verify: `rg -i "panic" src std os examples docs README.md zila.ebnf openspec/specs` shows no Zila Lang-language mention (Rust `panic!` in test helpers is allowed), and `cargo test --test os` still passes with the kernel's own division-fault handling unchanged.
 
 ## 6. Documentation and examples
 
 - [x] 6.1 `docs/syntax.html`: rewrite the error-handling paragraph (replace `panic("message")` with the three-rule story: wrap, values, abort; list what aborts and that nothing runs), the `int(x)` conversion note, the missing-key note and the `defer` "where it does not run" note. Document `abort`, `get` and `checked_*`. Verify: `cargo test --test docs` passes and every code sample compiles.
 - [x] 6.2 `docs/native.html` (exit-status line), `docs/stdlib.html` (the `split` note, `checked_*`, list `get`) and the `README.md` status: replace `panic` wording. Verify with the docs tests as above.
-- [x] 6.3 Extend `examples/errors.br` with `get`, `checked_add` and a guarded `abort`, and regenerate `docs/examples.html` with `brasa-parse --docs`. Verify the example builds on both targets and prints the documented output.
+- [x] 6.3 Extend `examples/errors.br` with `get`, `checked_add` and a guarded `abort`, and regenerate `docs/examples.html` with `zila-parse --docs`. Verify the example builds on both targets and prints the documented output.
 
 ## 7. Final check
 

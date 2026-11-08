@@ -1,12 +1,12 @@
 ## Context
 
-The standard library modules `text`, `list`, `float` and `math` are written in Brasa, embedded with `include_str!` through `std_source` and loaded when a file says `use name`. The interpreter loads only `text`, `list`, `float` and `math` (a name list in `interp.rs`). `math.fixed(x, digits)` already writes a float with a fixed number of decimals, and `text` has `split`, `join`, `replace`, `parse_int` and friends. Generics (monomorphization, with `Map<K, V>` keys limited to `text` and integers) and `Map<K, V>` with insertion-ordered iteration exist. There is no value that can hold "any type", so a function cannot take a mixed list of arguments; user types cannot be iterated with `for`.
+The standard library modules `text`, `list`, `float` and `math` are written in Zila Lang, embedded with `include_str!` through `std_source` and loaded when a file says `use name`. The interpreter loads only `text`, `list`, `float` and `math` (a name list in `interp.rs`). `math.fixed(x, digits)` already writes a float with a fixed number of decimals, and `text` has `split`, `join`, `replace`, `parse_int` and friends. Generics (monomorphization, with `Map<K, V>` keys limited to `text` and integers) and `Map<K, V>` with insertion-ordered iteration exist. There is no value that can hold "any type", so a function cannot take a mixed list of arguments; user types cannot be iterated with `for`.
 
 ## Goals / Non-Goals
 
 **Goals**
-- A `format` module that covers the everyday layout needs (padding, alignment, width, number bases, fixed decimals, thousands separators) and a template function, all in Brasa.
-- A generic `Set<T>` over text and integers with the usual operations, in Brasa, with a deterministic order.
+- A `format` module that covers the everyday layout needs (padding, alignment, width, number bases, fixed decimals, thousands separators) and a template function, all in Zila Lang.
+- A generic `Set<T>` over text and integers with the usual operations, in Zila Lang, with a deterministic order.
 - The same results natively and in the interpreter.
 
 **Non-Goals**

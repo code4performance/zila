@@ -8,7 +8,7 @@ Windows and controls for programs, with one set of functions and one behavior on
 `use ui` SHALL compile with `--target windows` and with `--target linux` from the same source and SHALL offer the same names, parameter lists, defaults and result types on both: `Window(title, width, height)`, `TextBox(value)`, `Button(label)`, `ListView()`, `Label(value)`, `vstack(...)`, `hstack(...)`, the properties `text`, `count` and `selected`, the methods `set_text`, `add`, `remove`, `clear`, `onClick`, `onChange`, `onSelect`, `layout`, `show`, `close`, and the functions `run` and `alert`. A program SHALL NOT need to know which target it runs on, and the library SHALL expose nothing that exists on one target only.
 
 #### Scenario: The example builds for both
-- **WHEN** `examples/ui.br` is built with `--target windows` and with `--target linux`
+- **WHEN** `examples/ui.zila` is built with `--target windows` and with `--target linux`
 - **THEN** both builds succeed with no change to the source
 
 #### Scenario: No platform names in the public surface
@@ -19,7 +19,7 @@ Windows and controls for programs, with one set of functions and one behavior on
 A `TextBox` SHALL hold editable single-line text; typing, Backspace, Delete, Left, Right, Home and End SHALL edit it and `onChange` SHALL run after each change. A `Button` SHALL run `onClick` when it is clicked, and when it is the first button of the window and Enter is pressed in a text box. A `ListView` SHALL show its items, scroll when they do not fit, let one item be selected by click or by Up and Down, and run `onSelect` when the selection changes. A `Label` SHALL show text that cannot be edited. `count` SHALL be the number of items of a list and `selected` the zero-based index of the selected item or -1. Setting the `text` of a control from the program SHALL run its `onChange` handlers exactly once when the text changed and not at all when it did not. After a window is closed, its controls SHALL keep answering `text`, `count` and `selected` with the values they held when it closed.
 
 #### Scenario: Add to a list
-- **WHEN** the user types `Ana` in the text box and clicks the Add button of `examples/ui.br`
+- **WHEN** the user types `Ana` in the text box and clicks the Add button of `examples/ui.zila`
 - **THEN** the list shows `Ana` and the text box is empty
 
 #### Scenario: Setting the same text
@@ -66,5 +66,5 @@ When no window system can be reached (on Linux: no usable local X display; on Wi
 A program built for either target SHALL be drivable without a person: when the environment variable `ZILA_UI_SCRIPT` names a file, the library SHALL read it as a list of input steps (`click <index>`, `type <text>`, `key <name>`, `select <index>`, `close`), one per line (`key` takes `backspace`, `enter`, `up` or `down`; typed text is appended at the end of the first text box), and apply them in order to the first window as if the user had done them, then close the window. A step that has no target (no text box, no list, no such button) SHALL be ignored. Programs and their output SHALL otherwise be unaffected.
 
 #### Scenario: Scripted run
-- **WHEN** `examples/ui.br` runs with a script that types `Ana`, clicks the Add button and closes the window
+- **WHEN** `examples/ui.zila` runs with a script that types `Ana`, clicks the Add button and closes the window
 - **THEN** the program's handlers run in that order and `run()` returns

@@ -2,7 +2,7 @@
 
 ## 1. Language: lexer, grammar, AST, parser (checks off)
 
-- [x] 1.1 `brasa.ebnf`: add `pub` to the reserved words; `top_decl = [ attrs ] [ 'pub' ] ( ... )` with `pub` before `async`/`func`, `type`, `let`/`var`, `extern`; `field = [ 'pub' ] ident ':' type`; add a semantic-rules note (private by default, package scope, construction rule). Verify: `tests/docs.rs` still passes and the grammar text matches the parser by reading both.
+- [x] 1.1 `zila.ebnf`: add `pub` to the reserved words; `top_decl = [ attrs ] [ 'pub' ] ( ... )` with `pub` before `async`/`func`, `type`, `let`/`var`, `extern`; `field = [ 'pub' ] ident ':' type`; add a semantic-rules note (private by default, package scope, construction rule). Verify: `tests/docs.rs` still passes and the grammar text matches the parser by reading both.
 - [x] 1.2 `src/lexer.rs`: add `"pub"` to `KEYWORDS`. Verify: a `tests/parse.rs` case that `let pub = 1` fails to parse and `x.pub` is still accepted as a member name.
 - [x] 1.3 `src/ast.rs` and `src/parser.rs`: add `public: bool` to `Decl` and `Field`; in `decl()` consume an optional `pub` after attributes (before `async`/`func`/`type`/`let`/`var`/`extern`) and reject it before `embed` with "`pub` cannot be applied to 'embed'"; in the record-field loop (the `Field { attrs, name, ty }` construction near the `fields.push` in the type parser) consume `pub` after field attributes; reject `pub` on enum variants, interface method signatures and parameters with a clear message. Update every `Decl {`/`Field {` constructor (`src/parser.rs`, any in `src/codegen_x64.rs`, `src/interp.rs`). Verify: new `tests/parse.rs` cases for each accepted placement (including `pub async func`, `pub extern func`, method `pub func (s: T) m()`, `#[export("x")] pub func`) and each rejected one.
 - [x] 1.4 Search `std/`, `os/`, `examples/`, `tests/*.rs` embedded sources and `docs/*.html` code samples for an identifier named `pub` and rename any. Verify: `rg -w pub` shows only intended uses afterwards; suite green.
@@ -12,7 +12,7 @@
 
 - [x] 2.1 `src/fmt.rs`: make sure `pub` gets a single space after it and keeps declaration, field and attribute indentation (the layout comes from `parse_with_layout`; adjust only if `pub` before a field or after `#[...]` breaks it). Verify: `tests/fmt.rs` cases for `pub func`, `pub type X = record pub a: int  b: int end`, `#[export("f")] pub func`, `pub async func`; formatting twice is a no-op.
 - [x] 2.2 `src/lsp.rs`: no code expected (diagnostics are `parse_source` errors); confirm `pub` declarations produce none and a misplaced `pub` reports the parser message with the right range. Verify: `tests/lsp.rs` cases for both.
-- [x] 2.3 `editors/vscode/syntaxes/brasa.tmLanguage.json`: add `pub` to the `keyword.declaration.brasa` alternation (`let|var|embed|extern|pub`), and make the `func`/`type` declaration patterns still capture names when preceded by `pub`. Verify: `tests/vscode.rs` (extend it to assert `pub` is in the grammar's keyword list and that every lexer keyword is in the grammar, if it does not already).
+- [x] 2.3 `editors/vscode/syntaxes/zila.tmLanguage.json`: add `pub` to the `keyword.declaration.zila` alternation (`let|var|embed|extern|pub`), and make the `func`/`type` declaration patterns still capture names when preceded by `pub`. Verify: `tests/vscode.rs` (extend it to assert `pub` is in the grammar's keyword list and that every lexer keyword is in the grammar, if it does not already).
 - [x] 2.4 `docs/syntax.html`: list `pub` among the reserved words with a short section on visibility, the construction rule and an example; update the grammar summary if the page has one. Verify: `cargo test --test docs` (`documented_keywords_match_the_language`).
 
 ## 3. Compiler: recording visibility
@@ -33,7 +33,7 @@
 
 ## 5. Migrate the standard library (one task per library; checks still off)
 
-For each file: put `pub` on every function, type, variant-bearing enum, global and field a program or another library uses, leave helpers private, run `brasa-parse --fmt`, then verify with the suite and `rg` that no other file calls a name left private. The final check for each is the suite (and its dedicated test file named below).
+For each file: put `pub` on every function, type, variant-bearing enum, global and field a program or another library uses, leave helpers private, run `zila-parse --fmt`, then verify with the suite and `rg` that no other file calls a name left private. The final check for each is the suite (and its dedicated test file named below).
 
 - [x] 5.1 `std/text.br` (also its use of `float`). Verify: `tests/stdlib.rs` and `tests/format.rs`.
 - [x] 5.2 `std/list.br`, `std/set.br`, `std/sorted.br` (their `Entry`/helper records are public if a public signature names them). Verify: `tests/sets.rs`, `tests/sorted.rs`, `tests/stdlib.rs`.
@@ -57,7 +57,7 @@ For each file: put `pub` on every function, type, variant-bearing enum, global a
 ## 7. Turn the checks on
 
 - [x] 7.1 Remove the temporary flag from task 4 so checks always run. Verify: the whole suite; every failure is a missed `pub` (fix it) or a real violation.
-- [x] 7.2 Run `brasa-parse --fmt-check` over `std/`, `os/` and `examples/`. Verify: no files listed.
+- [x] 7.2 Run `zila-parse --fmt-check` over `std/`, `os/` and `examples/`. Verify: no files listed.
 
 ## 8. Tests for the capability
 
@@ -75,7 +75,7 @@ For each file: put `pub` on every function, type, variant-bearing enum, global a
 - The temporary flag of task 4 was skipped: checks were written enabled from the start, and the suite found the missed `pub`s. Task 7.1 is therefore satisfied by construction.
 - Defaults: a method whose receiver type is private may be `pub` (the leak rule does not look at receivers); only `pub` fields of a `pub` record count in the leak rule; derived methods (`eq`, `compare`, `hash`) are `pub`; the prelude interfaces `std.Eq/Ord/Hash` are exempt from the interface-visibility rule; a `comptime` specialisation inherits the template's `pub`; the comptime driver program (`comptime_run`) and `drop` are exempt from all checks (compiler-generated references); `pub` on `use` / `package` is a parse error like `embed`; `pub comptime func` is accepted.
 - Interface satisfaction: a user method that satisfies a library interface (for example `format`'s `to_value`) must be `pub`; `examples/values.br`, `tests/format.rs` and `docs/stdlib.html` were updated.
-- Task 5.10: `tests/linux.rs` compares the `pub` names of each `X.br` and `X.linux.br`: every Windows name must exist on Linux. `sys` and `task` are skipped (platform internals) and the Linux variants may export extra names (the Brasa-written DNS resolver of `net`, the X11 protocol of `ui`, reached by their tests).
+- Task 5.10: `tests/linux.rs` compares the `pub` names of each `X.br` and `X.linux.br`: every Windows name must exist on Linux. `sys` and `task` are skipped (platform internals) and the Linux variants may export extra names (the Zila Lang-written DNS resolver of `net`, the X11 protocol of `ui`, reached by their tests).
 - Tests: `tests/visibility.rs` (12 tests), plus cases in `tests/parse.rs`, `tests/fmt.rs`, `tests/lsp.rs`, `tests/vscode.rs`, `tests/linux.rs`.
 - Final run (all files, each with a timeout): every file passes except `tests/linux.rs` (24 failing), `tests/error_kinds.rs` (6), `tests/ui.rs` (4) and one test of `tests/derive.rs` (`the_os_libraries_and_kernel_still_compile`). The same tests fail identically at the parent commit `efaed79` (checked in a separate worktree): `std/task.linux.br` has no `cur` that `std/future.br` calls, and `ui` reports an int/long mismatch. They are not caused by this change. `tests/async.rs`, `buffered_io`, `udp`, `dns`, `tls`, `os` all pass.
 - Examples: every example that compiled before still compiles (checked through the CLI); `--fmt-check` is covered by `tests/fmt.rs` (`the_repository_is_formatted`).

@@ -14,4 +14,4 @@
 - [x] 3.1 `tests/testrun.rs`: every scenario of the spec (passing and failing, invalid tests, own `main`, crash, several files, no tests)
 - [x] 3.2 `examples/testing.br`
 - [x] 3.3 `docs/getting-started.html` (the `--test` option), `docs/syntax.html` (`#[test]`, `assert`, `assert_eq`), README rows
-- [x] 3.4 Full test suite (async skipped) and `openspec validate add-brasa-test`
+- [x] 3.4 Full test suite (async skipped) and `openspec validate add-zila-test`

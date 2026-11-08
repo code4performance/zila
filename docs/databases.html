@@ -6,10 +6,14 @@
   <title>Databases — Zila Lang</title>
   <meta name="description" content="Databases in Zila Lang: db, postgres and sqlserver. Typed rows, bound parameters, transactions, TLS, and a Docker environment with real servers to test against.">
   <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="assets/zila.svg" type="image/svg+xml">
 </head>
 <body>
+  <a class="skip" href="#content">Skip to content</a>
   <header class="site-header">
-    <a class="brand" href="index.html">zila<span class="ember-dot">.</span><small>lang docs</small></a>
+    <a class="brand" href="index.html"><img src="assets/zila.svg" alt="" width="28" height="28"><span>Zila Lang</span><small>docs</small></a>
+    <input type="checkbox" id="menu" class="menu-toggle">
+    <label for="menu" class="menu-button">Menu</label>
     <nav class="site-nav">
       <a href="index.html">Overview</a>
       <a href="syntax.html">Syntax</a>
@@ -26,7 +30,7 @@
     </nav>
   </header>
 
-  <main>
+  <main id="content">
     <h1>Databases</h1>
     <p class="note"><code>db</code>, <code>postgres</code> and <code>sqlserver</code> are packages of the Zila Lang repository (<code>packages/</code>) that the compiler embeds, so <code>use db</code> needs no manifest; a package of your project with the same name replaces them (see <a href="packages.html#use">Packages</a>).</p>
     <p>Three libraries, all written in Zila Lang on <code>net</code> and <code>tls</code> (no C library is linked): <code>db</code> is what a program uses, <code>postgres</code> and <code>sqlserver</code> are the drivers. A driver's <code>open</code> returns a <code>db.Conn</code>; everything after that is the same on both databases. <a href="stdlib.html#db">The library page</a> lists every function; this page shows how they fit together.</p>
@@ -67,7 +71,7 @@
       <p><strong>Values are parameters.</strong> A <code>{expr}</code> in the SQL is never pasted into the text: the compiler writes the dialect's placeholder (<code>$1</code> for PostgreSQL, <code>@p1</code> for T-SQL) and the value goes to the server as a bound parameter, converted by its type (integers, <code>float</code>, <code>bool</code>, <code>text</code>, a <code>text?</code> that is <code>nil</code> as <code>NULL</code>, <code>[]float</code> as a vector, or a <code>db.Arg</code> as it is). Any other type is a compile error that names it. Braces inside strings, quoted identifiers and comments are text, and <code>{{</code> and <code>}}</code> write a brace.</p>
       <p><strong>Dialects.</strong> <code>sql postgres</code> (from <code>use postgres</code>) and <code>sql tsql</code> (from <code>use sqlserver</code>) are the two there are. The compiler reads each block with its dialect's lexical rules and reports, at compile time and with the line, an unterminated string, quoted identifier, comment or dollar-quoted text, unbalanced parentheses, a placeholder written by hand, a second statement where the dialect allows one, and a <code>GO</code> line in T-SQL (a command of client tools, not T-SQL). It does not parse SQL or know your tables: the server stays the judge of the grammar. <code>use db</code> is needed in the file, and a dialect is found only among the packages the file imports.</p>
       <p><strong>Running them.</strong> <code>conn.rows_sql(q)</code>, <code>conn.exec_sql(q)</code>, <code>db.query_sql(T, conn, q)</code> and <code>db.one_sql(T, conn, q)</code> behave like the text versions, with the same typed rows, transactions and errors. A connection knows its dialect, and a statement written for another one is an error of kind <code>InvalidInput</code> that names both; nothing is sent. Text statements with <code>db.query</code> and <code>conn.exec</code> keep working.</p>
-      <p><code>examples/db.br</code> writes one query once per dialect and runs it on both servers.</p>
+      <p><code>examples/db.zila</code> writes one query once per dialect and runs it on both servers.</p>
       <p><strong>Another database.</strong> A dialect is a declaration, not compiler code: a package marks a type with attributes that state the lexical rules (<code>#[sql_dialect("name")]</code>, <code>#[sql_placeholder("$n")]</code> or <code>"@pn"</code>, <code>":n"</code>, <code>"?"</code>, <code>#[sql_string]</code>, <code>#[sql_ident]</code>, <code>#[sql_line_comment]</code>, <code>#[sql_block_comment]</code>, <code>#[sql_dollar_quote]</code>, <code>#[sql_multi]</code> and a few more), and its connections set <code>dialect</code> when they are made. Oracle, MySQL and SQLite are planned as packages of that kind, with no change to the compiler.</p>
     </section>
 
@@ -96,13 +100,13 @@
 
     <section id="crud">
       <h2>Create, read, update, delete</h2>
-      <p>The same calls cover all four. <code>examples/users_crud.br</code> does them on a <code>Users</code> table, with optional columns, a unique username, a rolled-back delete and the duplicate-key error:</p>
+      <p>The same calls cover all four. <code>examples/users_crud.zila</code> does them on a <code>Users</code> table, with optional columns, a unique username, a rolled-back delete and the duplicate-key error:</p>
       <pre><code><span class="kw">let</span> insert = <span class="str">"insert into dbo.Users (Id, Username, DisplayName, AuthSource, Role, AccessStatus, CreatedAtUtc) values (newid(), @p1, @p2, N'Local', N'User', N'Active', sysutcdatetime())"</span>
 <span class="kw">try</span> conn.exec(insert, db.str(<span class="str">"ana"</span>), db.str(<span class="str">"Ana Souza"</span>))                                  <span class="cm">// create</span>
 <span class="kw">let</span> ana = <span class="kw">try</span> db.one(User, conn, <span class="str">"select ... from dbo.Users where Username = @p1"</span>, db.str(<span class="str">"ana"</span>))  <span class="cm">// read</span>
 <span class="kw">try</span> conn.exec(<span class="str">"update dbo.Users set Department = @p1 where Username = @p2"</span>, db.str(<span class="str">"Vendas"</span>), db.str(<span class="str">"ana"</span>))  <span class="cm">// update</span>
 <span class="kw">try</span> conn.exec(<span class="str">"delete from dbo.Users where Username = @p1"</span>, db.str(<span class="str">"ana"</span>))                  <span class="cm">// delete</span></code></pre>
-      <p><code>examples/db.br</code> runs one function against PostgreSQL and SQL Server and prints the same rows.</p>
+      <p><code>examples/db.zila</code> runs one function against PostgreSQL and SQL Server and prints the same rows.</p>
     </section>
 
     <section id="docker">
@@ -126,7 +130,7 @@ docker compose -f tests/docker/compose.yml down -v</code></pre>
   </main>
 
   <footer class="site-footer">
-    Zila Lang — a language with a human face. Docs generated from <code>zila.ebnf</code> and <code>examples/*.br</code>.
+    Zila Lang &middot; A small, readable language that compiles straight to machine code. The examples are checked against <code>examples/*.zila</code>; the grammar is <code>zila.ebnf</code>.
   </footer>
 </body>
 </html>

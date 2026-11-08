@@ -1,6 +1,6 @@
 // allocator: a program replaces the heap behind every list, text and record.
 //
-//   zila-parse examples/allocator.br -o allocator.exe
+//   zila-parse examples/allocator.zila -o allocator.exe
 //
 // Two functions marked `#[allocator(alloc)]` and `#[allocator(free)]` take over from the
 // runtime's heap. This one is a bump allocator over a single block of memory (an arena)

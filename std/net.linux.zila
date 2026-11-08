@@ -1,8 +1,8 @@
 // =====================================================================
 // Zila Lang standard library: TCP and UDP networking (`use net`) (Linux layer)
 //
-// The Linux counterpart of std/net.br, with the same functions and behavior. Sockets are
-// non-blocking: a call that would wait parks the task on `epoll` (std/task.linux.br) and the
+// The Linux counterpart of std/net.zila, with the same functions and behavior. Sockets are
+// non-blocking: a call that would wait parks the task on `epoll` (std/task.linux.zila) and the
 // other tasks run. Names are looked up by a DNS client written in Zila Lang (there is no C library):
 // `/etc/hosts` first, then the servers of `/etc/resolv.conf` over UDP, and TCP when an answer
 // is cut short. Like on Windows, only IPv4 addresses are used.
@@ -555,8 +555,24 @@ pub async func connect(host: text, port: long) -> Conn or error
     return conn
 end
 
-// Starts listening on a port (0 picks a free one; see `.port`).
+// Starts listening on a port on every network interface (0 picks a free one; see `.port`).
 pub async func listen(port: long) -> Listener or error
+    return await listen_on("", port)
+end
+
+// Starts listening on one local address and a port: `"127.0.0.1"` or `"localhost"` for this machine
+// only, `"0.0.0.0"` or `""` for every network interface, or the numeric IPv4 address of one
+// interface. 0 picks a free port (see `.port`).
+pub async func listen_on(host: text, port: long) -> Listener or error
+    var ip: long = 0
+    if host == "localhost"
+        ip = 2130706433
+    else if host != "" and host != "0.0.0.0"
+        ip = parse_ip(host)
+        if ip < 0
+            return error(errors.InvalidInput, "'{host}' is not an IPv4 address, \"localhost\" or \"\"")
+        end
+    end
     let s = new_socket_of(SOCK_STREAM)
     if sys.failed(s)
         return sys.error_for(s, "cannot create a socket")
@@ -565,7 +581,7 @@ pub async func listen(port: long) -> Listener or error
     let on = sys.buffer(8)
     sys.poke(long(on.ptr), 1)
     sys.syscall(54, s, 1, 2, long(on.ptr), 4, 0)
-    let addr = make_addr(0, port)
+    let addr = make_addr(ip, port)
     var rc = sys.syscall(49, s, long(addr.ptr), 16, 0, 0, 0)
     if sys.failed(rc)
         return sys.error_for(rc, "cannot listen on port {port}")

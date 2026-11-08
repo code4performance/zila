@@ -46,7 +46,7 @@ fn check_reserved(main: &File) -> R<()> {
         if let Some(n) = name {
             if n.starts_with("__") {
                 return Err(format!(
-                    "{}.br:{}: '{}' is not allowed: names that start with `__` are reserved for generated code",
+                    "{}.zila:{}: '{}' is not allowed: names that start with `__` are reserved for generated code",
                     main.package, d.line, n
                 ));
             }
@@ -295,7 +295,7 @@ impl Expander {
         if let Some(c) = self.closures.get(&key) {
             return Ok(c.clone());
         }
-        let c = check_generator(&self.uni, module, name).map_err(|e| format!("{}.br:{}: {}", self.main_name, user_line(line), e))?;
+        let c = check_generator(&self.uni, module, name).map_err(|e| format!("{}.zila:{}: {}", self.main_name, user_line(line), e))?;
         self.closures.insert(key, c.clone());
         Ok(c)
     }
@@ -356,7 +356,7 @@ impl Expander {
             let _ = walk_func(&mut copy, &mut s);
             if let Some((n, line)) = s.hit {
                 return Err(format!(
-                    "{}.br:{}: comptime function `{}` runs only at build time and cannot be called from runtime code",
+                    "{}.zila:{}: comptime function `{}` runs only at build time and cannot be called from runtime code",
                     self.main_name, line, n
                 ));
             }
@@ -380,7 +380,7 @@ impl Expander {
     fn find_derive(&self, arg: &Expr, ty: &str, line: u32) -> R<((String, String), String)> {
         let main = self.main();
         let uses: Vec<String> = main.uses.iter().map(|u| u[0].clone()).collect();
-        let at = format!("{}.br:{}:", self.main_name, line);
+        let at = format!("{}.zila:{}:", self.main_name, line);
         let is_derive = |m: &str, n: &str| self.func_in(m, n).map_or(false, |(d, fd)| fd.comptime && has_attr(d, "derive"));
         match &arg.kind {
             ExprKind::Ident(n) => {
@@ -425,7 +425,7 @@ impl Expander {
     /// The generator named by `#[generated(...)]` on the function `fname` of `module`.
     fn generator_of(&self, module: &str, attrs: &[Attr], line: u32) -> R<(String, String)> {
         let a = attrs.iter().find(|a| a.name == "generated").ok_or("internal error: not generated")?;
-        let at = format!("{}.br:{}:", self.main_name, user_line(line));
+        let at = format!("{}.zila:{}:", self.main_name, user_line(line));
         let uses: Vec<String> = self.uni.file(module).map(|f| f.uses.iter().map(|u| u[0].clone()).collect()).unwrap_or_default();
         let ok = |m: &str, n: &str| self.func_in(m, n).map_or(false, |(_, fd)| fd.comptime);
         match &a.args[0].kind {
@@ -484,7 +484,7 @@ impl Expander {
         if !has_attr(d, "generated") {
             return Ok(None);
         }
-        let at = format!("{}.br:{}:", self.main_name, e.line);
+        let at = format!("{}.zila:{}:", self.main_name, e.line);
         let Some(ci) = fd.params.iter().position(|p| p.comptime) else {
             return Err(format!("{} `{}` is #[generated] but has no `comptime` parameter", at, fname));
         };
@@ -542,7 +542,7 @@ impl Expander {
                 let chain = self.chains.get(&p.ty_name).cloned().unwrap_or_default();
                 let chain = if chain.is_empty() { p.gen_label.clone() } else { chain.join(" -> ") };
                 return Err(format!(
-                    "{}.br:{}: code generation did not settle after {} rounds: {} (the output of a generator keeps asking for more generation; used by `{}`)",
+                    "{}.zila:{}: code generation did not settle after {} rounds: {} (the output of a generator keeps asking for more generation; used by `{}`)",
                     self.main_name,
                     p.site_line,
                     MAX_ROUNDS,
@@ -654,7 +654,7 @@ impl Expander {
             if is_block {
                 let (name, raw, line, stmt) = blocks[i].clone();
                 let Some((m, label)) = self.find_block(&name) else {
-                    return Err(format!("{}.br:{}: block `{}` has no #[block] comptime function", self.main_name, line, name));
+                    return Err(format!("{}.zila:{}: block `{}` has no #[block] comptime function", self.main_name, line, name));
                 };
                 self.closure_for(&m, &name, line)?;
                 out.push(Pending {
@@ -752,7 +752,7 @@ impl Expander {
                 Outcome::Ok(t) => texts.push(t),
                 Outcome::Fail { line, msg } => {
                     let line = if line == 0 { p.site_line } else { user_line(line) };
-                    return Err(format!("{}.br:{}: error from comptime function `{}`: {}", self.main_name, line, p.gen_label, msg));
+                    return Err(format!("{}.zila:{}: error from comptime function `{}`: {}", self.main_name, line, p.gen_label, msg));
                 }
             }
         }
@@ -781,7 +781,7 @@ impl Expander {
     }
 
     fn gen_error(&self, msg: &str, line: u32, base: u32, _p: &Pending) -> String {
-        map_error(format!("{}.br:{}: {}", self.main_name, line.max(base), msg))
+        map_error(format!("{}.zila:{}: {}", self.main_name, line.max(base), msg))
     }
 
     fn apply(&mut self, pend: Vec<Pending>, texts: Vec<String>) -> R<()> {
@@ -879,7 +879,7 @@ impl Expander {
                             Some(e) => block_results.push(BlockResult::Expr(e)),
                             None => {
                                 return Err(format!(
-                                    "{}.br:{}: block `{}` did not produce an expression",
+                                    "{}.zila:{}: block `{}` did not produce an expression",
                                     self.main_name, p.site_line, p.ty_name
                                 ))
                             }
@@ -908,7 +908,7 @@ impl Expander {
             let key = (ty.clone(), fd.name.clone());
             if let Some(other) = self.gen_methods.get(&key) {
                 return Err(format!(
-                    "{}.br:{}: `{}` generates the method `{}` for `{}`, but it was already generated by `{}`",
+                    "{}.zila:{}: `{}` generates the method `{}` for `{}`, but it was already generated by `{}`",
                     self.main_name, p.site_line, p.gen_label, fd.name, ty, other
                 ));
             }
@@ -918,7 +918,7 @@ impl Expander {
                         if let Some(er) = &ef.receiver {
                             if matches!(&er.ty, Type::Named { path: ep, .. } if ep.last() == Some(&ty)) {
                                 return Err(format!(
-                                    "{}.br:{}: `{}` generates the method `{}` for `{}`, but `{}` is already declared for `{}` at line {}",
+                                    "{}.zila:{}: `{}` generates the method `{}` for `{}`, but `{}` is already declared for `{}` at line {}",
                                     self.main_name,
                                     p.site_line,
                                     p.gen_label,

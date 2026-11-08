@@ -1,5 +1,5 @@
 """Records what the real SQL Server container (plain port 51433) answers to the client program
-tests/data/sqlserver-client.br, as hex, into tests/data/sqlserver-exchange.txt. The replay test in
+tests/data/sqlserver-client.zila, as hex, into tests/data/sqlserver-exchange.txt. The replay test in
 tests/sqlserver.rs plays the same replies back, one per request message, to the Zila Lang driver, so the
 real token streams are checked without Docker.
 
@@ -12,7 +12,7 @@ import os, socket, subprocess, sys, tempfile, threading
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
-CLIENT = os.path.join(ROOT, "tests", "data", "sqlserver-client.br")
+CLIENT = os.path.join(ROOT, "tests", "data", "sqlserver-client.zila")
 OUT = os.path.join(ROOT, "tests", "data", "sqlserver-exchange.txt")
 PORT = 51600
 replies = []
@@ -60,7 +60,7 @@ def proxy(listener):
 def main():
     exe = os.path.join(tempfile.mkdtemp(), "rec.exe")
     src = open(CLIENT, encoding="utf-8").read().replace("@PORT@", str(PORT))
-    br = os.path.join(os.path.dirname(exe), "rec.br")
+    br = os.path.join(os.path.dirname(exe), "rec.zila")
     open(br, "w", encoding="utf-8").write(src)
     compiler = os.path.join(ROOT, "target", "debug", "zila-parse.exe")
     subprocess.run([compiler, br, "-o", exe], check=True)

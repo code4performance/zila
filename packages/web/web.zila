@@ -635,6 +635,9 @@ end
 
 pub type Server = record
     pub port: long
+    // The local address to listen on: "" (the default) for every network interface, "127.0.0.1" or
+    // "localhost" for this machine only, or the numeric IPv4 address of one interface.
+    pub host: text
     pub max_head: int
     pub max_line: int
     pub max_body: int
@@ -650,9 +653,10 @@ end
 
 // A new server on `port` (0 picks a free one; see `Running.port`). Limits are fields: change them
 // before `run()`: `app.read_timeout = 2000`.
-pub func server(port: long = 8080) -> Server
+pub func server(port: long = 8080, host: text = "") -> Server
     return Server {
         port: port,
+        host: host,
         max_head: 16384,
         max_line: 8192,
         max_body: 1048576,
@@ -1403,7 +1407,7 @@ end
 // Starts listening and serving in the background, then returns (use `Running.port` when the
 // port was 0, and `Running.stop()` to stop). The routes and middleware are fixed at this point.
 pub func (s: Server) start() -> Running or error
-    let listener = try await net.listen(s.port)
+    let listener = try await net.listen_on(s.host, s.port)
     let cx = context_of(s)
     spawn accept_loop(listener, cx)
     return Running { port: listener.port, listener: listener, stats: cx.stats }
@@ -1411,7 +1415,7 @@ end
 
 // Listens and serves until the program ends.
 pub func (s: Server) run() -> error
-    let listener = try await net.listen(s.port)
+    let listener = try await net.listen_on(s.host, s.port)
     accept_loop(listener, context_of(s))
     return
 end

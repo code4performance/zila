@@ -1,6 +1,6 @@
 ## Why
 
-The documentation site (`docs/`) was written once and has already fallen behind the language: it knows nothing about the native compiler (`--build`), reference counting, `spawn`/`channel`, `or error`/`try` beyond one edit, the `ui` and `task` libraries, or Brasa OS, and its code samples were edited by hand, so nothing stops them drifting from `examples/*.br` and the grammar. Documentation that is only updated when someone remembers is wrong most of the time. The request is that every change to the language keeps the site current.
+The documentation site (`docs/`) was written once and has already fallen behind the language: it knows nothing about the native compiler (`--build`), reference counting, `spawn`/`channel`, `or error`/`try` beyond one edit, the `ui` and `task` libraries, or Zila Lang OS, and its code samples were edited by hand, so nothing stops them drifting from `examples/*.br` and the grammar. Documentation that is only updated when someone remembers is wrong most of the time. The request is that every change to the language keeps the site current.
 
 ## What Changes
 
@@ -10,8 +10,8 @@ The documentation site (`docs/`) was written once and has already fallen behind 
   - every command-line flag the CLI accepts is documented in `docs/getting-started.html`, and every flag documented there exists;
   - every reserved word in `src/lexer.rs` is mentioned in `docs/syntax.html`, and the site mentions no keyword the lexer no longer has (for example `union`);
   - the docs build their navigation consistently and have no broken internal links.
-- Make the embedded examples **generated, not hand-written**: a small `cargo run --bin` tool (or a `brasa-parse --docs` mode) renders `examples/*.br` into the HTML blocks, so updating an example updates the site.
-- **Bring the site up to date now** with everything already built: native compilation and its supported subset, memory model (reference counting), error handling with `or error`/`try`, enums with data and exhaustive `match`, `spawn`/`channel`, the `ui` library, and a Brasa OS page (boot sector, kernel, how to run it in QEMU).
+- Make the embedded examples **generated, not hand-written**: a small `cargo run --bin` tool (or a `zila-parse --docs` mode) renders `examples/*.br` into the HTML blocks, so updating an example updates the site.
+- **Bring the site up to date now** with everything already built: native compilation and its supported subset, memory model (reference counting), error handling with `or error`/`try`, enums with data and exhaustive `match`, `spawn`/`channel`, the `ui` library, and a Zila Lang OS page (boot sector, kernel, how to run it in QEMU).
 - No change to the language, compiler or runtime behavior.
 
 ## Capabilities
@@ -20,7 +20,7 @@ The documentation site (`docs/`) was written once and has already fallen behind 
 - `docs-sync`: guarantees that the documentation site reflects the current language: a process rule for changes, automated checks that fail when docs and source disagree, and generated example blocks.
 
 ### Modified Capabilities
-<!-- None: the earlier add-brasa-docs-site change has not been archived, so there is no main docs-site spec yet. The new pages below are covered by the docs-sync spec. -->
+<!-- None: the earlier add-zila-docs-site change has not been archived, so there is no main docs-site spec yet. The new pages below are covered by the docs-sync spec. -->
 
 ## Impact
 

@@ -2,7 +2,7 @@
 // Zila Lang standard library: TCP networking (`use net`)
 //
 // Written in Zila Lang on Winsock with overlapped sockets and the scheduler's
-// completion port (std/task.br). No call blocks the other tasks.
+// completion port (std/task.zila). No call blocks the other tasks.
 //
 //   let listener = try await net.listen(8080)
 //   let conn = try await listener.accept()
@@ -310,15 +310,31 @@ pub async func connect(host: text, port: long) -> Conn or error
     return conn
 end
 
-// Starts listening on a port (0 picks a free one; see `.port`).
+// Starts listening on a port on every network interface (0 picks a free one; see `.port`).
 pub async func listen(port: long) -> Listener or error
+    return await listen_on("", port)
+end
+
+// Starts listening on one local address and a port: `"127.0.0.1"` or `"localhost"` for this machine
+// only, `"0.0.0.0"` or `""` for every network interface, or the numeric IPv4 address of one
+// interface. 0 picks a free port (see `.port`).
+pub async func listen_on(host: text, port: long) -> Listener or error
+    var ip: long = 0
+    if host == "localhost"
+        ip = 2130706433
+    else if host != "" and host != "0.0.0.0"
+        ip = parse_ip(host)
+        if ip < 0
+            return error(errors.InvalidInput, "'{host}' is not an IPv4 address, \"localhost\" or \"\"")
+        end
+    end
     try net_init()
     let s = new_socket()
     if s == INVALID_SOCKET
         return sys.error_for(task.last_error(), "cannot create a socket")
     end
     let l = Listener{ sock: s, port: port, open: true }
-    let addr = make_addr(0, port)
+    let addr = make_addr(ip, port)
     var rc: long = 0
     unsafe
         rc = ws.bind(s, addr.ptr, 16)

@@ -1,6 +1,6 @@
 ## Context
 
-`add-ai-client` provides `ai.Client`, `client.run`, `ai.Tool` and `client.embedder(model)` (a value with `embed(inputs: []text) -> [][]float or error`). `add-db-drivers` provides `db.Conn`, the PostgreSQL driver with pgvector values, `crypto.random` and the Docker environment with `items`-style vector tables. This change is plain Brasa and has no protocol of its own.
+`add-ai-client` provides `ai.Client`, `client.run`, `ai.Tool` and `client.embedder(model)` (a value with `embed(inputs: []text) -> [][]float or error`). `add-db-drivers` provides `db.Conn`, the PostgreSQL driver with pgvector values, `crypto.random` and the Docker environment with `items`-style vector tables. This change is plain Zila Lang and has no protocol of its own.
 
 ## Depends on
 
@@ -21,7 +21,7 @@
 5. **Re-indexing is replace-by-document.** Chunk ids are `<document id>#<index>`; indexing a document first embeds everything, then replaces its chunks in one step (in one transaction for pgvector), so a failing embedder never leaves half a document.
 6. **Prompt assembly treats chunks as untrusted data.** Sources go inside numbered blocks with a per-call delimiter made with `crypto.random` and checked not to occur in any chunk; the system text says the blocks are data, to cite as `[n]` and to say when the answer is not in them. This reduces prompt injection, it does not remove it, and the docs say so. With no retrieved chunk, `answer` returns "no sources" without a model call.
 7. **Context budget.** `max_context_chars` drops whole lowest-ranked chunks, never cuts one; token counts are not estimated (no tokenizer), characters are the unit and the docs say why.
-8. **Tests without the world.** A deterministic fake embedder (hash of words into a small vector) and `add-ai-client`'s fake model server; the pgvector test against the Docker server runs only when `BRASA_TEST_POSTGRES` is set.
+8. **Tests without the world.** A deterministic fake embedder (hash of words into a small vector) and `add-ai-client`'s fake model server; the pgvector test against the Docker server runs only when `ZILA_TEST_POSTGRES` is set.
 
 ## What changed while implementing
 

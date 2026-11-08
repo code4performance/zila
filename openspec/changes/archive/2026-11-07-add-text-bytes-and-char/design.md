@@ -1,13 +1,13 @@
 ## Context
 
-A `text` is already a pointer plus a length holding UTF-8 bytes; `len` is O(1) and counts bytes. Today `s[i]` calls `rt_text_byte` and yields a `u8` (`src/codegen_x64.rs`, the `Ty::Text` arm of `ExprKind::Index`), `slice` calls `rt_text_slice` with no boundary check, `chr(n)` builds a text from a number, and `for` accepts only ranges, maps and lists. `ExprKind::Char` already compiles to an unsigned 32-bit `Ty::Int`, so a char literal is just a number. `c.char` (FFI) is the 8-bit C type and has nothing to do with Brasa's `char`. `std/text.br`, `std/format.br` (its UTF-8 width code at the top reads `s[i]` and tests continuation bytes by hand), `std/float.br`, `std/net.br`, `std/ui.br` and `os/kernel.br` index text directly.
+A `text` is already a pointer plus a length holding UTF-8 bytes; `len` is O(1) and counts bytes. Today `s[i]` calls `rt_text_byte` and yields a `u8` (`src/codegen_x64.rs`, the `Ty::Text` arm of `ExprKind::Index`), `slice` calls `rt_text_slice` with no boundary check, `chr(n)` builds a text from a number, and `for` accepts only ranges, maps and lists. `ExprKind::Char` already compiles to an unsigned 32-bit `Ty::Int`, so a char literal is just a number. `c.char` (FFI) is the 8-bit C type and has nothing to do with Zila Lang's `char`. `std/text.br`, `std/format.br` (its UTF-8 width code at the top reads `s[i]` and tests continuation bytes by hand), `std/float.br`, `std/net.br`, `std/ui.br` and `os/kernel.br` index text directly.
 
 ## Goals / Non-Goals
 
 **Goals**
 - One clear model: bytes for `len`, `slice`, `byte`; characters for `for`, `char_count`, `chars`.
 - Text that is valid UTF-8 by construction: no operation on the safe surface can cut a character.
-- Every Brasa file in the repo migrated in the same change.
+- Every Zila Lang file in the repo migrated in the same change.
 
 **Non-Goals**
 - Grapheme clusters, normalization, Unicode case mapping, locale collation.

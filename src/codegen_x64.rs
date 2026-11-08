@@ -67,16 +67,16 @@ pub use output::*;
 use runtime::*;
 use threads::*;
 
-/// The Linux layer of a library: `std/<name>.linux.br`, used instead of `std/<name>.br` when the
+/// The Linux layer of a library: `std/<name>.linux.zila`, used instead of `std/<name>.zila` when the
 /// target is Linux. Libraries that touch the operating system have one.
 pub fn std_linux_source(name: &str) -> Option<&'static str> {
     match name {
-        "sys" => Some(include_str!("../std/sys.linux.br")),
-        "task" => Some(include_str!("../std/task.linux.br")),
-        "fs" => Some(include_str!("../std/fs.linux.br")),
-        "net" => Some(include_str!("../std/net.linux.br")),
-        "tls" => Some(include_str!("../packages/tls/linux/tls.br")),
-        "ui" => Some(include_str!("../packages/ui/linux/ui.br")),
+        "sys" => Some(include_str!("../std/sys.linux.zila")),
+        "task" => Some(include_str!("../std/task.linux.zila")),
+        "fs" => Some(include_str!("../std/fs.linux.zila")),
+        "net" => Some(include_str!("../std/net.linux.zila")),
+        "tls" => Some(include_str!("../packages/tls/linux/tls.zila")),
+        "ui" => Some(include_str!("../packages/ui/linux/ui.zila")),
         _ => None,
     }
 }
@@ -110,36 +110,36 @@ pub fn is_core_std(name: &str) -> bool {
 
 pub fn std_source(name: &str) -> Option<&'static str> {
     match name {
-        "ui" => Some(include_str!("../packages/ui/ui.br")),
-        "task" => Some(include_str!("../std/task.br")),
-        "future" => Some(include_str!("../std/future.br")),
-        "thread" => Some(include_str!("../std/thread.br")),
-        "sync" => Some(include_str!("../std/sync.br")),
-        "fs" => Some(include_str!("../std/fs.br")),
-        "net" => Some(include_str!("../std/net.br")),
-        "sys" => Some(include_str!("../std/sys.br")),
-        "ws" => Some(include_str!("../std/ws.br")),
-        "tls" => Some(include_str!("../packages/tls/tls.br")),
-        "float" => Some(include_str!("../std/float.br")),
-        "math" => Some(include_str!("../std/math.br")),
-        "text" => Some(include_str!("../std/text.br")),
-        "errors" => Some(include_str!("../std/errors.br")),
-        "list" => Some(include_str!("../std/list.br")),
-        "format" => Some(include_str!("../std/format.br")),
-        "set" => Some(include_str!("../std/set.br")),
-        "sorted" => Some(include_str!("../std/sorted.br")),
-        "bufio" => Some(include_str!("../std/bufio.br")),
-        "derive" => Some(include_str!("../std/derive.br")),
-        "reflect" => Some(include_str!("../std/reflect.br")),
-        "json" => Some(include_str!("../packages/json/json.br")),
-        "web" => Some(include_str!("../packages/web/web.br")),
-        "crypto" => Some(include_str!("../packages/crypto/crypto.br")),
-        "db" => Some(include_str!("../packages/db/db.br")),
-        "postgres" => Some(include_str!("../packages/postgres/postgres.br")),
-        "sqlserver" => Some(include_str!("../packages/sqlserver/sqlserver.br")),
-        "ai" => Some(include_str!("../packages/ai/ai.br")),
-        "mcp" => Some(include_str!("../packages/mcp/mcp.br")),
-        "rag" => Some(include_str!("../packages/rag/rag.br")),
+        "ui" => Some(include_str!("../packages/ui/ui.zila")),
+        "task" => Some(include_str!("../std/task.zila")),
+        "future" => Some(include_str!("../std/future.zila")),
+        "thread" => Some(include_str!("../std/thread.zila")),
+        "sync" => Some(include_str!("../std/sync.zila")),
+        "fs" => Some(include_str!("../std/fs.zila")),
+        "net" => Some(include_str!("../std/net.zila")),
+        "sys" => Some(include_str!("../std/sys.zila")),
+        "ws" => Some(include_str!("../std/ws.zila")),
+        "tls" => Some(include_str!("../packages/tls/tls.zila")),
+        "float" => Some(include_str!("../std/float.zila")),
+        "math" => Some(include_str!("../std/math.zila")),
+        "text" => Some(include_str!("../std/text.zila")),
+        "errors" => Some(include_str!("../std/errors.zila")),
+        "list" => Some(include_str!("../std/list.zila")),
+        "format" => Some(include_str!("../std/format.zila")),
+        "set" => Some(include_str!("../std/set.zila")),
+        "sorted" => Some(include_str!("../std/sorted.zila")),
+        "bufio" => Some(include_str!("../std/bufio.zila")),
+        "derive" => Some(include_str!("../std/derive.zila")),
+        "reflect" => Some(include_str!("../std/reflect.zila")),
+        "json" => Some(include_str!("../packages/json/json.zila")),
+        "web" => Some(include_str!("../packages/web/web.zila")),
+        "crypto" => Some(include_str!("../packages/crypto/crypto.zila")),
+        "db" => Some(include_str!("../packages/db/db.zila")),
+        "postgres" => Some(include_str!("../packages/postgres/postgres.zila")),
+        "sqlserver" => Some(include_str!("../packages/sqlserver/sqlserver.zila")),
+        "ai" => Some(include_str!("../packages/ai/ai.zila")),
+        "mcp" => Some(include_str!("../packages/mcp/mcp.zila")),
+        "rag" => Some(include_str!("../packages/rag/rag.zila")),
         _ => None,
     }
 }
@@ -946,7 +946,7 @@ impl Compiler {
     }
 
     fn err<T>(&self, msg: impl Into<String>) -> R<T> {
-        Err(format!("{}.br:{}: {}", self.cur_mod, self.line, msg.into()))
+        Err(format!("{}.zila:{}: {}", self.cur_mod, self.line, msg.into()))
     }
 
     fn lbl(&mut self, p: &str) -> String {
@@ -978,9 +978,9 @@ impl Compiler {
         self.fs.free.push(o);
     }
 
-    /// Loads the text `file.br:line` of the statement being compiled into `reg`, for a failing path.
+    /// Loads the text `file.zila:line` of the statement being compiled into `reg`, for a failing path.
     fn at(&mut self, reg: &str) {
-        let l = self.string_lit(&format!("{}.br:{}", self.cur_mod, self.line));
+        let l = self.string_lit(&format!("{}.zila:{}", self.cur_mod, self.line));
         self.e(format!("lea {}, {}", reg, l));
     }
 
@@ -1166,7 +1166,7 @@ impl Compiler {
         let main_mod = mods[0].0.clone();
         let main_ret = match self.funcs.get(&(main_mod.clone(), "main".to_string())) {
             Some(s) => s.ret.clone(),
-            None => return Err(format!("{}.br: no 'main' function found", main_mod)),
+            None => return Err(format!("{}.zila: no 'main' function found", main_mod)),
         };
         self.check_templates()?;
         let mut inits = Vec::new();

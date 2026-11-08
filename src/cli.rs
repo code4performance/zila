@@ -175,34 +175,34 @@ mod tests {
 
     #[test]
     fn modes_and_defaults() {
-        assert_eq!(p(&["a.br"]).unwrap().mode, Mode::Check);
-        assert_eq!(p(&["a.br", "--ast"]).unwrap().mode, Mode::Ast);
-        assert_eq!(p(&["a.br", "-o", "a.exe"]).unwrap().mode, Mode::Build);
-        assert_eq!(p(&["a.br", "--asm", "-o", "x"]).unwrap().mode, Mode::Asm);
-        let os = p(&["--os", "boot.br", "kernel.br", "-o", "d.img"]).unwrap();
-        assert_eq!((os.mode, os.path.as_deref(), os.extra.len()), (Mode::Os, Some("boot.br"), 1));
+        assert_eq!(p(&["a.zila"]).unwrap().mode, Mode::Check);
+        assert_eq!(p(&["a.zila", "--ast"]).unwrap().mode, Mode::Ast);
+        assert_eq!(p(&["a.zila", "-o", "a.exe"]).unwrap().mode, Mode::Build);
+        assert_eq!(p(&["a.zila", "--asm", "-o", "x"]).unwrap().mode, Mode::Asm);
+        let os = p(&["--os", "boot.zila", "kernel.zila", "-o", "d.img"]).unwrap();
+        assert_eq!((os.mode, os.path.as_deref(), os.extra.len()), (Mode::Os, Some("boot.zila"), 1));
         assert_eq!(p(&["--docs"]).unwrap().mode, Mode::Docs);
-        assert!(p(&["a.br"]).unwrap().optimize);
-        let n = p(&["a.br", "--no-opt", "-o", "a.exe"]).unwrap();
+        assert!(p(&["a.zila"]).unwrap().optimize);
+        let n = p(&["a.zila", "--no-opt", "-o", "a.exe"]).unwrap();
         assert!(!n.optimize && n.mode == Mode::Build);
     }
 
     #[test]
     fn target_is_explicit_only_when_given() {
-        let d = p(&["a.br", "--run"]).unwrap();
+        let d = p(&["a.zila", "--run"]).unwrap();
         assert!(!d.target_explicit && d.target == "windows");
-        let l = p(&["a.br", "--run", "--target", "linux"]).unwrap();
+        let l = p(&["a.zila", "--run", "--target", "linux"]).unwrap();
         assert!(l.target_explicit && l.target == "linux");
     }
 
     #[test]
     fn comptime_options() {
-        let o = p(&["a.br", "--run", "--comptime-timeout", "9", "--no-comptime-cache", "--comptime-dump"]).unwrap();
+        let o = p(&["a.zila", "--run", "--comptime-timeout", "9", "--no-comptime-cache", "--comptime-dump"]).unwrap();
         assert!(o.mode == Mode::Run && o.comptime_timeout == Some(9) && o.no_comptime_cache && o.comptime_dump);
-        let d = p(&["a.br"]).unwrap();
+        let d = p(&["a.zila"]).unwrap();
         assert!(d.comptime_timeout.is_none() && !d.no_comptime_cache && !d.comptime_dump);
-        assert!(p(&["a.br", "--comptime-timeout", "x"]).is_err());
-        assert!(p(&["a.br", "--comptime-timeout"]).is_err());
+        assert!(p(&["a.zila", "--comptime-timeout", "x"]).is_err());
+        assert!(p(&["a.zila", "--comptime-timeout"]).is_err());
     }
 
     #[test]
@@ -221,20 +221,20 @@ mod tests {
 
     #[test]
     fn unknown_options_are_rejected() {
-        assert!(p(&["a.br", "--bogus"]).unwrap_err().contains("unknown option"));
-        assert!(p(&["a.br", "-o"]).is_err());
+        assert!(p(&["a.zila", "--bogus"]).unwrap_err().contains("unknown option"));
+        assert!(p(&["a.zila", "-o"]).is_err());
     }
 
     #[test]
     fn every_flag_is_accepted() {
         for f in FLAGS {
             let args: Vec<&str> = match *f {
-                "-o" => vec!["a.br", "-o", "x"],
-                "--target" => vec!["a.br", "--target", "linux"],
-                "--comptime-timeout" => vec!["a.br", "--comptime-timeout", "9"],
+                "-o" => vec!["a.zila", "-o", "x"],
+                "--target" => vec!["a.zila", "--target", "linux"],
+                "--comptime-timeout" => vec!["a.zila", "--comptime-timeout", "9"],
                 "--add" => vec!["--add", "https://example.org/x/codec@1.0.0"],
                 "--as" => vec!["--add", "https://example.org/x/codec", "--as", "js"],
-                _ => vec!["a.br", f],
+                _ => vec!["a.zila", f],
             };
             assert!(p(&args).is_ok(), "{} is listed in FLAGS but not parsed", f);
         }

@@ -1,4 +1,8 @@
+<img src="docs/assets/zila.svg" alt="Zila Lang" width="48" height="48">
+
 # Contributing to Zila Lang
+
+*A small, readable language that compiles straight to machine code.*
 
 Thank you for wanting to help. Zila Lang is a young language and every kind of contribution matters: code, tests, documentation, examples, bug reports and ideas. This guide explains how to take part and what we expect, so your time goes into things that can be merged.
 
@@ -18,7 +22,7 @@ You do not have to write compiler code.
 |---|---|
 | Report a bug | Open an issue with a **tiny program** that fails (see below) |
 | Suggest a language feature | Open a **proposal** issue (see [Proposing a change](#proposing-a-change)) |
-| Write an example program | Add a `.br` file under `examples/` and a short explanation |
+| Write an example program | Add a `.zila` file under `examples/` and a short explanation |
 | Improve the documentation | Edit `docs/*.html` (see [Keep the documentation in step](#2-keep-the-documentation-in-step)) |
 | Write tests | Add cases under `tests/` |
 | Write library code in Zila Lang | Add or extend a module under `std/` |
@@ -50,7 +54,7 @@ A quick tour of the code is in the [README](README.md#what-is-in-the-repository)
 A good bug report lets someone else see the problem in a minute. Please include:
 
 1. **The smallest Zila Lang program** that shows it (a few lines, not your whole project).
-2. **What you ran**, for example `zila-parse bug.br -o bug.exe`.
+2. **What you ran**, for example `zila-parse bug.zila -o bug.exe`.
 3. **What you expected** and **what happened** (paste the exact message or output).
 4. Your **Windows version** if the problem is in compiling.
 
@@ -188,17 +192,3 @@ The project is intended to be dual-licensed under **MIT** or **Apache-2.0** (see
 ## Getting help
 
 Open an issue with the label `question`, or comment on the proposal or pull request you are working on. There is no chat server yet: keeping conversations on GitHub means the answers stay searchable for the next person.
-
-## Renaming the language
-
-The language can be renamed in one step with `tools/rename-language.py`; see `openspec/specs/language-rename` for what it guarantees. Before using it, check that:
-
-- the crate name is free on crates.io (or the crate is not published)
-- the GitHub organization and repository name are free
-- the extension publisher id is free on the VS Code Marketplace and on Open VSX
-- a domain for the site is available
-- no existing language, tool or command has the same name
-- the command (name + '-parse') is short and easy to type
-- the source file extension (.br) still fits, or --ext gives the new one
-
-Then run it as a dry run first (`python tools/rename-language.py <Name> --display "<Display Name>"`), review every changed line, and apply it with `--apply --yes` on a clean tree. The lines that tell the story of the old name are listed and have to be written again by a person. `tools/rename-allow.txt` lists the lines that may keep the old name (a "formerly known as" note).

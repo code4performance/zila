@@ -162,7 +162,7 @@ letter accent other
 fn text_cannot_be_indexed() {
     let e = compile_err("", "let s = \"abc\"
 let b = s[0]");
-    assert!(e.starts_with("main.br:7: text cannot be indexed"), "{}", e);
+    assert!(e.starts_with("main.zila:7: text cannot be indexed"), "{}", e);
     assert!(e.contains("bytes()") && e.contains("slice") && e.contains("for c in s"), "{}", e);
     // lists and maps still index
     prints("", "let xs = [10, 20]
@@ -438,7 +438,7 @@ fn text_building_compiles_for_linux_too() {
 
 #[test]
 fn the_unicode_example_prints_what_the_docs_say() {
-    let src = std::fs::read_to_string("examples/unicode.br").unwrap();
+    let src = std::fs::read_to_string("examples/unicode.zila").unwrap();
     let Some(r) = build_run(&src) else { return };
     assert_eq!(r.code, 0, "{}", r.err);
     assert_eq!(

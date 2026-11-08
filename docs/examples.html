@@ -6,10 +6,14 @@
   <title>Examples — Zila Lang</title>
   <meta name="description" content="Annotated walkthroughs of real Zila Lang programs: hello world, a REST API, a type system tour, and FFI/low-level code.">
   <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="assets/zila.svg" type="image/svg+xml">
 </head>
 <body>
+  <a class="skip" href="#content">Skip to content</a>
   <header class="site-header">
-    <a class="brand" href="index.html">zila<span class="ember-dot">.</span><small>lang docs</small></a>
+    <a class="brand" href="index.html"><img src="assets/zila.svg" alt="" width="28" height="28"><span>Zila Lang</span><small>docs</small></a>
+    <input type="checkbox" id="menu" class="menu-toggle">
+    <label for="menu" class="menu-button">Menu</label>
     <nav class="site-nav">
       <a href="index.html">Overview</a>
       <a href="syntax.html">Syntax</a>
@@ -26,9 +30,9 @@
     </nav>
   </header>
 
-  <main>
+  <main id="content">
     <h1>Examples</h1>
-    <p>These are the same programs shipped in <code>examples/</code> in the repository. Run any of them yourself with <code>zila-parse examples/&lt;name&gt;.br --run</code> — see <a href="getting-started.html">Getting Started</a>.</p>
+    <p>These are the same programs shipped in <code>examples/</code> in the repository. Run any of them yourself with <code>zila-parse examples/&lt;name&gt;.zila --run</code> — see <a href="getting-started.html">Getting Started</a>.</p>
 
     <nav class="toc">
       <h2>On this page</h2>
@@ -42,7 +46,7 @@
 
     <section id="hello">
       <h2>Hello world</h2>
-      <div class="file-label">examples/hello.br</div>
+      <div class="file-label">examples/hello.zila</div>
       <pre><code><span class="kw">package</span> main
 
 <span class="kw">type</span> Customer = <span class="kw">record</span>
@@ -70,10 +74,10 @@
 
     <section id="rest-api">
       <h2>REST API</h2>
-      <div class="file-label">examples/rest_api.br</div>
+      <div class="file-label">examples/rest_api.zila</div>
       <pre><code><span class="cm">// A small REST service on `use web`: routes with path parameters, JSON in and out, a middleware.</span>
 <span class="cm">//</span>
-<span class="cm">//   zila-parse examples/rest_api.br -o rest_api.exe</span>
+<span class="cm">//   zila-parse examples/rest_api.zila -o rest_api.exe</span>
 <span class="cm">//   rest_api.exe                      (then: curl http://localhost:8080/customers)</span>
 <span class="cm">//</span>
 <span class="cm">// The customers live in memory. Handlers are closures that capture by value, so state that</span>
@@ -138,7 +142,7 @@
 
     <section id="types">
       <h2>Type system tour</h2>
-      <div class="file-label">examples/types.br</div>
+      <div class="file-label">examples/types.zila</div>
       <pre><code><span class="kw">package</span> main
 
 <span class="kw">type</span> Printable = <span class="kw">interface</span>
@@ -228,10 +232,10 @@
 
     <section id="defer-example">
       <h2>defer: cleanup that cannot be forgotten</h2>
-      <div class="file-label">examples/defer.br</div>
+      <div class="file-label">examples/defer.zila</div>
       <pre><code><span class="cm">// defer: run a call when the function ends, however it ends.</span>
 <span class="cm">//</span>
-<span class="cm">//   zila-parse examples/defer.br -o defer.exe</span>
+<span class="cm">//   zila-parse examples/defer.zila -o defer.exe</span>
 <span class="cm">//</span>
 <span class="cm">// Deferred calls run last in, first out, on `return`, at the end of the</span>
 <span class="cm">// function, and when a `try` fails.</span>
@@ -271,10 +275,10 @@
 
     <section id="maps-example">
       <h2>Maps: look values up by key</h2>
-      <div class="file-label">examples/maps.br</div>
+      <div class="file-label">examples/maps.zila</div>
       <pre><code><span class="cm">// Maps: look values up by key.</span>
 <span class="cm">//</span>
-<span class="cm">//   zila-parse examples/maps.br -o maps.exe</span>
+<span class="cm">//   zila-parse examples/maps.zila -o maps.exe</span>
 <span class="cm">//</span>
 <span class="cm">// A Map&lt;K, V&gt; keeps values under keys (any type that is Hash: text, integers, records,</span>
 <span class="cm">// enums, lists...) and remembers the order</span>
@@ -316,10 +320,10 @@
 
     <section id="words-example">
       <h2>Text and lists: count the words</h2>
-      <div class="file-label">examples/words.br</div>
+      <div class="file-label">examples/words.zila</div>
       <pre><code><span class="cm">// Text and list helpers: count the words in a sentence.</span>
 <span class="cm">//</span>
-<span class="cm">//   zila-parse examples/words.br -o words.exe</span>
+<span class="cm">//   zila-parse examples/words.zila -o words.exe</span>
 <span class="cm">//</span>
 <span class="cm">// `use text` and `use list` are libraries written in Zila Lang. Their functions are called with</span>
 <span class="cm">// the module name in front, like text.split(...) and list.sort_by(...).</span>
@@ -377,11 +381,11 @@
 
     <section id="unicode-example">
       <h2>Text and characters: ação in bytes and characters</h2>
-      <div class="file-label">examples/unicode.br</div>
+      <div class="file-label">examples/unicode.zila</div>
       <pre><code><span class="cm">// Text is UTF-8: `len` counts bytes, `char_count()` counts characters, `for c in s` visits the</span>
 <span class="cm">// characters and `slice` cuts by byte positions (it aborts inside a character).</span>
 <span class="cm">//</span>
-<span class="cm">//   zila-parse examples/unicode.br -o unicode.exe</span>
+<span class="cm">//   zila-parse examples/unicode.zila -o unicode.exe</span>
 
 <span class="kw">package</span> main
 
@@ -410,10 +414,10 @@
 
     <section id="generics-example">
       <h2>Generics: one function, many types</h2>
-      <div class="file-label">examples/generics.br</div>
+      <div class="file-label">examples/generics.zila</div>
       <pre><code><span class="cm">// Generics and interfaces: write code once, use it with many types.</span>
 <span class="cm">//</span>
-<span class="cm">//   zila-parse examples/generics.br -o generics.exe</span>
+<span class="cm">//   zila-parse examples/generics.zila -o generics.exe</span>
 <span class="cm">//</span>
 <span class="cm">// &lt;T&gt; is a placeholder for a type. The compiler works out T from the arguments and</span>
 <span class="cm">// makes one copy of the code for each type you use. An interface lists methods, and a</span>
@@ -487,10 +491,10 @@
 
     <section id="comptime-example">
       <h2>comptime: code that writes code</h2>
-      <div class="file-label">examples/comptime.br</div>
+      <div class="file-label">examples/comptime.zila</div>
       <pre><code><span class="cm">// Compile-time code generation: a function that writes code for your types.</span>
 <span class="cm">//</span>
-<span class="cm">//   zila-parse examples/comptime.br -o comptime.exe</span>
+<span class="cm">//   zila-parse examples/comptime.zila -o comptime.exe</span>
 <span class="cm">//</span>
 <span class="cm">// A `comptime func` receives a `Type` (what the compiler knows about a type: its name, kind,</span>
 <span class="cm">// fields, variants and attributes) and returns Zila Lang source text. The compiler builds the</span>
@@ -580,10 +584,10 @@
 
     <section id="floats-example">
       <h2>Floats: fractional numbers</h2>
-      <div class="file-label">examples/floats.br</div>
+      <div class="file-label">examples/floats.zila</div>
       <pre><code><span class="cm">// Floating point: fractional numbers.</span>
 <span class="cm">//</span>
-<span class="cm">//   zila-parse examples/floats.br -o floats.exe</span>
+<span class="cm">//   zila-parse examples/floats.zila -o floats.exe</span>
 <span class="cm">//</span>
 <span class="cm">// `float` is a 64-bit number with a fractional part. It never mixes with `int`</span>
 <span class="cm">// by accident: convert with float(n) and int(x).</span>
@@ -633,7 +637,7 @@
 
     <section id="ui">
       <h2>Native windows</h2>
-      <div class="file-label">examples/ui.br</div>
+      <div class="file-label">examples/ui.zila</div>
       <pre><code><span class="kw">package</span> main
 
 <span class="kw">use</span> ui
@@ -654,15 +658,15 @@
     win.show()
     ui.run()
 <span class="kw">end</span></code></pre>
-      <p>The <code>ui</code> library is written in Zila Lang on top of the Win32 API. <code>ui.Window</code>, <code>ui.TextBox</code>, <code>ui.Button</code> and <code>ui.ListView</code> are real native controls; <code>vstack</code> lays them out; the lambda passed to <code>onClick</code> runs when the button is pressed (or Enter is pressed in the text box). Build it with <code>zila-parse examples/ui.br -o ui.exe</code>.</p>
+      <p>The <code>ui</code> library is written in Zila Lang on top of the Win32 API. <code>ui.Window</code>, <code>ui.TextBox</code>, <code>ui.Button</code> and <code>ui.ListView</code> are real native controls; <code>vstack</code> lays them out; the lambda passed to <code>onClick</code> runs when the button is pressed (or Enter is pressed in the text box). Build it with <code>zila-parse examples/ui.zila -o ui.exe</code>.</p>
     </section>
 
     <section id="async-example">
       <h2>Async: waiting, files and TCP</h2>
-      <div class="file-label">examples/async.br</div>
+      <div class="file-label">examples/async.zila</div>
       <pre><code><span class="cm">// async/await: waiting, files and TCP in one program.</span>
 <span class="cm">//</span>
-<span class="cm">//   zila-parse examples/async.br -o async.exe</span>
+<span class="cm">//   zila-parse examples/async.zila -o async.exe</span>
 <span class="cm">//</span>
 <span class="cm">// An `async func` starts running when it is called and returns a Future.</span>
 <span class="cm">// `await` waits for a future without blocking the other tasks.</span>
@@ -718,8 +722,8 @@
 
     <section id="ffi">
       <h2>FFI &amp; low-level</h2>
-      <p class="note">The whole of <code>examples/ffi.br</code>. See <code>zila-ffi.md</code> for the full FFI and inline-assembly specification.</p>
-      <div class="file-label">examples/ffi.br</div>
+      <p class="note">The whole of <code>examples/ffi.zila</code>. See <code>zila-ffi.md</code> for the full FFI and inline-assembly specification.</p>
+      <div class="file-label">examples/ffi.zila</div>
       <pre><code><span class="kw">package</span> main
 
 <span class="kw">use</span> c
@@ -802,10 +806,10 @@
     </section>
     <section id="tree-example">
       <h2>tree: shared objects and weak references</h2>
-      <div class="file-label">examples/tree.br</div>
+      <div class="file-label">examples/tree.zila</div>
       <pre><code><span class="cm">// tree: shared objects with `new`, and weak parent links that do not leak.</span>
 <span class="cm">//</span>
-<span class="cm">//   zila-parse examples/tree.br -o tree.exe</span>
+<span class="cm">//   zila-parse examples/tree.zila -o tree.exe</span>
 <span class="cm">//</span>
 <span class="cm">// `new Node{ ... }` makes one shared, reference-counted object of type Rc&lt;Node&gt;:</span>
 <span class="cm">// copying an Rc shares the object. A child that points back at its parent with an</span>
@@ -838,8 +842,8 @@
 <span class="kw">func</span> build() -&gt; int
     <span class="kw">let</span> root = <span class="kw">new</span> Node{ name: <span class="str">"root"</span> }
     <span class="kw">let</span> src = add_child(root, <span class="str">"src"</span>)
-    add_child(src, <span class="str">"main.br"</span>)
-    add_child(src, <span class="str">"util.br"</span>)
+    add_child(src, <span class="str">"main.zila"</span>)
+    add_child(src, <span class="str">"util.zila"</span>)
     add_child(root, <span class="str">"docs"</span>)
     print(path(src.children[1]))
     <span class="kw">return</span> root.children.len
@@ -854,10 +858,10 @@
     </section>
     <section id="json-example">
       <h2>json: read and write your own types</h2>
-      <div class="file-label">examples/json.br</div>
+      <div class="file-label">examples/json.zila</div>
       <pre><code><span class="cm">// JSON: read and write your own types, or a free-form tree.</span>
 <span class="cm">//</span>
-<span class="cm">//   zila-parse examples/json.br -o json.exe</span>
+<span class="cm">//   zila-parse examples/json.zila -o json.exe</span>
 <span class="cm">//</span>
 <span class="cm">// `json.parse(T, text)` turns JSON into a value of any type you declare, and `json.encode(T, x)`</span>
 <span class="cm">// does the reverse. There is nothing to register: the library reads the shape of `T` at build</span>
@@ -905,10 +909,10 @@
 
     <section id="web-example">
       <h2>web: a server, a template and the client</h2>
-      <div class="file-label">examples/web.br</div>
+      <div class="file-label">examples/web.zila</div>
       <pre><code><span class="cm">// The web library: a server, an HTML template and the client in one program.</span>
 <span class="cm">//</span>
-<span class="cm">//   zila-parse examples/web.br -o web.exe</span>
+<span class="cm">//   zila-parse examples/web.zila -o web.exe</span>
 <span class="cm">//</span>
 <span class="cm">// The server listens on a free port (0) in the background; the client asks it for a page. An</span>
 <span class="cm">// `html` block is markup with `{expression}` holes: every value is escaped, so the user name below</span>
@@ -963,7 +967,7 @@
   </main>
 
   <footer class="site-footer">
-    Zila Lang — a language with a human face. Docs generated from <code>zila.ebnf</code> and <code>examples/*.br</code>.
+    Zila Lang &middot; A small, readable language that compiles straight to machine code. The examples are checked against <code>examples/*.zila</code>; the grammar is <code>zila.ebnf</code>.
   </footer>
 </body>
 </html>

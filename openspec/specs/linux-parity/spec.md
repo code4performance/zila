@@ -20,11 +20,11 @@ A program that uses `task`, `future` (`async`, `await`, `spawn`, channels), `fs`
 - **THEN** the build fails with a message saying `ws` is internal to `net`
 
 ### Requirement: Libraries are chosen by target
-When the target is Linux, `use name` SHALL load `std/name.linux.br` if that file exists and `std/name.br` otherwise; for any other target it SHALL load `std/name.br`. Code that does not touch the operating system (channels, futures, buffered I/O, formatting) SHALL stay in the shared file.
+When the target is Linux, `use name` SHALL load `std/name.linux.zila` if that file exists and `std/name.zila` otherwise; for any other target it SHALL load `std/name.zila`. Code that does not touch the operating system (channels, futures, buffered I/O, formatting) SHALL stay in the shared file.
 
 #### Scenario: A Linux-only layer
 - **WHEN** `use fs` is compiled for Linux and for Windows
-- **THEN** the Linux build uses `std/fs.linux.br` and the Windows build uses `std/fs.br`, and the exported functions and types are the same
+- **THEN** the Linux build uses `std/fs.linux.zila` and the Windows build uses `std/fs.zila`, and the exported functions and types are the same
 
 ### Requirement: Tasks and timers
 On Linux, `spawn`, `task.yield`, `sleep`, channels (`send`, `receive`, `close`) and `async`/`await` SHALL behave as on Windows: cooperative tasks on one thread, a task runs until it waits, yields or finishes; when nothing is ready the scheduler sleeps until the next timer or I/O event; with no timer and no I/O it stops with the deadlock error; when `main` returns the program ends. Each task SHALL have its own stack that is released when the task finishes.
@@ -93,11 +93,11 @@ On Linux, `extern` functions declared with `#[link("name")]` SHALL be callable w
 - **THEN** its ELF file has no interpreter and no dynamic section
 
 ### Requirement: Division by zero
-An integer division or remainder by zero SHALL behave the same on both targets: the program prints `abort: <file>.br:<line>: division by zero` to standard error and exits with status 101, like any other abort.
+An integer division or remainder by zero SHALL behave the same on both targets: the program prints `abort: <file>.zila:<line>: division by zero` to standard error and exits with status 101, like any other abort.
 
 #### Scenario: Divide by zero
 - **WHEN** a program divides an integer by a variable that is zero
-- **THEN** it prints `abort: <file>.br:<line>: division by zero` and exits with status 101 on both targets
+- **THEN** it prints `abort: <file>.zila:<line>: division by zero` and exits with status 101 on both targets
 
 ### Requirement: The Windows build is unchanged
 Apart from the division check above, building for Windows SHALL produce the same code as before this change and the bare-metal image SHALL be byte-for-byte the same (the kernel keeps its own handling of division faults).

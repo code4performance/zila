@@ -185,7 +185,7 @@ fn out_of_range_conversion_aborts() {
         let src = main_of(&format!("let zero = 0.0\nlet x = int({})\nprintln(\"unreachable {{x}}\")", expr));
         let Some((out, code)) = run(&src) else { return };
         // main_of puts the statement with the conversion on line 10
-        assert_eq!(out, "abort: main.br:10: float out of range\n", "{}", expr);
+        assert_eq!(out, "abort: main.zila:10: float out of range\n", "{}", expr);
         assert_eq!(code, 101);
     }
 }
@@ -409,7 +409,7 @@ fn native_f32_printing_matches_the_reference_formatter() {
 
 #[test]
 fn a_bare_metal_kernel_rejects_floats() {
-    let boot = parse_source(&std::fs::read_to_string("os/boot.br").unwrap()).unwrap();
+    let boot = parse_source(&std::fs::read_to_string("os/boot.zila").unwrap()).unwrap();
     for body in ["let x = 1.5", "let x: float = 0.0", "let x: f32 = 0.0"] {
         let kernel = parse_source(&format!("package main\nfunc console_write(s: text)\nend\nfunc main()\n    {}\nend\n", body)).unwrap();
         let e = zila::codegen_x64::build_os(&boot, &kernel).unwrap_err();
@@ -419,7 +419,7 @@ fn a_bare_metal_kernel_rejects_floats() {
 
 #[test]
 fn the_floats_example_prints_what_the_docs_say() {
-    let src = std::fs::read_to_string("examples/floats.br").unwrap();
+    let src = std::fs::read_to_string("examples/floats.zila").unwrap();
     if let Some((out, code)) = run(&src) {
         assert_eq!(code, 0);
         assert_eq!(out, "average 20.625

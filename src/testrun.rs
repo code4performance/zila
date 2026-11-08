@@ -69,9 +69,9 @@ fn entry_point(tests: &[Test]) -> String {
 fn run_file(path: &str, optimize: bool) -> Result<Outcome, String> {
     let mut src = std::fs::read_to_string(path).map_err(|e| format!("cannot read {}: {}", path, e))?;
     crate::package::install_for(std::path::Path::new(path))?;
-    // a `_test.br` file of a package is tested together with the package's own files, as one
+    // a `_test.zila` file of a package is tested together with the package's own files, as one
     // module (so its tests see the package's private declarations); the module is built as main
-    if path.ends_with("_test.br") {
+    if path.ends_with("_test.zila") {
         let pkg = src.lines().find_map(|l| l.trim().strip_prefix("package ").map(|p| p.trim().to_string()));
         if let Some(pkg) = pkg.filter(|p| p != "main") {
             let p = std::path::Path::new(path);

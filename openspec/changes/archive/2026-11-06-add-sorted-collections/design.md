@@ -1,11 +1,11 @@
 ## Context
 
-`Map` is built in and keeps insertion order with text or integer keys; `std/set.br` wraps a map. Libraries such as `list`, `text`, `format` and `set` are Brasa source files embedded with `include_str!` (`std_source`) and loaded by the interpreter. A quick experiment showed that a recursive generic record with optional children (`left: Node<K, V>?`) and a record field of function type compile natively when the records are `#[shared]` (without it records are copied when passed to functions, so updates are lost). In a generic body `a < b` on a type parameter is rejected, so the order has to come from a function. The interpreter fails on `t.less(a, b)` ("no method 'less' found on record").
+`Map` is built in and keeps insertion order with text or integer keys; `std/set.br` wraps a map. Libraries such as `list`, `text`, `format` and `set` are Zila Lang source files embedded with `include_str!` (`std_source`) and loaded by the interpreter. A quick experiment showed that a recursive generic record with optional children (`left: Node<K, V>?`) and a record field of function type compile natively when the records are `#[shared]` (without it records are copied when passed to functions, so updates are lost). In a generic body `a < b` on a type parameter is rejected, so the order has to come from a function. The interpreter fails on `t.less(a, b)` ("no method 'less' found on record").
 
 ## Goals / Non-Goals
 
 **Goals**
-- O(log n) sorted map and set with a simple, auditable implementation in Brasa.
+- O(log n) sorted map and set with a simple, auditable implementation in Zila Lang.
 - Keys of any type, ordered by a user function, with ready-made int and text orders.
 
 **Non-Goals**

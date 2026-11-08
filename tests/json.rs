@@ -334,7 +334,7 @@ end
         }
     }
     assert_eq!(hits.len(), 1, "{:?}", hits);
-    assert!(hits[0].contains("\"json\" => Some(include_str!(\"../packages/json/json.br\"))"), "{:?}", hits);
+    assert!(hits[0].contains("\"json\" => Some(include_str!(\"../packages/json/json.zila\"))"), "{:?}", hits);
 }
 
 #[test]
@@ -999,7 +999,7 @@ end
 
 #[test]
 fn the_examples_that_mention_json_use_the_real_signatures() {
-    let types = std::fs::read_to_string("examples/types.br").unwrap();
+    let types = std::fs::read_to_string("examples/types.zila").unwrap();
     let file = parse_source(&types).unwrap_or_else(|e| panic!("{}", e));
     assert!(types.contains("#[json(\"full_name\")]") && types.contains("#[json(skip)]"));
     // the User type of the example decodes and encodes with the library
@@ -1010,13 +1010,13 @@ fn the_examples_that_mention_json_use_the_real_signatures() {
     ));
     assert_eq!(run(&src), "{\"id\":3,\"full_name\":\"Ana Lima\",\"email\":\"a@b\"}\n4 Bia true\n");
     drop(file);
-    let errors = std::fs::read_to_string("examples/errors.br").unwrap();
+    let errors = std::fs::read_to_string("examples/errors.zila").unwrap();
     parse_source(&errors).unwrap_or_else(|e| panic!("{}", e));
 }
 
 #[test]
 fn the_json_example_prints_what_the_docs_say() {
-    let src = std::fs::read_to_string("examples/json.br").unwrap();
+    let src = std::fs::read_to_string("examples/json.zila").unwrap();
     let out = run(&src);
     let want = "port: 8080\nhost: example.org\nproxy: none\n\
                 {\n  \"port\": 8080,\n  \"host_name\": \"example.org\",\n  \"proxy\": null,\n  \"tags\": [\n    \"a\",\n    \"b\"\n  ]\n}\n\

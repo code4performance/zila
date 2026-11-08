@@ -12,7 +12,7 @@
 //   - `start` runs the closure on a new OS thread (Windows `CreateThread`).
 //   - `Thread.join` blocks the calling thread until that thread has finished.
 //   - When `main` returns the process ends, even if threads are still running.
-//   - Each thread has its own task scheduler (std/task.br); tasks never move.
+//   - Each thread has its own task scheduler (std/task.zila); tasks never move.
 //   - A program that uses threads counts references atomically (the compiler
 //     adds `lock` prefixes to the runtime's counters); other programs do not.
 // =====================================================================

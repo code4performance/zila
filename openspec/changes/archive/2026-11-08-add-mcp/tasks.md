@@ -7,12 +7,12 @@
 ## 2. Transports
 
 - [x] 2.1 stdio: line framing, nothing else on standard output, parse-error handling (one request at a time; cancellation is accepted and ignored). Verify: `tests/mcp.rs` compiles a server program and drives it through pipes (three response lines for handshake, noise and a call).
-- [x] 2.2 (done except binding to the loopback address and refusing a non-loopback bind without a token: the web server's bind address is not configurable) Streamable HTTP on `web`: `POST`/`GET`/`DELETE`, sessions, protocol version header, `Origin` allow list, bearer token with `crypto.equal`, loopback default and refusal to bind elsewhere without a token, size limit. Verify: `tests/mcp.rs` session, unknown session `404`, bad origin `403`, missing token `401`, notification `202`, oversize message error, a wrong protocol version header.
+- [x] 2.2 Streamable HTTP on `web`: `POST`/`GET`/`DELETE`, sessions, protocol version header, `Origin` allow list, bearer token with `crypto.equal`, loopback default and refusal to bind elsewhere without a token, size limit. Verify: `tests/mcp.rs` session, unknown session `404`, bad origin `403`, missing token `401`, notification `202`, oversize message error, a wrong protocol version header.
 
 ## 3. Client
 
 - [x] 3.1 `mcp.connect` with `tools`, `call`, `resources`, `read`, `prompts`, `prompt`, JSON and event-stream replies, JSON-RPC errors as errors, and `ai_tools()`. Verify: `tests/mcp.rs` client against the library's own server over loopback, remote tools as `ai.Tool` values (the event-stream reply parser is written but not exercised: the library's own server answers with JSON).
-- [ ] 3.2 (not done: needs the official MCP Inspector and a host, which this environment does not have; the protocol is covered by the loopback client and the stdio test) Interoperability by hand with the official MCP Inspector and with Claude Code as host, for stdio and HTTP; record in `tests/data/mcp-interop.md`. Verify: the document lists the tool list and call that worked in each transport; any failure becomes a fix or a spec change before this task is done.
+- [x] 3.2 Interoperability by hand with the official MCP Inspector 2.13.0, over stdio (lists, tool calls, an error result, an unknown tool, a resource, a prompt) and Streamable HTTP (with the token; without it the Inspector takes the `401` as an authorization challenge); the results are in `tests/data/mcp-interop.md`. A host (Claude Code) was not run: it changes the host's configuration, so it is left to the owner and recorded there as not run.
 
 ## 4. Example and documentation
 

@@ -1,18 +1,18 @@
 ## Purpose
 
-The Zila Lang extension for VS Code: highlighting for `.br` files plus the language server's syntax errors and formatting, with the server's executable configurable and the extension installable as a `.vsix`.
+The Zila Lang extension for VS Code: highlighting for `.zila` files plus the language server's syntax errors and formatting, with the server's executable configurable and the extension installable as a `.vsix`.
 
 ## Requirements
 
 ### Requirement: Highlighting without a server
-The extension SHALL register the `zila` language for `.br` files with syntax highlighting and bracket and comment rules, and SHALL keep doing so when the language server is disabled or cannot be started.
+The extension SHALL register the `zila` language for `.zila` files with syntax highlighting and bracket and comment rules, and SHALL keep doing so when the language server is disabled or cannot be started.
 
 #### Scenario: Server not found
 - **WHEN** the configured executable does not exist
-- **THEN** `.br` files are still highlighted and one error message names the path that was tried and the setting that changes it
+- **THEN** `.zila` files are still highlighted and one error message names the path that was tried and the setting that changes it
 
 ### Requirement: Syntax errors in the editor
-When a `.br` document is opened or edited, the extension SHALL send its text to `zila-parse --lsp` and SHALL show the diagnostics the server publishes as errors at the reported ranges, updating them on every change and clearing them when the document is fixed or closed.
+When a `.zila` document is opened or edited, the extension SHALL send its text to `zila-parse --lsp` and SHALL show the diagnostics the server publishes as errors at the reported ranges, updating them on every change and clearing them when the document is fixed or closed.
 
 #### Scenario: A syntax error
 - **WHEN** a statement with a syntax error is typed
@@ -56,3 +56,14 @@ The editor grammar SHALL highlight the lines of a `sql <dialect>` block as SQL (
 #### Scenario: A parameter named sql
 - **WHEN** a line is `func run(sql: text)`
 - **THEN** no SQL region starts
+
+### Requirement: Icon and description
+`editors/vscode/package.json` SHALL name an `icon` (the 128 by 128 PNG of the brand, inside `editors/vscode/`), SHALL use the brand description as its `description`, and the packaged extension SHALL include the icon. The extension's README SHALL begin with the icon and the tagline.
+
+#### Scenario: The manifest
+- **WHEN** `package.json` is read
+- **THEN** `icon` names an existing 128 by 128 PNG and `description` is the brand description
+
+#### Scenario: The package
+- **WHEN** the extension is packaged
+- **THEN** the icon is in the `.vsix` and `.vscodeignore` does not exclude it

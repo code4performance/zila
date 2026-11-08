@@ -409,8 +409,8 @@ end
 
 #[test]
 fn the_tree_example_builds_and_prints_what_the_docs_say() {
-    let src = std::fs::read_to_string("examples/tree.br").unwrap();
+    let src = std::fs::read_to_string("examples/tree.zila").unwrap();
     let Some((out, code)) = run(&src) else { return };
-    assert_eq!(out, "root/src/util.br\ntop-level entries: 2\nobjects left after the tree is gone: 0\n");
+    assert_eq!(out, "root/src/util.zila\ntop-level entries: 2\nobjects left after the tree is gone: 0\n");
     assert_eq!(code, 0);
 }

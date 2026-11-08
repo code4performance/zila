@@ -27,5 +27,5 @@
 
 ## 6. Documentation and examples
 
-- [x] 6.1 Add `examples/maps.br` (word count) and a section for it on `docs/examples.html` (generated with `brasa-parse --docs`); verify the example builds and prints the documented output
+- [x] 6.1 Add `examples/maps.br` (word count) and a section for it on `docs/examples.html` (generated with `zila-parse --docs`); verify the example builds and prints the documented output
 - [x] 6.2 Document maps on `docs/syntax.html` (type, literal, indexing, methods, iteration order, missing key), remove them from the not-yet-supported list in `docs/native.html`, and update the status table and roadmap in `README.md`; verify `cargo test` (docs tests) passes and every code sample compiles

@@ -5,7 +5,7 @@ Attributes are parsed on declarations (`Decl.attrs`, for `#[naked]`, `#[export]`
 ## Goals / Non-Goals
 
 **Goals**
-- Tests written in Brasa, run in one process per file, with a clear pass/fail output and exit status.
+- Tests written in Zila Lang, run in one process per file, with a clear pass/fail output and exit status.
 - Assertions that fit the language's error model rather than a new control-flow mechanism.
 
 **Non-Goals**

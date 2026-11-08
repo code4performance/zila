@@ -48,7 +48,7 @@ The runtime SHALL keep owning object headers, reference counts, zeroing and the 
 - **THEN** `free` is called once with the pointer, size and alignment given to `alloc`
 
 ### Requirement: Targets
-A custom allocator SHALL be usable on every target (Windows, Linux and bare metal) and SHALL replace the built-in heap there. When one is declared, the Windows program SHALL NOT import `GetProcessHeap`, `HeapAlloc` or `HeapFree`, and the Linux program SHALL NOT contain its free-list heap or its `mmap` and `munmap` code. A bare-metal program without an allocator SHALL keep the built-in heap, and `os/kernel.br` SHALL provide its own through these attributes.
+A custom allocator SHALL be usable on every target (Windows, Linux and bare metal) and SHALL replace the built-in heap there. When one is declared, the Windows program SHALL NOT import `GetProcessHeap`, `HeapAlloc` or `HeapFree`, and the Linux program SHALL NOT contain its free-list heap or its `mmap` and `munmap` code. A bare-metal program without an allocator SHALL keep the built-in heap, and `os/kernel.zila` SHALL provide its own through these attributes.
 
 #### Scenario: Windows without the process heap
 - **WHEN** a Windows program with a custom allocator is built
@@ -56,7 +56,7 @@ A custom allocator SHALL be usable on every target (Windows, Linux and bare meta
 
 #### Scenario: Kernel provides the allocator
 - **WHEN** the kernel image is built and booted
-- **THEN** its lists, text and records are allocated by the functions in `os/kernel.br` and the boot test passes
+- **THEN** its lists, text and records are allocated by the functions in `os/kernel.zila` and the boot test passes
 
 ### Requirement: live_objects and heap_bytes
 `live_objects()` SHALL count objects with a custom allocator as it does with the built-in one. `heap_bytes()` SHALL be a compile error in a program that declares an allocator, with a message that it needs the built-in heap.

@@ -47,7 +47,7 @@ fn align_up(n: u64, a: u64) -> u64 {
 }
 
 /// The text of an assembler error: at the Zila Lang line of an inline `asm` block when the failing
-/// line belongs to one (the code generator leaves a `; asm file.br:line` marker before each block).
+/// line belongs to one (the code generator leaves a `; asm file.zila:line` marker before each block).
 fn asm_error(asm: &str, e: &str) -> String {
     let Some(rest) = e.strip_prefix("asm line ") else { return e.to_string() };
     let Some((n, msg)) = rest.split_once(": ") else { return e.to_string() };

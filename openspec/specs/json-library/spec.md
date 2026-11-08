@@ -69,7 +69,7 @@ Lets programs read and write JSON, either as a dynamic tree or directly into and
 `#[json("key")]` on a record field SHALL use `key` as the JSON key in both directions. `#[json(skip)]` (the bare word `skip`, not a quoted text, which is an ordinary key) SHALL leave the field out of `encode` and ignore its key in `parse`, which leaves the field at its zero value (empty text, `0`, `false`, empty list, empty map, `nil`, a record of zero values, the first case of an enum). Any other content in a `json` attribute (a bare word that is not `skip`, no argument, several arguments, an empty key) SHALL be a compile error naming the field. Two fields of one record resolving to the same key SHALL be a compile error.
 
 #### Scenario: Rename
-- **WHEN** a program encodes the `User` of `examples/types.br` with `name` `Ana Lima`
+- **WHEN** a program encodes the `User` of `examples/types.zila` with `name` `Ana Lima`
 - **THEN** the text contains `"full_name":"Ana Lima"` and no `"name"` key
 
 #### Scenario: Skip
@@ -100,7 +100,7 @@ Strings SHALL be UTF-8. Decoding SHALL accept the escapes `\"`, `\\`, `\/`, `\b`
 - **THEN** the result is a string whose quote is written `\"`, whose newline is written `\n`, and whose `é` keeps its UTF-8 bytes
 
 ### Requirement: Numbers
-Decoding into an integer type SHALL fail for a literal that is not integral and for a value outside the type's range; a literal that is integral in value, like `1e2` or `5.0`, SHALL be accepted. Nothing SHALL wrap or round. Decoding into a float SHALL give the correctly rounded value. Encoding a float SHALL write the shortest decimal text that reads back as the same value (the digits of `std/float.br`), in the JSON number grammar; `NaN` and infinities SHALL make `encode` return an error. Integers SHALL be written in decimal with no fraction.
+Decoding into an integer type SHALL fail for a literal that is not integral and for a value outside the type's range; a literal that is integral in value, like `1e2` or `5.0`, SHALL be accepted. Nothing SHALL wrap or round. Decoding into a float SHALL give the correctly rounded value. Encoding a float SHALL write the shortest decimal text that reads back as the same value (the digits of `std/float.zila`), in the JSON number grammar; `NaN` and infinities SHALL make `encode` return an error. Integers SHALL be written in decimal with no fraction.
 
 #### Scenario: Overflow
 - **WHEN** a program decodes `300` as `u8` and `9223372036854775808` as `int`

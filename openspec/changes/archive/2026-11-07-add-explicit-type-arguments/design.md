@@ -1,6 +1,6 @@
 ## Context
 
-`a < b > (c)` is valid Brasa (two comparisons are rejected elsewhere, but `a < b, c > (d)` inside an argument list is not a call). The parser has no symbol table, so it cannot tell a generic function from a variable.
+`a < b > (c)` is valid Zila Lang (two comparisons are rejected elsewhere, but `a < b, c > (d)` inside an argument list is not a call). The parser has no symbol table, so it cannot tell a generic function from a variable.
 
 ## Decisions
 

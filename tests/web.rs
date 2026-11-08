@@ -128,7 +128,7 @@ fn exe_path(tag: &str, ext: &str) -> std::path::PathBuf {
 fn build(src: &str) -> Result<std::path::PathBuf, String> {
     setup();
     if let Ok(dir) = std::env::var("ZILA_WEB_DUMP") {
-        let _ = std::fs::write(std::path::Path::new(&dir).join(format!("web-test-{}.br", N.load(Ordering::SeqCst))), src);
+        let _ = std::fs::write(std::path::Path::new(&dir).join(format!("web-test-{}.zila", N.load(Ordering::SeqCst))), src);
     }
     let file = parse_source(src).unwrap_or_else(|d| panic!("parse error: {}", d));
     let exe = exe_path("w", ".exe");
@@ -207,7 +207,7 @@ fn run_linux(src: &str) -> Option<String> {
 
 #[test]
 fn web_is_rejected_in_a_bare_metal_kernel() {
-    let boot = parse_source(&std::fs::read_to_string("os/boot.br").unwrap()).unwrap();
+    let boot = parse_source(&std::fs::read_to_string("os/boot.zila").unwrap()).unwrap();
     let kernel = parse_source("package main\nuse web\nfunc console_write(s: text)\nend\nfunc main()\nend\n").unwrap();
     let e = build_os(&boot, &kernel).unwrap_err();
     assert!(e.contains("web") && e.contains("bare-metal"), "{}", e);
@@ -1205,7 +1205,7 @@ fn a_malformed_template_is_a_compile_error_at_the_block() {
         let indented: String = body.lines().map(|l| format!("        {}\n", l)).collect();
         let src = prep(&format!("package main\nuse web\nfunc main()\n    let name = \"n\"\n    let p = html\n{}    end\n    print(p.markup)\nend\n", indented));
         let e = compile_error(&src);
-        assert!(e.contains("main.br:5") && e.contains(expect), "{}: {}", expect, e);
+        assert!(e.contains("main.zila:5") && e.contains(expect), "{}: {}", expect, e);
     }
 }
 
@@ -1295,7 +1295,7 @@ HTTP/1.1 200 OK | ok
 
 #[test]
 fn the_web_example_prints_what_the_docs_say() {
-    let src = std::fs::read_to_string("examples/web.br").unwrap();
+    let src = std::fs::read_to_string("examples/web.zila").unwrap();
     let out = run(&src);
     assert_eq!(
         out,
@@ -1321,7 +1321,7 @@ fn the_rest_api_example_serves_customers() {
         eprintln!("port 8080 is busy: skipping");
         return;
     }
-    let src = std::fs::read_to_string("examples/rest_api.br").unwrap();
+    let src = std::fs::read_to_string("examples/rest_api.zila").unwrap();
     let exe = build(&src).unwrap_or_else(|e| panic!("compile error: {}", e));
     let mut child = Command::new(&exe).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
     let mut first = String::new();

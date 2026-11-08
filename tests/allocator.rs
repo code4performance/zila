@@ -309,7 +309,7 @@ fn linux_leaves_out_free_lists_and_mmap() {
 
 #[test]
 fn bare_metal_keeps_the_built_in_heap_without_an_allocator() {
-    let boot = parse_source(&std::fs::read_to_string("os/boot.br").unwrap()).unwrap();
+    let boot = parse_source(&std::fs::read_to_string("os/boot.zila").unwrap()).unwrap();
     let kernel = "package main\nfunc console_write(s: text)\nend\nfunc main()\n    let n = heap_bytes()\nend\n";
     zila::codegen_x64::build_os(&boot, &parse_source(kernel).unwrap()).unwrap();
 }
@@ -416,7 +416,7 @@ true
 
 #[test]
 fn the_allocator_example_runs() {
-    let src = std::fs::read_to_string("examples/allocator.br").unwrap();
+    let src = std::fs::read_to_string("examples/allocator.zila").unwrap();
     let Some(r) = windows(&src) else { return };
     assert_eq!((r.out.as_str(), r.code), ("bump allocator arena \nallocations came from the arena: true\nfrees were counted: true\n", 0), "{}", r.err);
 }

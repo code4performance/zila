@@ -21,7 +21,7 @@ fn run(src: &str, extra: &[&str], input: &str) -> Ran {
     let dir = std::env::temp_dir().join(format!("zila-runtest-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     let tmp = dir.join("tmp");
     std::fs::create_dir_all(&tmp).unwrap();
-    let file = dir.join("prog.br");
+    let file = dir.join("prog.zila");
     std::fs::write(&file, src).unwrap();
     let mut child = Command::new(env!("CARGO_BIN_EXE_zila-parse"))
         .arg(&file)
@@ -60,7 +60,7 @@ fn main_of(body: &str) -> String {
 
 #[test]
 fn hello_runs_and_leaves_nothing_behind() {
-    let src = std::fs::read_to_string("examples/hello.br").unwrap();
+    let src = std::fs::read_to_string("examples/hello.zila").unwrap();
     let r = run(&src, &[], "");
     assert_eq!(r.code, 0, "{}", r.err);
     assert!(r.out.starts_with("Hello, Ana!\n"), "{}", r.out);
@@ -130,7 +130,7 @@ fn an_abort_gives_status_101_and_writes_to_standard_error() {
     assert_eq!(r.code, 101);
     assert_eq!(r.out, "x
 ");
-    assert_eq!(r.err, "abort: main.br:5: stop
+    assert_eq!(r.err, "abort: main.zila:5: stop
 ");
     assert!(r.left.is_empty(), "left behind: {:?}", r.left);
 }

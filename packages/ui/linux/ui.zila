@@ -1,7 +1,7 @@
 // =====================================================================
 // Zila Lang standard library: `use ui` (Linux layer)
 //
-// The Linux counterpart of std/ui.br, with the same functions and behavior: the shared region
+// The Linux counterpart of std/ui.zila, with the same functions and behavior: the shared region
 // below is the same text in both files. Windows and controls are drawn by this library on an
 // X11 display: it speaks the X11 protocol itself over the server's Unix socket, so the program
 // is still a static executable with no C library, GTK or Xlib. It works on any X server,
@@ -28,8 +28,8 @@ use sys
 use text
 
 // ---- shared begin ----
-// Everything from here to "shared end" is the same text in std/ui.br (Windows) and
-// std/ui.linux.br (Linux); tests/ui.rs checks that. It holds the whole public API, the layout
+// Everything from here to "shared end" is the same text in std/ui.zila (Windows) and
+// std/ui.linux.zila (Linux); tests/ui.rs checks that. It holds the whole public API, the layout
 // and the scripted input. The two files differ only in the `be_*` functions below it, which
 // are the backend: the native controls of Win32 on Windows, controls drawn on X11 on Linux.
 

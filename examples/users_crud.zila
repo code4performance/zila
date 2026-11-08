@@ -1,6 +1,6 @@
 // Create, read, update and delete on a `Users` table in SQL Server.
 //
-//   zila-parse examples/users_crud.br -o users_crud.exe
+//   zila-parse examples/users_crud.zila -o users_crud.exe
 //
 // The table has the shape of the `Users` table of an application database (a GUID key, a unique
 // username, optional columns, status and role texts, UTC timestamps). The URL points at the

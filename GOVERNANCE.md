@@ -1,4 +1,8 @@
+<img src="docs/assets/zila.svg" alt="Zila Lang" width="48" height="48">
+
 # Zila Lang Project Charter
+
+*A small, readable language that compiles straight to machine code.*
 
 This charter is the statute of the Zila Lang project: what it stands for, who decides what, and the rules everyone who takes part agrees to follow. It is short on purpose. For the practical steps of sending a contribution, see [CONTRIBUTING.md](CONTRIBUTING.md). For how people must treat each other, see the [Code of Conduct](CODE_OF_CONDUCT.md).
 

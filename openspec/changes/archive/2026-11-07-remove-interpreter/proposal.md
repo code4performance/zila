@@ -6,8 +6,8 @@ There is one language and one compiler. After `add-direct-pe-output` the compile
 
 ## What Changes
 
-- **BREAKING**: `src/interp.rs` and the `Interpreter` type are deleted. `brasa::Interpreter` is no longer exported.
-- `brasa-parse file.br --run` compiles the program to a temporary native executable for the **host** (a PE on Windows, an ELF on Linux), runs it with the terminal's standard input, output and error passed straight through, deletes the executable, and exits with the program's exit status (101 after a panic, as the program itself would). Optimization follows `--no-opt` as for `--build`.
+- **BREAKING**: `src/interp.rs` and the `Interpreter` type are deleted. `zila::Interpreter` is no longer exported.
+- `zila-parse file.br --run` compiles the program to a temporary native executable for the **host** (a PE on Windows, an ELF on Linux), runs it with the terminal's standard input, output and error passed straight through, deletes the executable, and exits with the program's exit status (101 after a panic, as the program itself would). Optimization follows `--no-opt` as for `--build`.
 - Compile errors are reported exactly as `--build` reports them (`compilation error: ...`, exit 1); nothing is run. The checks the compiler makes and the interpreter did not (types, generics, exhaustiveness) now apply to `--run` too.
 - `--run` with a `--target` that is not the host is an error that says so (no emulation, no WSL).
 - `float_text` and `float_text_f32` (the reference layout of a float used by tests) keep their public names and move from `interp.rs` to a new `src/float_text.rs`; `src/lib.rs` re-exports them from there.
@@ -30,5 +30,5 @@ There is one language and one compiler. After `add-direct-pe-output` the compile
 - `src/interp.rs` deleted; `src/lib.rs` (`mod interp`, re-export); new `src/float_text.rs` and `src/run.rs`; `src/main.rs` (`Mode::Run` branch).
 - Tests: `tests/parse.rs` (`interpreter_runs_hello`), `tests/buffered_io.rs`, `tests/defer.rs`, `tests/floats.rs`, `tests/format.rs`, `tests/generics.rs`, `tests/maps.rs`, `tests/sets.rs`, `tests/sorted.rs`, `tests/stdlib.rs`; new `tests/run.rs`.
 - Docs: `README.md`, `docs/getting-started.html`, `docs/native.html`, `docs/stdlib.html`, `docs/syntax.html`.
-- `std/`, `os/`, `examples/` and `brasa-ffi.md` need no change (they contain no interpreter-specific code; `examples/sorted.br` only mentions `--run` in a comment that stays correct).
+- `std/`, `os/`, `examples/` and `zila-ffi.md` need no change (they contain no interpreter-specific code; `examples/sorted.br` only mentions `--run` in a comment that stays correct).
 - Cost: `--run` is now as slow as a build instead of instant.

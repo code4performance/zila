@@ -1,6 +1,6 @@
 ## Purpose
 
-A single way to talk to a relational database from Brasa: parameterized statements, rows decoded into the program's own types, transactions and clear errors, independent of which database sits behind it.
+A single way to talk to a relational database from Zila Lang: parameterized statements, rows decoded into the program's own types, transactions and clear errors, independent of which database sits behind it.
 
 ## ADDED Requirements
 

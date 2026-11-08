@@ -6,10 +6,14 @@
   <title>Library — Zila Lang</title>
   <meta name="description" content="The Zila Lang standard library for text, lists, formatting and sets: searching, splitting, parsing numbers, map, filter, sort, padding, templates and set operations.">
   <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="assets/zila.svg" type="image/svg+xml">
 </head>
 <body>
+  <a class="skip" href="#content">Skip to content</a>
   <header class="site-header">
-    <a class="brand" href="index.html">zila<span class="ember-dot">.</span><small>lang docs</small></a>
+    <a class="brand" href="index.html"><img src="assets/zila.svg" alt="" width="28" height="28"><span>Zila Lang</span><small>docs</small></a>
+    <input type="checkbox" id="menu" class="menu-toggle">
+    <label for="menu" class="menu-button">Menu</label>
     <nav class="site-nav">
       <a href="index.html">Overview</a>
       <a href="syntax.html">Syntax</a>
@@ -26,7 +30,7 @@
     </nav>
   </header>
 
-  <main>
+  <main id="content">
     <h1>Library</h1>
     <p>The everyday operations live in four modules: <code>text</code>, <code>list</code>, <code>format</code> and <code>set</code>; <code>json</code> reads and writes JSON; <code>web</code> is an HTTP server and client. They are written in Zila Lang itself (see the files in <code>std/</code>), and you use them by name: <code>use text</code> once at the top of the file, then <code>text.trim(s)</code>. Nothing is added to the types themselves, so the names never clash with your own functions.</p>
     <p>Not all of it is the core. <code>text</code>, <code>list</code>, <code>set</code>, <code>sorted</code>, <code>format</code>, <code>bufio</code>, <code>errors</code>, <code>math</code>, <code>float</code>, <code>fs</code>, <code>net</code>, <code>sync</code>, <code>task</code>, <code>future</code>, <code>thread</code>, <code>sys</code>, <code>reflect</code> and <code>derive</code> are the core of the standard library: the compiler and the runtime rest on them, and their names are reserved. <code>json</code>, <code>crypto</code>, <code>tls</code>, <code>ui</code>, <code>web</code>, <code>ai</code>, <code>mcp</code>, <code>rag</code>, <code>db</code>, <code>postgres</code> and <code>sqlserver</code> follow external formats and services and change faster than the compiler, so they are packages of the Zila Lang repository (<code>packages/</code>) that the compiler embeds: a package of your project may take their name and then replaces them, with a warning. See <a href="packages.html#use">Packages</a>.</p>
@@ -284,7 +288,7 @@ app.get(<span class="str">"/hello/:name"</span>, <span class="kw">func</span>(re
 <span class="kw">let</span> reply = <span class="kw">try</span> web.get(<span class="str">"http://127.0.0.1:8080/hello/ana"</span>)   <span class="cm">// reply.status, reply.body</span></code></pre>
       <p><code>use web</code> is an HTTP/1.1 server, a router, a middleware chain, JSON helpers, an HTTP client and HTML templates, all written in Zila Lang on <code>net</code>, <code>tls</code>, <code>task</code> and <code>json</code>; the compiler only knows the name. It works on Windows and Linux alike and is not available in a bare-metal kernel. See <a href="examples.html#rest-api">the REST API example</a> and <a href="examples.html#web-example">the web example</a>.</p>
       <h3>Server</h3>
-      <p>The server runs one task per connection on the scheduler, so a slow client never delays the others. <code>web.server(port: 8080)</code> makes a <code>Server</code> (port 0 picks a free one). Its limits are fields you can set before starting: <code>max_head</code> (16 KiB of header lines; <code>431</code>), <code>max_line</code> (8 KiB request line; <code>414</code>), <code>max_body</code> (1 MiB; <code>413</code>, answered without reading the body), <code>read_timeout</code> (10 s for a request that has started; <code>408</code>), <code>idle_timeout</code> (5 s between requests on a kept-alive connection; closed silently), <code>write_timeout</code> (10 s) and <code>max_connections</code> (1024; a connection beyond that gets <code>503</code> and is closed). Times are in milliseconds, sizes in bytes. A malformed request gets <code>400</code>, an unsupported method <code>501</code>. Bodies are read with <code>Content-Length</code> or <code>Transfer-Encoding: chunked</code> (both at once is <code>400</code>); HTTP/1.1 connections are kept alive unless either side says <code>Connection: close</code>, HTTP/1.0 ones close unless they ask to keep alive; requests on one connection are answered in order. <code>app.run()</code> serves until the program ends; <code>app.start()</code> serves in the background and returns a <code>Running</code> with <code>.port</code> and <code>.stop()</code>.</p>
+      <p>The server runs one task per connection on the scheduler, so a slow client never delays the others. <code>web.server(port: 8080)</code> makes a <code>Server</code> (port 0 picks a free one). It listens on every network interface unless <code>host</code> says otherwise: <code>web.server(port: 8080, host: "127.0.0.1")</code> (or <code>"localhost"</code>) accepts connections from this machine only, and <code>net.listen_on(host, port)</code> does the same for a raw listener. Its limits are fields you can set before starting: <code>max_head</code> (16 KiB of header lines; <code>431</code>), <code>max_line</code> (8 KiB request line; <code>414</code>), <code>max_body</code> (1 MiB; <code>413</code>, answered without reading the body), <code>read_timeout</code> (10 s for a request that has started; <code>408</code>), <code>idle_timeout</code> (5 s between requests on a kept-alive connection; closed silently), <code>write_timeout</code> (10 s) and <code>max_connections</code> (1024; a connection beyond that gets <code>503</code> and is closed). Times are in milliseconds, sizes in bytes. A malformed request gets <code>400</code>, an unsupported method <code>501</code>. Bodies are read with <code>Content-Length</code> or <code>Transfer-Encoding: chunked</code> (both at once is <code>400</code>); HTTP/1.1 connections are kept alive unless either side says <code>Connection: close</code>, HTTP/1.0 ones close unless they ask to keep alive; requests on one connection are answered in order. <code>app.run()</code> serves until the program ends; <code>app.start()</code> serves in the background and returns a <code>Running</code> with <code>.port</code> and <code>.stop()</code>.</p>
       <table>
         <thead><tr><th>Call</th><th>What it does</th></tr></thead>
         <tbody>
@@ -381,7 +385,7 @@ print(conn.protocol())                                <span class="cm">// the pr
 
     <section id="mcp-lib">
       <h2>mcp</h2>
-      <p><code>use mcp</code> (with <code>use ai</code>): <code>mcp.server(name, version)</code> with <code>server.tool(t)</code>, <code>server.resource(uri, name, mime, read)</code>, <code>server.template(pattern, name, mime, read)</code> and <code>server.prompt(name, description, args, build)</code>; <code>server.serve_stdio()</code> and <code>server.serve_http(app, path)</code> (with <code>server.bearer_token</code> and <code>server.origins</code>); <code>server.handle(session, message)</code> for one JSON-RPC message; <code>mcp.connect(url, token)</code> and a client with <code>tools()</code>, <code>call(name, args)</code>, <code>resources()</code>, <code>read(uri)</code>, <code>prompts()</code>, <code>prompt(name, args)</code>, <code>close()</code> and <code>ai_tools()</code>. See <a href="ai.html#mcp">the AI page</a>. Also new: <code>sys.stdin_read(max)</code> reads standard input (blocking). Not available in a bare-metal kernel.</p>
+      <p><code>use mcp</code> (with <code>use ai</code>): <code>mcp.server(name, version)</code> with <code>server.tool(t)</code>, <code>server.resource(uri, name, mime, read)</code>, <code>server.template(pattern, name, mime, read)</code> and <code>server.prompt(name, description, args, build)</code>; <code>server.serve_stdio()</code> and <code>server.serve_http(app, path)</code> (an error without a <code>server.bearer_token</code> unless the web server listens on this machine only; with <code>server.origins</code>); <code>server.handle(session, message)</code> for one JSON-RPC message; <code>mcp.connect(url, token)</code> and a client with <code>tools()</code>, <code>call(name, args)</code>, <code>resources()</code>, <code>read(uri)</code>, <code>prompts()</code>, <code>prompt(name, args)</code>, <code>close()</code> and <code>ai_tools()</code>. See <a href="ai.html#mcp">the AI page</a>. Also new: <code>sys.stdin_read(max)</code> reads standard input (blocking). Not available in a bare-metal kernel.</p>
     </section>
 
     <section id="rag-lib">
@@ -435,7 +439,7 @@ print(conn.protocol())                                <span class="cm">// the pr
   </main>
 
   <footer class="site-footer">
-    Zila Lang — a language with a human face. Docs generated from <code>zila.ebnf</code> and <code>examples/*.br</code>.
+    Zila Lang &middot; A small, readable language that compiles straight to machine code. The examples are checked against <code>examples/*.zila</code>; the grammar is <code>zila.ebnf</code>.
   </footer>
 </body>
 </html>

@@ -365,8 +365,8 @@ fn a_real_chat_when_a_key_is_given() {
 
 #[test]
 fn the_ai_example_builds_and_is_rejected_in_the_kernel() {
-    let src = std::fs::read_to_string("examples/ai.br").unwrap();
-    let exe = build(&src).unwrap_or_else(|e| panic!("examples/ai.br: {}", e));
+    let src = std::fs::read_to_string("examples/ai.zila").unwrap();
+    let exe = build(&src).unwrap_or_else(|e| panic!("examples/ai.zila: {}", e));
     let _ = std::fs::remove_file(exe);
     setup();
     let file = parse_source("package main

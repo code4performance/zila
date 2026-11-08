@@ -1,6 +1,6 @@
 ## Why
 
-`use net` speaks only TCP, so a Brasa program cannot do the things UDP is for: sending small independent messages without a connection (logging and metrics, game and sensor traffic, discovery on a local network, simple request/reply protocols, DNS-style lookups). UDP is the next item of the standard library roadmap, and it fits the way TCP is already done: overlapped Winsock calls waited on through the scheduler's completion port.
+`use net` speaks only TCP, so a Zila Lang program cannot do the things UDP is for: sending small independent messages without a connection (logging and metrics, game and sensor traffic, discovery on a local network, simple request/reply protocols, DNS-style lookups). UDP is the next item of the standard library roadmap, and it fits the way TCP is already done: overlapped Winsock calls waited on through the scheduler's completion port.
 
 ## What Changes
 

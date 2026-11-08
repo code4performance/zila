@@ -67,7 +67,7 @@ Lets a program store values under keys and find them again quickly, so lookups b
 
 #### Scenario: Missing key
 - **WHEN** a program reads `m["nope"]` and the key was never stored
-- **THEN** the program aborts with `abort: <file>.br:<line>: map key not found` and exits with 101
+- **THEN** the program aborts with `abort: <file>.zila:<line>: map key not found` and exits with 101
 
 ### Requirement: Map methods
 A map SHALL provide the methods `has(key)` (bool), `get(key, default)` (the stored value or `default`), `remove(key)` (removes the key if present, otherwise does nothing) and `clear()` (removes every entry), and a `len` property (the number of entries, as for lists and text).

@@ -1,6 +1,6 @@
 ## Purpose
 
-Connects Brasa programs to PostgreSQL with a driver written in Brasa, including encrypted connections, modern authentication and the vector type used for embeddings.
+Connects Zila Lang programs to PostgreSQL with a driver written in Zila Lang, including encrypted connections, modern authentication and the vector type used for embeddings.
 
 ## ADDED Requirements
 

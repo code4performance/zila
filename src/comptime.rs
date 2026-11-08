@@ -45,7 +45,7 @@ pub fn package_source(name: &str, target: crate::codegen_x64::Target) -> Option<
 }
 
 /// Registers the packages a program asks for with `use` that are files next to `path`
-/// (`<dir>/<name>.br`), and theirs in turn. Used by the command line, the formatter and the
+/// (`<dir>/<name>.zila`), and theirs in turn. Used by the command line, the formatter and the
 /// language server so that block names of those packages are known.
 pub fn register_siblings(path: &std::path::Path, src: &str) {
     let dir = match path.parent() {
@@ -58,7 +58,7 @@ pub fn register_siblings(path: &std::path::Path, src: &str) {
         if !done.insert(name.clone()) || crate::codegen_x64::std_source(&name).is_some() {
             continue;
         }
-        let file = dir.join(format!("{}.br", name));
+        let file = dir.join(format!("{}.zila", name));
         if let Ok(text) = std::fs::read_to_string(&file) {
             register_package(&name, &text);
             todo.extend(use_names(&text));

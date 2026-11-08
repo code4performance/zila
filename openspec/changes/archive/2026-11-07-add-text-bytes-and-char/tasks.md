@@ -46,7 +46,7 @@
 
 - [x] 7.1 Update `docs/syntax.html`: a "Text and characters" section that states `len` is bytes (with `"ação".len == 6`), shows `for c in s`, `char`, `c.code`, `char(n)`, `slice` by bytes and the abort, `bytes()`, `byte(i)` and `char_count()`, and says `s[i]` does not exist and why; verify `tests/docs.rs` (navigation, links, anchors) passes
 - [x] 7.2 Update `docs/stdlib.html` (`reverse`, `pad_*`, `chars`, `from_chars`, `from_bytes`; remove "Text is bytes" paragraph and replace it with the model), `docs/examples.html` (the new example), and `README.md` (status table and a one-line note on the `s[i]` breaking change); verify `tests/docs.rs` and that no page still says `chr` or shows a text index
-- [x] 7.3 Run `brasa fmt` over the migrated `.br` files and the whole docs/test suite one final time; verify `brasa fmt --check` reports nothing and `openspec validate add-text-bytes-and-char --strict` passes
+- [x] 7.3 Run `zila fmt` over the migrated `.br` files and the whole docs/test suite one final time; verify `zila fmt --check` reports nothing and `openspec validate add-text-bytes-and-char --strict` passes
 
 ## Implementation notes
 

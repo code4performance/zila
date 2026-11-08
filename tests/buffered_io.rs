@@ -404,7 +404,7 @@ end
 
 #[test]
 fn the_lines_example_runs() {
-    let src = std::fs::read_to_string("examples/lines.br").unwrap();
+    let src = std::fs::read_to_string("examples/lines.zila").unwrap();
     let Some(out) = native(&src) else { return };
     let _ = std::fs::remove_file("lines-example.txt");
     assert!(out.contains("lines: 3") && out.contains("longest: ação"), "{}", out);

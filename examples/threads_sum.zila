@@ -1,7 +1,7 @@
 // Threads: a parallel sum. Workers add slices of a shared list and send their partial sums on
 // a channel. The output is the same every run.
 //
-//   zila-parse examples/threads_sum.br -o threads_sum.exe
+//   zila-parse examples/threads_sum.zila -o threads_sum.exe
 
 package main
 

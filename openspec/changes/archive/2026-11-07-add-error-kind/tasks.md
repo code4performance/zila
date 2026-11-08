@@ -21,7 +21,7 @@
 
 ## 4. Standard library kinds
 
-- [x] 4.1 `std/sys.br` and `std/sys.linux.br`: add `kind_of(code)` and `error_for(code, what)` using the tables in the design (Windows codes, Linux errno), keeping the `describe` text. Verify: unit-style Brasa test calling `sys.error_for` with 2 (Windows) / 2 (Linux), 5/13, 10061/111 and an unmapped code, checking `kind` and that `message` equals `sys.describe` of the same input
+- [x] 4.1 `std/sys.br` and `std/sys.linux.br`: add `kind_of(code)` and `error_for(code, what)` using the tables in the design (Windows codes, Linux errno), keeping the `describe` text. Verify: unit-style Zila Lang test calling `sys.error_for` with 2 (Windows) / 2 (Linux), 5/13, 10061/111 and an unmapped code, checking `kind` and that `message` equals `sys.describe` of the same input
 - [x] 4.2 `std/fs.br` and `std/fs.linux.br`: replace `error(sys.describe(...))` with `sys.error_for(...)`; `end of file` -> `UnexpectedEof`; closed handle -> `Closed`. Verify: scenarios "Missing file" and "End of input" on Windows and Linux (`tests/buffered_io.rs`, `tests/linux.rs`), existing messages unchanged
 - [x] 4.3 `std/net.br`, `std/net.linux.br`: connect/listen/udp/accept/read/write through `error_for`; unresolved names `NotFound`; closed socket and connection `Closed`; oversized datagram `InvalidInput`; `end of file` `UnexpectedEof`; the Linux DNS client's `no answer from` -> `Timeout`. Verify: scenarios "Refused connection" and "Port in use" in `tests/async.rs`-style loopback tests (run the new ones alone, `cargo test --test error_kinds`; async.rs is skipped in routine runs)
 - [x] 4.4 `std/task.br`, `std/task.linux.br`: confirm the codes that reach `error_for` (cancelled 995/125, timeouts) and map any task-level failure; if no `error(...)` is produced there, record that in the commit message and change nothing. Verify: `grep -n "error(" std/task*.br` result is recorded and the timeout/cancel cases are covered by a test through `net` (done: `grep -n "error(" std/task*.br` finds nothing; `timeout(ms, f)` now fails with `Timeout` (`future.timed_out()`), tested through `net.udp` recv; 995/125 `Cancelled` and 10060/110 `Timeout` are checked through `sys.error_for`)
@@ -33,7 +33,7 @@
 
 - [x] 5.1 `docs/syntax.html` (Error handling): kind, message, cause, constructors, `context`, `is`, `full_message`, the `try` rule, custom kinds, `if e.kind == ...` instead of `match`. Verify: `cargo test --test docs` (code samples are compiled)
 - [x] 5.2 `docs/stdlib.html`: a new `errors` section (standard kinds, `errors.kind`) and the kind returned by each function group (fs, net, tls, text parsers); update the interpreter limits note only if `remove-interpreter` has not landed. Verify: `cargo test --test docs`
-- [x] 5.3 `README.md` (the error bullets and the `error("cannot parse...")` sample if shown with kinds) and `brasa.ebnf` semantic notes: replace "error("message") creates an error; e.message reads it" with the three fields, the constructors and the `try` rule. Verify: `cargo test --test docs` and a read-through that README samples still compile
+- [x] 5.3 `README.md` (the error bullets and the `error("cannot parse...")` sample if shown with kinds) and `zila.ebnf` semantic notes: replace "error("message") creates an error; e.message reads it" with the three fields, the constructors and the `try` rule. Verify: `cargo test --test docs` and a read-through that README samples still compile
 
 ## 6. Tests and validation
 

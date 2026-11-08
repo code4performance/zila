@@ -8,7 +8,7 @@
 - [x] 1.7 Verify that `int * int` wraps at 32 bits before widening and that `long(a) * long(b)` is exact, with a test
 - [x] 1.4 Verify `int(x)`, `long(x)` and `float(x)` as conversions (float to `int` out of range still panics `float out of range` at the i32 limits) and that `c.int` / `c.long` keep C sizes; add tests in `tests/codegen.rs` and `tests/floats.rs`
 
-## 2. Rewrite Brasa code
+## 2. Rewrite Zila Lang code
 
 - [x] 2.1 Review `std/*.br` and change every place a value can exceed `i32` (file sizes and offsets in `fs`, timestamps, hashes in `set`/maps, byte counters, handles) to `long` or `usize`, leaving lengths and indices as `int`, and list every `int` accumulator (hash functions, `format` thousands, time and size arithmetic) in the commit message; verify with the full test suite excluding `tests/async.rs` plus one test per library that exceeds 2^31
 - [x] 2.2 Do the same for `os/boot.br`, `os/kernel.br` and `examples/*.br`; verify with `tests/os.rs` and by compiling every example
@@ -16,7 +16,7 @@
 
 ## 3. Docs and grammar
 
-- [x] 3.1 Fix `brasa.ebnf` semantic notes (literals default to `int` = `i32`; `long` = `i64`; `float` = `f64`) and `docs/syntax.html` (remove "int (64-bit)", document the aliases, `long`, `usize` and the 2 GB note); verify by grep that no doc says `int` is 64-bit
+- [x] 3.1 Fix `zila.ebnf` semantic notes (literals default to `int` = `i32`; `long` = `i64`; `float` = `f64`) and `docs/syntax.html` (remove "int (64-bit)", document the aliases, `long`, `usize` and the 2 GB note); verify by grep that no doc says `int` is 64-bit
 - [x] 3.2 Update `README.md`, `docs/stdlib.html`, `docs/native.html` and `docs/examples.html` where they state sizes or use `int` for large values; verify the pages and the docs-sync checks (`docs-sync` spec) pass
 
 ## Notes (implementation)

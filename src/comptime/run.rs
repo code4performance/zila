@@ -607,7 +607,7 @@ pub fn run_calls(uni: &super::reflect::Universe, main_module: &str, specs: &[Cal
         let any_fail = got.iter().any(|g| matches!(g, Some(Outcome::Fail { .. })));
         for (n, slot) in got.into_iter().enumerate() {
             let s = &renumbered[n];
-            let at = format!("{}.br:{}:", s.site_module, s.site_line);
+            let at = format!("{}.zila:{}:", s.site_module, s.site_line);
             match slot {
                 Some(Outcome::Ok(text)) => {
                     if text.len() > OUTPUT_CAP {

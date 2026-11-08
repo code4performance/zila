@@ -1,6 +1,6 @@
 // tree: shared objects with `new`, and weak parent links that do not leak.
 //
-//   zila-parse examples/tree.br -o tree.exe
+//   zila-parse examples/tree.zila -o tree.exe
 //
 // `new Node{ ... }` makes one shared, reference-counted object of type Rc<Node>:
 // copying an Rc shares the object. A child that points back at its parent with an
@@ -33,8 +33,8 @@ end
 func build() -> int
     let root = new Node{ name: "root" }
     let src = add_child(root, "src")
-    add_child(src, "main.br")
-    add_child(src, "util.br")
+    add_child(src, "main.zila")
+    add_child(src, "util.zila")
     add_child(root, "docs")
     print(path(src.children[1]))
     return root.children.len

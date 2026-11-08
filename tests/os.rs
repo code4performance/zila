@@ -9,8 +9,8 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 fn image() -> Vec<u8> {
-    let boot = parse_source(&std::fs::read_to_string("os/boot.br").unwrap()).unwrap();
-    let kernel = parse_source(&std::fs::read_to_string("os/kernel.br").unwrap()).unwrap();
+    let boot = parse_source(&std::fs::read_to_string("os/boot.zila").unwrap()).unwrap();
+    let kernel = parse_source(&std::fs::read_to_string("os/kernel.zila").unwrap()).unwrap();
     build_os(&boot, &kernel).unwrap()
 }
 
@@ -28,7 +28,7 @@ fn image_has_a_valid_boot_sector() {
 
 #[test]
 fn kernel_without_console_write_is_rejected() {
-    let boot = parse_source(&std::fs::read_to_string("os/boot.br").unwrap()).unwrap();
+    let boot = parse_source(&std::fs::read_to_string("os/boot.zila").unwrap()).unwrap();
     let kernel = parse_source("package main\nfunc main()\nend\n").unwrap();
     let e = build_os(&boot, &kernel).unwrap_err();
     assert!(e.contains("console_write"), "{}", e);
@@ -36,7 +36,7 @@ fn kernel_without_console_write_is_rejected() {
 
 #[test]
 fn windows_only_libraries_are_rejected() {
-    let boot = parse_source(&std::fs::read_to_string("os/boot.br").unwrap()).unwrap();
+    let boot = parse_source(&std::fs::read_to_string("os/boot.zila").unwrap()).unwrap();
     let kernel = parse_source("package main\nuse ui\nfunc console_write(s: text)\nend\nfunc main()\nend\n").unwrap();
     let e = build_os(&boot, &kernel).unwrap_err();
     assert!(e.contains("bare-metal"), "{}", e);
@@ -104,7 +104,7 @@ fn boots_in_qemu_and_runs_shell_commands() {
 
 #[test]
 fn kernels_cannot_use_async_or_the_windows_libraries() {
-    let boot = parse_source(&std::fs::read_to_string("os/boot.br").unwrap()).unwrap();
+    let boot = parse_source(&std::fs::read_to_string("os/boot.zila").unwrap()).unwrap();
     for body in [
         "async func f() -> int\n    return 1\nend\n",
         "func g() -> int\n    return await sleep(1)\nend\n",
@@ -122,8 +122,8 @@ fn kernels_cannot_use_async_or_the_windows_libraries() {
 
 #[test]
 fn the_kernel_supplies_its_own_heap() {
-    // the heap is `#[allocator]` code in os/kernel.br, so the runtime's built-in size-class heap is gone
-    let kernel = parse_source(&std::fs::read_to_string("os/kernel.br").unwrap()).unwrap();
+    // the heap is `#[allocator]` code in os/kernel.zila, so the runtime's built-in size-class heap is gone
+    let kernel = parse_source(&std::fs::read_to_string("os/kernel.zila").unwrap()).unwrap();
     let asm = zila::codegen_x64::generate_asm_for(&kernel, &zila::codegen_x64::CompileOptions::default(), zila::codegen_x64::Target::Bare).unwrap();
     assert!(asm.contains("call B_main_heap_alloc") && asm.contains("call B_main_heap_free"));
     assert!(!asm.contains("rt_freelists") && !asm.contains("rt_brk"));

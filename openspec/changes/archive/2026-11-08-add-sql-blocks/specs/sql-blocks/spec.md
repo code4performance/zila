@@ -1,6 +1,6 @@
 ## Purpose
 
-Write SQL inside a Brasa program as raw lines, checked as far as the dialect's lexical rules allow at compile time, with every value passed as a bound parameter and with the dialect described by a declaration so that more databases can be added without changing the compiler.
+Write SQL inside a Zila Lang program as raw lines, checked as far as the dialect's lexical rules allow at compile time, with every value passed as a bound parameter and with the dialect described by a declaration so that more databases can be added without changing the compiler.
 
 ## ADDED Requirements
 

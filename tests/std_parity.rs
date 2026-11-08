@@ -1,5 +1,5 @@
-//! The Linux layer of a standard library (`std/<name>.linux.br`) must offer the same public
-//! surface as the Windows one (`std/<name>.br`): a program that compiles on one target must
+//! The Linux layer of a standard library (`std/<name>.linux.zila`) must offer the same public
+//! surface as the Windows one (`std/<name>.zila`): a program that compiles on one target must
 //! compile on the other (spec `static-linking`).
 
 use zila::ast::*;
@@ -43,14 +43,14 @@ fn surface(src: &str) -> BTreeMap<String, String> {
 }
 
 /// The file of one layer of a library: the core ones are in `std/`, the others are packages whose
-/// Linux layer is `packages/<lib>/linux/<lib>.br`.
+/// Linux layer is `packages/<lib>/linux/<lib>.zila`.
 fn layer(lib: &str, linux: bool) -> String {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let pkg = root.join("packages").join(lib);
     let path = if pkg.is_dir() {
-        if linux { pkg.join("linux").join(format!("{}.br", lib)) } else { pkg.join(format!("{}.br", lib)) }
+        if linux { pkg.join("linux").join(format!("{}.zila", lib)) } else { pkg.join(format!("{}.zila", lib)) }
     } else {
-        root.join("std").join(if linux { format!("{}.linux.br", lib) } else { format!("{}.br", lib) })
+        root.join("std").join(if linux { format!("{}.linux.zila", lib) } else { format!("{}.zila", lib) })
     };
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {}", path.display(), e))
 }
@@ -63,7 +63,7 @@ fn differences(lib: &str) -> BTreeSet<String> {
     for (k, v) in &win {
         match lin.get(k) {
             None => {
-                out.insert(format!("{}: only in {}.br: {}", lib, lib, k));
+                out.insert(format!("{}: only in {}.zila: {}", lib, lib, k));
             }
             Some(o) if o != v => {
                 out.insert(format!("{}: signature: {}", lib, k));
@@ -73,7 +73,7 @@ fn differences(lib: &str) -> BTreeSet<String> {
     }
     for k in lin.keys() {
         if !win.contains_key(k) {
-            out.insert(format!("{}: only in {}.linux.br: {}", lib, lib, k));
+            out.insert(format!("{}: only in {}.linux.zila: {}", lib, lib, k));
         }
     }
     out
@@ -84,7 +84,7 @@ fn libraries() -> Vec<String> {
     let mut libs: Vec<String> = std::fs::read_dir(root.join("std"))
         .unwrap()
         .filter_map(|e| e.ok())
-        .filter_map(|e| e.file_name().to_str().and_then(|n| n.strip_suffix(".linux.br")).map(|n| n.to_string()))
+        .filter_map(|e| e.file_name().to_str().and_then(|n| n.strip_suffix(".linux.zila")).map(|n| n.to_string()))
         .collect();
     for e in std::fs::read_dir(root.join("packages")).unwrap().flatten() {
         if e.path().join("linux").is_dir() {

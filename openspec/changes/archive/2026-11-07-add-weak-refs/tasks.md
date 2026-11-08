@@ -1,6 +1,6 @@
 ## 1. Language surface
 
-- [x] 1.1 Change `new_expr` in `brasa.ebnf` to `'new' record_lit` and make `src/parser.rs` (the `Tok::Kw("new")` arm) parse a record literal; change `ExprKind::New` in `src/ast.rs` accordingly; verify with a parse test in `tests/parse.rs` that `new Node{ value: 1 }` parses and `new Node` is rejected with a message asking for a record literal
+- [x] 1.1 Change `new_expr` in `zila.ebnf` to `'new' record_lit` and make `src/parser.rs` (the `Tok::Kw("new")` arm) parse a record literal; change `ExprKind::New` in `src/ast.rs` accordingly; verify with a parse test in `tests/parse.rs` that `new Node{ value: 1 }` parses and `new Node` is rejected with a message asking for a record literal
 - [x] 1.2 Reserve the type names `Rc` and `Weak` and the builtins `weak` and `upgrade` in `src/lsp.rs` and `src/fmt.rs` where they list types or builtins; verify `tests/lsp.rs` and `tests/fmt.rs` pass and a user type named `Rc` fails with a duplicate-definition error
 
 ## 2. Native compiler: Rc
@@ -33,9 +33,9 @@
 
 ## 7. Documentation and examples
 
-- [x] 7.1 Add `examples/tree.br` (a tree whose children point to the parent with `Weak<Node>`, printing `live_objects()` before and after) and a section on `docs/examples.html` generated with `brasa-parse --docs`; verify the example builds and prints the documented output
+- [x] 7.1 Add `examples/tree.br` (a tree whose children point to the parent with `Weak<Node>`, printing `live_objects()` before and after) and a section on `docs/examples.html` generated with `zila-parse --docs`; verify the example builds and prints the documented output
 - [x] 7.2 Update `docs/native.html`: replace the cycle bullet with the `Rc`/`Weak` explanation and the strong-cycle caveat, document the memory layout (cell, drop order), and remove `new` from the not-yet-supported list; update the `new` paragraph in `docs/syntax.html`; verify `cargo test --test docs` passes and every code sample compiles
-- [x] 7.3 Update `README.md` (replace "Reference cycles are not collected: avoid building them", add `new`/`Weak` to the memory bullets and the status list) and the `new_expr` note in `brasa.ebnf`; verify `tests/docs.rs` still passes
+- [x] 7.3 Update `README.md` (replace "Reference cycles are not collected: avoid building them", add `new`/`Weak` to the memory bullets and the status list) and the `new_expr` note in `zila.ebnf`; verify `tests/docs.rs` still passes
 
 ## Implementation notes
 

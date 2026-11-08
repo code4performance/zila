@@ -145,7 +145,7 @@ fn sql_is_still_an_ordinary_identifier() {
 #[test]
 fn mistakes_are_reported_at_compile_time_with_their_line() {
     let e = compile_error(&program("    let q = sql postgres\n        select 1\n        where name = 'abc\n    end\n"));
-    assert!(e.contains("string that begins here is not closed") && e.contains(".br:"), "{}", e);
+    assert!(e.contains("string that begins here is not closed") && e.contains(".zila:"), "{}", e);
     let e = compile_error(&program("    let q = sql postgres\n        select 1; select 2\n    end\n"));
     assert!(e.contains("one statement per block"), "{}", e);
     let e = compile_error(&program("    let q = sql postgres\n        where id = $1\n    end\n"));
@@ -270,17 +270,17 @@ fn a_package_can_declare_a_new_dialect_without_any_change_to_the_compiler() {
     std::fs::create_dir_all(dir.join("lite")).unwrap();
     std::fs::write(dir.join("zila.toml"), "[package]\nname = \"app\"\nversion = \"0.1.0\"\n").unwrap();
     std::fs::write(
-        dir.join("lite").join("lite.br"),
+        dir.join("lite").join("lite.zila"),
         "package lite\n\n#[sql_dialect(\"sqlite\")]\n#[sql_placeholder(\"?\")]\n#[sql_string(\"'\")]\n#[sql_ident(\"[\", \"]\")]\n#[sql_ident(\"`\")]\n#[sql_line_comment(\"--\")]\npub type Dialect = record\nend\n",
     )
     .unwrap();
     let main = "package main\n\nuse db\nuse lite\n\nfunc main()\n    let id = 7\n    let q = sql sqlite\n        select * from [t] where a = {id} and `b` = {id + 1} -- {not a hole}\n    end\n    print(\"{q.dialect}|{q.text}|{q.args.len}\")\nend\n";
-    std::fs::write(dir.join("main.br"), main).unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_zila-parse")).arg("main.br").arg("--run").current_dir(&dir).output().unwrap();
+    std::fs::write(dir.join("main.zila"), main).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_zila-parse")).arg("main.zila").arg("--run").current_dir(&dir).output().unwrap();
     let text = String::from_utf8_lossy(&out.stdout).replace('\r', "") + &String::from_utf8_lossy(&out.stderr).replace('\r', "");
     // a hand-written `?` is refused by the profile
-    std::fs::write(dir.join("main.br"), main.replace("{id + 1}", "?")).unwrap();
-    let bad = Command::new(env!("CARGO_BIN_EXE_zila-parse")).arg("main.br").arg("--asm").current_dir(&dir).output().unwrap();
+    std::fs::write(dir.join("main.zila"), main.replace("{id + 1}", "?")).unwrap();
+    let bad = Command::new(env!("CARGO_BIN_EXE_zila-parse")).arg("main.zila").arg("--asm").current_dir(&dir).output().unwrap();
     let bad_text = String::from_utf8_lossy(&bad.stderr).to_string();
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(text, "sqlite|select * from [t] where a = ? and `b` = ? -- {not a hole}|2\n");

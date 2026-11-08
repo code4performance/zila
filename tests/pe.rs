@@ -8,7 +8,7 @@ use zila::parse_source;
 fn programs() -> Vec<(String, String)> {
     let mut v = Vec::new();
     let ex = std::fs::read_dir("examples").unwrap();
-    let mut names: Vec<String> = ex.filter_map(|e| e.ok()).map(|e| format!("examples/{}", e.file_name().to_string_lossy())).filter(|p| p.ends_with(".br")).collect();
+    let mut names: Vec<String> = ex.filter_map(|e| e.ok()).map(|e| format!("examples/{}", e.file_name().to_string_lossy())).filter(|p| p.ends_with(".zila")).collect();
     names.sort();
     for p in names {
         v.push((p.clone(), std::fs::read_to_string(&p).unwrap()));
@@ -202,7 +202,7 @@ fn a_bad_asm_block_names_the_file_and_line_and_leaves_nothing() {
     let src = "package main\nfunc main()\n    let x = 1\n    unsafe\n        asm\n            frobnicate rax\n        end\n    end\nend\n";
     let _ = std::fs::remove_file(scratch("badasm.exe"));
     let e = build(src, "badasm.exe").unwrap_err();
-    assert!(e.starts_with("main.br:5:"), "{}", e);
+    assert!(e.starts_with("main.zila:5:"), "{}", e);
     assert!(e.contains("frobnicate"), "{}", e);
     assert!(!scratch("badasm.exe").exists(), "no output file is left");
     assert_eq!(temp_dirs(), before, "no temporary directory is left");
@@ -210,7 +210,7 @@ fn a_bad_asm_block_names_the_file_and_line_and_leaves_nothing() {
 
 #[test]
 fn executables_are_small() {
-    for (p, limit) in [("examples/hello.br", 8 * 1024), ("examples/ui.br", 68 * 1024)] {
+    for (p, limit) in [("examples/hello.zila", 8 * 1024), ("examples/ui.zila", 68 * 1024)] {
         let src = std::fs::read_to_string(p).unwrap();
         let name = format!("size_{}.exe", p.replace('/', "_"));
         let b = build(&src, &name).unwrap_or_else(|e| panic!("{}: {}", p, e));
@@ -223,7 +223,7 @@ fn the_compiler_needs_no_visual_studio() {
     // a build with an empty environment: no PATH, no vcvars, no Visual Studio variables
     let exe = scratch("clean_env.exe");
     let _ = std::fs::remove_file(&exe);
-    let src = scratch("clean_env.br");
+    let src = scratch("clean_env.zila");
     std::fs::write(&src, "package main\nfunc main()\n    print(\"hello\")\nend\n").unwrap();
     let out = std::process::Command::new(env!("CARGO_BIN_EXE_zila-parse"))
         .env_clear()

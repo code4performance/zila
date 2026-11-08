@@ -177,7 +177,7 @@ fn sorted_collections_do_not_leak() {
 
 #[test]
 fn the_sorted_example_runs() {
-    let src = std::fs::read_to_string("examples/sorted.br").unwrap();
+    let src = std::fs::read_to_string("examples/sorted.zila").unwrap();
     if let Some(out) = native(&src) {
         assert!(out.contains("leaderboard"), "{}", out);
     }

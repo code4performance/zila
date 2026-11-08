@@ -53,7 +53,7 @@ An interface used as the type of a variable, parameter, field, element or result
 - **THEN** compilation fails with an error suggesting `func show<T: Printable>(x: T)`
 
 ### Requirement: Built-in types as arguments
-A built-in type MAY be a type argument. It SHALL satisfy a bound when methods with a matching receiver exist for it, which Brasa code can declare (`func (n: int) to_text() -> text`).
+A built-in type MAY be a type argument. It SHALL satisfy a bound when methods with a matching receiver exist for it, which Zila Lang code can declare (`func (n: int) to_text() -> text`).
 
 #### Scenario: Method on a built-in type
 - **WHEN** a program declares `func (n: int) to_text() -> text` and calls `show(42)` with `T: Printable`

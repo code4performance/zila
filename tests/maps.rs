@@ -67,7 +67,7 @@ print("{m["nope"]}")
 print("after")"#,
     );
     let Some((out, code)) = run(&src) else { return };
-    assert_eq!(out, "before\nabort: main.br:11: map key not found\n");
+    assert_eq!(out, "before\nabort: main.zila:11: map key not found\n");
     assert_eq!(code, 101);
 }
 
@@ -319,14 +319,14 @@ cleared 0
 ";
     // the program prints these lines and stops with an abort
     if let Some((native, code)) = run(&src) {
-        assert_eq!(native, format!("{}abort: main.br:29: map key not found\n", expected));
+        assert_eq!(native, format!("{}abort: main.zila:29: map key not found\n", expected));
         assert_eq!(code, 101);
     }
 }
 
 #[test]
 fn a_bare_metal_kernel_rejects_maps() {
-    let boot = parse_source(&std::fs::read_to_string("os/boot.br").unwrap()).unwrap();
+    let boot = parse_source(&std::fs::read_to_string("os/boot.zila").unwrap()).unwrap();
     let kernel = parse_source("package main\nfunc console_write(s: text)\nend\nfunc main()\n    let m: Map<text, int> = {}\nend\n").unwrap();
     let e = zila::codegen_x64::build_os(&boot, &kernel).unwrap_err();
     assert!(e.contains("maps") && e.contains("bare-metal"), "{}", e);
@@ -334,7 +334,7 @@ fn a_bare_metal_kernel_rejects_maps() {
 
 #[test]
 fn the_maps_example_builds_and_prints_what_the_docs_say() {
-    let src = std::fs::read_to_string("examples/maps.br").unwrap();
+    let src = std::fs::read_to_string("examples/maps.zila").unwrap();
     let Some((out, code)) = run(&src) else { return };
     assert_eq!(out, "red: 3\ngreen: 2\nblue: 1\n2 prices, apple costs 3\nno pears today\nkiwi costs 0\n");
     assert_eq!(code, 0);

@@ -155,7 +155,7 @@ fn sockets_do_not_leak() {
 
 #[test]
 fn the_udp_example_runs() {
-    let src = std::fs::read_to_string("examples/udp.br").unwrap();
+    let src = std::fs::read_to_string("examples/udp.zila").unwrap();
     let Some(out) = run(&src) else { return };
     assert!(out.contains("echoed: hello udp") && out.contains("3 datagrams"), "{}", out);
 }

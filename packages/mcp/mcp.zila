@@ -11,7 +11,7 @@
 //
 //     var app = web.server(port: 8080)
 //     server.bearer_token = "secret"
-//     server.serve_http(app, "/mcp")                // Streamable HTTP on a `web` server
+//     try server.serve_http(app, "/mcp")            // Streamable HTTP on a `web` server (127.0.0.1)
 //     app.run()
 //
 //     let client = try mcp.connect("http://localhost:8080/mcp", "secret")
@@ -43,6 +43,7 @@
 package mcp
 
 use web
+use net
 use json
 use ai
 use errors
@@ -755,12 +756,33 @@ func http_delete(s: Server, req: web.Request) -> web.Response or error
     return web.text(200, "")
 end
 
+// Is `host` an address that only this machine can reach?
+func is_loopback(host: text) -> bool
+    if host == "localhost"
+        return true
+    end
+    let ip = net.parse_ip(host)
+    return ip >= 0 and (ip >> 24) == 127
+end
+
 // Attaches the server to a `web` application at `path`: POST carries the JSON-RPC messages, GET
 // is answered 405 (this version sends no messages of its own) and DELETE ends a session.
-pub func (s: Server) serve_http(ref app: web.Server, path: text)
+//
+// A tool server is a way to run code for whoever can reach it, so it listens on this machine only
+// by default: an application left on every interface (`app.host` empty) is moved to 127.0.0.1.
+// Serving on any other address needs `bearer_token`, which must be set before this call; without it
+// the call is an error and nothing is attached. Set `app.host` before this call too.
+pub func (s: Server) serve_http(ref app: web.Server, path: text) -> error
+    if app.host == ""
+        app.host = "127.0.0.1"
+    end
+    if not is_loopback(app.host) and s.bearer_token == ""
+        return error(errors.InvalidInput, "refusing to serve MCP on {app.host} without a bearer_token: set `bearer_token` first, or keep the web server on 127.0.0.1")
+    end
     app.post(path, func(req) return http_post(s, req) end)
     app.delete(path, func(req) return http_delete(s, req) end)
     app.get(path, func(req) return refuse(405, "this server does not stream messages to the client").with_header("Allow", "POST, DELETE") end)
+    return
 end
 
 // ---------------------------------------------------------------------------

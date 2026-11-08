@@ -62,18 +62,18 @@ test('the handshake completes and the server stops cleanly', { skip }, async () 
 test('a good file has no diagnostics, a bad one has one, and fixing it clears it', { skip }, async () => {
   const c = make();
   await c.start();
-  c.open('file:///a.br', GOOD, 1);
+  c.open('file:///a.zila', GOOD, 1);
   assert.deepStrictEqual((await c.next()).list, []);
-  c.change('file:///a.br', BAD, 2);
+  c.change('file:///a.zila', BAD, 2);
   const bad = await c.next();
   assert.strictEqual(bad.list.length, 1);
   assert.strictEqual(bad.list[0].range.start.line, 3);
   assert.strictEqual(bad.list[0].severity, 1);
   assert.strictEqual(bad.list[0].source, 'zila');
   assert.strictEqual(bad.version, 2);
-  c.change('file:///a.br', GOOD, 3);
+  c.change('file:///a.zila', GOOD, 3);
   assert.deepStrictEqual((await c.next()).list, []);
-  c.close('file:///a.br');
+  c.close('file:///a.zila');
   assert.deepStrictEqual((await c.next()).list, []);
   await c.stop();
 });
@@ -81,7 +81,7 @@ test('a good file has no diagnostics, a bad one has one, and fixing it clears it
 test('documents opened before the server is ready are sent once it is', { skip }, async () => {
   const c = make();
   const started = c.start();
-  c.open('file:///early.br', BAD, 1);
+  c.open('file:///early.zila', BAD, 1);
   await started;
   assert.strictEqual((await c.next()).list.length, 1);
   await c.stop();
@@ -90,11 +90,11 @@ test('documents opened before the server is ready are sent once it is', { skip }
 test('typing bursts are sent once after the debounce', { skip }, async () => {
   const c = make({ debounce: 60 });
   await c.start();
-  c.open('file:///burst.br', GOOD, 1);
+  c.open('file:///burst.zila', GOOD, 1);
   await c.next();
-  c.change('file:///burst.br', BAD, 2);
-  c.change('file:///burst.br', GOOD, 3);
-  c.change('file:///burst.br', BAD, 4);
+  c.change('file:///burst.zila', BAD, 2);
+  c.change('file:///burst.zila', GOOD, 3);
+  c.change('file:///burst.zila', BAD, 4);
   const d = await c.next();
   assert.strictEqual(d.version, 4);
   assert.strictEqual(d.list.length, 1);
@@ -104,28 +104,28 @@ test('typing bursts are sent once after the debounce', { skip }, async () => {
 test('formatting returns one edit for an unformatted file and none for a formatted one', { skip }, async () => {
   const c = make();
   await c.start();
-  c.open('file:///f.br', UNFORMATTED, 1);
+  c.open('file:///f.zila', UNFORMATTED, 1);
   await c.next();
-  const edits = await c.format('file:///f.br');
+  const edits = await c.format('file:///f.zila');
   assert.strictEqual(edits.length, 1);
   assert.strictEqual(edits[0].newText, FORMATTED);
   assert.deepStrictEqual(edits[0].range.start, { line: 0, character: 0 });
-  c.change('file:///f.br', FORMATTED, 2, true);
+  c.change('file:///f.zila', FORMATTED, 2, true);
   await c.next();
-  assert.strictEqual(await c.format('file:///f.br'), null);
-  c.change('file:///f.br', BAD, 3, true);
+  assert.strictEqual(await c.format('file:///f.zila'), null);
+  c.change('file:///f.zila', BAD, 3, true);
   await c.next();
-  assert.strictEqual(await c.format('file:///f.br'), null);
+  assert.strictEqual(await c.format('file:///f.zila'), null);
   await c.stop();
 });
 
 test('formatting flushes a pending change first', { skip }, async () => {
   const c = make({ debounce: 5000 });
   await c.start();
-  c.open('file:///p.br', GOOD, 1);
+  c.open('file:///p.zila', GOOD, 1);
   await c.next();
-  c.change('file:///p.br', UNFORMATTED, 2);
-  const edits = await c.format('file:///p.br');
+  c.change('file:///p.zila', UNFORMATTED, 2);
+  const edits = await c.format('file:///p.zila');
   assert.strictEqual(edits[0].newText, FORMATTED);
   await c.stop();
 });
@@ -176,7 +176,7 @@ test('a crashing server is restarted three times with the open documents, then r
   let stopped = false;
   const c = new Client({ command: process.execPath, args: [file], onStopped: () => (stopped = true) });
   await c.start();
-  c.open('file:///x.br', GOOD, 1);
+  c.open('file:///x.zila', GOOD, 1);
   for (let i = 0; i < 100 && !stopped; i++) await new Promise((r) => setTimeout(r, 50));
   assert.strictEqual(stopped, true);
   // the first start plus three restarts

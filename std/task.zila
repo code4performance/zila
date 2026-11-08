@@ -22,7 +22,7 @@
 //
 // The compiler lowers `spawn f(x)` to `task.start(func() f(x) end)` and
 // `ch.send(v)` / `ch.receive()` / `ch.close()` to the functions below.
-// `std/future.br` builds `async`/`await` on `park`, `wake` and `add_timer`.
+// `std/future.zila` builds `async`/`await` on `park`, `wake` and `add_timer`.
 // =====================================================================
 
 package task
@@ -117,7 +117,7 @@ pub type Sched = record
     // Timers, ascending by deadline (milliseconds of the system tick count).
     timer_at: []long
     timer_run: []func()
-    // Operations the operating system is still working on (see std/fs.br, std/net.br).
+    // Operations the operating system is still working on (see std/fs.zila, std/net.zila).
     pending_io: long
     iocp: usize
     pub ops: []Op
@@ -131,7 +131,7 @@ type Place = record
     pub s: Sched
 end
 
-// `multi` is 1 once the program has started a thread (std/thread.br): from then on the
+// `multi` is 1 once the program has started a thread (std/thread.zila): from then on the
 // scheduler of the calling thread is found through thread-local storage and channels lock.
 var main_sched: Sched
 var multi: long = 0

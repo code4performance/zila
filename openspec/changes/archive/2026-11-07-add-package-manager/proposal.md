@@ -1,13 +1,13 @@
 ## Why
 
-Brasa programs can only `use` the libraries embedded in the compiler (`std/`), and a program is a single source file. There is no way to share code between projects, which blocks the ecosystem the language needs (JSON and web frameworks are planned as libraries). GOVERNANCE.md already says the package manager depends on foundational decisions (visibility, memory and error models) and that projects declare an `edition` from 1.0. This change adds the package manager now, while breaking changes are still allowed, with the smallest design that works: dependencies are git repositories pinned by commit, versions are semver with minimal version selection, and there is no registry.
+Zila Lang programs can only `use` the libraries embedded in the compiler (`std/`), and a program is a single source file. There is no way to share code between projects, which blocks the ecosystem the language needs (JSON and web frameworks are planned as libraries). GOVERNANCE.md already says the package manager depends on foundational decisions (visibility, memory and error models) and that projects declare an `edition` from 1.0. This change adds the package manager now, while breaking changes are still allowed, with the smallest design that works: dependencies are git repositories pinned by commit, versions are semver with minimal version selection, and there is no registry.
 
 ## What Changes
 
-- A **manifest** `brasa.toml` (a small, strict subset of TOML) at the project root: `[package]` (name, version, `edition` reserved) and one `[dependencies.<name>]` table per dependency (`git`, `version`).
-- A **lock file** `brasa.lock`, written by the tool and committed: for every selected package its module path, version, git commit and a SHA-256 tree hash.
-- **Commands** added to `brasa-parse`, in the style of `--fmt` and `--test`: `--init`, `--add <git-url>[@version]`, `--fetch`, `--tidy`, `--update [name]`, plus the modifiers `--as <name>` and `--offline`. Only `--add`, `--fetch` and `--update` use the network. A normal build never does.
-- A **cache** outside the project (`$BRASA_HOME`, default `~/.brasa`) holding one checkout per package version and commit, verified by hash on every build; builds work offline from it.
+- A **manifest** `zila.toml` (a small, strict subset of TOML) at the project root: `[package]` (name, version, `edition` reserved) and one `[dependencies.<name>]` table per dependency (`git`, `version`).
+- A **lock file** `zila.lock`, written by the tool and committed: for every selected package its module path, version, git commit and a SHA-256 tree hash.
+- **Commands** added to `zila-parse`, in the style of `--fmt` and `--test`: `--init`, `--add <git-url>[@version]`, `--fetch`, `--tidy`, `--update [name]`, plus the modifiers `--as <name>` and `--offline`. Only `--add`, `--fetch` and `--update` use the network. A normal build never does.
+- A **cache** outside the project (`$ZILA_HOME`, default `~/.zila`) holding one checkout per package version and commit, verified by hash on every build; builds work offline from it.
 - **Resolution**: `use name.path` finds `name` among the standard library, the project's dependencies and its local packages, with the rules the spec defines. A package is a directory of `.br` files; only `pub` items are visible to other packages.
 - **Versions**: semver with Go-style minimal version selection (the smallest version that satisfies every requirement; no solver). A different major version is a different package with its own import name, so majors coexist.
 - **Git** is the one external program the toolchain may run, for fetching only, with an explicit error when it is missing.

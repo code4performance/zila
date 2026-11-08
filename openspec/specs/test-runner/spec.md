@@ -36,7 +36,7 @@ Under `--test`, `assert(cond)` and `assert(cond, "message")` SHALL do nothing wh
 
 #### Scenario: Outside --test
 - **WHEN** a normally built program runs `assert(false)` in a function that returns nothing
-- **THEN** it compiles, and at run time it aborts with `abort: <file>.br:<line>: assertion failed` and exits with 101
+- **THEN** it compiles, and at run time it aborts with `abort: <file>.zila:<line>: assertion failed` and exits with 101
 
 #### Scenario: Not in an error function
 - **WHEN** `assert(true)` is used in a function that returns nothing
@@ -47,7 +47,7 @@ Under `--test`, `assert(cond)` and `assert(cond, "message")` SHALL do nothing wh
 - **THEN** the run stops early as for any abort, with exit status 1 from `--test`
 
 ### Requirement: Running tests
-`zila-parse --test file.br [more.br ...]` SHALL build each file with an entry point that runs its tests (the file's own `main` is not used), print `ok <name>` or `FAIL <name>: <message>` for each test in order, and then print `test result: N passed, M failed`. It SHALL exit with 1 when any test failed, a file does not parse or compile, or the program stopped before finishing (a crash or an abort, reported with its exit code after the output so far), and with 0 otherwise. A file without tests SHALL print `no tests in <file>` and SHALL NOT make the status 1. `--no-opt` SHALL be honoured.
+`zila-parse --test file.zila [more.zila ...]` SHALL build each file with an entry point that runs its tests (the file's own `main` is not used), print `ok <name>` or `FAIL <name>: <message>` for each test in order, and then print `test result: N passed, M failed`. It SHALL exit with 1 when any test failed, a file does not parse or compile, or the program stopped before finishing (a crash or an abort, reported with its exit code after the output so far), and with 0 otherwise. A file without tests SHALL print `no tests in <file>` and SHALL NOT make the status 1. `--no-opt` SHALL be honoured.
 
 #### Scenario: Passing and failing tests
 - **WHEN** a file has one passing and one failing test

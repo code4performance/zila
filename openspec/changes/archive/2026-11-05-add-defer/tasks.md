@@ -16,5 +16,5 @@
 
 ## 4. Documentation and examples
 
-- [x] 4.1 Add `examples/defer.br` and a section for it on `docs/examples.html` (generated with `brasa-parse --docs`); verify the example builds and prints the documented output
+- [x] 4.1 Add `examples/defer.br` and a section for it on `docs/examples.html` (generated with `zila-parse --docs`); verify the example builds and prints the documented output
 - [x] 4.2 Document `defer` on `docs/syntax.html` (function-scoped, last in first out, captured when it runs, where it does not run), remove it from the not-yet-supported lists in `docs/syntax.html` and `docs/native.html`, and update the status and roadmap in `README.md`; verify `cargo test` (docs tests) passes and every code sample compiles

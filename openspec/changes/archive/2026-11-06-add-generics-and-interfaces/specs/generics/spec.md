@@ -64,7 +64,7 @@ Instances SHALL follow the same reference-counting rules as hand-written code fo
 - **THEN** `live_objects()` does not grow between iterations
 
 ### Requirement: Errors in generic code
-The body of a generic function SHALL be checked once, as written, against what its bound (or lack of one) allows. Using a method or operator on a value of type parameter `T` that is not provided SHALL be a compile error at the generic definition naming `T`. Putting a `T` into text (`"{x}"`) is the one exception: it is checked for each instance, because Brasa has no built-in bound for printable types.
+The body of a generic function SHALL be checked once, as written, against what its bound (or lack of one) allows. Using a method or operator on a value of type parameter `T` that is not provided SHALL be a compile error at the generic definition naming `T`. Putting a `T` into text (`"{x}"`) is the one exception: it is checked for each instance, because Zila Lang has no built-in bound for printable types.
 
 #### Scenario: Unbounded method call
 - **WHEN** `func show<T>(x: T)` calls `x.to_text()`

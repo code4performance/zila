@@ -120,7 +120,7 @@ fn layouts_pad_and_align() {
 
 #[test]
 fn the_report_example_runs() {
-    let src = std::fs::read_to_string("examples/report.br").unwrap();
+    let src = std::fs::read_to_string("examples/report.zila").unwrap();
     if let Some(out) = native(&src) {
         assert!(out.contains("item    |     qty|     price") && out.contains("Ação    |       7|    100.00"), "{}", out);
         assert!(out.contains("98,000"), "{}", out);
@@ -226,7 +226,7 @@ fn text_and_the_helpers_run() {
 
 #[test]
 fn the_values_example_runs() {
-    let src = std::fs::read_to_string("examples/values.br").unwrap();
+    let src = std::fs::read_to_string("examples/values.zila").unwrap();
     if let Some(out) = native(&src) {
         assert!(out.contains("Apples  |   1,200|      1.50") && out.contains("hex 000000ff, binary 1010, upper BEEF"), "{}", out);
         assert!(out.contains("ready: true, ratio: 0.3, at (3, 4)"), "{}", out);

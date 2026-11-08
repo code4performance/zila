@@ -26,10 +26,10 @@
 
 - [x] 5.1 Write the core std list into `std_source` as data (core vs non-core) and update `is_reserved` to reserve only core names
 - [x] 5.2 Implement shadowing of non-core std names by dependencies and local packages, with the warning, and tests for both scenarios in the delta spec
-- [x] 5.3 Move the libraries to `packages/<name>/` (with their `brasa.toml`, Linux layers in `linux/`), delete the `std/` copies and embed from `packages/`; each builds as a local package (`tests/packages.rs`)
-- [x] 5.4 No deprecation warning: nothing outside the repository uses Brasa (user decision, 2026-11-08); using a non-core library as `std` keeps working with no message
+- [x] 5.3 Move the libraries to `packages/<name>/` (with their `zila.toml`, Linux layers in `linux/`), delete the `std/` copies and embed from `packages/`; each builds as a local package (`tests/packages.rs`)
+- [x] 5.4 No deprecation warning: nothing outside the repository uses Zila Lang (user decision, 2026-11-08); using a non-core library as `std` keeps working with no message
 - [x] 5.5 Update `docs/stdlib.html`, `docs/packages.html`, `docs/databases.html`, `docs/ai.html` and the README: which libraries are core, which are official packages, the deprecation; verify with `cargo test --test docs`
-- [x] 5.6 Record the open question (hosting, manifest-less builds) in the proposal for when someone outside the repository uses Brasa
+- [x] 5.6 Record the open question (hosting, manifest-less builds) in the proposal for when someone outside the repository uses Zila Lang
 
 ## 6. Phase 3: compiler structure (the typed form and the cache moved to the change `add-typed-pipeline-and-cache`)
 

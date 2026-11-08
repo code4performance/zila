@@ -90,7 +90,7 @@ A numeric literal with a fraction or exponent SHALL have type `float`, or `f32` 
 - **THEN** it prints `NaN`
 
 ### Requirement: Calling and ownership
-Floats SHALL be passed to and returned from Brasa functions, closures and tasks like other values, and SHALL be passed to and returned from `extern` functions using the Windows x64 convention (floating arguments in XMM0 to XMM3 by position, result in XMM0). Floats SHALL NOT be reference counted.
+Floats SHALL be passed to and returned from Zila Lang functions, closures and tasks like other values, and SHALL be passed to and returned from `extern` functions using the Windows x64 convention (floating arguments in XMM0 to XMM3 by position, result in XMM0). Floats SHALL NOT be reference counted.
 
 #### Scenario: Function and closure
 - **WHEN** a program passes a float to a function, a closure and a spawned task and returns a float

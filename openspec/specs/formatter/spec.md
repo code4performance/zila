@@ -5,7 +5,7 @@ Gives Zila Lang source one standard style, applied by `zila-parse --fmt` and che
 ## Requirements
 
 ### Requirement: Formatting files
-`zila-parse --fmt file.br [more.br ...]` SHALL rewrite each file in the standard style and print the names of the files it changed. `zila-parse --fmt-check file.br ...` SHALL change nothing, print the names of the files that are not in the standard style and exit with status 1 when there are any (0 otherwise). A file that does not parse SHALL be reported with its error and left untouched, and the exit status SHALL be 1.
+`zila-parse --fmt file.zila [more.zila ...]` SHALL rewrite each file in the standard style and print the names of the files it changed. `zila-parse --fmt-check file.zila ...` SHALL change nothing, print the names of the files that are not in the standard style and exit with status 1 when there are any (0 otherwise). A file that does not parse SHALL be reported with its error and left untouched, and the exit status SHALL be 1.
 
 #### Scenario: Rewriting
 - **WHEN** a badly indented file is given to `--fmt`
@@ -67,7 +67,7 @@ The text of every token, including number spellings, string escapes and interpol
 The formatter SHALL write a file only when the sequence of tokens of the result equals the sequence of tokens of the original, and SHALL otherwise report an error and leave the file untouched. Formatting an already formatted file SHALL give the same text (idempotence).
 
 #### Scenario: Tokens and idempotence
-- **WHEN** every `.br` file of `std/`, `examples/` and `os/` is formatted
+- **WHEN** every `.zila` file of `std/`, `examples/` and `os/` is formatted
 - **THEN** the tokens are equal before and after, a second pass changes nothing, and after the repository has been formatted `--fmt-check` lists none of them
 
 ### Requirement: The options are documented

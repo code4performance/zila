@@ -3,13 +3,17 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Zila Lang — a language with a human face</title>
-  <meta name="description" content="Zila Lang is a readable systems-and-application language: explicit error handling, structural interfaces, and zero-cost C interop, with syntax that reads like prose.">
+  <title>Zila Lang — a small, readable language</title>
+  <meta name="description" content="A small, readable language that compiles straight to machine code.">
   <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="assets/zila.svg" type="image/svg+xml">
 </head>
 <body>
+  <a class="skip" href="#content">Skip to content</a>
   <header class="site-header">
-    <a class="brand" href="index.html">zila<span class="ember-dot">.</span><small>lang docs</small></a>
+    <a class="brand" href="index.html"><img src="assets/zila.svg" alt="" width="28" height="28"><span>Zila Lang</span><small>docs</small></a>
+    <input type="checkbox" id="menu" class="menu-toggle">
+    <label for="menu" class="menu-button">Menu</label>
     <nav class="site-nav">
       <a href="index.html" aria-current="page">Overview</a>
       <a href="syntax.html">Syntax</a>
@@ -26,18 +30,27 @@
     </nav>
   </header>
 
-  <main>
+  <main id="content">
     <section class="hero">
       <h1>Zila Lang</h1>
-      <p class="tagline">A readable systems-and-application language: explicit error handling, structural interfaces, and zero-cost C interop — syntax that reads like prose, power that reaches down to raw pointers and inline assembly.</p>
-      <p class="note">Formerly Zila Lang: the command <code>zila-parse</code> is now <code>zila-parse</code>, the environment variables <code>ZILA_*</code> are now <code>ZILA_*</code>, and the VS Code settings <code>zila.*</code> are now <code>zila.*</code>.</p>
+      <p class="tagline">A small, readable language that compiles straight to machine code.</p>
     </section>
 
     <section>
       <h2>What is Zila Lang?</h2>
-      <p>Zila Lang is a general-purpose programming language designed to feel approachable while staying honest about what your code actually does. Programs are organized into <code>package</code>s and blocks that end with <code>end</code> instead of braces, so a function, a type, or an <code>if</code> reads as a plain block of statements rather than a thicket of punctuation.</p>
+      <p>Zila Lang is a compiled, statically typed language with readable syntax, where blocks close with the word end. Its compiler, written in Rust with no dependencies, produces x86-64 programs for Windows and Linux itself: no virtual machine, no garbage collector, no runtime to install. Errors are values, memory is reference-counted, and the same language writes applications, C bindings and a kernel.</p>
       <p>Underneath that readable surface sits a practical, static type system: <code>record</code>s, <code>enum</code>s (with or without data), and structural <code>interface</code>s, with generics for reusable code. Errors are values, not exceptions — a function that can fail returns <code>T or error</code>, and <code>try</code> propagates failure up the call stack explicitly, so you can always see where a program might fail just by reading its signatures.</p>
       <p>Zila Lang doesn't stop at the application layer. The same language can drop into <code>unsafe</code> blocks to dereference raw pointers, declare <code>extern "C"</code> functions, and write inline <code>asm</code> — enough to call into existing C libraries, be called from C, or write a naked interrupt handler, without switching languages or reaching for a separate systems-programming toolkit.</p>
+    </section>
+
+    <section>
+      <h2>What it is for</h2>
+      <ul>
+        <li>Command-line tools and servers</li>
+        <li>Native desktop windows</li>
+        <li>Bindings to C libraries</li>
+        <li>Operating-system code</li>
+      </ul>
     </section>
 
     <section>
@@ -60,7 +73,7 @@
 
     <section>
       <h2>A quick taste</h2>
-      <div class="file-label">examples/hello.br</div>
+      <div class="file-label">examples/hello.zila</div>
       <pre><code><span class="kw">package</span> main
 
 <span class="kw">type</span> Customer = <span class="kw">record</span>
@@ -99,14 +112,14 @@
       </div>
       <div class="card">
         <h3>Getting Started</h3>
-        <p>Build the parser and run your first <code>.br</code> file.</p>
+        <p>Build the parser and run your first <code>.zila</code> file.</p>
         <a class="card-link" href="getting-started.html">Get started →</a>
       </div>
     </section>
   </main>
 
   <footer class="site-footer">
-    Zila Lang — a language with a human face. Docs generated from <code>zila.ebnf</code> and <code>examples/*.br</code>.
+    Zila Lang &middot; A small, readable language that compiles straight to machine code. The examples are checked against <code>examples/*.zila</code>; the grammar is <code>zila.ebnf</code>.
   </footer>
 </body>
 </html>

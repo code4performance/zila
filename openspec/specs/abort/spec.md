@@ -6,11 +6,11 @@ Defines how a Zila Lang program fails. Overflow never fails, failures a caller c
 ## Requirements
 
 ### Requirement: Abort stops the process at once
-An abort SHALL print one line `abort: <file>.br:<line>: <message>` to standard error and end the process with exit status 101. It SHALL run no `defer`, no `drop` and no unwinding, SHALL NOT flush buffered writers, and SHALL NOT be catchable. An abort in any task ends the whole process. There SHALL be no `panic` in the language.
+An abort SHALL print one line `abort: <file>.zila:<line>: <message>` to standard error and end the process with exit status 101. It SHALL run no `defer`, no `drop` and no unwinding, SHALL NOT flush buffered writers, and SHALL NOT be catchable. An abort in any task ends the whole process. There SHALL be no `panic` in the language.
 
 #### Scenario: Message and status
-- **WHEN** a program prints `a` and then calls `abort("stop")` on line 3 of `main.br`
-- **THEN** standard output has `a`, standard error has `abort: main.br:3: stop`, and the exit status is 101
+- **WHEN** a program prints `a` and then calls `abort("stop")` on line 3 of `main.zila`
+- **THEN** standard output has `a`, standard error has `abort: main.zila:3: stop`, and the exit status is 101
 
 #### Scenario: Nothing runs
 - **WHEN** a function has `defer print("cleanup")` and a value with `drop`, and then aborts
@@ -32,7 +32,7 @@ The following SHALL abort with the given message: an index outside a list, slice
 
 #### Scenario: Index out of bounds
 - **WHEN** `xs[5]` is read on line 9 and `xs` has three items
-- **THEN** the program prints `abort: <file>.br:9: index out of bounds` to standard error and exits with 101
+- **THEN** the program prints `abort: <file>.zila:9: index out of bounds` to standard error and exits with 101
 
 #### Scenario: Out of memory
 - **WHEN** a program allocates until the heap is exhausted
@@ -40,7 +40,7 @@ The following SHALL abort with the given message: an index outside a list, slice
 
 #### Scenario: Same on both targets
 - **WHEN** the same program divides by a zero variable on Windows and on Linux
-- **THEN** both print `abort: <file>.br:<line>: division by zero` and exit with 101
+- **THEN** both print `abort: <file>.zila:<line>: division by zero` and exit with 101
 
 ### Requirement: Integer arithmetic wraps
 Integer `+`, `-`, `*` and unary `-` SHALL wrap at the width of the type, in every build, optimized or not and whether computed at compile time or at run time. `MIN / -1` SHALL give `MIN` and `MIN % -1` SHALL give 0 instead of failing. Overflow SHALL never abort.

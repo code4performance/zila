@@ -387,7 +387,7 @@ fn timeout_needs_a_future_and_all_a_list_of_futures() {
     assert!(e.contains("all() needs a list of futures"), "{}", e);
 }
 
-// The `drop` hook closes files and sockets (std/fs.br, std/net.br).
+// The `drop` hook closes files and sockets (std/fs.zila, std/net.zila).
 #[test]
 fn drop_hook_runs_when_the_last_reference_goes_away() {
     let src = r#"
@@ -818,7 +818,7 @@ end
 
 #[test]
 fn the_async_example_builds_and_runs() {
-    let src = std::fs::read_to_string("examples/async.br").unwrap();
+    let src = std::fs::read_to_string("examples/async.zila").unwrap();
     let path = temp_path("example.txt");
     let src = src.replace("zila-example.txt", &path);
     let result = run(&src);

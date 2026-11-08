@@ -112,10 +112,10 @@ fn the_linux_assembly_uses_system_calls_and_no_windows_api() {
 #[test]
 fn the_target_option_is_checked() {
     let run = |args: &[&str]| Command::new(env!("CARGO_BIN_EXE_zila-parse")).args(args).output().unwrap();
-    let out = run(&["x.br", "--target", "solaris"]);
+    let out = run(&["x.zila", "--target", "solaris"]);
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(!out.status.success() && err.contains("unknown target 'solaris'") && err.contains("windows") && err.contains("linux"), "{}", err);
-    let out = run(&["x.br", "--target"]);
+    let out = run(&["x.zila", "--target"]);
     assert!(!out.status.success() && String::from_utf8_lossy(&out.stderr).contains("--target needs a name"));
 }
 
@@ -172,7 +172,7 @@ fn an_error_from_main_and_an_abort_set_the_exit_status() {
     let Some((out, code)) = run_linux(src) else { return };
     assert_eq!((out.as_str(), code), ("before\nerror: boom\n", 1));
     let Some((out, code)) = run_linux(&main_of("print(\"x\")\nabort(\"stop\")")) else { return };
-    assert_eq!((out.as_str(), code), ("x\nabort: main.br:5: stop\n", 101));
+    assert_eq!((out.as_str(), code), ("x\nabort: main.zila:5: stop\n", 101));
 }
 
 #[test]
@@ -180,7 +180,7 @@ fn division_by_zero_stops_the_program() {
     for body in ["var z = 0\nprint(10 / z)", "var z = 0\nprint(10 % z)", "print(10 / 0)"] {
         let Some((out, code)) = run_linux(&main_of(body)) else { return };
         assert_eq!(code, 101, "{}: {}", body, out);
-        assert!(out.contains("abort: main.br:") && out.contains(": division by zero"), "{}: {}", body, out);
+        assert!(out.contains("abort: main.zila:") && out.contains(": division by zero"), "{}: {}", body, out);
     }
 }
 
@@ -223,7 +223,7 @@ fn programs_that_do_not_use_the_windows_api_print_the_same_on_both_targets() {
     let examples = ["async", "defer", "floats", "generics", "hello", "lines", "maps", "report", "sets", "sorted", "udp", "values", "words"];
     let mut compared = 0;
     for name in examples {
-        let src = std::fs::read_to_string(format!("examples/{}.br", name)).unwrap();
+        let src = std::fs::read_to_string(format!("examples/{}.zila", name)).unwrap();
         let Some((linux, code)) = run_linux(&src) else { return };
         let Some(windows) = run_windows(&src) else { return };
         assert_eq!(code, 0, "{} exited with {}: {}", name, code, linux);
@@ -289,8 +289,8 @@ fn assert_same_api(windows: &str, linux: &str, names: &[&str]) {
 #[test]
 fn the_sys_layers_share_their_api() {
     assert_same_api(
-        include_str!("../std/sys.br"),
-        include_str!("../std/sys.linux.br"),
+        include_str!("../std/sys.zila"),
+        include_str!("../std/sys.linux.zila"),
         &["type Buf", "type Scratch", "buffer", "trim_end", "describe", "Buf.drop"],
     );
 }
@@ -909,16 +909,16 @@ end
 #[test]
 fn the_fs_net_and_task_layers_share_their_api() {
     assert_same_api(
-        include_str!("../std/fs.br"),
-        include_str!("../std/fs.linux.br"),
+        include_str!("../std/fs.zila"),
+        include_str!("../std/fs.linux.zila"),
         &[
             "type File", "type Reader", "type Writer", "read", "write", "open", "create", "append", "File.close", "Reader.read_line", "Reader.read",
             "Reader.read_all", "Reader.at_end", "Reader.close", "Writer.write", "Writer.write_line", "Writer.flush", "Writer.close",
         ],
     );
     assert_same_api(
-        include_str!("../std/net.br"),
-        include_str!("../std/net.linux.br"),
+        include_str!("../std/net.zila"),
+        include_str!("../std/net.linux.zila"),
         &[
             "type Conn", "type Listener", "type Reader", "type Writer", "type UdpSocket", "type Packet", "lookup", "resolve", "connect", "listen",
             "parse_ip", "Listener.accept", "Listener.close", "Conn.read", "Conn.write", "Conn.close", "Conn.reader", "Conn.writer", "Reader.read_line",
@@ -927,8 +927,8 @@ fn the_fs_net_and_task_layers_share_their_api() {
         ],
     );
     assert_same_api(
-        include_str!("../std/task.br"),
-        include_str!("../std/task.linux.br"),
+        include_str!("../std/task.zila"),
+        include_str!("../std/task.linux.zila"),
         &[
             "type Task", "type Chan", "init", "fatal", "now", "reap", "add_timer", "fire_timers", "poll_io", "wait_events", "switch_away", "park", "wake",
             "start", "yield", "chan_new", "wake_one", "chan_send", "chan_recv", "chan_close", "cur",
@@ -961,7 +961,7 @@ fn build_file(src: &str) -> Vec<u8> {
 
 #[test]
 fn ui_builds_on_linux_and_stays_a_static_executable() {
-    let src = std::fs::read_to_string("examples/ui.br").unwrap();
+    let src = std::fs::read_to_string("examples/ui.zila").unwrap();
     let bytes = build_file(&src);
     assert_eq!(&bytes[..4], b"\x7fELF");
     // no interpreter and no dynamic section: the X11 protocol is spoken with system calls
@@ -1100,7 +1100,7 @@ fn an_error_and_an_abort_still_exit_correctly_in_a_dynamic_program() {
     assert_eq!((out.as_str(), code), ("error: boom\n", 1));
     let src = format!("{}func main()\n    unsafe\n        getpid()\n    end\n    abort(\"stop\")\nend\n", head);
     let Some((out, code)) = run_linux(&src) else { return };
-    assert_eq!((out.as_str(), code), ("abort: main.br:11: stop\n", 101));
+    assert_eq!((out.as_str(), code), ("abort: main.zila:11: stop\n", 101));
 }
 
 #[test]
@@ -1110,7 +1110,7 @@ fn every_library_is_in_the_compatibility_table() {
     let section = &section[..section.find("</section>").unwrap()];
     for entry in std::fs::read_dir("std").unwrap() {
         let name = entry.unwrap().file_name().into_string().unwrap();
-        let Some(lib) = name.strip_suffix(".br") else { continue };
+        let Some(lib) = name.strip_suffix(".zila") else { continue };
         if lib.ends_with(".linux") {
             continue;
         }
@@ -1413,15 +1413,15 @@ fn a_library_and_its_linux_variant_export_the_same_names() {
     let mut layers: Vec<(String, String, String)> = Vec::new();
     for entry in std::fs::read_dir("std").unwrap() {
         let file = entry.unwrap().file_name().to_string_lossy().to_string();
-        if let Some(base) = file.strip_suffix(".linux.br") {
-            layers.push((base.to_string(), format!("std/{}.br", base), format!("std/{}.linux.br", base)));
+        if let Some(base) = file.strip_suffix(".linux.zila") {
+            layers.push((base.to_string(), format!("std/{}.zila", base), format!("std/{}.linux.zila", base)));
         }
     }
     for entry in std::fs::read_dir("packages").unwrap() {
         let path = entry.unwrap().path();
         let base = path.file_name().unwrap().to_string_lossy().to_string();
         if path.join("linux").is_dir() {
-            layers.push((base.clone(), format!("packages/{}/{}.br", base, base), format!("packages/{}/linux/{}.br", base, base)));
+            layers.push((base.clone(), format!("packages/{}/{}.zila", base, base), format!("packages/{}/linux/{}.zila", base, base)));
         }
     }
     for (base, win_path, lin_path) in layers {
@@ -1434,7 +1434,7 @@ fn a_library_and_its_linux_variant_export_the_same_names() {
         // a program written against the Windows variant must find every public name on Linux; the
         // Linux variants may export extra names (the resolver of `net` and the X protocol of `ui`
         // are written in Zila Lang, and tests reach into them)
-        assert!(only_win.is_empty(), "{}: public in {}.br but missing from {}.linux.br: {:?}", base, base, base, only_win);
+        assert!(only_win.is_empty(), "{}: public in {}.zila but missing from {}.linux.zila: {:?}", base, base, base, only_win);
         checked += 1;
     }
     assert!(checked >= 4, "expected the Linux variants, found {}", checked);

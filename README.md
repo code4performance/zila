@@ -1,14 +1,14 @@
+<p align="center"><img src="docs/assets/zila.svg" alt="Zila Lang" width="96" height="96"></p>
+
 # Zila Lang
 
-> **A compiled, statically-typed systems programming language that feels like Go, thinks like Rust, and talks to C without ceremony.**
+**A small, readable language that compiles straight to machine code.**
 
-Zila Lang compiles straight to x86-64 machine code. No LLVM, no virtual machine, no garbage collector, and no runtime to install. The compiler is written from scratch in Rust with **zero dependencies**, it ships with its own x86 assembler, and the same toolchain that builds a 6 KB Windows program also builds a bootable 64-bit operating system.
+Zila Lang is a compiled, statically typed language with readable syntax, where blocks close with the word end. Its compiler, written in Rust with no dependencies, produces x86-64 programs for Windows and Linux itself: no virtual machine, no garbage collector, no runtime to install. Errors are values, memory is reference-counted, and the same language writes applications, C bindings and a kernel.
 
-It is young, it is honest about what it can't do yet, and it is looking for people to help it grow. **If you like compilers, language design, or just want to see what a clean-slate language looks like, come build it with us.**
+**What it is for:** command-line tools and servers, native desktop windows, bindings to C libraries, and operating-system code.
 
-### The name
-
-Zila Lang was called Zila Lang until November 2026. Formerly Zila Lang: the command `zila-parse` is now `zila-parse`, the environment variables `ZILA_*` are now `ZILA_*`, the VS Code extension `zila-lang` and its settings `zila.*` are now `zila-lang` and `zila.*`, and the crate `zila` is now `zila`. Source files are still `.br`. Nothing else about the language changed.
+Zila Lang is young and honest about what it cannot do yet. If you like compilers and language design, come build it with us: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
@@ -70,7 +70,7 @@ end
 ```
 
 ```text
-$ zila-parse demo.br -o demo.exe
+$ zila-parse demo.zila -o demo.exe
 $ ./demo.exe
 areas: 12 and 12
 doubled in parallel: 10 and 12
@@ -91,7 +91,7 @@ There is no LLVM, no linker and no virtual machine in the middle: the compiler w
 
 ```mermaid
 flowchart LR
-    SRC["program.br"] --> LEX["Lexer<br/>(tokens, interpolation)"]
+    SRC["program.zila"] --> LEX["Lexer<br/>(tokens, interpolation)"]
     LEX --> PAR["Parser<br/>(syntax tree)"]
     PAR --> CT{"comptime<br/>generators?"}
     CT -- yes --> GEN["Run generators<br/>(native, cached)"]
@@ -212,10 +212,10 @@ Everything in this list is implemented and covered by tests.
 - Reference counting frees every heap value as soon as it is unreachable, including on early `return`, `break` and `try`. There are no GC pauses.
 - Records, lists and maps have value semantics: assigning or passing one is cheap (reference counted), and writing to a list or map that another holder still has copies it first (copy on write). `ref` shares the caller's value; to fill a caller's list, take it as `ref xs: []int` and call `fill(ref xs)`. Records can define `drop` to close files and sockets automatically.
 - `live_objects()` reports how many heap objects are alive, so leaks are easy to test for. The test suite uses it to check that thousands of tasks and connections leave nothing behind.
-- `new Node{ ... }` makes a shared, reference-counted object (`Rc<Node>`); `Weak<T>` with `weak(x)` and `w.upgrade()` holds one without keeping it alive, so trees with parent links, observers and graphs are freed completely. A cycle made only of `Rc` references is still not collected: break it with `Weak`. See `examples/tree.br`.
+- `new Node{ ... }` makes a shared, reference-counted object (`Rc<Node>`); `Weak<T>` with `weak(x)` and `w.upgrade()` holds one without keeping it alive, so trees with parent links, observers and graphs are freed completely. A cycle made only of `Rc` references is still not collected: break it with `Weak`. See `examples/tree.zila`.
 - `use text`, `use list`, `use format`, `use set` and `use sorted`: `split`, `join`, `trim`, `replace`, `parse_int`, `parse_float`, `map`, `filter`, `reduce`, `sort_by`, `sort`, `contains` and more, written in Zila Lang on top of generics.
 - Generics and interfaces: `func first<T>(items: []T) -> T`, `type Stack<T>`, and `T: Printable` bounds with structural interfaces. The compiler infers the type arguments (or you write them: `empty<int>()`) and makes one copy per type used.
-- **Compile-time code generation**: a `comptime func` receives a `Type` (name, kind, fields, variants, attributes) and returns Zila Lang source that the compiler compiles in place. `#[derive(name)]` adds methods to a type, `#[generated(gen)]` writes the body of a function for each type it is called with, and `#[block]` gives a library its own block syntax (a name, raw lines, `end`). Generators are native programs built and run for the build machine, limited to a checked, deterministic subset of the language (no I/O, `spawn`, `unsafe`, `asm` or global variables), with a time and output limit, hygiene for generated names, errors that point at your code, and an on-disk cache. See [docs/syntax.html](docs/syntax.html#comptime) and `examples/comptime.br`.
+- **Compile-time code generation**: a `comptime func` receives a `Type` (name, kind, fields, variants, attributes) and returns Zila Lang source that the compiler compiles in place. `#[derive(name)]` adds methods to a type, `#[generated(gen)]` writes the body of a function for each type it is called with, and `#[block]` gives a library its own block syntax (a name, raw lines, `end`). Generators are native programs built and run for the build machine, limited to a checked, deterministic subset of the language (no I/O, `spawn`, `unsafe`, `asm` or global variables), with a time and output limit, hygiene for generated names, errors that point at your code, and an on-disk cache. See [docs/syntax.html](docs/syntax.html#comptime) and `examples/comptime.zila`.
 - `float` (`f64`) and `f32`: arithmetic, comparisons that follow IEEE 754, explicit `float(n)` / `int(x)` conversions, shortest-text printing, `use math`, and C calls through the XMM registers.
 - `Map<K, V>` stores values under any key type that is `Hash` (text, integers, records, enums, lists): `{ "a": 1 }` literals, `m[key]`, `has`, `get(key, default)`, `remove`, and `for key, value in m` in insertion order.
 - `Eq`, `Ord` and `Hash` are standard interfaces (no `use`) that the compiler derives for records and enums and you can override with `eq`, `compare` and `hash` methods; `==`, `<` and the other comparison operators work on such types and on a bounded `T: Ord`, and `Self` names the satisfying type inside an interface.
@@ -297,7 +297,7 @@ Zila Lang is **pre-alpha**. The design is settling, but breaking changes are sti
 | Text, list, format, set and sorted libraries | ✅ `use text`, `use list`, `use format` (`%` templates, padding, hex, thousands, and `format.fmt` for values of any type with `%(08x)`, `%(>10,)` and `%(.2f)`, native only), `use set`, `use sorted` (sorted maps and sets, ordered by `compare` or by a function), `use derive` (`hash_combine`) and `use bufio` (the buffers behind line reading and buffered writing in `fs` and `net`). More to come |
 | Text and characters | ✅ A `char` type; `len` counts bytes, `for c in s` walks characters, `slice` cuts by bytes and aborts inside a character, `s.bytes()`, `s.byte(i)`, `s.char_count()`, `text.chars`, `text.from_bytes`; `reverse` and `pad_*` work on characters. **Breaking:** `s[i]` on a text and `chr(n)` are gone (use `s.byte(i)`, `for c in s`, `char(n).to_text()`) |
 | Optimizer | 🔧 Constant folding, direct operands, compare-and-branch, peephole cleanups, integer variables in registers and inlining of small functions (`--no-opt` turns them off) |
-| Formatter (`--fmt`, `--fmt-check`) | ✅ Standard style for `.br` files; only whitespace changes, comments kept |
+| Formatter (`--fmt`, `--fmt-check`) | ✅ Standard style for `.zila` files; only whitespace changes, comments kept |
 | Test runner (`--test`, `#[test]`, `assert`, `assert_eq`) | ✅ Runs the tests of a file natively and reports `ok`/`FAIL` with the line |
 | Language server (`--lsp`) | ✅ Syntax errors and formatting. Hover, go to definition, completion and type errors: ⏳ not started |
 | VS Code extension | ✅ Highlighting, syntax errors and formatting through the language server (package it with `npx @vscode/vsce package`; the manual smoke test is still open) |
@@ -397,16 +397,16 @@ The tool is called `zila-parse` (`target/release/zila-parse`).
 **Use it**
 
 ```sh
-zila-parse program.br                 # check a program and print a summary
-zila-parse program.br -o program.exe  # compile to a native Windows executable
-zila-parse program.br --target linux -o program   # compile to a static Linux ELF
-zila-parse program.br --run           # compile and run it
-zila-parse program.br --asm           # show the generated assembly
-zila-parse program.br --ast           # show the syntax tree
-zila-parse program.br --tokens        # show the tokens
-zila-parse --os os/boot.br os/kernel.br -o zila-os.img   # build a bootable disk image
-zila-parse --fmt file.br              # format files in the standard style (--fmt-check only lists them)
-zila-parse --test file.br             # run the #[test] functions of a file
+zila-parse program.zila                 # check a program and print a summary
+zila-parse program.zila -o program.exe  # compile to a native Windows executable
+zila-parse program.zila --target linux -o program   # compile to a static Linux ELF
+zila-parse program.zila --run           # compile and run it
+zila-parse program.zila --asm           # show the generated assembly
+zila-parse program.zila --ast           # show the syntax tree
+zila-parse program.zila --tokens        # show the tokens
+zila-parse --os os/boot.zila os/kernel.zila -o zila-os.img   # build a bootable disk image
+zila-parse --fmt file.zila              # format files in the standard style (--fmt-check only lists them)
+zila-parse --test file.zila             # run the #[test] functions of a file
 zila-parse --lsp                      # run the language server on standard input and output
 zila-parse --docs                     # refresh the examples on the documentation site
 ```
@@ -414,9 +414,9 @@ zila-parse --docs                     # refresh the examples on the documentatio
 **Try the examples**
 
 ```sh
-zila-parse examples/hello.br -o hello.exe && ./hello.exe
-zila-parse examples/async.br -o async.exe && ./async.exe
-zila-parse examples/hello.br --target linux -o hello && ./hello   # on Linux (or WSL)
+zila-parse examples/hello.zila -o hello.exe && ./hello.exe
+zila-parse examples/async.zila -o async.exe && ./async.exe
+zila-parse examples/hello.zila --target linux -o hello && ./hello   # on Linux (or WSL)
 .\os\run.ps1                            # build and boot Zila Lang OS in QEMU
 ```
 
@@ -443,7 +443,8 @@ src/
   ast.rs           syntax tree
   run.rs           --run: build a temporary executable, run it, delete it
   float_text.rs    reference float layout the tests compare native output with
-  codegen_x64.rs   native compiler: type checks, x86-64 code, runtime, Windows and Linux back ends
+  codegen_x64.rs, codegen_x64/   native compiler: type checks, x86-64 code, runtime, Windows and Linux back ends, split by topic
+  prune.rs, effects.rs, sqlblock.rs   reachability pruning, package effects, `sql` blocks
   asm_x86.rs       the x86 assembler (16, 32 and 64-bit): bare-metal images, Windows and Linux programs
   pe.rs            the Windows PE writer
   regalloc.rs      register allocation for the optimizer
@@ -451,8 +452,10 @@ src/
   comptime.rs, comptime/   compile-time code generation: reflection data, subset check, generator driver and cache, expansion
   cli.rs, docs.rs  command-line options; the documentation generator
   package.rs, fetch.rs   the package manager: manifest, lock, versions, hashes, cache and resolver; the git runner and the package commands
-std/               standard library, written in Zila Lang: ui, task, future, fs, net, tls, web, crypto, db, postgres, sqlserver, sys, text, list, format, set, sorted, bufio (and ws, internal to net); `*.linux.br` are the Linux layers
-os/                Zila Lang OS: boot.br (boot sector) and kernel.br
+std/               the core of the standard library, written in Zila Lang: text, list, set, sorted, format, bufio, errors, math, float, fs, net, sync, task, future, thread, sys, reflect, derive
+packages/          the other libraries, as packages: json, crypto, tls, ui, web, ai, mcp, rag, db, postgres, sqlserver
+tools/             the rename tool and the icon generator
+os/                Zila Lang OS: boot.zila (boot sector) and kernel.zila
 examples/          example programs
 docs/              the documentation site (static HTML)
 editors/vscode/    VS Code extension: highlighting, syntax errors and formatting through the language server

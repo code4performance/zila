@@ -1,6 +1,6 @@
 ## 1. Front end
 
-- [x] 1.1 Add the keywords `async` and `await` to the lexer and update the keyword lists in `brasa.ebnf` and the editor grammar; verify with a lexer test that both lex as keywords and that existing examples still parse
+- [x] 1.1 Add the keywords `async` and `await` to the lexer and update the keyword lists in `zila.ebnf` and the editor grammar; verify with a lexer test that both lex as keywords and that existing examples still parse
 - [x] 1.2 Parse `async func` declarations (flag on `FuncDecl`) and `await expr` as a prefix operator at the level of `try`, with `Future<T>` accepted as a type; verify with parser tests for an async function, `await f()`, `try await f()` and `await` in a lambda argument
 - [x] 1.3 Reject `async` on methods with `ref` parameters, on `extern` functions and on lambdas, and reject `await` outside an `async func` or `main`; verify each with a compile-error test whose message names the rule
 
@@ -44,4 +44,4 @@
 
 - [x] 7.1 Add `examples/async.br` (concurrent sleeps, a file round trip and a TCP echo with `try await`) and make `tests/` build and run it; verify its output
 - [x] 7.2 Document `async`/`await`, `Future<T>`, `sleep`, `timeout`, `all`/`race`, `fs` and `net` in `docs/` (a new page linked from the shared navigation, plus updates to the syntax page and getting-started) with their limits (single thread, no cancellation, single await, blocking name lookup); verify every code sample compiles and every nav link works from disk
-- [x] 7.3 Update `README.md` and `brasa.ebnf` for the new syntax and libraries; verify `cargo test` passes and no page still says `spawn` is the only concurrency primitive
+- [x] 7.3 Update `README.md` and `zila.ebnf` for the new syntax and libraries; verify `cargo test` passes and no page still says `spawn` is the only concurrency primitive

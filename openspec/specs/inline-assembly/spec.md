@@ -55,5 +55,5 @@ A line in an `asm` block that starts with a double quote SHALL still be read as 
 The boot sector, the kernel, the examples, the tests and the documentation SHALL write assembly without quotes, and the editor grammar SHALL highlight raw assembly lines in `asm` blocks.
 
 #### Scenario: Boot image
-- **WHEN** `os/boot.br` and `os/kernel.br` are built after the conversion
+- **WHEN** `os/boot.zila` and `os/kernel.zila` are built after the conversion
 - **THEN** the image is byte-for-byte equal to the one built before

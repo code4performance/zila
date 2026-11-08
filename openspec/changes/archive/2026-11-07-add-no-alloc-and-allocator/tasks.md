@@ -6,7 +6,7 @@
 - [x] 1.4 Implement the syntactic rules of the spec: interpolation, collection literals, `new`, capturing closures (compare with the closure capture analysis near `rt_drop_closure` in `src/codegen_x64.rs`), `spawn`, `channel`, `defer`, `c.alloc`, async calls. Verify: one `tests/noalloc.rs` test per scenario of the no-alloc spec, including constant text and a non-capturing closure being accepted.
 - [x] 1.5 Reject calls through function values and interface methods with unknown receiver, accept static dispatch, trust `extern` unless `#[allocates]`, skip `asm` blocks. Verify: tests for the four scenarios and the error text naming the callee expression.
 - [x] 1.6 Reject writes that may copy using the ownership facts from `add-copy-on-write` (skip with a comment until that change is in; keep the test `#[ignore]`d with the reason). Verify: the copy scenarios pass once the dependency exists.
-- [x] 1.7 Call the analysis before code generation so errors carry `file:line` and show in `brasa` compile and in the language server (`src/lsp.rs` already reports compile errors). Verify: `tests/lsp.rs` gets one case that shows the diagnostic.
+- [x] 1.7 Call the analysis before code generation so errors carry `file:line` and show in `zila` compile and in the language server (`src/lsp.rs` already reports compile errors). Verify: `tests/lsp.rs` gets one case that shows the diagnostic.
 
 ## 2. Custom allocator
 
@@ -27,16 +27,16 @@
 ## 4. Documentation and editor
 
 - [x] 4.1 Describe both attributes, the limits and the signatures in `docs/syntax.html`, `docs/native.html` and `docs/os.html`; keep the README promise accurate (fixed list of allocating operations). Verify: `tests/docs.rs` passes (it compiles the examples in the docs).
-- [x] 4.2 Highlight `no_alloc`, `allocates` and `allocator` attributes in `editors/vscode/syntaxes/brasa.tmLanguage.json`. Verify: `tests/vscode.rs` passes.
+- [x] 4.2 Highlight `no_alloc`, `allocates` and `allocator` attributes in `editors/vscode/syntaxes/zila.tmLanguage.json`. Verify: `tests/vscode.rs` passes.
 - [x] 4.3 Run the full suite (leaving `tests/async.rs` out of routine runs) and `openspec validate add-no-alloc-and-allocator --strict`. Verify: both pass.
 
 ## Notes on defaults taken during implementation
 
 - The analysis is syntactic over the AST (no type information): a generic function is analysed once per declaration, so an instantiation cannot be accepted while another is rejected; the check is conservative.
-- Interfaces only bound type parameters in Brasa, so a call on a `T: Interface` value is analysed as a call to every method of that name (static dispatch); the interface-call rejection applies to interface-typed locals if the language ever allows them.
+- Interfaces only bound type parameters in Zila Lang, so a call on a `T: Interface` value is analysed as a call to every method of that name (static dispatch); the interface-call rejection applies to interface-typed locals if the language ever allows them.
 - Also counted as allocating: an empty list or map literal, `Map.new()` and the other collection constructors, and the built-in `add`, `push` and `slice` methods (not in the spec's list, but they do allocate).
 - Writes that may copy (1.6) are not checked until `add-copy-on-write` lands; `tests/noalloc.rs::a_write_that_may_copy_is_rejected` is `#[ignore]`d with the reason.
 - `rt_alloc` asks the custom allocator for `payload + 24` rounded up to a multiple of 16, aligned to 16; `free` receives that same size.
 - The language server now compiles a parsing `package main` file and shows the first compile error as a diagnostic (it reported only syntax errors before).
-- No std function needed `#[allocates]` (no std extern allocates in Brasa's heap). Marked `#[no_alloc]`: text `index_from`, `index_of`, `contains`, `compare`, `is_space`; math `sqrt`, `floor`, `ceil`, `trunc`, `abs`, `min`, `max`, `round`, `pow`; errors `is_word_byte`.
+- No std function needed `#[allocates]` (no std extern allocates in Zila Lang's heap). Marked `#[no_alloc]`: text `index_from`, `index_of`, `contains`, `compare`, `is_space`; math `sqrt`, `floor`, `ceil`, `trunc`, `abs`, `min`, `max`, `round`, `pow`; errors `is_word_byte`.
 - Linux allocator behaviour is covered by running programs through WSL (`tests/allocator.rs`) plus assertions on the generated assembly.

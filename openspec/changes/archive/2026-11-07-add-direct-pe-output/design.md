@@ -30,11 +30,11 @@ Two facts make Windows simpler than it looks: the assembler already accepts the 
 
 **5. The manifest becomes a resource compiled by the compiler.** The existing `MANIFEST` text is embedded as an `RT_MANIFEST` resource (ID 1) in `.rsrc`. Only the three-level resource directory tree is needed for that. GUI programs get the subsystem value for Windows, console programs the console value, chosen from `uses_ui` as now.
 
-**6. Entry stays `brasa_start`.** The PE entry point is the symbol `brasa_start`, which already calls `SetConsoleOutputCP(65001)` and sets the stack up. No C runtime is involved, as today.
+**6. Entry stays `zila_start`.** The PE entry point is the symbol `zila_start`, which already calls `SetConsoleOutputCP(65001)` and sets the stack up. No C runtime is involved, as today.
 
 **7. Remove, don't keep, the old path.** `vcvars_candidates`, the batch file and the temp directory are deleted rather than kept as a fallback. Keeping both would mean testing both forever and would leave "needs Visual Studio" as a documented option. The old output remains reachable through git history if needed to compare behavior during development (task 1.1 records reference outputs before any change).
 
-**8. Errors come from the compiler.** `asm_x86` errors already carry the assembly line number; the writer maps it back to the Brasa line using the markers the code generator leaves, and failures leave no temporary files because nothing is written until the image is complete.
+**8. Errors come from the compiler.** `asm_x86` errors already carry the assembly line number; the writer maps it back to the Zila Lang line using the markers the code generator leaves, and failures leave no temporary files because nothing is written until the image is complete.
 
 **9. Facts found while implementing.**
 - The assembler produces one flat blob. The writer puts `rt_text_end:`, `align 4096` and `rt_data_start:` where the text says `.data`, assembles once at `image base + 0x1000`, and cuts the blob into `.text` and `.data` at those symbols (no two-pass header trick is needed: the headers have a fixed size). The assembler now reports source line numbers (blank and comment lines counted) so errors map to the generated text, and the code generator leaves a `; asm file.br:line` marker before each inline `asm` block.
@@ -57,7 +57,7 @@ Two facts make Windows simpler than it looks: the assembler already accepts the 
 
 ## Migration Plan
 
-All Brasa code lives in this repository, so there is nothing external to migrate. The change lands in this order, each step keeping the suite green: (1) record reference results, (2) make the assembler accept the full Windows output, (3) add import slots to the Windows text, (4) write the PE, (5) delete the `ml64`/`link` path, (6) update the documentation and README. Until step 5 the old path stays selectable by an environment variable used only by developers, to compare outputs. Rollback before step 5 is turning that variable on; after step 5 it is reverting the commit.
+All Zila Lang code lives in this repository, so there is nothing external to migrate. The change lands in this order, each step keeping the suite green: (1) record reference results, (2) make the assembler accept the full Windows output, (3) add import slots to the Windows text, (4) write the PE, (5) delete the `ml64`/`link` path, (6) update the documentation and README. Until step 5 the old path stays selectable by an environment variable used only by developers, to compare outputs. Rollback before step 5 is turning that variable on; after step 5 it is reverting the commit.
 
 ## Open Questions
 

@@ -1,6 +1,6 @@
 ## Why
 
-Brasa has `spawn` and `channel`, but a task can only wait for another task or a channel. It cannot wait for time, a file or the network, so a program that sleeps, reads a file or talks over TCP either blocks every other task or cannot be written at all. Programs that serve or fetch things (the REST example, a chat server, the shell of an OS) need to overlap waiting with work. An `async`/`await` model gives beginners a single readable way to write that: a function that waits is marked `async`, and `await` is the only place a task gives up the processor.
+Zila Lang has `spawn` and `channel`, but a task can only wait for another task or a channel. It cannot wait for time, a file or the network, so a program that sleeps, reads a file or talks over TCP either blocks every other task or cannot be written at all. Programs that serve or fetch things (the REST example, a chat server, the shell of an OS) need to overlap waiting with work. An `async`/`await` model gives beginners a single readable way to write that: a function that waits is marked `async`, and `await` is the only place a task gives up the processor.
 
 ## What Changes
 
@@ -30,9 +30,9 @@ Brasa has `spawn` and `channel`, but a task can only wait for another task or a 
 ## Impact
 
 - **Compiler** (`src/lexer.rs`, `parser.rs`, `ast.rs`, `codegen_x64.rs`): two keywords, an `async` flag on function declarations, an `Await` expression, the `Future<T>` type, lowering of `async func` to a task plus a future, new intrinsics, and import of the new libraries.
-- **Standard library** (written in Brasa, like `ui` and `task`): extended `std/task.br`, new `std/async.br`, `std/fs.br`, `std/net.br`.
+- **Standard library** (written in Zila Lang, like `ui` and `task`): extended `std/task.br`, new `std/async.br`, `std/fs.br`, `std/net.br`.
 - **Runtime**: no new assembly beyond what `task.br` needs; I/O uses Windows `kernel32` and `ws2_32` through `extern`.
-- **Grammar, tests, docs**: `brasa.ebnf`, editor grammar, `tests/`, `docs/` and `README.md`.
+- **Grammar, tests, docs**: `zila.ebnf`, editor grammar, `tests/`, `docs/` and `README.md`.
 - **Assumptions** (no clarification needed):
   - Tasks stay cooperative on one thread (no parallelism); switches happen only at `await`, `receive` and `task.yield()`.
   - Futures are single-consumer: a future's value is taken by the first `await`.

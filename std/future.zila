@@ -6,7 +6,7 @@
 //     async func f(a) -> T          to      a function returning Future<T>
 //     await e                       to      future.wait(e)
 //
-// An async function runs as its own task (a fiber, see std/task.br). The
+// An async function runs as its own task (a fiber, see std/task.zila). The
 // value it returns is stored in `slot` as a plain word; `slot` is a list
 // created with the element-ownership flag of T, so a result nobody awaited
 // is released together with the future.

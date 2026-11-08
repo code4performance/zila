@@ -30,5 +30,5 @@ Text is "bytes (UTF-8)" but the language hides that in the wrong places. `s[i]` 
 - **Assumptions** (no clarification needed):
   - `s.byte(i)` is kept as a public method even though `s[i]` goes: it is O(1) and does not copy, which `bytes()` cannot offer, and it cannot break a character because it yields a number, not text. It may be dropped later if `bytes()` becomes a view.
   - No normalization, grapheme or case-mapping support: a character is a code point. `upper`/`lower` stay ASCII-only.
-  - FFI is untouched: `c.char` stays the 8-bit C type; `char` is the Brasa type.
+  - FFI is untouched: `c.char` stays the 8-bit C type; `char` is the Zila Lang type.
 - **Depends on** `remove-panic-add-abort` (abort semantics), `add-direct-pe-output` and `remove-interpreter` (this change does not port anything to the interpreter; if it still exists when this lands, its text support is deleted rather than updated).

@@ -7,6 +7,6 @@ The lines of a `sql` block SHALL be kept as written, including the text of holes
 - **WHEN** a `sql` block has a `select` line and a `where` line indented four spaces deeper, inside a function indented eight spaces wrong
 - **THEN** after formatting the block sits one level inside its function and the `where` line is still four spaces deeper than `select`
 
-#### Scenario: Text that looks like Brasa
+#### Scenario: Text that looks like Zila Lang
 - **WHEN** a block contains the line `end_date is null` or `-- end`
 - **THEN** it is part of the block, and only a line that is just `end` closes it

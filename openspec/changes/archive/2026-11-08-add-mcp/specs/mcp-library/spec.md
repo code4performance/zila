@@ -57,7 +57,7 @@ A server SHALL expose resources (`server.resource(uri, name, mime_type, reader)`
 - **THEN** the server answers the first request, an error with code `-32700`, and the second request
 
 ### Requirement: Streamable HTTP transport
-`server.serve_http(app, path)` SHALL attach the server to a `use web` application at one endpoint: `POST` of a JSON-RPC message SHALL answer with `application/json` (a notification gets `202` with no body); a `GET` SHALL answer `405` unless server-initiated messages are used, which this version does not do; `DELETE` SHALL end a session. Sessions SHALL be identified by the `Mcp-Session-Id` header assigned at `initialize`, a request carrying an unknown session id SHALL get `404`, and the `MCP-Protocol-Version` header SHALL be checked when present. The server SHALL validate the `Origin` header against an allowed list (default: only same-host origins) and answer `403` otherwise, and when `bearer_token` is set SHALL answer `401` with `WWW-Authenticate: Bearer` to a missing or wrong token (compared in constant time). It SHALL document that it does not bind the loopback address by itself (the web server's address is not configurable yet), so a bearer token is the protection when the machine is reachable.
+`server.serve_http(app, path)` SHALL attach the server to a `use web` application at one endpoint: `POST` of a JSON-RPC message SHALL answer with `application/json` (a notification gets `202` with no body); a `GET` SHALL answer `405` unless server-initiated messages are used, which this version does not do; `DELETE` SHALL end a session. Sessions SHALL be identified by the `Mcp-Session-Id` header assigned at `initialize`, a request carrying an unknown session id SHALL get `404`, and the `MCP-Protocol-Version` header SHALL be checked when present. The server SHALL validate the `Origin` header against an allowed list (default: only same-host origins) and answer `403` otherwise, and when `bearer_token` is set SHALL answer `401` with `WWW-Authenticate: Bearer` to a missing or wrong token (compared in constant time). `serve_http` SHALL return an error. The web server SHALL have an address to listen on (`host`, empty meaning every network interface, as before), and `serve_http` SHALL move an application whose `host` is empty to `127.0.0.1`, so the endpoint is reachable from this machine only by default. For any other address (including `0.0.0.0`) `serve_http` SHALL return an error of kind `InvalidInput`, and attach nothing, unless `bearer_token` was set before the call; `127.0.0.0/8` addresses and `localhost` are loopback addresses.
 
 #### Scenario: Session
 - **WHEN** a client posts `initialize` without a session and then `tools/list` with the returned `Mcp-Session-Id`
@@ -70,6 +70,14 @@ A server SHALL expose resources (`server.resource(uri, name, mime_type, reader)`
 #### Scenario: Token
 - **WHEN** `bearer_token` is `secret` and a request carries no `Authorization` header
 - **THEN** the answer is `401`
+
+#### Scenario: Loopback by default
+- **WHEN** `serve_http` is called on a web application whose `host` is empty
+- **THEN** `host` becomes `127.0.0.1`, and a connection to the machine's network address on that port is refused
+
+#### Scenario: Another address needs a token
+- **WHEN** `serve_http` is called with `host` set to `0.0.0.0` or to a network address and `bearer_token` is empty
+- **THEN** it returns an `InvalidInput` error that names `bearer_token`, and with `bearer_token` set it succeeds
 
 ### Requirement: HTTP client
 `mcp.connect(url)` (with an optional bearer token) SHALL perform the handshake against a Streamable HTTP server and return an `mcp.Client` with `tools()`, `call(name, args)`, `resources()`, `read(uri)`, `prompts()`, `prompt(name, args)` and `close()`. It SHALL send the session and protocol version headers, accept both `application/json` and `text/event-stream` replies to a `POST` (collecting events until the response for the request arrives), and map JSON-RPC errors to errors of the standard type. `client.ai_tools()` SHALL return the remote tools as `ai.Tool` values (with the remote schema as given, arguments passed through as JSON) that `client.run` can use alongside local ones.

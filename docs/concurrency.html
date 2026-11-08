@@ -6,10 +6,14 @@
   <title>Tasks and channels — Zila Lang</title>
   <meta name="description" content="spawn, channels and the cooperative task scheduler of Zila Lang.">
   <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="assets/zila.svg" type="image/svg+xml">
 </head>
 <body>
+  <a class="skip" href="#content">Skip to content</a>
   <header class="site-header">
-    <a class="brand" href="index.html">zila<span class="ember-dot">.</span><small>lang docs</small></a>
+    <a class="brand" href="index.html"><img src="assets/zila.svg" alt="" width="28" height="28"><span>Zila Lang</span><small>docs</small></a>
+    <input type="checkbox" id="menu" class="menu-toggle">
+    <label for="menu" class="menu-button">Menu</label>
     <nav class="site-nav">
       <a href="index.html">Overview</a>
       <a href="syntax.html">Syntax</a>
@@ -26,7 +30,7 @@
     </nav>
   </header>
 
-  <main>
+  <main id="content">
     <h1>Tasks and channels</h1>
     <p>A <strong>task</strong> is a function running next to the others. Tasks talk through <strong>channels</strong>. They are lightweight (thousands are fine), cooperative, and share one scheduler with <a href="async.html">async/await</a>.</p>
 
@@ -121,7 +125,7 @@
   </main>
 
   <footer class="site-footer">
-    Zila Lang — a language with a human face. Docs generated from <code>zila.ebnf</code> and <code>examples/*.br</code>.
+    Zila Lang &middot; A small, readable language that compiles straight to machine code. The examples are checked against <code>examples/*.zila</code>; the grammar is <code>zila.ebnf</code>.
   </footer>
 </body>
 </html>

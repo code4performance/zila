@@ -6,10 +6,14 @@
   <title>Syntax Guide — Zila Lang</title>
   <meta name="description" content="A tour of Zila Lang's syntax: packages, types, functions, control flow, error handling, string interpolation, attributes, and FFI/assembly.">
   <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="assets/zila.svg" type="image/svg+xml">
 </head>
 <body>
+  <a class="skip" href="#content">Skip to content</a>
   <header class="site-header">
-    <a class="brand" href="index.html">zila<span class="ember-dot">.</span><small>lang docs</small></a>
+    <a class="brand" href="index.html"><img src="assets/zila.svg" alt="" width="28" height="28"><span>Zila Lang</span><small>docs</small></a>
+    <input type="checkbox" id="menu" class="menu-toggle">
+    <label for="menu" class="menu-button">Menu</label>
     <nav class="site-nav">
       <a href="index.html">Overview</a>
       <a href="syntax.html" aria-current="page">Syntax</a>
@@ -26,7 +30,7 @@
     </nav>
   </header>
 
-  <main>
+  <main id="content">
     <h1>Syntax Guide</h1>
     <p>Every construct below follows <code>zila.ebnf</code>, the project's formal grammar. Blocks end with <code>end</code>; a newline ends a statement (there's no <code>;</code>).</p>
 
@@ -53,7 +57,7 @@
       <pre><code><span class="kw">package</span> main
 
 <span class="kw">use</span> text, list</code></pre>
-      <p>A name after <code>use</code> is a standard library module, a dependency listed in <code>zila.toml</code> or a directory of <code>.br</code> files next to it; a name that is none of them is a compile error. <a href="packages.html">Packages</a> explains the rest.</p>
+      <p>A name after <code>use</code> is a standard library module, a dependency listed in <code>zila.toml</code> or a directory of <code>.zila</code> files next to it; a name that is none of them is a compile error. <a href="packages.html">Packages</a> explains the rest.</p>
     </section>
 
     <section id="types">
@@ -202,7 +206,7 @@
 
     <section id="errors">
       <h2>Error handling</h2>
-      <p>Zila Lang has no exceptions. A function that can fail ends its signature with <code>or error</code> (<code>-&gt; Config or error</code>), or just <code>-&gt; error</code> when it returns nothing. Inside it, writing <code>try</code> in front of a call hands a failure straight to the caller. <code>error("message")</code> creates an error; <code>match</code> reads a result with <code>ok(value)</code> and <code>err(e)</code>, and <code>call() ?? fallback</code> supplies a default. Integer arithmetic never fails: <code>+</code>, <code>-</code> and <code>*</code> wrap at the width of the type, and <code>MIN / -1</code> is <code>MIN</code>; <code>math.checked_add</code>, <code>checked_sub</code>, <code>checked_mul</code> and <code>checked_div</code> return <code>int or error</code> (kind <code>Overflow</code>, or <code>InvalidInput</code> for a zero divisor) when you need to know. A failure the caller can handle is a value: <code>xs.get(i)</code> gives the element or nothing, <code>m.get(key, default)</code> a default. For a mistake in the program itself (not bad input), <code>abort("message")</code> writes <code>abort: file.br:line: message</code> to standard error and ends the process with exit code 101. An out-of-bounds index, an integer division or remainder by zero, a missing map key with <code>m[key]</code>, <code>take</code> on an empty list, <code>int(x)</code> of a float that does not fit, a failed <code>assert</code> outside <code>--test</code> and running out of memory abort the same way. An abort cannot be caught and runs no <code>defer</code>, no <code>drop</code> and no unwinding, and buffered writers are not flushed. <code>defer</code> schedules an expression to run when the enclosing function returns — commonly used to release a resource right after acquiring it.</p>
+      <p>Zila Lang has no exceptions. A function that can fail ends its signature with <code>or error</code> (<code>-&gt; Config or error</code>), or just <code>-&gt; error</code> when it returns nothing. Inside it, writing <code>try</code> in front of a call hands a failure straight to the caller. <code>error("message")</code> creates an error; <code>match</code> reads a result with <code>ok(value)</code> and <code>err(e)</code>, and <code>call() ?? fallback</code> supplies a default. Integer arithmetic never fails: <code>+</code>, <code>-</code> and <code>*</code> wrap at the width of the type, and <code>MIN / -1</code> is <code>MIN</code>; <code>math.checked_add</code>, <code>checked_sub</code>, <code>checked_mul</code> and <code>checked_div</code> return <code>int or error</code> (kind <code>Overflow</code>, or <code>InvalidInput</code> for a zero divisor) when you need to know. A failure the caller can handle is a value: <code>xs.get(i)</code> gives the element or nothing, <code>m.get(key, default)</code> a default. For a mistake in the program itself (not bad input), <code>abort("message")</code> writes <code>abort: file.zila:line: message</code> to standard error and ends the process with exit code 101. An out-of-bounds index, an integer division or remainder by zero, a missing map key with <code>m[key]</code>, <code>take</code> on an empty list, <code>int(x)</code> of a float that does not fit, a failed <code>assert</code> outside <code>--test</code> and running out of memory abort the same way. An abort cannot be caught and runs no <code>defer</code>, no <code>drop</code> and no unwinding, and buffered writers are not flushed. <code>defer</code> schedules an expression to run when the enclosing function returns — commonly used to release a resource right after acquiring it.</p>
       <pre><code><span class="kw">func</span> load(path: text) -&gt; Config or error
     <span class="kw">let</span> raw = <span class="kw">try</span> file.read(path)
     <span class="kw">let</span> f = <span class="kw">try</span> file.open(path)
@@ -470,12 +474,12 @@ print(char(231).to_text())    <span class="cm">// ç</span></code></pre>
 <span class="kw">end</span></code></pre>
 
       <h3 id="no-alloc"><code>#[no_alloc]</code> and <code>#[allocator]</code></h3>
-      <p><code>#[no_alloc]</code> on a function is a promise the compiler checks: neither the function nor anything it calls may allocate. The allocating operations are a fixed list: text with interpolation, list, map and set literals (an empty <code>[]</code> too), <code>Map.new()</code> and the other collection constructors, <code>new</code>, a closure that captures a variable, <code>spawn</code>, <code>channel</code>, <code>defer</code>, <code>c.alloc</code>, calling an async function, and the list and text methods <code>add</code>, <code>push</code> and <code>slice</code>. Text without interpolation and a closure that captures nothing do not allocate. The standard library is analysed like your own code, so there is no list of allocating functions to keep. A function that calls through a function value (a parameter or a local holding a function) is rejected, because the callee is unknown. Calls on a type parameter bound by an interface are analysed as direct calls to every method of that name. <code>extern</code> functions are trusted unless marked <code>#[allocates]</code>, and <code>asm</code> blocks are not looked into. The error names the chain: <code>'parse_line' is #[no_alloc] but allocates</code>, then <code>parse_line -&gt; trim_all -&gt; text interpolation at util.br:12</code>.</p>
+      <p><code>#[no_alloc]</code> on a function is a promise the compiler checks: neither the function nor anything it calls may allocate. The allocating operations are a fixed list: text with interpolation, list, map and set literals (an empty <code>[]</code> too), <code>Map.new()</code> and the other collection constructors, <code>new</code>, a closure that captures a variable, <code>spawn</code>, <code>channel</code>, <code>defer</code>, <code>c.alloc</code>, calling an async function, and the list and text methods <code>add</code>, <code>push</code> and <code>slice</code>. Text without interpolation and a closure that captures nothing do not allocate. The standard library is analysed like your own code, so there is no list of allocating functions to keep. A function that calls through a function value (a parameter or a local holding a function) is rejected, because the callee is unknown. Calls on a type parameter bound by an interface are analysed as direct calls to every method of that name. <code>extern</code> functions are trusted unless marked <code>#[allocates]</code>, and <code>asm</code> blocks are not looked into. The error names the chain: <code>'parse_line' is #[no_alloc] but allocates</code>, then <code>parse_line -&gt; trim_all -&gt; text interpolation at util.zila:12</code>.</p>
       <p>A program replaces the heap with three functions of fixed signatures, at most one of each. The runtime keeps the object headers, reference counts and zeroing; the allocator only hands out raw memory (it may return it uninitialized), and the runtime asks for the payload plus a 24-byte header, aligned to 16. They are checked as <code>#[no_alloc]</code> themselves, are accepted only in the program (not in <code>std/</code>), and need both <code>alloc</code> and <code>free</code>; <code>realloc</code> is optional and used to grow lists (without it the runtime allocates, copies and frees). A null from <code>alloc</code> or <code>realloc</code> ends the program with <code>out of memory</code>. <code>live_objects()</code> keeps counting; <code>heap_bytes()</code> is a compile error with a custom allocator.</p>
       <pre><code>#[allocator(alloc)]   <span class="kw">func</span> my_alloc(size: u64, align: u64) -&gt; *u8
 #[allocator(free)]    <span class="kw">func</span> my_free(ptr: *u8, size: u64, align: u64)
 #[allocator(realloc)] <span class="kw">func</span> my_realloc(ptr: *u8, old: u64, size: u64, align: u64) -&gt; *u8</code></pre>
-      <p>See <code>examples/no_alloc.br</code> and <code>examples/allocator.br</code>.</p>
+      <p>See <code>examples/no_alloc.zila</code> and <code>examples/allocator.zila</code>.</p>
     </section>
 
     <section id="comptime">
@@ -517,7 +521,7 @@ print(char(231).to_text())    <span class="cm">// ç</span></code></pre>
         <li><strong>Cross-compiling.</strong> Generators are built for, and run on, the machine that compiles, whatever <code>--target</code> says; <code>reflect.target()</code> tells them which target the build is for.</li>
         <li><strong>Trust.</strong> A generator is code that runs on your machine during the build. The subset check is what makes running a package's generators reasonably safe: it is enforced for every function a generator reaches, the process has no input, a time limit, an output limit and a memory limit, and the language server and the formatter never run one. It is not a hard sandbox against code that gets around the check; read the generators of packages you do not trust.</li>
       </ul>
-      <p>Results are cached on disk, keyed by a hash of the compiler version, the target, the source of what the generator reaches and the description of the type, so an unchanged build does not run the generators again (<code>--no-comptime-cache</code> turns this off). See <a href="native.html#comptime">the pipeline</a> and <code>examples/comptime.br</code>.</p>
+      <p>Results are cached on disk, keyed by a hash of the compiler version, the target, the source of what the generator reaches and the description of the type, so an unchanged build does not run the generators again (<code>--no-comptime-cache</code> turns this off). See <a href="native.html#comptime">the pipeline</a> and <code>examples/comptime.zila</code>.</p>
     </section>
 
     <section id="ffi">
@@ -565,7 +569,7 @@ print(char(231).to_text())    <span class="cm">// ç</span></code></pre>
     assert(clamp(99, 0, 10) &lt;= 10, <span class="str">"above the range"</span>)
     <span class="kw">return</span>
 <span class="kw">end</span></code></pre>
-      <p>Run them with <code>zila-parse --test file.br</code> (the file must be in <code>package main</code>). A failed check prints <code>FAIL clamp_keeps_values_inside: line 7: assertion failed: left 3, right 4</code>; a test that crashes the program stops the run of that file. <code>examples/testing.br</code> is a complete example.</p>
+      <p>Run them with <code>zila-parse --test file.zila</code> (the file must be in <code>package main</code>). A failed check prints <code>FAIL clamp_keeps_values_inside: line 7: assertion failed: left 3, right 4</code>; a test that crashes the program stops the run of that file. <code>examples/testing.zila</code> is a complete example.</p>
     </section>
 
     <div class="note">
@@ -574,7 +578,7 @@ print(char(231).to_text())    <span class="cm">// ç</span></code></pre>
   </main>
 
   <footer class="site-footer">
-    Zila Lang — a language with a human face. Docs generated from <code>zila.ebnf</code> and <code>examples/*.br</code>.
+    Zila Lang &middot; A small, readable language that compiles straight to machine code. The examples are checked against <code>examples/*.zila</code>; the grammar is <code>zila.ebnf</code>.
   </footer>
 </body>
 </html>

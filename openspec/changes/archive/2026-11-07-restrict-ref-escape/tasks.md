@@ -14,11 +14,11 @@
 
 ## 3. Standard library, os and examples audit
 
-- [x] 3.1 Confirm no violation in every current `ref` user: `std/fs.br`, `std/fs.linux.br`, `std/net.br`, `std/net.linux.br`, `std/sys.br`, `std/sys.linux.br`, `std/task.br`, `std/task.linux.br` (the `drop` receivers, `wake_one`, `chan_*`), `examples/types.br`, and `os/` (grep `\bref\b`; none expected). Rewrite any hit the suites reveal (use `new T` if `add-weak-refs` has landed, otherwise an index or a field copy). Verify: `cargo test --test stdlib --test codegen --test linux --test defer --test optimizer` (leave `tests/async.rs` out of routine runs) and `brasa build examples/types.br`.
+- [x] 3.1 Confirm no violation in every current `ref` user: `std/fs.br`, `std/fs.linux.br`, `std/net.br`, `std/net.linux.br`, `std/sys.br`, `std/sys.linux.br`, `std/task.br`, `std/task.linux.br` (the `drop` receivers, `wake_one`, `chan_*`), `examples/types.br`, and `os/` (grep `\bref\b`; none expected). Rewrite any hit the suites reveal (use `new T` if `add-weak-refs` has landed, otherwise an index or a field copy). Verify: `cargo test --test stdlib --test codegen --test linux --test defer --test optimizer` (leave `tests/async.rs` out of routine runs) and `zila build examples/types.br`.
 
 ## 4. Documentation
 
-- [x] 4.1 `brasa.ebnf`: update the comments on `lambda_param`, `arg`, the receiver and the "Values" notes ("ref = temporary borrow of a value that lives elsewhere; it cannot be stored, returned, captured or sent to a task"); productions unchanged. Verify: `cargo test --test parse`.
+- [x] 4.1 `zila.ebnf`: update the comments on `lambda_param`, `arg`, the receiver and the "Values" notes ("ref = temporary borrow of a value that lives elsewhere; it cannot be stored, returned, captured or sent to a task"); productions unchanged. Verify: `cargo test --test parse`.
 - [x] 4.2 `docs/syntax.html` (the `ref` paragraphs), `docs/native.html`, `docs/async.html`, `docs/index.html`: describe `ref` as a passing mode with the escape rule and the `new T` remedy. Verify: `cargo test --test docs`.
 - [x] 4.3 Check README and GOVERNANCE for `ref` mentions. Verify: `grep -n "\bref\b" README.md GOVERNANCE.md` and update if any.
 
@@ -28,5 +28,5 @@
 - Lambdas have no `->`, so tests use plain `func()` lambdas.
 - Audit found one violation: `release(conn)` in `std/tls.br` and `std/tls.linux.br` (called from the `ref` receiver `drop`). Fixed by making `release` take `ref conn` and passing `ref conn` at every call.
 - Not run (needs permission / network): `tests/linux.rs`, `tests/os.rs`, `tests/tls.rs`, `tests/dns.rs`. The `.linux.br` std files were audited by reading only.
-- `brasa build examples/types.br` fails with "type 'Customer' is not supported by the native backend" (unrelated to this change; no escape error).
+- `zila build examples/types.br` fails with "type 'Customer' is not supported by the native backend" (unrelated to this change; no escape error).
 - Test results: refs 17/17, refcheck unit 2/2; remaining failures equal the known pre-existing set.

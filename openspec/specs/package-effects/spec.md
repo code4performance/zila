@@ -6,7 +6,7 @@ Show the consumer of a package what it can do to the machine and to memory safet
 ## Requirements
 
 ### Requirement: Effects of a package
-For every package in a build, the toolchain SHALL determine its effects: whether its code (files not ending in `_test.br`) contains an `unsafe` block, an `extern` declaration or an `asm` block, and for `extern` which libraries it names. The effects of a package SHALL be those of its own code only, not those of its dependencies, which are reported separately. In a build report (`--explain-link`) they SHALL be those of the code the program reaches (generic code always counts); when packages are downloaded, where no program exists, and for the policy, they SHALL be those of the whole package, tests left out.
+For every package in a build, the toolchain SHALL determine its effects: whether its code (files not ending in `_test.zila`) contains an `unsafe` block, an `extern` declaration or an `asm` block, and for `extern` which libraries it names. The effects of a package SHALL be those of its own code only, not those of its dependencies, which are reported separately. In a build report (`--explain-link`) they SHALL be those of the code the program reaches (generic code always counts); when packages are downloaded, where no program exists, and for the policy, they SHALL be those of the whole package, tests left out.
 
 #### Scenario: A package with FFI
 - **WHEN** a dependency declares `extern func` from `user32` and has no `unsafe` block elsewhere

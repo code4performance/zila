@@ -63,7 +63,7 @@ fn page_helpers_read_the_site() {
     assert!(all.iter().any(|p| p.name == "index.html"));
     let hello = page("index.html");
     let b = blocks(&hello.html);
-    assert!(b.iter().any(|b| b.example_path() == Some("examples/hello.br")));
+    assert!(b.iter().any(|b| b.example_path() == Some("examples/hello.zila")));
     assert_eq!(plain("<span class=\"kw\">let</span> a &lt; b"), "let a < b");
 }
 
@@ -228,7 +228,7 @@ fn the_database_libraries_are_documented() {
         assert!(stdlib.contains(needed), "docs/stdlib.html does not mention `{}`", needed);
     }
     let databases = page("databases.html").html;
-    for needed in ["db.query", "postgres.open", "sqlserver.open", "encrypt=on", "tests/docker", "ZILA_TEST_POSTGRES", "examples/users_crud.br", "examples/db.br", "#[db("] {
+    for needed in ["db.query", "postgres.open", "sqlserver.open", "encrypt=on", "tests/docker", "ZILA_TEST_POSTGRES", "examples/users_crud.zila", "examples/db.zila", "#[db("] {
         assert!(databases.contains(needed), "docs/databases.html does not mention `{}`", needed);
     }
     let native = page("native.html").html;
@@ -261,7 +261,7 @@ fn the_mcp_library_is_documented() {
         assert!(stdlib.contains(needed), "docs/stdlib.html does not mention `{}`", needed);
     }
     let ai = page("ai.html").html;
-    for needed in ["id=\"mcp\"", "Mcp-Session-Id", "isError", "-32602", "Origin", "examples/mcp_server.br"] {
+    for needed in ["id=\"mcp\"", "Mcp-Session-Id", "isError", "-32602", "Origin", "examples/mcp_server.zila"] {
         assert!(ai.contains(needed), "docs/ai.html does not mention `{}`", needed);
     }
 }
@@ -277,4 +277,230 @@ fn the_rag_library_is_documented() {
     for needed in ["id=\"rag\"", "max_context_chars", "pgvector", "not instructions"] {
         assert!(ai.contains(needed), "docs/ai.html does not mention `{}`", needed);
     }
+}
+
+// ---------------------------------------------------------------- brand and layout
+
+/// The fields of `docs/assets/description.txt`: `tagline`, `summary` and the `for` list.
+fn description() -> (String, String, Vec<String>) {
+    let text = fs::read_to_string("docs/assets/description.txt").unwrap().replace("\r\n", "\n");
+    let (mut tagline, mut summary, mut items) = (String::new(), String::new(), Vec::new());
+    for line in text.lines() {
+        if let Some((k, v)) = line.split_once(':') {
+            match k {
+                "tagline" => tagline = v.trim().to_string(),
+                "summary" => summary = v.trim().to_string(),
+                "for" => items.push(v.trim().to_string()),
+                _ => {}
+            }
+        }
+    }
+    (tagline, summary, items)
+}
+
+#[test]
+fn the_description_is_one_text_of_the_right_size() {
+    let (tagline, summary, items) = description();
+    assert!(!tagline.is_empty() && tagline.chars().count() <= 90, "the tagline has {} characters (at most 90)", tagline.chars().count());
+    assert!(!summary.is_empty() && summary.chars().count() <= 500, "the summary has {} characters (at most 500)", summary.chars().count());
+    assert!(items.len() >= 3);
+    for text in [&tagline, &summary] {
+        assert!(!text.contains(['`', '<', '>', '&']), "the description is plain text, without markup: {}", text);
+    }
+}
+
+#[test]
+fn the_description_is_used_as_it_is_everywhere() {
+    let (tagline, summary, _) = description();
+    let mut wrong = Vec::new();
+    let mut want = |file: &str, text: &str, what: &str, found: &str| {
+        if !found.contains(text) {
+            wrong.push(format!("{} does not contain the {} of docs/assets/description.txt", file, what));
+        }
+    };
+    let index = page("index.html").html;
+    want("docs/index.html", &tagline, "tagline", &plain(&index));
+    want("docs/index.html", &summary, "summary", &plain(&index));
+    want("docs/index.html (meta description)", &format!("<meta name=\"description\" content=\"{}\">", tagline), "tagline", &index);
+    let readme = fs::read_to_string("README.md").unwrap().replace("\r\n", "\n");
+    want("README.md", &tagline, "tagline", &readme);
+    want("README.md", &summary, "summary", &readme);
+    let cargo = fs::read_to_string("Cargo.toml").unwrap();
+    want("Cargo.toml", &format!("description = \"{}\"", tagline), "tagline", &cargo);
+    let package = fs::read_to_string("editors/vscode/package.json").unwrap();
+    want("editors/vscode/package.json", &format!("\"description\": \"{}\"", tagline), "tagline", &package);
+    let ext = fs::read_to_string("editors/vscode/README.md").unwrap();
+    want("editors/vscode/README.md", &tagline, "tagline", &ext);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+#[test]
+fn every_page_has_the_icon_the_skip_link_and_the_content_anchor() {
+    for p in pages() {
+        assert!(p.html.contains("<link rel=\"icon\" href=\"assets/zila.svg\""), "docs/{} does not link the icon", p.name);
+        assert!(p.html.contains("<html lang=\"en\">"), "docs/{} has no language", p.name);
+        let body = p.html.split("<body>").nth(1).unwrap_or_else(|| panic!("docs/{} has no body", p.name));
+        assert!(body.trim_start().starts_with("<a class=\"skip\" href=\"#content\">"), "docs/{}: the skip link must come first", p.name);
+        assert!(p.html.contains("<main id=\"content\">"), "docs/{} has no main#content", p.name);
+        assert!(p.html.contains("<label for=\"menu\" class=\"menu-button\">") && p.html.contains("id=\"menu\" class=\"menu-toggle\""), "docs/{} has no menu control", p.name);
+        assert!(!p.html.contains("ember-dot"), "docs/{} still has the old brand markup", p.name);
+    }
+    assert!(Path::new("docs/assets/zila.svg").is_file());
+}
+
+#[test]
+fn the_icons_are_plain_and_small() {
+    for file in ["docs/assets/zila.svg", "docs/assets/zila-mono.svg"] {
+        let svg = fs::read_to_string(file).unwrap();
+        assert!(svg.len() < 2048, "{} is {} bytes", file, svg.len());
+        for bad in ["<script", "<image", "<text", "<foreignObject", "href="] {
+            assert!(!svg.contains(bad), "{} contains {}", file, bad);
+        }
+        assert!(svg.contains("viewBox"), "{} has no viewBox", file);
+    }
+    // the extension's icon is a real 128 x 128 PNG
+    let png = fs::read("editors/vscode/icon.png").unwrap();
+    assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
+    let (w, h) = (u32::from_be_bytes(png[16..20].try_into().unwrap()), u32::from_be_bytes(png[20..24].try_into().unwrap()));
+    assert_eq!((w, h), (128, 128));
+    let manifest = fs::read_to_string("editors/vscode/package.json").unwrap();
+    assert!(manifest.contains("\"icon\": \"icon.png\""), "package.json does not name the icon");
+    let ignore = fs::read_to_string("editors/vscode/.vscodeignore").unwrap();
+    assert!(!ignore.lines().any(|l| l.trim() == "icon.png" || l.trim() == "*.png"), ".vscodeignore excludes the icon");
+}
+
+#[test]
+fn the_site_needs_nothing_from_another_origin_and_no_script() {
+    let css = fs::read_to_string("docs/styles.css").unwrap();
+    for bad in ["@import", "url(http", "url(\"http", "@font-face"] {
+        assert!(!css.contains(bad), "docs/styles.css contains {}", bad);
+    }
+    for p in pages() {
+        assert!(!p.html.contains("<script"), "docs/{} has a script", p.name);
+        for tag in ["<link ", "<img "] {
+            for chunk in p.html.split(tag).skip(1) {
+                let attrs = chunk.split('>').next().unwrap();
+                assert!(!attrs.contains("http://") && !attrs.contains("https://"), "docs/{} loads a file from another origin: {}{}", p.name, tag, attrs);
+            }
+        }
+    }
+}
+
+fn hex(v: &str) -> (f64, f64, f64) {
+    let v = v.trim().trim_start_matches('#');
+    let c = |i: usize| u8::from_str_radix(&v[i..i + 2], 16).unwrap() as f64 / 255.0;
+    (c(0), c(2), c(4))
+}
+
+fn luminance(rgb: (f64, f64, f64)) -> f64 {
+    let f = |c: f64| if c <= 0.03928 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) };
+    0.2126 * f(rgb.0) + 0.7152 * f(rgb.1) + 0.0722 * f(rgb.2)
+}
+
+fn contrast(a: &str, b: &str) -> f64 {
+    let (la, lb) = (luminance(hex(a)), luminance(hex(b)));
+    (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+}
+
+/// The custom properties of one `:root { ... }` block of the stylesheet, by their order in the file.
+fn tokens(css: &str, block: usize) -> std::collections::HashMap<String, String> {
+    let mut starts = css.match_indices(":root {").map(|(i, _)| i);
+    let start = starts.nth(block).unwrap_or_else(|| panic!("the stylesheet has no :root block {}", block));
+    let body = &css[start..];
+    let body = &body[..body.find('}').unwrap()];
+    body.lines()
+        .filter_map(|l| {
+            let l = l.trim();
+            let (k, v) = l.strip_prefix("--")?.split_once(':')?;
+            Some((k.to_string(), v.trim().trim_end_matches(';').to_string()))
+        })
+        .collect()
+}
+
+#[test]
+fn text_and_background_colours_have_a_contrast_of_at_least_4_5_in_both_themes() {
+    let css = fs::read_to_string("docs/styles.css").unwrap();
+    let light = tokens(&css, 0);
+    let mut dark = light.clone();
+    dark.extend(tokens(&css, 1));
+    for (theme, t) in [("light", &light), ("dark", &dark)] {
+        for fg in ["fg", "muted", "accent", "kw", "str", "cm"] {
+            for bg in ["bg", "bg-soft"] {
+                let ratio = contrast(&t[fg], &t[bg]);
+                assert!(ratio >= 4.5, "{} theme: --{} on --{} has a contrast of {:.2} (at least 4.5)", theme, fg, bg, ratio);
+            }
+        }
+    }
+}
+
+#[test]
+fn the_layout_keeps_to_its_rules() {
+    let css = fs::read_to_string("docs/styles.css").unwrap();
+    assert!(css.contains("--measure: 68ch"), "the reading column is 68ch");
+    assert!(css.contains("prefers-color-scheme: dark") && css.contains("@media print") && css.contains("min-width: 800px"));
+    assert!(css.contains(":focus-visible"), "focus must be visible");
+    assert!(!css.contains("ember"), "the old ember palette is gone");
+    assert!(css.contains("system-ui"), "system fonts");
+}
+
+// ---------------------------------------------------------------- the file extension
+
+/// The old extension of source files: written in two parts so that this file does not match itself.
+fn old_extension() -> String {
+    format!("{}{}", ".b", "r")
+}
+
+fn tracked_files() -> Vec<String> {
+    let out = std::process::Command::new("git").args(["ls-files", "-z"]).output().unwrap();
+    String::from_utf8_lossy(&out.stdout).split('\0').filter(|p| !p.is_empty()).map(|p| p.to_string()).collect()
+}
+
+/// The lines of `text` where the old extension ends a word (a file name, or the extension quoted), but not where it starts a longer name.
+fn mentions(text: &str, ext: &str) -> Vec<usize> {
+    let mut found = Vec::new();
+    for (i, line) in text.lines().enumerate() {
+        let mut from = 0;
+        while let Some(at) = line[from..].find(ext) {
+            let end = from + at + ext.len();
+            let next = line[end..].chars().next();
+            if !next.map_or(false, |c| c.is_alphanumeric() || c == '_') {
+                found.push(i + 1);
+                break;
+            }
+            from = end;
+        }
+    }
+    found
+}
+
+#[test]
+fn the_extension_rule_reads_words_and_not_longer_names() {
+    let ext = old_extension();
+    assert_eq!(mentions(&format!("a{} b{}:3\nlonger{}ackets\nok", ext, ext, ext), &ext), vec![1]);
+    assert!(mentions(&format!("x{}acket", ext), &ext).is_empty());
+}
+
+#[test]
+fn no_tracked_file_uses_the_old_source_extension() {
+    let ext = old_extension();
+    let mut problems = Vec::new();
+    for path in tracked_files() {
+        // the archive records what was true when each change was archived
+        if path.starts_with("openspec/changes/archive/") || !Path::new(&path).is_file() {
+            continue;
+        }
+        if path.ends_with(&ext) {
+            problems.push(format!("{}: a source file must end in .zila", path));
+            continue;
+        }
+        let Ok(bytes) = fs::read(&path) else { continue };
+        if bytes.contains(&0) {
+            continue;
+        }
+        let Ok(text) = String::from_utf8(bytes) else { continue };
+        for line in mentions(&text, &ext) {
+            problems.push(format!("{}:{}: names the old extension", path, line));
+        }
+    }
+    assert!(problems.is_empty(), "the old source file extension is still used ({} places):\n{}", problems.len(), problems.join("\n"));
 }

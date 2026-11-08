@@ -1,6 +1,6 @@
 ## Why
 
-Brasa has TLS, JSON with comptime reflection and cheap tasks, which is what talking to a language model needs, but there is no client for an LLM API. With one, a program can use a model as a typed function (`ask(Invoice, ...)`), stream answers and give the model Brasa functions as tools. This is the base of `add-mcp` (the same tools served over MCP) and `add-rag` (retrieval and grounded answers). Database tools for agents come from `add-db-drivers`.
+Zila Lang has TLS, JSON with comptime reflection and cheap tasks, which is what talking to a language model needs, but there is no client for an LLM API. With one, a program can use a model as a typed function (`ask(Invoice, ...)`), stream answers and give the model Zila Lang functions as tools. This is the base of `add-mcp` (the same tools served over MCP) and `add-rag` (retrieval and grounded answers). Database tools for agents come from `add-db-drivers`.
 
 ## What Changes
 

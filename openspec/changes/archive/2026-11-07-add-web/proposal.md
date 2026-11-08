@@ -1,10 +1,10 @@
 ## Why
 
-Brasa has TCP, TLS and tasks, but writing a web service still means parsing HTTP by hand. `examples/rest_api.br` and `examples/types.br` show the intended shape (`app.get("/customers/:id", ...)`, `Handler` and `Middleware` types, `app.use(...)`), and `brasa.ebnf` reserves `app.use` for it. Before this change `examples/rest_api.br` used `http` and `db`, which were never libraries. A standard `use web` makes the language useful for the most common kind of program, and exercises everything the other planned changes build: JSON, error kinds, comptime reflection, tasks without coloring.
+Zila Lang has TCP, TLS and tasks, but writing a web service still means parsing HTTP by hand. `examples/rest_api.br` and `examples/types.br` show the intended shape (`app.get("/customers/:id", ...)`, `Handler` and `Middleware` types, `app.use(...)`), and `zila.ebnf` reserves `app.use` for it. Before this change `examples/rest_api.br` used `http` and `db`, which were never libraries. A standard `use web` makes the language useful for the most common kind of program, and exercises everything the other planned changes build: JSON, error kinds, comptime reflection, tasks without coloring.
 
 ## What Changes
 
-- A new library `use web`, written in Brasa (`std/web.br`) on top of `use net`, `use tls`, `use json`, `use text` and `use task`. No change to the compiler beyond registering the library; `net` gains `cancel` (a plain function that ends the I/O waiting on a connection or listener, used by the timers) on both layers.
+- A new library `use web`, written in Zila Lang (`std/web.br`) on top of `use net`, `use tls`, `use json`, `use text` and `use task`. No change to the compiler beyond registering the library; `net` gains `cancel` (a plain function that ends the I/O waiting on a connection or listener, used by the timers) on both layers.
 - An HTTP/1.1 server: request line, headers, bodies with `Content-Length` and `chunked`, keep-alive, size limits and timeouts driven by the scheduler, one task per connection.
 - `Request` and `Response` records, routing with path parameters (`/users/:id`), a middleware chain (`type Middleware = func(Request, next: Handler) -> Response or error`), `app.use(...)`.
 - JSON helpers: `web.read_json(T, req)` decodes the body, `web.json(T, status, value)` and `web.created(T, value)` encode a response (they are generated per type, so the program also writes `use json`).
@@ -28,4 +28,4 @@ None.
 
 ## Impact
 
-`std/web.br` (new), `src/codegen_x64.rs` (register the library, reject it in the kernel), `examples/rest_api.br`, `examples/web.br` (new), `tests/web.rs` (new), `tests/linux.rs`, `tests/docs.rs`, `docs/stdlib.html` (new section), `docs/async.html` (link), `docs/native.html` (Linux table row), `README.md` (library list and roadmap), `brasa.ebnf` comment. Depends on `add-comptime-reflection`, `add-json`, `add-error-kind` and `remove-async-coloring`; see design.md.
+`std/web.br` (new), `src/codegen_x64.rs` (register the library, reject it in the kernel), `examples/rest_api.br`, `examples/web.br` (new), `tests/web.rs` (new), `tests/linux.rs`, `tests/docs.rs`, `docs/stdlib.html` (new section), `docs/async.html` (link), `docs/native.html` (Linux table row), `README.md` (library list and roadmap), `zila.ebnf` comment. Depends on `add-comptime-reflection`, `add-json`, `add-error-kind` and `remove-async-coloring`; see design.md.

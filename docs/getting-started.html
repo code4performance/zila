@@ -4,12 +4,16 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Getting Started — Zila Lang</title>
-  <meta name="description" content="Build the Zila Lang parser and run your first .br file, including the --ast, --tokens, and --run options.">
+  <meta name="description" content="Build the Zila Lang parser and run your first .zila file, including the --ast, --tokens, and --run options.">
   <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="assets/zila.svg" type="image/svg+xml">
 </head>
 <body>
+  <a class="skip" href="#content">Skip to content</a>
   <header class="site-header">
-    <a class="brand" href="index.html">zila<span class="ember-dot">.</span><small>lang docs</small></a>
+    <a class="brand" href="index.html"><img src="assets/zila.svg" alt="" width="28" height="28"><span>Zila Lang</span><small>docs</small></a>
+    <input type="checkbox" id="menu" class="menu-toggle">
+    <label for="menu" class="menu-button">Menu</label>
     <nav class="site-nav">
       <a href="index.html">Overview</a>
       <a href="syntax.html">Syntax</a>
@@ -26,7 +30,7 @@
     </nav>
   </header>
 
-  <main>
+  <main id="content">
     <h1>Getting Started</h1>
     <p>Zila Lang's reference implementation is a Rust lexer, AST, and recursive-descent parser and a native x86-64 compiler — std-only, no external dependencies.</p>
 
@@ -39,12 +43,12 @@ cargo test</code></pre>
 
     <section>
       <h2>Run a program</h2>
-      <p>Once built, point <code>zila-parse</code> at any <code>.br</code> file:</p>
-      <pre><code>./target/release/zila-parse examples/rest_api.br            <span class="cm"># OK + summary</span>
-./target/release/zila-parse examples/hello.br --ast          <span class="cm"># dump the AST</span>
-./target/release/zila-parse examples/hello.br --tokens       <span class="cm"># dump tokens</span>
-./target/release/zila-parse examples/hello.br --run          <span class="cm"># compile, run, delete the executable</span>
-./target/release/zila-parse examples/async.br -o async.exe   <span class="cm"># compile to a native executable</span></code></pre>
+      <p>Once built, point <code>zila-parse</code> at any <code>.zila</code> file:</p>
+      <pre><code>./target/release/zila-parse examples/rest_api.zila            <span class="cm"># OK + summary</span>
+./target/release/zila-parse examples/hello.zila --ast          <span class="cm"># dump the AST</span>
+./target/release/zila-parse examples/hello.zila --tokens       <span class="cm"># dump tokens</span>
+./target/release/zila-parse examples/hello.zila --run          <span class="cm"># compile, run, delete the executable</span>
+./target/release/zila-parse examples/async.zila -o async.exe   <span class="cm"># compile to a native executable</span></code></pre>
 
       <dl class="cli">
         <dt>(no flag)</dt>
@@ -78,19 +82,19 @@ cargo test</code></pre>
         <dd>Prints how many bytes of code and data each package contributes to the program (the program itself, each library or dependency named by <code>use</code>, the runtime, strings and generated helpers), largest first, and the total. It writes no executable unless <code>-o</code> is also given. Combine it with <code>--target linux</code> for the Linux program. See <a href="packages.html#linking">Packages</a>.</dd>
 
         <dt>--docs</dt>
-        <dd>Rewrites the example blocks of this documentation site from <code>examples/*.br</code>. Run it after changing an example; <code>cargo test</code> fails when the pages are out of date.</dd>
+        <dd>Rewrites the example blocks of this documentation site from <code>examples/*.zila</code>. Run it after changing an example; <code>cargo test</code> fails when the pages are out of date.</dd>
 
-        <dt>--fmt file.br ...</dt>
+        <dt>--fmt file.zila ...</dt>
         <dd>Rewrites the files in the standard style and prints the names of the ones it changed. Only whitespace changes: four spaces per block level (<code>end</code> and <code>else</code> line up with the line that opens the block), one space after commas, no trailing spaces, at most one blank line in a row, comments kept. It refuses to write a file whose tokens would differ from the original's, and leaves a file with a syntax error alone.</dd>
 
-        <dt>--fmt-check file.br ...</dt>
+        <dt>--fmt-check file.zila ...</dt>
         <dd>Changes nothing: lists the files that are not in the standard style and exits with status 1 when there are any (and 0 otherwise), so a build can check formatting.</dd>
 
-        <dt>--test file.br ...</dt>
+        <dt>--test file.zila ...</dt>
         <dd>Builds each file with a generated entry point that runs its <code>#[test]</code> functions in order and prints <code>ok name</code> or <code>FAIL name: message</code> for each, then <code>test result: N passed, M failed</code>. The exit status is 1 when a test failed, a file does not compile or the run stopped early (a crash such as a division by zero is reported with its exit code). The file's own <code>main</code> is not used; combine with <code>--no-opt</code> to test without the optimizer. See <a href="syntax.html#testing">Testing</a>.</dd>
 
         <dt>--lsp</dt>
-        <dd>Runs a language server on standard input and output (Language Server Protocol). It reports syntax errors as you type and formats documents in the standard style, like <code>--fmt</code>. Any editor with an LSP client can use it by starting <code>zila-parse --lsp</code> for <code>.br</code> files.</dd>
+        <dd>Runs a language server on standard input and output (Language Server Protocol). It reports syntax errors as you type and formats documents in the standard style, like <code>--fmt</code>. Any editor with an LSP client can use it by starting <code>zila-parse --lsp</code> for <code>.zila</code> files.</dd>
 
         <dt>--comptime-timeout seconds</dt>
         <dd>The time one run of comptime generators may take (default 5). A generator that takes longer is stopped and the build fails with an error naming it. See <a href="syntax.html#comptime">Compile-time code generation</a>.</dd>
@@ -122,7 +126,7 @@ cargo test</code></pre>
         <dt>--offline</dt>
         <dd>With the package commands: use only the cache and the lock, and fail naming what is missing. Builds never use the network, so it changes nothing for them.</dd>
 
-        <dt>--os boot.br kernel.br -o disk.img</dt>
+        <dt>--os boot.zila kernel.zila -o disk.img</dt>
         <dd>Builds a bootable disk image from a boot sector and a kernel, both written in Zila Lang (see <code>os/</code> in the repository). Run it with QEMU.</dd>
       </dl>
     </section>
@@ -132,7 +136,7 @@ cargo test</code></pre>
       <p>The repository has a VS Code extension in <code>editors/vscode</code>: syntax highlighting, syntax errors as you type and Format Document, using the language server (<code>zila-parse --lsp</code>). It has no npm dependencies and needs no build step. Put <code>zila-parse</code> on your <code>PATH</code> (or set <code>zila.server.path</code>), then package and install it:</p>
       <pre><code>cd editors/vscode
 npx @vscode/vsce package
-code --install-extension zila-lang-0.3.0.vsix</code></pre>
+code --install-extension zila-lang-0.4.0.vsix</code></pre>
       <p>The settings are <code>zila.server.path</code> (the executable, default <code>zila-parse</code>), <code>zila.server.enabled</code> and <code>zila.trace</code> (log the protocol to the <strong>Zila Lang Language Server</strong> output channel), and the command <strong>Zila Lang: Restart Language Server</strong>. If the executable cannot be started you get one message and highlighting keeps working. Other editors can run <code>zila-parse --lsp</code> with any Language Server Protocol client.</p>
     </section>
 
@@ -140,7 +144,7 @@ code --install-extension zila-lang-0.3.0.vsix</code></pre>
       <h2>Reading errors</h2>
       <p>Parse errors report the file, line, and column, with the offending source line and a caret pointing at the problem:</p>
       <pre><code><span class="cm">error: expected 'end', found end of file
-  --&gt; prog.br:4:1</span></code></pre>
+  --&gt; prog.zila:4:1</span></code></pre>
     </section>
 
     <section>
@@ -156,7 +160,7 @@ code --install-extension zila-lang-0.3.0.vsix</code></pre>
   </main>
 
   <footer class="site-footer">
-    Zila Lang — a language with a human face. Docs generated from <code>zila.ebnf</code> and <code>examples/*.br</code>.
+    Zila Lang &middot; A small, readable language that compiles straight to machine code. The examples are checked against <code>examples/*.zila</code>; the grammar is <code>zila.ebnf</code>.
   </footer>
 </body>
 </html>

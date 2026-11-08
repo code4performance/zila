@@ -23,7 +23,7 @@ For every package in a build, the toolchain SHALL determine its effects: whether
 - **THEN** the output names the package, the old and the new effects, and marks the line as changed
 
 ### Requirement: Policy file
-When `brasa.toml` contains `[policy]` with `forbid = "unsafe"`, `"extern"` or `"asm"` (a single string; the manifest subset has no arrays), a build SHALL fail if any dependency, direct or transitive, has that effect, naming the package and the construct. The project's own code is not checked.
+When `zila.toml` contains `[policy]` with `forbid = "unsafe"`, `"extern"` or `"asm"` (a single string; the manifest subset has no arrays), a build SHALL fail if any dependency, direct or transitive, has that effect, naming the package and the construct. The project's own code is not checked.
 
 #### Scenario: Forbidden effect
 - **WHEN** `[policy]` has `forbid = "asm"` and a dependency has an `asm` block

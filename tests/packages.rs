@@ -42,12 +42,12 @@ fn norm(s: String) -> String {
 #[test]
 fn the_non_core_libraries_live_in_packages_and_the_compiler_embeds_them_from_there() {
     for n in NON_CORE {
-        assert!(!Path::new(&format!("std/{}.br", n)).exists(), "std/{}.br should not exist: the source is packages/{}/{}.br", n, n, n);
+        assert!(!Path::new(&format!("std/{}.zila", n)).exists(), "std/{}.zila should not exist: the source is packages/{}/{}.zila", n, n, n);
         let manifest = std::fs::read_to_string(format!("packages/{}/zila.toml", n)).unwrap();
         assert!(manifest.contains(&format!("name = \"{}\"", n)) && manifest.contains("version = "), "packages/{}/zila.toml", n);
         // the compiler's copy is the package's file
         let embedded = norm(zila::codegen_x64::std_source(n).unwrap().to_string());
-        assert!(embedded == norm(std::fs::read_to_string(format!("packages/{}/{}.br", n, n)).unwrap()), "{}", n);
+        assert!(embedded == norm(std::fs::read_to_string(format!("packages/{}/{}.zila", n, n)).unwrap()), "{}", n);
     }
     assert!(Path::new("packages/zila.toml").is_file());
 }
@@ -57,8 +57,8 @@ fn every_package_builds_as_a_local_package_and_says_it_shadows_the_standard_one(
     let dir = scratch("each");
     copy_dir(Path::new("packages"), &dir);
     for n in NON_CORE {
-        std::fs::write(dir.join("main.br"), format!("package main\n\nuse {}\n\nfunc main()\n    print(\"hi\")\nend\n", n)).unwrap();
-        let o = zila(&dir, &["main.br", "--asm"]);
+        std::fs::write(dir.join("main.zila"), format!("package main\n\nuse {}\n\nfunc main()\n    print(\"hi\")\nend\n", n)).unwrap();
+        let o = zila(&dir, &["main.zila", "--asm"]);
         let (_, err) = text(&o);
         assert!(o.status.success(), "package {} does not build: {}", n, err);
         assert!(err.contains(&format!("shadows the standard library's '{}'", n)), "{}: {}", n, err);
@@ -71,15 +71,15 @@ fn a_package_shadows_a_non_core_standard_library_and_the_standard_libraries_keep
     let dir = scratch("shadow");
     std::fs::write(dir.join("zila.toml"), "[package]\nname = \"app\"\nversion = \"0.1.0\"\n").unwrap();
     std::fs::create_dir_all(dir.join("json")).unwrap();
-    std::fs::write(dir.join("json").join("json.br"), "package json\n\npub func hello() -> text\n    return \"my json\"\nend\n").unwrap();
-    std::fs::write(dir.join("main.br"), "package main\n\nuse json\n\nfunc main()\n    print(json.hello())\nend\n").unwrap();
-    let o = zila(&dir, &["main.br", "--run"]);
+    std::fs::write(dir.join("json").join("json.zila"), "package json\n\npub func hello() -> text\n    return \"my json\"\nend\n").unwrap();
+    std::fs::write(dir.join("main.zila"), "package main\n\nuse json\n\nfunc main()\n    print(json.hello())\nend\n").unwrap();
+    let o = zila(&dir, &["main.zila", "--run"]);
     let (out, err) = text(&o);
     assert_eq!(out, "my json\n", "{}", err);
     assert!(err.contains("the package 'json' shadows the standard library's 'json'"), "{}", err);
     // `rag` uses the standard `json` inside: the local package must not replace it there
-    std::fs::write(dir.join("main.br"), "package main\n\nuse rag\n\nfunc main()\n    print(\"ok\")\nend\n").unwrap();
-    let o = zila(&dir, &["main.br", "--run"]);
+    std::fs::write(dir.join("main.zila"), "package main\n\nuse rag\n\nfunc main()\n    print(\"ok\")\nend\n").unwrap();
+    let o = zila(&dir, &["main.zila", "--run"]);
     let (out, err) = text(&o);
     assert_eq!(out, "ok\n", "{}", err);
     assert!(!err.contains("shadows"), "{}", err);
@@ -100,9 +100,9 @@ fn core_names_stay_reserved_and_other_names_may_be_dependencies() {
     let dir = scratch("localcore");
     std::fs::write(dir.join("zila.toml"), "[package]\nname = \"app\"\nversion = \"0.1.0\"\n").unwrap();
     std::fs::create_dir_all(dir.join("text")).unwrap();
-    std::fs::write(dir.join("text").join("text.br"), "package text\n\npub func x() -> int\n    return 1\nend\n").unwrap();
-    std::fs::write(dir.join("main.br"), "package main\nfunc main()\nend\n").unwrap();
-    let o = zila(&dir, &["main.br", "--asm"]);
+    std::fs::write(dir.join("text").join("text.zila"), "package text\n\npub func x() -> int\n    return 1\nend\n").unwrap();
+    std::fs::write(dir.join("main.zila"), "package main\nfunc main()\nend\n").unwrap();
+    let o = zila(&dir, &["main.zila", "--asm"]);
     let (_, err) = text(&o);
     assert!(!o.status.success() && err.contains("core standard library"), "{}", err);
     let _ = std::fs::remove_dir_all(&dir);
@@ -111,7 +111,7 @@ fn core_names_stay_reserved_and_other_names_may_be_dependencies() {
 #[test]
 fn using_a_non_core_library_as_standard_needs_no_manifest_and_prints_no_warning() {
     let dir = scratch("nowarn");
-    std::fs::write(dir.join("main.br"), "package main
+    std::fs::write(dir.join("main.zila"), "package main
 
 use json
 use db
@@ -121,7 +121,7 @@ func main()
     print(\"hi\")
 end
 ").unwrap();
-    let o = zila(&dir, &["main.br", "--run"]);
+    let o = zila(&dir, &["main.zila", "--run"]);
     let (out, err) = text(&o);
     assert_eq!(out, "hi
 ", "{}", err);

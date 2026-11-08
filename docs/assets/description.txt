@@ -1,0 +1,6 @@
+tagline: A small, readable language that compiles straight to machine code.
+summary: Zila Lang is a compiled, statically typed language with readable syntax, where blocks close with the word end. Its compiler, written in Rust with no dependencies, produces x86-64 programs for Windows and Linux itself: no virtual machine, no garbage collector, no runtime to install. Errors are values, memory is reference-counted, and the same language writes applications, C bindings and a kernel.
+for: command-line tools and servers
+for: native desktop windows
+for: bindings to C libraries
+for: operating-system code

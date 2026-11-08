@@ -40,14 +40,14 @@ fn same(src: &str) -> Option<String> {
     let (b, cb, _) = run_with(src, &ON)?;
     if a != b {
         let dir = std::env::temp_dir();
-        let _ = std::fs::write(dir.join("zila-opt-diff.br"), src);
+        let _ = std::fs::write(dir.join("zila-opt-diff.zila"), src);
         let first = a.lines().zip(b.lines()).position(|(x, y)| x != y).unwrap_or(0);
         panic!(
             "optimized output differs from unoptimized output at line {}: {:?} (unoptimized) vs {:?} (optimized); program saved to {}",
             first + 1,
             a.lines().nth(first),
             b.lines().nth(first),
-            dir.join("zila-opt-diff.br").display()
+            dir.join("zila-opt-diff.zila").display()
         );
     }
     assert_eq!(ca, cb, "exit codes differ");
@@ -245,7 +245,7 @@ print(x / (2 - 2))"] {
         let (b, cb, _) = run_with(&main_of(body), &ON).unwrap();
         assert_eq!((a.clone(), ca), (b, cb), "{}", body);
         assert_eq!(ca, 101, "{} should abort: {}", body, a);
-        assert!(a.contains("abort: main.br:") && a.contains(": division by zero"), "{}: {}", body, a);
+        assert!(a.contains("abort: main.zila:") && a.contains(": division by zero"), "{}: {}", body, a);
     }
 }
 

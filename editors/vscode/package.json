@@ -1,8 +1,9 @@
 {
   "name": "zila-lang",
   "displayName": "Zila Lang Programming Language",
-  "description": "Syntax highlighting, syntax errors and formatting for Zila Lang (.br), through the zila-parse language server",
-  "version": "0.3.0",
+  "description": "A small, readable language that compiles straight to machine code.",
+  "icon": "icon.png",
+  "version": "0.4.0",
   "publisher": "zila",
   "license": "MIT OR Apache-2.0",
   "repository": {
@@ -35,7 +36,7 @@
           "zila"
         ],
         "extensions": [
-          ".br"
+          ".zila"
         ],
         "configuration": "./language-configuration.json"
       }

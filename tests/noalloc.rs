@@ -106,7 +106,7 @@ func main()
 end
 ";
     check_err(src, "error: 'greet' is #[no_alloc] but allocates");
-    check_err(src, "greet -> text interpolation at main.br:5");
+    check_err(src, "greet -> text interpolation at main.zila:5");
 }
 
 #[test]
@@ -169,7 +169,7 @@ func main()
 end
 ";
     check_err(src, "error: 'a' is #[no_alloc] but allocates");
-    check_err(src, "a -> b -> c -> list literal at main.br:4");
+    check_err(src, "a -> b -> c -> list literal at main.zila:4");
 }
 
 #[test]
@@ -210,7 +210,7 @@ end
 func main()
 end
 ";
-    check_err(src, "a -> b -> c -> list literal at main.br:4");
+    check_err(src, "a -> b -> c -> list literal at main.zila:4");
 }
 
 #[test]
@@ -286,7 +286,7 @@ end
 func main()
 end
 ", body);
-        check_err(&src, &format!("f -> {} at main.br:", op));
+        check_err(&src, &format!("f -> {} at main.zila:", op));
     }
     check_err(
         "package main
@@ -509,12 +509,12 @@ fn a_std_function_marked_no_alloc_that_allocates_fails_the_library() {
     let lib = parse_source("package lib\n\n#[no_alloc]\nfunc broken(n: int) -> []int\n    return [n]\nend\n").unwrap();
     let modules = vec![("main".to_string(), main), ("lib".to_string(), lib)];
     let e = zila::noalloc::check_program(&modules, &std::collections::HashSet::new()).unwrap_err();
-    assert!(e.contains("lib.br:4") && e.contains("broken -> list literal"), "{}", e);
+    assert!(e.contains("lib.zila:4") && e.contains("broken -> list literal"), "{}", e);
 }
 
 #[test]
 fn the_no_alloc_example_runs() {
-    let src = std::fs::read_to_string("examples/no_alloc.br").unwrap();
+    let src = std::fs::read_to_string("examples/no_alloc.zila").unwrap();
     let file = parse_source(&src).unwrap();
     let exe = std::env::temp_dir().join(format!("zila-noalloc-example-{}.exe", std::process::id()));
     match zila::codegen_x64::compile_to_native(&file, exe.to_str().unwrap()) {

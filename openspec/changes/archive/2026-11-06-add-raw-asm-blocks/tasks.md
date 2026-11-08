@@ -8,10 +8,10 @@
 ## 2. Conversion
 
 - [x] 2.1 Convert `os/boot.br`, `os/kernel.br` and `examples/ffi.br`, and show the image and the assembly are identical to the reference
-- [x] 2.2 Convert the asm blocks in `tests/*.rs`, `brasa-ffi.md`, `docs/syntax.html`, `docs/examples.html` and `docs/os.html`
+- [x] 2.2 Convert the asm blocks in `tests/*.rs`, `zila-ffi.md`, `docs/syntax.html`, `docs/examples.html` and `docs/os.html`
 
 ## 3. Editor and documentation
 
 - [x] 3.1 Update the TextMate grammar so raw assembly lines are highlighted
-- [x] 3.2 Describe raw lines (and the still accepted quoted lines) in `docs/syntax.html`, `brasa-ffi.md` and the README
+- [x] 3.2 Describe raw lines (and the still accepted quoted lines) in `docs/syntax.html`, `zila-ffi.md` and the README
 - [x] 3.3 Run the full test suite and `openspec validate add-raw-asm-blocks`

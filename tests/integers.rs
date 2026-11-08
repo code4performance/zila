@@ -152,7 +152,7 @@ fn a_float_outside_the_int_range_stops_the_program() {
     // 2^31 does not fit an int but fits a long
     let src = main_of("let big = 2147483648.0\nprintln(long(big))\nlet x = int(big)\nprintln(\"unreachable\")");
     let Some((out, code)) = run(&src) else { return };
-    assert_eq!(out, "2147483648\nabort: main.br:6: float out of range\n");
+    assert_eq!(out, "2147483648\nabort: main.zila:6: float out of range\n");
     assert_eq!(code, 101);
 }
 
@@ -164,7 +164,7 @@ fn the_c_names_keep_the_c_sizes() {
 
 #[test]
 fn file_sizes_and_offsets_are_long() {
-    let fs = std::fs::read_to_string("std/fs.br").unwrap();
+    let fs = std::fs::read_to_string("std/fs.zila").unwrap();
     assert!(fs.contains("func file_size(f: File, path: text) -> long or error"));
     assert!(fs.contains("count: long, offset: long"));
 }

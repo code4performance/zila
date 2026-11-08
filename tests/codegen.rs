@@ -10,7 +10,7 @@ fn asm(src: &str) -> Result<String, String> {
 
 #[test]
 fn examples_compile() {
-    for p in ["examples/hello.br", "examples/ui.br", "examples/unicode.br"] {
+    for p in ["examples/hello.zila", "examples/ui.zila", "examples/unicode.zila"] {
         let src = std::fs::read_to_string(p).unwrap();
         let a = asm(&src).unwrap_or_else(|e| panic!("{}: {}", p, e));
         assert!(a.contains("zila_start proc"), "{}", p);
@@ -49,7 +49,7 @@ fn let_is_immutable() {
 #[test]
 fn type_errors_are_reported_with_line() {
     let e = asm("package main\nfunc f(s: text)\nend\nfunc main()\n    f(42)\nend\n").unwrap_err();
-    assert!(e.starts_with("main.br:5:"), "{}", e);
+    assert!(e.starts_with("main.zila:5:"), "{}", e);
     assert!(e.contains("expected text, found int"), "{}", e);
 }
 

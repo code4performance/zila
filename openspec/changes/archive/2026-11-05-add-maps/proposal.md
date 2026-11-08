@@ -1,6 +1,6 @@
 ## Why
 
-Maps are parsed (`{ "a": 1 }`, `Map<text, int>`) but the native compiler rejects them, so a Brasa program has no way to look something up by name: word counts, caches, configuration, headers of a request. Lists are the only collection, and searching one by hand is slow and noisy. A built-in map is the next most useful building block after lists, and it is the foundation the text and collection libraries on the roadmap will use.
+Maps are parsed (`{ "a": 1 }`, `Map<text, int>`) but the native compiler rejects them, so a Zila Lang program has no way to look something up by name: word counts, caches, configuration, headers of a request. Lists are the only collection, and searching one by hand is slow and noisy. A built-in map is the next most useful building block after lists, and it is the foundation the text and collection libraries on the roadmap will use.
 
 ## What Changes
 

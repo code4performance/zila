@@ -1,13 +1,13 @@
 ## Context
 
-Tasks today are Windows fibers scheduled by `std/task.br` (Brasa code): a ready queue, `switch_away()`, channels, and a deadlock check that fires whenever the ready queue is empty. Everything is single-threaded and cooperative. Heap values are reference counted, `T or error` is a boxed result, and standard libraries (`ui`, `task`) are Brasa files embedded in the compiler and compiled with the program; they reach the OS through `extern "system"`. See proposal.md for motivation and specs/ for required behavior.
+Tasks today are Windows fibers scheduled by `std/task.br` (Zila Lang code): a ready queue, `switch_away()`, channels, and a deadlock check that fires whenever the ready queue is empty. Everything is single-threaded and cooperative. Heap values are reference counted, `T or error` is a boxed result, and standard libraries (`ui`, `task`) are Zila Lang files embedded in the compiler and compiled with the program; they reach the OS through `extern "system"`. See proposal.md for motivation and specs/ for required behavior.
 
 ## Goals / Non-Goals
 
 **Goals:**
 - `async`/`await` that reads simply and reuses what exists: fibers, the ready queue, `or error`/`try`, reference counting.
 - Timers, files and TCP that never block other tasks.
-- Almost all of it written in Brasa in the standard library, as `ui` and `task` are.
+- Almost all of it written in Zila Lang in the standard library, as `ui` and `task` are.
 
 **Non-Goals:**
 - Parallelism, thread pools, atomic reference counts.
@@ -20,7 +20,7 @@ Tasks today are Windows fibers scheduled by `std/task.br` (Brasa code): a ready 
 
 **2. `await` parks the current fiber.** `await f` lowers to a call that registers the current task as the future's waiter and switches away; completion moves the waiter back to the ready queue. This is exactly how `channel.receive` already works, so one wake-up mechanism serves both. The "colored function" rule (`await` only in `async func` or `main`) is a compile-time check, cheap to relax later because fibers make `await` safe anywhere that runs inside a task.
 
-**3. Future layout.** A future is a Brasa record in `std/future.br` (`state`, `slot`, `waiters`). The value lives in `slot`, a one-element list created with the element-ownership flag matching `T`, so the existing list destructor releases an unawaited result and no new destructor machinery is needed. `await` takes the value out with a new list intrinsic `take()` that removes the last element without releasing it (ownership moves to the caller). Awaiting twice finds the slot empty and stops with an error. Alternative: keep the value and retain on each await (multi-await); rejected for v1 because the memory model then needs the future to outlive every awaiter.
+**3. Future layout.** A future is a Zila Lang record in `std/future.br` (`state`, `slot`, `waiters`). The value lives in `slot`, a one-element list created with the element-ownership flag matching `T`, so the existing list destructor releases an unawaited result and no new destructor machinery is needed. `await` takes the value out with a new list intrinsic `take()` that removes the last element without releasing it (ownership moves to the caller). Awaiting twice finds the slot empty and stops with an error. Alternative: keep the value and retain on each await (multi-await); rejected for v1 because the memory model then needs the future to outlive every awaiter.
 
 **4. One scheduler, three sources of wake-ups.** `switch_away()` gains a loop: take a ready task; if none, compute the delay to the earliest timer; if there are no timers and no outstanding I/O, report deadlock; otherwise wait for I/O completions up to that delay, wake tasks whose operations completed or whose timers expired, and retry. To avoid starving timers and I/O when tasks never idle, the scheduler also polls with zero delay every 64 task switches. Alternatives: a dedicated scheduler fiber (extra switches and stack), or an OS timer thread (introduces threads and atomic counts). The idle wait runs on the current fiber.
 
@@ -30,7 +30,7 @@ Tasks today are Windows fibers scheduled by `std/task.br` (Brasa code): a ready 
 
 **7. Files.** `CreateFileW` with `FILE_FLAG_OVERLAPPED`, associated with the port; `ReadFile`/`WriteFile` with explicit offsets in chunks (64 KiB) until end of file or all data written, so large files and partial transfers work and other tasks run between chunks. Paths are converted from UTF-8 with `MultiByteToWideChar`. Handles close in the task that opened them, on every path including errors.
 
-**8. TCP.** Winsock with overlapped sockets: `AcceptEx`, `ConnectEx` (both fetched with `WSAIoctl`, called as `extern` function values), `WSARecv`, `WSASend`. A listener and each connection are records that own their handle. Closing on release needs a language feature the compiler lacks (record destructors only release fields), so decision 11 adds a `drop` hook; `close()` stays available for closing early. Host names go through the blocking `getaddrinfo`; numeric IPv4 addresses are parsed in Brasa and never block.
+**8. TCP.** Winsock with overlapped sockets: `AcceptEx`, `ConnectEx` (both fetched with `WSAIoctl`, called as `extern` function values), `WSARecv`, `WSASend`. A listener and each connection are records that own their handle. Closing on release needs a language feature the compiler lacks (record destructors only release fields), so decision 11 adds a `drop` hook; `close()` stays available for closing early. Host names go through the blocking `getaddrinfo`; numeric IPv4 addresses are parsed in Zila Lang and never block.
 
 **9. `all`/`race` are compiler-known.** They are generic over `T`, which the language does not have, so the compiler expands `await all(xs)` into a loop that awaits each future in order (they already run concurrently because async calls start eagerly) and `await race(xs)` into a call to a library function `wait_any` that registers the task on every future's waiter list and returns the index of the first to complete, followed by taking that value. Losing futures keep running and are released when dropped.
 
@@ -48,8 +48,8 @@ Decisions that implementation settled; none changes the specs.
 - **Task ids are recycled.** Finished tasks put their id on a free list after their fiber is deleted, so the task table is bounded by peak concurrency instead of growing with every async call (the leak the first version had).
 - **Timers hold closures.** The timer list stores `func()` actions, so the scheduler does not depend on the future library.
 - **`timeout` flattens.** `timeout` over a future that already yields `U or error` yields `U or error`, not a nested result. For other futures it yields `T or error`.
-- **`timeout`, `all`, `race`, `sleep`** are compiler-known (like `channel`); `timeout` is built by parsing a small Brasa template and reusing the `async` lowering.
-- **Winsock declarations** live in `std/ws.br` and shared memory/error helpers in `std/sys.br`, because a Brasa module cannot declare an `extern` named like one of its own functions (`listen`).
+- **`timeout`, `all`, `race`, `sleep`** are compiler-known (like `channel`); `timeout` is built by parsing a small Zila Lang template and reusing the `async` lowering.
+- **Winsock declarations** live in `std/ws.br` and shared memory/error helpers in `std/sys.br`, because a Zila Lang module cannot declare an `extern` named like one of its own functions (`listen`).
 - **`extern` function values** are accepted where an integer is expected and the reverse, since they are raw code addresses; this is how `ConnectEx` and `AcceptEx` are called.
 - **Native builds are independent.** Each build uses its own work directory, so several can run at once (found when the tests ran in parallel).
 

@@ -1,6 +1,6 @@
 ## Why
 
-Brasa says it has no exceptions, yet it has `panic`: a call that stops the program with a message, plus a handful of run-time failures (index out of bounds, division by zero, a missing map key, running out of memory) that behave like it. The word promises more than the implementation does. There is no unwinding, no recovery, and `defer` and `drop` do not run, so `panic` is really "abort" under a name that makes people expect Rust or Go semantics. Meanwhile the grammar still says integer overflow "panics in debug", which no compiler path implements (arithmetic already wraps), and there is no way to ask for a list element without risking a fatal failure.
+Zila Lang says it has no exceptions, yet it has `panic`: a call that stops the program with a message, plus a handful of run-time failures (index out of bounds, division by zero, a missing map key, running out of memory) that behave like it. The word promises more than the implementation does. There is no unwinding, no recovery, and `defer` and `drop` do not run, so `panic` is really "abort" under a name that makes people expect Rust or Go semantics. Meanwhile the grammar still says integer overflow "panics in debug", which no compiler path implements (arithmetic already wraps), and there is no way to ask for a list element without risking a fatal failure.
 
 This change gives each kind of failure exactly one home:
 
@@ -13,7 +13,7 @@ This change gives each kind of failure exactly one home:
 - **BREAKING**: `panic("message")` is removed from the language. A new built-in `abort("message")` is the only way a program stops fatally on purpose.
 - **BREAKING**: a fatal stop prints `abort: <file>.br:<line>: <message>` instead of `panic: <message>`, and goes to standard error. The exit status stays 101.
 - Fatal stops are specified once, as `abort`: out-of-bounds index, integer division or remainder by zero, a missing map key with `m[key]`, `take` from an empty list, `int(x)` of an out-of-range float, a failed `assert` outside `--test`, out of memory, and `abort(...)` itself. They run no `defer`, no `drop`, no unwinding, and cannot be caught.
-- Integer arithmetic wraps at the width of the type in every build; the "panic in debug" rule is removed from `brasa.ebnf`. `MIN / -1` wraps to `MIN` instead of faulting.
+- Integer arithmetic wraps at the width of the type in every build; the "panic in debug" rule is removed from `zila.ebnf`. `MIN / -1` wraps to `MIN` instead of faulting.
 - New library functions `checked_add`, `checked_sub`, `checked_mul`, `checked_div` return `int or error` (kind `Overflow` for overflow, `InvalidInput` for a zero divisor).
 - New list method `xs.get(i)` returns `T?` (`nil` when `i` is out of range, negative included) for element types that can be nil, and `T or error` (kind `InvalidInput`) for integers, floats and booleans, which have no `nil` (optional scalars do not exist in the language yet). `Map.get(key, default)` is unchanged.
 - `assert` and `assert_eq` keep their behavior under `--test` (the enclosing function returns the error and the test fails). In a normal build they abort. They are no longer a compile error in functions that do not return `error`.
@@ -41,8 +41,8 @@ This change gives each kind of failure exactly one home:
 - **Interpreter** (`src/interp.rs`): `panic` becomes `abort`. This file is removed by `remove-interpreter`; whichever lands first adapts (see design).
 - **Test runner** (`src/testrun.rs`): `--test` must tell the compiler it is building a test entry point; an abort is reported as a crash.
 - **Library**: `std/text.br` (the only `panic(` in `std/`, `os/` and `examples/`); new `checked_*` in `std/math.br`.
-- **Grammar and docs**: `brasa.ebnf`, `docs/syntax.html`, `docs/native.html`, `docs/stdlib.html`, `README.md`.
-- **Tests**: `tests/floats.rs`, `tests/linux.rs`, `tests/maps.rs`, `tests/optimizer.rs`, `tests/testrun.rs`, `tests/stdlib.rs` and new abort tests. Rust `panic!` in test helpers is Rust, not Brasa, and stays.
+- **Grammar and docs**: `zila.ebnf`, `docs/syntax.html`, `docs/native.html`, `docs/stdlib.html`, `README.md`.
+- **Tests**: `tests/floats.rs`, `tests/linux.rs`, `tests/maps.rs`, `tests/optimizer.rs`, `tests/testrun.rs`, `tests/stdlib.rs` and new abort tests. Rust `panic!` in test helpers is Rust, not Zila Lang, and stays.
 - **Assumptions**:
   - Exit status 101 is kept because `linux-target` and `linux-parity` and their tests already promise it.
   - "Forced nil" has no syntax in the language today (no `x!`); when a force-unwrap is added it aborts under this change's rules. No work is needed now.

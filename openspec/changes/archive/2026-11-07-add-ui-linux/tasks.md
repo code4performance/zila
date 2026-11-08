@@ -2,7 +2,7 @@
 
 - [x] 1.1 Rename `Control.hwnd` to `Control.id` in `std/ui.br` and everything that reads it; verify with `cargo test --test codegen` (the ui example still compiles) and a grep that no `hwnd` remains in public declarations
 - [x] 1.2 Move the platform-independent code (tree, `pref`, layout rules, handler table, `run()` contract) into a `// ---- shared ----` region of `std/ui.br`; verify the Windows `examples/ui.br` still builds and `cargo test --test codegen --test stdlib` pass
-- [x] 1.3 Add the shared scripted-input interpreter (`BRASA_UI_SCRIPT`: `click`, `type`, `key`, `select`, `close`) and the shared `ui: cannot open a display: <reason>` error; verify with a Windows test that runs a scripted `examples/ui.br` and checks the order of handler output
+- [x] 1.3 Add the shared scripted-input interpreter (`ZILA_UI_SCRIPT`: `click`, `type`, `key`, `select`, `close`) and the shared `ui: cannot open a display: <reason>` error; verify with a Windows test that runs a scripted `examples/ui.br` and checks the order of handler output
 - [x] 1.4 Make `ws` internal: reject `use ws` from user files on every target with the "internal to `net`" message; verify with tests for both targets and that `net` on Windows still builds
 
 ## 2. The Linux layer

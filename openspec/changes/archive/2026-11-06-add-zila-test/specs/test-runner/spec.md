@@ -35,7 +35,7 @@ A top-level function marked `#[test]` SHALL be a test. A test SHALL have no para
 - **THEN** compilation fails saying that assert needs a function that returns an error
 
 ### Requirement: Running tests
-`brasa-parse --test file.br [more.br ...]` SHALL build each file with an entry point that runs its tests (the file's own `main` is not used), print `ok <name>` or `FAIL <name>: <message>` for each test in order, and then print `test result: N passed, M failed`. It SHALL exit with 1 when any test failed, a file does not parse or compile, or the program stopped before finishing (a crash or a panic, reported with its exit code after the output so far), and with 0 otherwise. A file without tests SHALL print `no tests in <file>` and SHALL NOT make the status 1. `--no-opt` SHALL be honoured.
+`zila-parse --test file.br [more.br ...]` SHALL build each file with an entry point that runs its tests (the file's own `main` is not used), print `ok <name>` or `FAIL <name>: <message>` for each test in order, and then print `test result: N passed, M failed`. It SHALL exit with 1 when any test failed, a file does not parse or compile, or the program stopped before finishing (a crash or a panic, reported with its exit code after the output so far), and with 0 otherwise. A file without tests SHALL print `no tests in <file>` and SHALL NOT make the status 1. `--no-opt` SHALL be honoured.
 
 #### Scenario: Passing and failing tests
 - **WHEN** a file has one passing and one failing test

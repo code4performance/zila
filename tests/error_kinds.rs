@@ -575,6 +575,6 @@ end
 
 #[test]
 fn the_errors_example_runs() {
-    let src = std::fs::read_to_string("examples/errors.br").unwrap();
+    let src = std::fs::read_to_string("examples/errors.zila").unwrap();
     expect_win(&src, "no settings file, using defaults\nstd.Timeout\nno answer: connection lost\nconnection lost\n75\n-1\nstd.Overflow: integer overflow: 9223372036854775807 + 1\n");
 }

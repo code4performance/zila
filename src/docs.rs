@@ -1,7 +1,7 @@
-//! Keeps the documentation site (`docs/*.html`) in step with `examples/*.br`.
+//! Keeps the documentation site (`docs/*.html`) in step with `examples/*.zila`.
 //!
-//! A code block preceded by `<div class="file-label">examples/NAME.br</div>` shows that file in
-//! full; one labelled `examples/NAME.br (excerpt)` shows a contiguous part of it. `sync` (the
+//! A code block preceded by `<div class="file-label">examples/NAME.zila</div>` shows that file in
+//! full; one labelled `examples/NAME.zila (excerpt)` shows a contiguous part of it. `sync` (the
 //! `zila-parse --docs` command) rewrites the full blocks from the files, and `tests/docs.rs`
 //! fails when a block no longer matches.
 
@@ -19,7 +19,7 @@ pub struct Block {
 }
 
 impl Block {
-    /// `examples/NAME.br` for blocks that show an example file.
+    /// `examples/NAME.zila` for blocks that show an example file.
     pub fn example_path(&self) -> Option<&str> {
         let l = self.label.as_deref()?;
         let p = l.split_whitespace().next()?;
@@ -234,10 +234,10 @@ mod tests {
 
     #[test]
     fn blocks_find_labels_and_ranges() {
-        let h = "<div class=\"file-label\">examples/a.br</div>\n<pre><code>x</code></pre>\n<pre><code>y</code></pre>";
+        let h = "<div class=\"file-label\">examples/a.zila</div>\n<pre><code>x</code></pre>\n<pre><code>y</code></pre>";
         let b = blocks(h);
         assert_eq!(b.len(), 2);
-        assert_eq!(b[0].example_path(), Some("examples/a.br"));
+        assert_eq!(b[0].example_path(), Some("examples/a.zila"));
         assert!(!b[0].is_excerpt());
         assert_eq!(&h[b[0].start..b[0].end], "x");
         assert_eq!(b[1].label, None);
@@ -245,7 +245,7 @@ mod tests {
 
     #[test]
     fn excerpts_are_recognised() {
-        let h = "<div class=\"file-label\">examples/a.br (excerpt)</div><pre><code>z</code></pre>";
+        let h = "<div class=\"file-label\">examples/a.zila (excerpt)</div><pre><code>z</code></pre>";
         assert!(blocks(h)[0].is_excerpt());
     }
 

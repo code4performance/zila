@@ -1,7 +1,7 @@
 // =====================================================================
 // Zila Lang standard library: TLS client (`use tls`) (Linux layer)
 //
-// The Linux counterpart of std/tls.br, with the same functions and behavior. It uses OpenSSL 3
+// The Linux counterpart of std/tls.zila, with the same functions and behavior. It uses OpenSSL 3
 // (libssl.so.3, which every current distribution ships) through `extern`. OpenSSL works on
 // memory buffers (BIOs) here: the bytes it wants to send are written to the socket with
 // `net`, and the bytes that arrive are handed to it, so waiting never blocks the other tasks.

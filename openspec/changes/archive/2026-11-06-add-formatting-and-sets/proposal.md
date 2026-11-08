@@ -1,6 +1,6 @@
 ## Why
 
-Programs that print tables, reports or money amounts still build their text by hand with `+` and `math.fixed`, and programs that need "have I seen this before" use a `Map<K, bool>` and ignore the values. A formatting module and a set type are the next everyday pieces of the standard library, and both can be written in Brasa on top of what already exists (text, lists, maps, generics).
+Programs that print tables, reports or money amounts still build their text by hand with `+` and `math.fixed`, and programs that need "have I seen this before" use a `Map<K, bool>` and ignore the values. A formatting module and a set type are the next everyday pieces of the standard library, and both can be written in Zila Lang on top of what already exists (text, lists, maps, generics).
 
 ## What Changes
 
@@ -9,7 +9,7 @@ Programs that print tables, reports or money amounts still build their text by h
   - Helpers that turn values into text for those arguments: `format.int(n)`, `format.hex(n)`, `format.bin(n)`, `format.float(x, digits)`, `format.thousands(n)`.
   - Padding helpers: `format.pad_left`, `format.pad_right`, `format.center`.
   - A template that does not match its arguments is reported, never silently ignored.
-- New library module `set` (`use set`): a generic `Set<T>` for `text` and integer elements, written in Brasa over `Map<T, bool>`: `set.empty()`, `add`, `has`, `remove`, `clear`, `len`, `to_list` for iterating (`for x in s.to_list()`; looping over a user type directly is not part of this change), and `union`, `intersect`, `difference`, `is_subset`, `from_list`.
+- New library module `set` (`use set`): a generic `Set<T>` for `text` and integer elements, written in Zila Lang over `Map<T, bool>`: `set.empty()`, `add`, `has`, `remove`, `clear`, `len`, `to_list` for iterating (`for x in s.to_list()`; looping over a user type directly is not part of this change), and `union`, `intersect`, `difference`, `is_subset`, `from_list`.
 - The interpreter gets the same modules (it already loads library modules).
 - Out of scope, kept on the roadmap: buffered I/O, UDP, TLS, async DNS, sorted maps and sets, and placeholders that format values of any type directly (that needs a way to pass values of mixed types to one function).
 

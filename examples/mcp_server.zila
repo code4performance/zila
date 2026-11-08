@@ -1,6 +1,6 @@
 // An MCP server: a customer database offered as tools, a resource and a prompt to any MCP host.
 //
-//   zila-parse examples/mcp_server.br -o mcp_server.exe
+//   zila-parse examples/mcp_server.zila -o mcp_server.exe
 //
 // Hosts such as Claude Desktop, Claude Code and IDEs start the program and talk to it over standard
 // input and output, one JSON-RPC message per line. In a host's MCP configuration:

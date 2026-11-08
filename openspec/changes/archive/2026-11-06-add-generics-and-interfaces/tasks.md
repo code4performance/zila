@@ -28,5 +28,5 @@
 
 ## 6. Documentation and examples
 
-- [x] 6.1 Add `examples/generics.br` (a `Stack<T>`, a generic `first`, and `show<T: Printable>` with two record types) and its section on `docs/examples.html` (via `brasa-parse --docs`); verify it builds and prints the documented output
+- [x] 6.1 Add `examples/generics.br` (a `Stack<T>`, a generic `first`, and `show<T: Printable>` with two record types) and its section on `docs/examples.html` (via `zila-parse --docs`); verify it builds and prints the documented output
 - [x] 6.2 Update `docs/syntax.html` (generics, inference, interfaces as bounds, what is not supported), remove generics and interfaces from the not-yet-supported list in `docs/native.html`, and update the status table and roadmap in `README.md`; verify `cargo test` passes, including the docs tests

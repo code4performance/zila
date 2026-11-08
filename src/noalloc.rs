@@ -53,26 +53,26 @@ pub fn check_program(
                 DeclKind::Type(td) => {
                     for a in &d.attrs {
                         if a.name == "no_alloc" {
-                            return Err(format!("{}.br:{}: #[no_alloc] only applies to functions ('{}')", mname, line, td.name));
+                            return Err(format!("{}.zila:{}: #[no_alloc] only applies to functions ('{}')", mname, line, td.name));
                         }
                         if a.name == "allocates" {
-                            return Err(format!("{}.br:{}: #[allocates] only applies to functions ('{}')", mname, line, td.name));
+                            return Err(format!("{}.zila:{}: #[allocates] only applies to functions ('{}')", mname, line, td.name));
                         }
                         if a.name == "allocator" {
-                            return Err(format!("{}.br:{}: #[allocator] only applies to functions ('{}')", mname, line, td.name));
+                            return Err(format!("{}.zila:{}: #[allocator] only applies to functions ('{}')", mname, line, td.name));
                         }
                     }
                 }
                 DeclKind::Var(vd) => {
                     for a in &d.attrs {
                         if a.name == "no_alloc" {
-                            return Err(format!("{}.br:{}: #[no_alloc] only applies to functions ('{}')", mname, line, vd.name));
+                            return Err(format!("{}.zila:{}: #[no_alloc] only applies to functions ('{}')", mname, line, vd.name));
                         }
                         if a.name == "allocates" {
-                            return Err(format!("{}.br:{}: #[allocates] only applies to functions ('{}')", mname, line, vd.name));
+                            return Err(format!("{}.zila:{}: #[allocates] only applies to functions ('{}')", mname, line, vd.name));
                         }
                         if a.name == "allocator" {
-                            return Err(format!("{}.br:{}: #[allocator] only applies to functions ('{}')", mname, line, vd.name));
+                            return Err(format!("{}.zila:{}: #[allocator] only applies to functions ('{}')", mname, line, vd.name));
                         }
                     }
                 }
@@ -109,13 +109,13 @@ pub fn check_program(
                     for a in &d.attrs {
                         if a.name == "allocator" {
                             if *mname != main_pkg {
-                                return Err(format!("{}.br:{}: #[allocator] is only allowed on top-level functions of the program, not in the standard library", mname, line));
+                                return Err(format!("{}.zila:{}: #[allocator] is only allowed on top-level functions of the program, not in the standard library", mname, line));
                             }
                             if fd.receiver.is_some() {
-                                return Err(format!("{}.br:{}: #[allocator] only applies to top-level functions", mname, line));
+                                return Err(format!("{}.zila:{}: #[allocator] only applies to top-level functions", mname, line));
                             }
                             if a.args.len() != 1 {
-                                return Err(format!("{}.br:{}: #[allocator] requires one argument: 'alloc', 'free' or 'realloc'", mname, line));
+                                return Err(format!("{}.zila:{}: #[allocator] requires one argument: 'alloc', 'free' or 'realloc'", mname, line));
                             }
                             let role_str = match a.args.first() {
                                 Some(Expr { kind: ExprKind::Ident(id), .. }) => id.as_str(),
@@ -132,27 +132,27 @@ pub fn check_program(
                             match role_str {
                                 "alloc" => {
                                     if let Some((_, prev_line, prev_fn)) = &alloc_func {
-                                        return Err(format!("{}.br:{}: #[allocator(alloc)] already declared at line {} ('{}')", mname, line, prev_line, prev_fn));
+                                        return Err(format!("{}.zila:{}: #[allocator(alloc)] already declared at line {} ('{}')", mname, line, prev_line, prev_fn));
                                     }
                                     validate_alloc_sig(mname, line, fd)?;
                                     alloc_func = Some((mname.clone(), line, fd.name.clone()));
                                 }
                                 "free" => {
                                     if let Some((_, prev_line, prev_fn)) = &free_func {
-                                        return Err(format!("{}.br:{}: #[allocator(free)] already declared at line {} ('{}')", mname, line, prev_line, prev_fn));
+                                        return Err(format!("{}.zila:{}: #[allocator(free)] already declared at line {} ('{}')", mname, line, prev_line, prev_fn));
                                     }
                                     validate_free_sig(mname, line, fd)?;
                                     free_func = Some((mname.clone(), line, fd.name.clone()));
                                 }
                                 "realloc" => {
                                     if let Some((_, prev_line, prev_fn)) = &realloc_func {
-                                        return Err(format!("{}.br:{}: #[allocator(realloc)] already declared at line {} ('{}')", mname, line, prev_line, prev_fn));
+                                        return Err(format!("{}.zila:{}: #[allocator(realloc)] already declared at line {} ('{}')", mname, line, prev_line, prev_fn));
                                     }
                                     validate_realloc_sig(mname, line, fd)?;
                                     realloc_func = Some((mname.clone(), line, fd.name.clone()));
                                 }
                                 other => {
-                                    return Err(format!("{}.br:{}: unknown allocator role '{}' (expected 'alloc', 'free' or 'realloc')", mname, line, other));
+                                    return Err(format!("{}.zila:{}: unknown allocator role '{}' (expected 'alloc', 'free' or 'realloc')", mname, line, other));
                                 }
                             }
                             // Allocator functions are implicitly #[no_alloc]
@@ -185,7 +185,7 @@ pub fn check_program(
                 DeclKind::Embed(_) => {
                     for a in &d.attrs {
                         if matches!(a.name.as_str(), "no_alloc" | "allocates" | "allocator") {
-                            return Err(format!("{}.br:{}: #[{}] only applies to functions", mname, line, a.name));
+                            return Err(format!("{}.zila:{}: #[{}] only applies to functions", mname, line, a.name));
                         }
                     }
                 }
@@ -201,13 +201,13 @@ pub fn check_program(
             realloc_sym: r.as_ref().map(|x| format!("B_{}_{}", x.0, x.2)),
         }),
         (Some(a), None, _) => {
-            return Err(format!("{}.br:{}: custom allocator declares 'alloc' but is missing 'free'", a.0, a.1));
+            return Err(format!("{}.zila:{}: custom allocator declares 'alloc' but is missing 'free'", a.0, a.1));
         }
         (None, Some(f), _) => {
-            return Err(format!("{}.br:{}: custom allocator declares 'free' but is missing 'alloc'", f.0, f.1));
+            return Err(format!("{}.zila:{}: custom allocator declares 'free' but is missing 'alloc'", f.0, f.1));
         }
         (None, None, Some(r)) => {
-            return Err(format!("{}.br:{}: custom allocator declares 'realloc' but requires both 'alloc' and 'free'", r.0, r.1));
+            return Err(format!("{}.zila:{}: custom allocator declares 'realloc' but requires both 'alloc' and 'free'", r.0, r.1));
         }
         (None, None, None) => None,
     };
@@ -347,7 +347,7 @@ pub fn check_program(
         if node.is_no_alloc {
             if let Some(chain) = find_alloc_chain(qname, &func_nodes) {
                 return Err(format!(
-                    "{}.br:{}: error: '{}' is #[no_alloc] but allocates\n  {}",
+                    "{}.zila:{}: error: '{}' is #[no_alloc] but allocates\n  {}",
                     node.file, node.line, node.name, chain
                 ));
             }
@@ -392,7 +392,7 @@ fn type_to_string(ty: &Type) -> String {
 fn validate_alloc_sig(mname: &str, line: u32, fd: &FuncDecl) -> Result<(), String> {
     let wrong = || {
         format!(
-            "{}.br:{}: wrong signature for #[allocator(alloc)] (expected `func {}(size: u64, align: u64) -> *u8`)",
+            "{}.zila:{}: wrong signature for #[allocator(alloc)] (expected `func {}(size: u64, align: u64) -> *u8`)",
             mname, line, fd.name
         )
     };
@@ -415,7 +415,7 @@ fn validate_alloc_sig(mname: &str, line: u32, fd: &FuncDecl) -> Result<(), Strin
 fn validate_free_sig(mname: &str, line: u32, fd: &FuncDecl) -> Result<(), String> {
     let wrong = || {
         format!(
-            "{}.br:{}: wrong signature for #[allocator(free)] (expected `func {}(ptr: *u8, size: u64, align: u64)`)",
+            "{}.zila:{}: wrong signature for #[allocator(free)] (expected `func {}(ptr: *u8, size: u64, align: u64)`)",
             mname, line, fd.name
         )
     };
@@ -438,7 +438,7 @@ fn validate_free_sig(mname: &str, line: u32, fd: &FuncDecl) -> Result<(), String
 fn validate_realloc_sig(mname: &str, line: u32, fd: &FuncDecl) -> Result<(), String> {
     let wrong = || {
         format!(
-            "{}.br:{}: wrong signature for #[allocator(realloc)] (expected `func {}(ptr: *u8, old: u64, size: u64, align: u64) -> *u8`)",
+            "{}.zila:{}: wrong signature for #[allocator(realloc)] (expected `func {}(ptr: *u8, old: u64, size: u64, align: u64) -> *u8`)",
             mname, line, fd.name
         )
     };
@@ -853,7 +853,7 @@ fn find_alloc_chain(start_qname: &str, nodes: &HashMap<String, FuncNode>) -> Opt
     // If start node directly allocates, return immediate chain
     if let Some(op) = start_node.direct_allocs.first() {
         return Some(format!(
-            "{} -> {} at {}.br:{}",
+            "{} -> {} at {}.zila:{}",
             start_node.name, op.description, op.file, op.line
         ));
     }
@@ -870,7 +870,7 @@ fn find_alloc_chain(start_qname: &str, nodes: &HashMap<String, FuncNode>) -> Opt
             // Check direct allocs
             if let Some(op) = curr_node.direct_allocs.first() {
                 let chain = path.join(" -> ");
-                return Some(format!("{} -> {} at {}.br:{}", chain, op.description, op.file, op.line));
+                return Some(format!("{} -> {} at {}.zila:{}", chain, op.description, op.file, op.line));
             }
 
             // Expand callees

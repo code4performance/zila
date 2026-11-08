@@ -10,7 +10,7 @@
 - **Comparison**: `== != < <= > >=` on floats with IEEE semantics (any comparison with NaN is false except `!=`).
 - **Conversion**: no implicit int/float mixing. Explicit `float(x)` and `int(x)` conversions (`int` truncates toward zero; NaN and out-of-range values panic with `float out of range`), plus `f32(x)`/`f64(x)` between float widths.
 - **Printing and text**: `print`, `println` and string interpolation print floats in the shortest form that reads back exactly (`1.5`, `0.1`, `1e21`, `NaN`, `inf`, `-inf`); whole numbers print with `.0` (`3.0`).
-- **Math helpers** in `std/math.br`: `sqrt`, `abs`, `floor`, `ceil`, `round`, `min`, `max`, `pow` (`sqrt` and rounding use SSE instructions; the rest are written in Brasa).
+- **Math helpers** in `std/math.br`: `sqrt`, `abs`, `floor`, `ceil`, `round`, `min`, `max`, `pow` (`sqrt` and rounding use SSE instructions; the rest are written in Zila Lang).
 - **FFI**: `extern` functions take and return floats in the Windows x64 way (XMM registers).
 - **Assembler**: SSE2 scalar instructions needed by the above are added to the built-in assembler.
 - **Interpreter**: `--run` supports the same float behavior.

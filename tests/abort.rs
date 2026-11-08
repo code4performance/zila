@@ -114,13 +114,13 @@ fn main_of(body: &str) -> String {
 #[test]
 fn an_abort_writes_one_line_to_standard_error_and_exits_with_101() {
     // `abort` is on line 5
-    expect(&main_of("print(\"a\")\nabort(\"stop\")"), "a\n", "abort: main.br:5: stop\n", 101);
+    expect(&main_of("print(\"a\")\nabort(\"stop\")"), "a\n", "abort: main.zila:5: stop\n", 101);
 }
 
 #[test]
 fn nothing_runs_on_an_abort() {
     let src = "package main\n\ntype R = record\n    n: int\nend\n\nfunc (ref r: R) drop()\n    print(\"drop\")\nend\n\nfunc main()\n    let r = R { n: 1 }\n    defer print(\"cleanup\")\n    print(\"before\")\n    abort(\"stop\")\nend\n";
-    expect(src, "before\n", "abort: main.br:15: stop\n", 101);
+    expect(src, "before\n", "abort: main.zila:15: stop\n", 101);
 }
 
 #[test]
@@ -182,7 +182,7 @@ fn every_checking_site_reports_the_message_and_the_line_of_the_failing_statement
     for (body, message, line) in cases {
         for (label, r) in everywhere(&main_of(body)) {
             assert_eq!(r.out, "", "{} {}", label, body);
-            assert_eq!(r.err, format!("abort: main.br:{}: {}\n", line, message), "{} {}", label, body);
+            assert_eq!(r.err, format!("abort: main.zila:{}: {}\n", line, message), "{} {}", label, body);
             assert_eq!(r.code, 101, "{} {}", label, body);
         }
     }
@@ -193,7 +193,7 @@ fn an_inlined_helper_reports_the_line_of_its_own_source() {
     // `first` is small enough to be inlined; the line is the one in its body
     for (label, r) in everywhere(SITES) {
         assert_eq!((r.out.as_str(), r.code), ("go\n", 101), "{}", label);
-        assert_eq!(r.err, "abort: main.br:4: index out of bounds\n", "{}", label);
+        assert_eq!(r.err, "abort: main.zila:4: index out of bounds\n", "{}", label);
     }
 }
 
@@ -202,17 +202,17 @@ fn an_inlined_helper_reports_the_line_of_its_own_source() {
 #[test]
 fn assert_outside_a_test_run_aborts_in_any_function() {
     let src = "package main\n\nfunc check(n: int)\n    assert(n > 0)\nend\n\nfunc main()\n    check(1)\n    assert_eq(1 + 1, 2)\n    check(0)\nend\n";
-    expect(src, "", "abort: main.br:4: assertion failed\n", 101);
+    expect(src, "", "abort: main.zila:4: assertion failed\n", 101);
     let src = "package main\n\nfunc main()\n    assert(1 > 2, \"one is not two\")\nend\n";
-    expect(src, "", "abort: main.br:4: one is not two\n", 101);
+    expect(src, "", "abort: main.zila:4: one is not two\n", 101);
     let src = "package main\n\nfunc main()\n    assert_eq(3, 4)\nend\n";
-    expect(src, "", "abort: main.br:4: assertion failed: left 3, right 4\n", 101);
+    expect(src, "", "abort: main.zila:4: assertion failed: left 3, right 4\n", 101);
 }
 
 #[test]
 fn assert_in_a_function_returning_an_error_aborts_in_a_normal_build() {
     let src = "package main\n\nfunc g(n: int) -> int or error\n    assert(n > 0)\n    return n\nend\n\nfunc main()\n    print(g(1) ?? 0)\n    print(g(0) ?? 0)\nend\n";
-    expect(src, "1\n", "abort: main.br:4: assertion failed\n", 101);
+    expect(src, "1\n", "abort: main.zila:4: assertion failed\n", 101);
 }
 
 #[test]
@@ -221,7 +221,7 @@ fn test_mode_is_off_by_default() {
 }
 
 fn run_tests(src: &str) -> Option<(String, String, i32)> {
-    let p = temp("tests.br");
+    let p = temp("tests.zila");
     std::fs::write(&p, src).unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_zila-parse")).arg("--test").arg(&p).output().unwrap();
     let _ = std::fs::remove_file(&p);
@@ -240,7 +240,7 @@ fn under_test_a_failed_assert_is_a_failed_test_and_an_assert_in_a_plain_helper_i
     assert_eq!(code, 1, "{}{}", out, err);
     assert!(out.contains("FAIL a: line 9: assertion failed: left 1, right 2"), "{}", out);
     assert!(out.contains("run stopped early (by an abort, exit code 101)"), "{}", out);
-    assert!(err.contains("abort: main.br:4: assertion failed"), "{}", err);
+    assert!(err.contains("abort: main.zila:4: assertion failed"), "{}", err);
     assert!(!out.contains("never"), "{}", out);
 }
 
@@ -250,7 +250,7 @@ fn a_crashing_test_run_is_described_as_an_abort() {
     let Some((out, err, code)) = run_tests(src) else { return };
     assert_eq!(code, 1);
     assert!(out.contains("run stopped early (by an abort, exit code 101)"), "{}", out);
-    assert!(err.contains("abort: main.br:6: division by zero"), "{}", err);
+    assert!(err.contains("abort: main.zila:6: division by zero"), "{}", err);
 }
 
 // ---- wrapping ----

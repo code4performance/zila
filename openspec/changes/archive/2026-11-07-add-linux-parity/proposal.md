@@ -1,6 +1,6 @@
 ## Why
 
-`--target linux` (change `add-linux-target`) runs the language and the pure libraries, but a Brasa program that reads a file, opens a socket, sleeps, spawns a task or calls `async` still builds only for Windows. For the language to do the same on both platforms, every library and feature that is rejected on Linux today needs a Linux implementation behind the same API, so that one source file builds for either target.
+`--target linux` (change `add-linux-target`) runs the language and the pure libraries, but a Zila Lang program that reads a file, opens a socket, sleeps, spawns a task or calls `async` still builds only for Windows. For the language to do the same on both platforms, every library and feature that is rejected on Linux today needs a Linux implementation behind the same API, so that one source file builds for either target.
 
 What is missing on Linux today:
 
@@ -9,7 +9,7 @@ What is missing on Linux today:
 | `task`, `spawn`, `sleep`, channels, `async`/`await`, `future` | fibers, timers and the I/O completion port are Windows calls (`CreateFiber`, `SwitchToFiber`, `GetQueuedCompletionStatusEx`) | a context switch written in assembly, stacks from `mmap`, `epoll` and `clock_gettime` |
 | `fs` | `CreateFileW`, `ReadFile`, `WriteFile`, overlapped I/O | `open`, `read`, `write`, `pread`, `pwrite`, `fstat`, `close`, `unlink`, `rename`, `mkdir` |
 | `net` (TCP, UDP) | Winsock (`ws`) and the completion port | `socket`, `bind`, `listen`, `accept4`, `connect`, `sendto`, `recvfrom`, non-blocking with `epoll` |
-| `net` name lookup (`lookup`, `resolve`) | `GetAddrInfoExW` | a DNS client written in Brasa over UDP (`/etc/hosts`, `/etc/resolv.conf`), since there is no libc |
+| `net` name lookup (`lookup`, `resolve`) | `GetAddrInfoExW` | a DNS client written in Zila Lang over UDP (`/etc/hosts`, `/etc/resolv.conf`), since there is no libc |
 | `sys` | `FormatMessageA`, Windows error codes | an `errno` message table |
 | `extern` / `#[link]` | imports from DLLs | a dynamically linked ELF that calls C with the System V convention |
 | division by zero | neither target prints a message: Windows ends with a hardware exception, Linux with a signal (status 136) | a check in the generated code on both targets: `panic: division by zero`, status 101 |

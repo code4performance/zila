@@ -6,7 +6,7 @@ Defines how Zila Lang builds Windows executables using only the compiler, so tha
 ## Requirements
 
 ### Requirement: Building a Windows executable needs only the compiler
-`zila-parse prog.br -o prog.exe` (and `--target windows`) SHALL write a 64-bit Windows executable without running any other program and without reading any Visual Studio, Windows SDK or other toolchain file. It SHALL succeed on a machine where none of `ml64`, `link`, `vcvars64.bat` and `vswhere` exist.
+`zila-parse prog.zila -o prog.exe` (and `--target windows`) SHALL write a 64-bit Windows executable without running any other program and without reading any Visual Studio, Windows SDK or other toolchain file. It SHALL succeed on a machine where none of `ml64`, `link`, `vcvars64.bat` and `vswhere` exist.
 
 #### Scenario: A machine with no Visual Studio
 - **WHEN** a hello-world program is built on Windows with no Visual Studio installed and no `ml64` or `link` on the path
@@ -54,10 +54,10 @@ A program that does not use `ui` SHALL be built for the console subsystem and on
 - **THEN** the bytes written are UTF-8 and the text shows correctly
 
 ### Requirement: Size
-A hello-world executable SHALL be no larger than 8 KB, and the window example (`examples/ui.br`: a window, a text box, a button and a list, with the whole `ui` library) SHALL be no larger than 64 KB and no larger than the same program was when built with `ml64` and `link`.
+A hello-world executable SHALL be no larger than 8 KB, and the window example (`examples/ui.zila`: a window, a text box, a button and a list, with the whole `ui` library) SHALL be no larger than 64 KB and no larger than the same program was when built with `ml64` and `link`.
 
 #### Scenario: Small executables
-- **WHEN** `examples/hello.br` and `examples/ui.br` are built
+- **WHEN** `examples/hello.zila` and `examples/ui.zila` are built
 - **THEN** the sizes are within the limits
 
 ### Requirement: Failures are reported by the compiler

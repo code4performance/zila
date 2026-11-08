@@ -10,4 +10,4 @@
 
 - [x] 2.1 `tests/lsp.rs`: JSON round trip, initialize, good and bad files, editing, formatting, shutdown
 - [x] 2.2 `docs/getting-started.html` documents `--lsp` (checked by `tests/docs.rs`)
-- [ ] 2.3 Follow-ups: VS Code extension client that starts `brasa-parse --lsp`, type errors, hover, go to definition, completion
+- [ ] 2.3 Follow-ups: VS Code extension client that starts `zila-parse --lsp`, type errors, hover, go to definition, completion

@@ -1,6 +1,6 @@
 ## Context
 
-All calls to Brasa functions go through `call_sig(sig, receiver, args)` in `codegen_x64.rs`: it binds the arguments to the parameters, evaluates each into a temporary slot (`temps`), loads the first four into `rcx, rdx, r8, r9` and emits `call sym`, then frees the temporaries. Each function is compiled into its own `FnState` (scopes, slots, labels, the register plan). Locals live at absolute offsets in the frame, so code for another function's expression can be emitted inside the caller as long as names resolve in the right places. A function's module is `sig.module`; default-parameter expressions are already compiled in the callee's module by switching `self.cur_mod`.
+All calls to Zila Lang functions go through `call_sig(sig, receiver, args)` in `codegen_x64.rs`: it binds the arguments to the parameters, evaluates each into a temporary slot (`temps`), loads the first four into `rcx, rdx, r8, r9` and emits `call sym`, then frees the temporaries. Each function is compiled into its own `FnState` (scopes, slots, labels, the register plan). Locals live at absolute offsets in the frame, so code for another function's expression can be emitted inside the caller as long as names resolve in the right places. A function's module is `sig.module`; default-parameter expressions are already compiled in the callee's module by switching `self.cur_mod`.
 
 ## Goals / Non-Goals
 

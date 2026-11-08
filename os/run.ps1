@@ -15,7 +15,7 @@ $qemu = (Get-Command qemu-system-x86_64 -ErrorAction SilentlyContinue).Source
 if (-not $qemu) { $qemu = "$env:USERPROFILE\qemu\qemu-system-x86_64.exe" }
 if (-not (Test-Path $qemu)) { throw "QEMU not found. Install it with: winget install SoftwareFreedomConservancy.QEMU" }
 
-& $zila --os "$root\os\boot.br" "$root\os\kernel.br" -o "$root\zila-os.img"
+& $zila --os "$root\os\boot.zila" "$root\os\kernel.zila" -o "$root\zila-os.img"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 if ($Serial) {
     & $qemu -drive format=raw,file="$root\zila-os.img" -serial stdio -display none -m 128 -no-reboot

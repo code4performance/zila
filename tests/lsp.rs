@@ -47,9 +47,9 @@ fn initialize_announces_the_features() {
 #[test]
 fn a_good_file_has_no_diagnostics_and_a_bad_one_has_one() {
     let mut docs = HashMap::new();
-    let r = open(&mut docs, "file:///a.br", "package main\n\nfunc main()\nend\n");
+    let r = open(&mut docs, "file:///a.zila", "package main\n\nfunc main()\nend\n");
     assert_eq!(r[0].get("params").get("diagnostics"), &Json::Arr(vec![]));
-    let r = open(&mut docs, "file:///b.br", "package main\n\nfunc main()\n    let = 3\nend\n");
+    let r = open(&mut docs, "file:///b.zila", "package main\n\nfunc main()\n    let = 3\nend\n");
     let Json::Arr(d) = r[0].get("params").get("diagnostics") else { panic!() };
     assert_eq!(d.len(), 1);
     assert_eq!(d[0].get("range").get("start").get("line"), &Json::Num(3.0));
@@ -60,20 +60,20 @@ fn a_good_file_has_no_diagnostics_and_a_bad_one_has_one() {
 #[test]
 fn editing_republishes_and_formatting_returns_one_edit() {
     let mut docs = HashMap::new();
-    open(&mut docs, "file:///c.br", "package main\n\nfunc main()\nend\n");
+    open(&mut docs, "file:///c.zila", "package main\n\nfunc main()\nend\n");
     let r = send(
         &mut docs,
-        r#"{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":"file:///c.br"},"contentChanges":[{"text":"package main\n\nfunc main()\nprintln(1,2)\nend\n"}]}}"#,
+        r#"{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":"file:///c.zila"},"contentChanges":[{"text":"package main\n\nfunc main()\nprintln(1,2)\nend\n"}]}}"#,
     );
     assert_eq!(r[0].get("params").get("diagnostics"), &Json::Arr(vec![]));
-    let r = send(&mut docs, r#"{"jsonrpc":"2.0","id":7,"method":"textDocument/formatting","params":{"textDocument":{"uri":"file:///c.br"}}}"#);
+    let r = send(&mut docs, r#"{"jsonrpc":"2.0","id":7,"method":"textDocument/formatting","params":{"textDocument":{"uri":"file:///c.zila"}}}"#);
     let Json::Arr(edits) = r[0].get("result") else { panic!() };
     assert_eq!(edits.len(), 1);
     assert_eq!(edits[0].get("newText").str(), Some("package main\n\nfunc main()\n    println(1, 2)\nend\n"));
     assert_eq!(edits[0].get("range").get("end").get("line"), &Json::Num(5.0));
     // an already formatted file needs no edit
-    open(&mut docs, "file:///d.br", "package main\n\nfunc main()\nend\n");
-    let r = send(&mut docs, r#"{"jsonrpc":"2.0","id":8,"method":"textDocument/formatting","params":{"textDocument":{"uri":"file:///d.br"}}}"#);
+    open(&mut docs, "file:///d.zila", "package main\n\nfunc main()\nend\n");
+    let r = send(&mut docs, r#"{"jsonrpc":"2.0","id":8,"method":"textDocument/formatting","params":{"textDocument":{"uri":"file:///d.zila"}}}"#);
     assert_eq!(r[0].get("result"), &Json::Arr(vec![]));
 }
 
@@ -100,7 +100,7 @@ end
 func main()
 end
 ";
-    let r = open(&mut docs, "file:///na.br", src);
+    let r = open(&mut docs, "file:///na.zila", src);
     let Json::Arr(d) = r[0].get("params").get("diagnostics") else { panic!() };
     assert_eq!(d.len(), 1);
     assert_eq!(d[0].get("range").get("start").get("line"), &Json::Num(3.0));
@@ -137,11 +137,11 @@ func main()
     print(s)
 end
 ";
-    let r = open(&mut docs, "file:///blocks.br", src);
+    let r = open(&mut docs, "file:///blocks.zila", src);
     assert_eq!(r[0].get("params").get("diagnostics"), &Json::Arr(vec![]));
     assert!(!zila::comptime::launch_log().iter().any(|l| l.starts_with("lsp_never_runs(")));
     // an error outside the block is still reported
-    let r = open(&mut docs, "file:///bad.br", &src.replace("print(s)", "print(s"));
+    let r = open(&mut docs, "file:///bad.zila", &src.replace("print(s)", "print(s"));
     let Json::Arr(d) = r[0].get("params").get("diagnostics") else { panic!() };
     assert_eq!(d.len(), 1);
 }
@@ -150,7 +150,7 @@ end
 fn indexing_a_text_is_a_diagnostic_that_points_to_the_alternatives() {
     let mut docs = HashMap::new();
     let src = "package main\n\nfunc main()\n    let s = \"ação\"\n    let b = s[0]\nend\n";
-    let r = open(&mut docs, "file:///idx.br", src);
+    let r = open(&mut docs, "file:///idx.zila", src);
     let Json::Arr(d) = r[0].get("params").get("diagnostics") else { panic!() };
     assert_eq!(d.len(), 1);
     assert_eq!(d[0].get("range").get("start").get("line"), &Json::Num(4.0));
@@ -162,7 +162,7 @@ fn indexing_a_text_is_a_diagnostic_that_points_to_the_alternatives() {
 fn a_non_transferable_spawn_thread_argument_is_a_diagnostic() {
     let mut docs = HashMap::new();
     let src = "package main\n\nuse thread\n\ntype Node = record\n    value: int\nend\n\nfunc show(n: Rc<Node>)\nend\n\nfunc main()\n    let n = new Node{ value: 1 }\n    spawn_thread show(n)\nend\n";
-    let r = open(&mut docs, "file:///thr.br", src);
+    let r = open(&mut docs, "file:///thr.zila", src);
     let Json::Arr(d) = r[0].get("params").get("diagnostics") else { panic!() };
     assert_eq!(d.len(), 1);
     let m = d[0].get("message").str().unwrap();
@@ -173,9 +173,9 @@ fn a_non_transferable_spawn_thread_argument_is_a_diagnostic() {
 fn pub_declarations_have_no_diagnostics_and_a_misplaced_pub_is_reported_on_its_line() {
     let mut docs = HashMap::new();
     let good = "package lib\n\npub type P = record\n    pub x: int\n    y: int\nend\n\n#[export(\"f\")]\npub func f() -> int\n    return 1\nend\n\npub async func g()\nend\n\npub let K = 1\n";
-    let r = open(&mut docs, "file:///pub.br", good);
+    let r = open(&mut docs, "file:///pub.zila", good);
     assert_eq!(r[0].get("params").get("diagnostics"), &Json::Arr(vec![]));
-    let r = open(&mut docs, "file:///bad.br", "package lib\n\npub embed \"x\"\n");
+    let r = open(&mut docs, "file:///bad.zila", "package lib\n\npub embed \"x\"\n");
     let Json::Arr(d) = r[0].get("params").get("diagnostics") else { panic!() };
     assert_eq!(d.len(), 1);
     assert_eq!(d[0].get("range").get("start").get("line"), &Json::Num(2.0));
@@ -190,17 +190,17 @@ fn packages_of_the_project_are_seen_by_the_editor() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("util")).unwrap();
     std::fs::write(dir.join("zila.toml"), "[package]\nname = \"app\"\n").unwrap();
-    std::fs::write(dir.join("util/util.br"), "package util\n\npub func twice(n: int) -> int\n    return n * 2\nend\n\n#[block]\npub comptime func raw_text(raw: text) -> text\n    return raw\nend\n").unwrap();
+    std::fs::write(dir.join("util/util.zila"), "package util\n\npub func twice(n: int) -> int\n    return n * 2\nend\n\n#[block]\npub comptime func raw_text(raw: text) -> text\n    return raw\nend\n").unwrap();
     let p = dir.to_string_lossy().replace('\\', "/").replace(' ', "%20");
     let uri = |f: &str| if p.starts_with('/') { format!("file://{}/{}", p, f) } else { format!("file:///{}/{}", p, f) };
     let mut docs = HashMap::new();
     let good = "package main\n\nuse util\n\nfunc main()\n    print(\"{util.twice(2)}\")\nend\n";
-    let r = open(&mut docs, &uri("main.br"), good);
+    let r = open(&mut docs, &uri("main.zila"), good);
     assert_eq!(r[0].get("params").get("diagnostics"), &Json::Arr(vec![]), "a package of the project resolves");
     let blocks = "package main\n\nuse util\n\nfunc main()\n    let s = raw_text\n        {{ not ) Zila Lang ((\n    end\n    print(s)\nend\n";
-    let r = open(&mut docs, &uri("blocks.br"), blocks);
+    let r = open(&mut docs, &uri("blocks.zila"), blocks);
     assert_eq!(r[0].get("params").get("diagnostics"), &Json::Arr(vec![]), "a block of a package of the project");
-    let r = open(&mut docs, &uri("bad.br"), &good.replace("use util", "use nothing"));
+    let r = open(&mut docs, &uri("bad.zila"), &good.replace("use util", "use nothing"));
     let Json::Arr(d) = r[0].get("params").get("diagnostics") else { panic!() };
     assert_eq!(d.len(), 1);
     let m = d[0].get("message").str().unwrap();
@@ -212,12 +212,12 @@ fn packages_of_the_project_are_seen_by_the_editor() {
 fn a_sql_block_has_no_diagnostics_and_syntax_errors_around_it_are_reported() {
     let mut docs = HashMap::new();
     let good = "package main\n\nuse db\nuse postgres\n\nfunc main()\n    let limit = 5\n    let q = sql postgres\n        select id from customers\n        where id < {limit} and name = 'it''s {not a hole}'\n    end\n    print(q.text)\nend\n";
-    let r = open(&mut docs, "file:///sql_good.br", good);
+    let r = open(&mut docs, "file:///sql_good.zila", good);
     assert_eq!(r[0].get("params").get("diagnostics"), &Json::Arr(vec![]));
     // a syntax error after the block is still reported on its own line, and the SQL text is not
     // taken for Zila Lang (the server does not compile files that use `db`, which has generators)
     let bad = good.replace("print(q.text)", "print(q.text");
-    let r = open(&mut docs, "file:///sql_bad.br", &bad);
+    let r = open(&mut docs, "file:///sql_bad.zila", &bad);
     let Json::Arr(d) = r[0].get("params").get("diagnostics") else { panic!() };
     assert_eq!(d.len(), 1, "{:?}", d);
     assert_eq!(d[0].get("range").get("start").get("line"), &Json::Num(12.0));
@@ -231,11 +231,11 @@ func main()
     let q = sql postgres
         select 1
 ";
-    let r = open(&mut docs, "file:///sql_open.br", open_block);
+    let r = open(&mut docs, "file:///sql_open.zila", open_block);
     let Json::Arr(d) = r[0].get("params").get("diagnostics") else { panic!() };
     assert_eq!(d.len(), 1, "{:?}", d);
     assert_eq!(d[0].get("range").get("start").get("line"), &Json::Num(6.0));
     // an ordinary identifier called sql is not a block
-    let r = open(&mut docs, "file:///sql_ident.br", "package main\n\nfunc f(sql: text) -> text\n    return sql\nend\n\nfunc main()\n    print(f(\"x\"))\nend\n");
+    let r = open(&mut docs, "file:///sql_ident.zila", "package main\n\nfunc f(sql: text) -> text\n    return sql\nend\n\nfunc main()\n    print(f(\"x\"))\nend\n");
     assert_eq!(r[0].get("params").get("diagnostics"), &Json::Arr(vec![]));
 }

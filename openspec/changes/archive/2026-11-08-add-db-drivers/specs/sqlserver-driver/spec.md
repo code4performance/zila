@@ -1,6 +1,6 @@
 ## Purpose
 
-Connects Brasa programs to Microsoft SQL Server with a driver written in Brasa that implements the same database interface as the PostgreSQL driver.
+Connects Zila Lang programs to Microsoft SQL Server with a driver written in Zila Lang that implements the same database interface as the PostgreSQL driver.
 
 ## ADDED Requirements
 

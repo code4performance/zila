@@ -32,4 +32,4 @@ Native code generation already has what `defer` needs: closures that capture var
 - [A deferred call that allocates is slower than inlined cleanup] → One small closure per executed `defer`; acceptable, and only functions that use `defer` pay.
 - [Sharing records can surprise people used to copy semantics] → It is what makes `defer buf.flush()` do the useful thing, and it is documented.
 - [Interpreter and native differ on late variable changes] → Documented; the native behavior is the specification.
-- [Defers do not run on a panic] → Documented; there is no unwinding in Brasa.
+- [Defers do not run on a panic] → Documented; there is no unwinding in Zila Lang.

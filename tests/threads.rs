@@ -948,12 +948,12 @@ fn example(name: &str, expected: &str) {
 
 #[test]
 fn example_parallel_sum() {
-    example("threads_sum.br", "sum = 50005000\n");
+    example("threads_sum.zila", "sum = 50005000\n");
 }
 
 #[test]
 fn example_mutex_counter() {
-    example("threads_mutex.br", "mutex  = 80000\natomic = 80000\n");
+    example("threads_mutex.zila", "mutex  = 80000\natomic = 80000\n");
 }
 
 // ---------------------------------------------------------------- other targets

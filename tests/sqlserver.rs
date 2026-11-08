@@ -457,7 +457,7 @@ fn xml_and_single_byte_text_in_cyrillic_and_central_european_code_pages_are_conv
 
 #[test]
 fn recorded_answers_of_the_real_server_decode_into_the_expected_values() {
-    let client = std::fs::read_to_string("tests/data/sqlserver-client.br").unwrap();
+    let client = std::fs::read_to_string("tests/data/sqlserver-client.zila").unwrap();
     let rest = client
         .replace("package main
 

@@ -1,6 +1,6 @@
 ## Context
 
-The standard library is Brasa source embedded in the compiler (`std_source` in `src/codegen_x64.rs`: `text`, `list`, `format`, `float`, ...). `std/float.br` already prints the shortest round-trip digits (`to_text`) and `std/text.br` has `parse_int` and `parse_float`. Records can carry field attributes (`#[json("full_name")]` parses today, see `examples/types.br`) and `examples/errors.br` calls `json.parse(Config, raw)`, but no `json` module exists. What a library needs and the language lacks today is looking at a type: its fields, their names and attributes, the cases of an enum, and constructing values of it. That is the job of `add-comptime-reflection`.
+The standard library is Zila Lang source embedded in the compiler (`std_source` in `src/codegen_x64.rs`: `text`, `list`, `format`, `float`, ...). `std/float.br` already prints the shortest round-trip digits (`to_text`) and `std/text.br` has `parse_int` and `parse_float`. Records can carry field attributes (`#[json("full_name")]` parses today, see `examples/types.br`) and `examples/errors.br` calls `json.parse(Config, raw)`, but no `json` module exists. What a library needs and the language lacks today is looking at a type: its fields, their names and attributes, the cases of an enum, and constructing values of it. That is the job of `add-comptime-reflection`.
 
 **Depends on**
 - `add-comptime-reflection`: type arguments as values (`json.parse(T, s)`), enumerating the fields, attributes, cases and element types of `T`, and building a `T` generically. The whole derivation lives on it.
@@ -12,7 +12,7 @@ The standard library is Brasa source embedded in the compiler (`std_source` in `
 ## Goals / Non-Goals
 
 **Goals**
-- JSON entirely in Brasa, derived by reflection, with no JSON code in the compiler.
+- JSON entirely in Zila Lang, derived by reflection, with no JSON code in the compiler.
 - Errors that say where the problem is.
 - Safe against hostile input: no stack exhaustion, no silent number damage.
 

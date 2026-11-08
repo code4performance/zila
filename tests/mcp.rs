@@ -168,7 +168,7 @@ fn a_stdio_server_answers_one_line_per_message_and_survives_noise() {
 const HTTP_SETUP: &str = r##"
 func start_http(s: mcp.Server) -> web.Running or error
     var app = web.server(port: 0)
-    s.serve_http(app, "/mcp")
+    try s.serve_http(app, "/mcp")
     return try app.start()
 end
 
@@ -196,20 +196,89 @@ fn sessions_origins_tokens_and_limits_are_enforced_over_http() {
 
 #[test]
 fn a_bearer_token_is_required_and_compared_by_value() {
-    let body = "    s.bearer_token = \"secret\"\n    var app = web.server(port: 0)\n    s.serve_http(app, \"/mcp\")\n    let guarded = try app.start()\n    let u = \"http://127.0.0.1:{guarded.port}/mcp\"\n    var h: Map<text, text> = {}\n    h[\"Content-Type\"] = \"application/json\"\n    let none = try web.request(web.Post, u, h, INIT_JSON)\n    print(none.status, none.header(\"www-authenticate\") ?? \"-\")\n    h[\"Authorization\"] = \"Bearer wrong\"\n    print((try web.request(web.Post, u, h, INIT_JSON)).status)\n    h[\"Authorization\"] = \"Bearer secret\"\n    print((try web.request(web.Post, u, h, INIT_JSON)).status)\n    match mcp.connect(u, \"nope\")\n        ok(c) -> print(\"unexpected\")\n        err(e) -> print(e.kind.name)\n    end\n    let good = try mcp.connect(u, \"secret\")\n    print((try good.tools()).len)\n";
+    let body = "    s.bearer_token = \"secret\"\n    var app = web.server(port: 0)\n    try s.serve_http(app, \"/mcp\")\n    let guarded = try app.start()\n    let u = \"http://127.0.0.1:{guarded.port}/mcp\"\n    var h: Map<text, text> = {}\n    h[\"Content-Type\"] = \"application/json\"\n    let none = try web.request(web.Post, u, h, INIT_JSON)\n    print(none.status, none.header(\"www-authenticate\") ?? \"-\")\n    h[\"Authorization\"] = \"Bearer wrong\"\n    print((try web.request(web.Post, u, h, INIT_JSON)).status)\n    h[\"Authorization\"] = \"Bearer secret\"\n    print((try web.request(web.Post, u, h, INIT_JSON)).status)\n    match mcp.connect(u, \"nope\")\n        ok(c) -> print(\"unexpected\")\n        err(e) -> print(e.kind.name)\n    end\n    let good = try mcp.connect(u, \"secret\")\n    print((try good.tools()).len)\n";
     let src = http_program(body).replace("func main() -> error", &prep(&format!("let INIT_JSON = {}\n\nfunc main() -> error", INIT_MSG)));
     assert_eq!(run(&src), "401 Bearer\n401\n200\nstd.Unauthenticated\n2\n");
 }
 
 #[test]
 fn an_oversized_message_is_refused_without_running_anything() {
-    let body = "    s.max_message = 200\n    var app = web.server(port: 0)\n    s.serve_http(app, \"/mcp\")\n    let small = try app.start()\n    var h: Map<text, text> = {}\n    h[\"Content-Type\"] = \"application/json\"\n    let r = try web.request(web.Post, \"http://127.0.0.1:{small.port}/mcp\", h, text.repeat(\"x\", 500))\n    print(r.status, text.contains(r.body, \"larger than 200\"))\n";
+    let body = "    s.max_message = 200\n    var app = web.server(port: 0)\n    try s.serve_http(app, \"/mcp\")\n    let small = try app.start()\n    var h: Map<text, text> = {}\n    h[\"Content-Type\"] = \"application/json\"\n    let r = try web.request(web.Post, \"http://127.0.0.1:{small.port}/mcp\", h, text.repeat(\"x\", 500))\n    print(r.status, text.contains(r.body, \"larger than 200\"))\n";
     assert_eq!(run(&http_program(body)), "413 true\n");
 }
 
 #[test]
 fn the_mcp_example_builds() {
-    let src = std::fs::read_to_string("examples/mcp_server.br").unwrap();
-    let exe = build(&src).unwrap_or_else(|e| panic!("examples/mcp_server.br: {}", e));
+    let src = std::fs::read_to_string("examples/mcp_server.zila").unwrap();
+    let exe = build(&src).unwrap_or_else(|e| panic!("examples/mcp_server.zila: {}", e));
     let _ = std::fs::remove_file(exe);
+}
+
+#[test]
+fn serve_http_listens_on_this_machine_by_default_and_needs_a_token_for_any_other_address() {
+    let body = r#"    var a1 = web.server(port: 0)
+    print("[{a1.host}]")
+    try s.serve_http(a1, "/x")
+    print("[{a1.host}]")
+    var a2 = web.server(port: 0, host: "0.0.0.0")
+    match s.serve_http(a2, "/x")
+        ok -> print("attached {a2.host}")
+        err(e) -> print(e.kind.name, text.contains(e.message, "bearer_token"))
+    end
+    var a3 = web.server(port: 0, host: "192.168.1.5")
+    match s.serve_http(a3, "/x")
+        ok -> print("attached {a3.host}")
+        err(e) -> print(e.kind.name, text.contains(e.message, "bearer_token"))
+    end
+    var a4 = web.server(port: 0, host: "localhost")
+    match s.serve_http(a4, "/x")
+        ok -> print("attached {a4.host}")
+        err(e) -> print(e.kind.name)
+    end
+    s.bearer_token = "secret"
+    var a5 = web.server(port: 0, host: "0.0.0.0")
+    match s.serve_http(a5, "/x")
+        ok -> print("attached {a5.host}")
+        err(e) -> print(e.kind.name)
+    end
+"#;
+    assert_eq!(run(&http_program(body)), "[]\n[127.0.0.1]\nstd.InvalidInput true\nstd.InvalidInput true\nattached localhost\nattached 0.0.0.0\n");
+}
+
+/// The address of this machine on its network, or `None` when it has none (or only the loopback).
+fn lan_address() -> Option<String> {
+    let s = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    s.connect("8.8.8.8:80").ok()?;
+    let ip = s.local_addr().ok()?.ip();
+    (!ip.is_loopback() && !ip.is_unspecified()).then(|| ip.to_string())
+}
+
+#[test]
+fn a_server_on_127_0_0_1_cannot_be_reached_from_the_network_address_of_the_machine() {
+    let Some(lan) = lan_address() else {
+        eprintln!("this machine has no network address besides the loopback: skipping");
+        return;
+    };
+    let body = format!(
+        r#"    var h: Map<text, text> = {{}}
+    h["Content-Type"] = "application/json"
+    match web.request(web.Post, "http://127.0.0.1:{{up.port}}/mcp", h, "")
+        ok(r) -> print("loopback answered")
+        err(e) -> print("loopback refused")
+    end
+    match web.request(web.Post, "http://{lan}:{{up.port}}/mcp", h, "")
+        ok(r) -> print("network answered {{r.status}}")
+        err(e) -> print("network refused")
+    end
+    s.bearer_token = "secret"
+    var open_app = web.server(port: 0, host: "0.0.0.0")
+    try s.serve_http(open_app, "/mcp")
+    let open = try open_app.start()
+    match web.request(web.Post, "http://{lan}:{{open.port}}/mcp", h, "")
+        ok(r) -> print("open server answered {{r.status}}")
+        err(e) -> print("open server refused")
+    end
+"#
+    );
+    assert_eq!(run(&http_program(&body)), "loopback answered\nnetwork refused\nopen server answered 401\n");
 }

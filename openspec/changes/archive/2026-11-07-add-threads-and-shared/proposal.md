@@ -1,6 +1,6 @@
 ## Why
 
-Brasa tasks are cooperative and run on one thread (README, `std/task.br`), and every reference count is a plain, non-atomic `inc`/`dec` (`rt_retain`/`rt_release` in `src/codegen_x64.rs`). A program cannot use a second core, and a blocking system call (a long computation, a blocking file read) freezes every task. The project owner chose real multi-threading in the style of Rust's `Rc`/`Arc`: `new T` (add-weak-refs) stays cheap and non-atomic, and a second reference kind, `shared T`, has atomic counts and may cross threads. The compiler decides what may cross a thread boundary by looking at the types, with no annotation from the user.
+Zila Lang tasks are cooperative and run on one thread (README, `std/task.br`), and every reference count is a plain, non-atomic `inc`/`dec` (`rt_retain`/`rt_release` in `src/codegen_x64.rs`). A program cannot use a second core, and a blocking system call (a long computation, a blocking file read) freezes every task. The project owner chose real multi-threading in the style of Rust's `Rc`/`Arc`: `new T` (add-weak-refs) stays cheap and non-atomic, and a second reference kind, `shared T`, has atomic counts and may cross threads. The compiler decides what may cross a thread boundary by looking at the types, with no annotation from the user.
 
 ## What Changes
 
@@ -28,5 +28,5 @@ None. The wording "one scheduler" in `async-execution` and `docs/concurrency.htm
 ## Impact
 
 - `src/lexer.rs`, `src/parser.rs`, `src/ast.rs` (`shared`, `spawn_thread`), a new transferability check next to the type checker, `src/codegen_x64.rs` (atomic `rt_retain_atomic`/`rt_release_atomic`, thread-safe allocator, thread entry and thread-local scheduler state, `live_objects`), `src/regalloc.rs` (treat `spawn_thread` like `Spawn`), `src/lsp.rs` (diagnostics, hover).
-- `std/task.br`, `std/task.linux.br` (per-thread scheduler state, cross-thread wake), new `std/thread.br`, `std/thread.linux.br`, `std/sync.br` (`Mutex`, `Atomic`), `std/future.br`, `std/net.br`, `std/net.linux.br`, `std/fs.br`, `std/fs.linux.br` (per-thread I/O state), `os/` (kernel target rejects threads), `examples/`, `docs/concurrency.html`, `docs/native.html`, README, `brasa.ebnf`.
+- `std/task.br`, `std/task.linux.br` (per-thread scheduler state, cross-thread wake), new `std/thread.br`, `std/thread.linux.br`, `std/sync.br` (`Mutex`, `Atomic`), `std/future.br`, `std/net.br`, `std/net.linux.br`, `std/fs.br`, `std/fs.linux.br` (per-thread I/O state), `os/` (kernel target rejects threads), `examples/`, `docs/concurrency.html`, `docs/native.html`, README, `zila.ebnf`.
 - Tests: new `tests/threads.rs`; existing suites must pass (`tests/async.rs` is run separately, per the project's routine).

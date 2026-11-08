@@ -2,7 +2,7 @@
 // Zila Lang standard library: TLS client (`use tls`)
 //
 // Written in Zila Lang on the Windows SChannel security package (secur32.dll; Linux uses
-// std/tls.linux.br on OpenSSL),
+// std/tls.linux.zila on OpenSSL),
 // over the TCP connections of `net`. The server certificate is checked
 // against the Windows trust store and the host name. No call blocks the
 // other tasks (the cryptography itself runs inline and is fast).

@@ -9,7 +9,7 @@
 //   5. turns on PAE, long mode and paging,
 //   6. far-jumps into 64-bit code and from there into the kernel.
 //
-// Build:  zila-parse --os os/boot.br os/kernel.br -o zila-os.img
+// Build:  zila-parse --os os/boot.zila os/kernel.zila -o zila-os.img
 //
 // The compiler assembles the `asm` lines below itself (no NASM). The builder
 // stores the kernel size, in sectors, in `kernel_sectors`.

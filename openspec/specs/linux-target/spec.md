@@ -5,7 +5,7 @@ Builds static x86-64 Linux executables with `--target linux`, using only the com
 ## Requirements
 
 ### Requirement: Building a Linux executable
-`zila-parse prog.br --target linux -o prog` SHALL write a static x86-64 ELF executable that needs no external tool to build and no shared library to run, and SHALL work on a machine without the Windows build tools. `--target windows` SHALL be the same as the default. `--target` with any other value SHALL be an error that lists the valid targets. With `--asm`, `--target linux` SHALL print the Linux assembly instead of building.
+`zila-parse prog.zila --target linux -o prog` SHALL write a static x86-64 ELF executable that needs no external tool to build and no shared library to run, and SHALL work on a machine without the Windows build tools. `--target windows` SHALL be the same as the default. `--target` with any other value SHALL be an error that lists the valid targets. With `--asm`, `--target linux` SHALL print the Linux assembly instead of building.
 
 #### Scenario: A hello program
 - **WHEN** a program that prints `hello` is built with `--target linux -o hello` and run on Linux
@@ -16,7 +16,7 @@ Builds static x86-64 Linux executables with `--target linux`, using only the com
 - **THEN** the tool reports that the target is unknown and names `windows` and `linux`
 
 ### Requirement: The same programs give the same output
-A program that uses only the language and the libraries available on Linux SHALL print the same text on Linux as on Windows, including numbers, floats, text with multibyte characters, collections, errors and `format`. A program whose `main` returns an error SHALL print `error: <message>` and exit with status 1; an `abort` SHALL print `abort: <file>.br:<line>: <message>` to standard error and exit with status 101; normal completion SHALL exit with status 0. A run-time failure such as division by zero SHALL be an abort.
+A program that uses only the language and the libraries available on Linux SHALL print the same text on Linux as on Windows, including numbers, floats, text with multibyte characters, collections, errors and `format`. A program whose `main` returns an error SHALL print `error: <message>` and exit with status 1; an `abort` SHALL print `abort: <file>.zila:<line>: <message>` to standard error and exit with status 101; normal completion SHALL exit with status 0. A run-time failure such as division by zero SHALL be an abort.
 
 #### Scenario: Examples agree
 - **WHEN** the example programs that do not use the Windows API are built for both targets and run
@@ -24,7 +24,7 @@ A program that uses only the language and the libraries available on Linux SHALL
 
 #### Scenario: Exit codes
 - **WHEN** a program's `main` returns `error("boom")`, and another calls `abort("stop")`
-- **THEN** the first prints `error: boom` and exits with 1, and the second prints `abort: <file>.br:<line>: stop` and exits with 101
+- **THEN** the first prints `error: boom` and exits with 1, and the second prints `abort: <file>.zila:<line>: stop` and exits with 101
 
 ### Requirement: Memory
 Objects SHALL be reference counted and freed as on Windows, `live_objects()` SHALL count them, and memory SHALL be given back: a loop that builds and drops large texts and lists SHALL NOT grow without bound. The built-in heap (size-class free lists over a region the executable asks the kernel for, large blocks from `mmap`) SHALL be the default allocator and SHALL be left out of the executable when the program declares a custom allocator with `#[allocator]`. Running out of memory SHALL stop the program with `abort: out of memory`.

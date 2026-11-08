@@ -10,7 +10,7 @@
 - Scalar ref bindings (`ref v: int`) are mutable aliases of a caller variable. Reading them as a value is a copy and stays allowed; `&v` and capture are rejected like for records.
 - `async` functions and `async` methods still take no `ref` parameters (the existing rule is kept and specified).
 - Methods with `(ref s: T)` receivers get the same treatment: `s` is a ref binding in the body, so `return s`, `registry.add(s)` and `let t = s` in such a method are errors. The standard library and examples were audited: no current use violates the rule, so `std/`, `os/` and `examples/` need no rewrite beyond what the verification task confirms.
-- `brasa.ebnf` comments, `docs/syntax.html` and `docs/native.html` describe `ref` as a passing mode with the restrictions.
+- `zila.ebnf` comments, `docs/syntax.html` and `docs/native.html` describe `ref` as a passing mode with the restrictions.
 
 ## Capabilities
 
@@ -25,6 +25,6 @@ None. No existing spec defines `ref`; `async-execution` is unchanged (its `ref` 
 ## Impact
 
 - `src/codegen_x64.rs`: a new check run from `gen_func` and for lambda bodies (`lambda`), plus an `is_ref` flag on `Local` set by `bind_params`; `address_of` and `func_sig` (async rule) are touched. The AST walk lives in a small new module `src/refcheck.rs`.
-- `brasa.ebnf`, `docs/syntax.html`, `docs/native.html`, `docs/async.html`, `docs/index.html` wording.
+- `zila.ebnf`, `docs/syntax.html`, `docs/native.html`, `docs/async.html`, `docs/index.html` wording.
 - Tests: new `tests/refs.rs` (accepted and rejected programs); `tests/codegen.rs` keeps the async test.
 - `std/*`, `os/*` and `examples/*` must compile unchanged; this is checked by the existing suites (`tests/stdlib.rs`, `tests/codegen.rs::examples_compile`).

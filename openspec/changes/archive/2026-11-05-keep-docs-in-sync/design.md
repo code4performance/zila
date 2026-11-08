@@ -1,6 +1,6 @@
 ## Context
 
-`docs/` is five hand-written static pages (see `add-brasa-docs-site`). Embedded code is copied by hand from `examples/*.br`, so it drifts; nothing checks keywords or flags. The project has no CI and no runtime dependencies, but `cargo test` already runs on every change. See proposal.md for motivation.
+`docs/` is five hand-written static pages (see `add-zila-docs-site`). Embedded code is copied by hand from `examples/*.br`, so it drifts; nothing checks keywords or flags. The project has no CI and no runtime dependencies, but `cargo test` already runs on every change. See proposal.md for motivation.
 
 ## Goals / Non-Goals
 
@@ -20,9 +20,9 @@
 
 **2. Highlighting markup is stripped before comparing.** The drift check removes tags and decodes the few HTML entities used (`&lt; &gt; &amp; &quot;`), then compares to the file. This keeps the site's hand-tuned classes (`kw`, `str`) while still proving the text is identical. Alternative: generate the whole page; rejected because prose and samples then live in templates that are harder to edit.
 
-**3. A generator for the example blocks.** `brasa-parse --docs` rewrites each `<pre>` block whose preceding `<div class="file-label">` names `examples/NAME.br` from the file, applying keyword and string highlighting from the lexer's token stream, so highlighting follows the real grammar. Alternative: a regex highlighter; rejected because the lexer already knows keywords, strings and comments exactly.
+**3. A generator for the example blocks.** `zila-parse --docs` rewrites each `<pre>` block whose preceding `<div class="file-label">` names `examples/NAME.br` from the file, applying keyword and string highlighting from the lexer's token stream, so highlighting follows the real grammar. Alternative: a regex highlighter; rejected because the lexer already knows keywords, strings and comments exactly.
 
-**4. Flags and keywords come from the code, not from a copy.** Keywords are read from `brasa::lexer::KEYWORDS` (already public). Flags are exposed from `main.rs` as a `FLAGS` table used by both argument parsing and the test, so adding a flag without a docs entry fails. Alternative: scrape the `usage()` text; rejected as fragile.
+**4. Flags and keywords come from the code, not from a copy.** Keywords are read from `zila::lexer::KEYWORDS` (already public). Flags are exposed from `main.rs` as a `FLAGS` table used by both argument parsing and the test, so adding a flag without a docs entry fails. Alternative: scrape the `usage()` text; rejected as fragile.
 
 **5. New pages join the shared nav through the same test.** The test derives the page list from `docs/*.html` and requires each page to be linked in every page's nav, which covers the new pages (`native.html`, `concurrency.html`, `os.html`).
 

@@ -203,7 +203,7 @@ println(text.lines("").len, text.lines("a\n\nb").len, text.lines("x").len)"#,
 fn empty_separator_is_an_abort() {
     let src = main_of("use text", "let p = text.split(\"abc\", \"\")\nprintln(p.len)");
     let Some((out, code)) = run(&src) else { return };
-    assert!(out.starts_with("abort: text.br:") && out.ends_with(": split needs a separator\n"), "{}", out);
+    assert!(out.starts_with("abort: text.zila:") && out.ends_with(": split needs a separator\n"), "{}", out);
     assert_eq!(code, 101);
 }
 
@@ -351,7 +351,7 @@ fn parse_float_matches_the_reference_parser() {
 
 #[test]
 fn the_words_example_prints_what_the_docs_say() {
-    let src = std::fs::read_to_string("examples/words.br").unwrap();
+    let src = std::fs::read_to_string("examples/words.zila").unwrap();
     if let Some((out, code)) = run(&src) {
         assert_eq!(code, 0);
         assert_eq!(out, "the    4

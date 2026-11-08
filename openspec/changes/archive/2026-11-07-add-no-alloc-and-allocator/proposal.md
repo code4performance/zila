@@ -24,5 +24,5 @@ The README promises that allocation only happens in known operations (text inter
 ## Impact
 
 - `src/codegen_x64.rs`: `rt_alloc` and `rt_free_obj` in `RUNTIME_WIN`, the Linux runtime and `RUNTIME_BARE`, `RUNTIME_DATA_*`, `heap_bytes`, `c_intrinsic` (`c.alloc`, `c.free`), `alloc()`, attribute handling next to `naked`/`shared`; a new analysis module `src/noalloc.rs` called before code generation.
-- `std/*.br` (mark functions that cannot allocate), `os/kernel.br`, `examples/no_alloc.br` and `examples/allocator.br` (new), `tests/noalloc.rs` and `tests/allocator.rs` (new), `tests/os.rs`, `README.md`, `docs/syntax.html`, `docs/native.html`, `docs/os.html`, `editors/vscode/syntaxes/brasa.tmLanguage.json`.
+- `std/*.br` (mark functions that cannot allocate), `os/kernel.br`, `examples/no_alloc.br` and `examples/allocator.br` (new), `tests/noalloc.rs` and `tests/allocator.rs` (new), `tests/os.rs`, `README.md`, `docs/syntax.html`, `docs/native.html`, `docs/os.html`, `editors/vscode/syntaxes/zila.tmLanguage.json`.
 - Depends on other planned changes (see design.md): `add-direct-pe-output`, `remove-panic-add-abort`, `add-copy-on-write`, `remove-interpreter`.

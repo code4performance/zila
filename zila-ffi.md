@@ -1,4 +1,8 @@
+<img src="docs/assets/zila.svg" alt="Zila Lang" width="48" height="48">
+
 # Zila Lang FFI & Inline Assembly Specification
+
+*A small, readable language that compiles straight to machine code.*
 
 This document defines the Foreign Function Interface (FFI) and Inline Assembly specifications for the Zila Lang programming language.
 

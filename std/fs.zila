@@ -2,7 +2,7 @@
 // Zila Lang standard library: files (`use fs`)
 //
 // Written in Zila Lang on top of Windows overlapped I/O and the scheduler's
-// completion port (std/task.br). Reading and writing never block other
+// completion port (std/task.zila). Reading and writing never block other
 // tasks: the operating system moves the data while the scheduler runs
 // something else.
 //

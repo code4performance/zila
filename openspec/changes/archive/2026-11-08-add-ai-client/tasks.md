@@ -6,11 +6,11 @@
 
 ## 2. Client
 
-- [x] 2.1 `ai.Client`, `anthropic`/`openai_compatible` constructors, `key_from_env`, neutral `Message`/`Reply`/`Usage`, `chat` for both wire formats, status-to-kind mapping, `timeout`, key redaction. Verify: `tests/ai.rs` with a fake model server in Brasa: simple reply for both providers, 429 → `Unavailable`, 401 → `Unauthenticated`, an error printed without the key, missing environment variable named in the error.
+- [x] 2.1 `ai.Client`, `anthropic`/`openai_compatible` constructors, `key_from_env`, neutral `Message`/`Reply`/`Usage`, `chat` for both wire formats, status-to-kind mapping, `timeout`, key redaction. Verify: `tests/ai.rs` with a fake model server in Zila Lang: simple reply for both providers, 429 → `Unavailable`, 401 → `Unauthenticated`, an error printed without the key, missing environment variable named in the error.
 - [x] 2.2 Retries with exponential back-off, jitter and `retry-after`; no retry on other 4xx; no retry after streamed output began; `stream` with SSE parsing and callback stop. Verify: fake-server tests for 503-then-200, 400-once, `retry-after`, a three-piece stream with pauses (first callback before the server's last event), an error event in the stream, a callback abort that closes the connection.
 - [x] 2.3 `ai.schema(T)` and `ask(T, req)` with `#[desc]`, one repair round, fence stripping, raw answer in the final error. Verify: `tests/ai.rs` schema snapshots for the four-field record, enum with and without payloads, optional, list and map (a recursive type is refused at build time, not given `$defs`); `ask` happy path, one repair, double failure.
 - [x] 2.4 `ai.tool`, `run` agent loop with concurrent tool calls in call order, `max_steps`, handler errors and bad arguments as error results, unknown tool, cumulative usage. Verify: `tests/ai.rs` scenarios of the spec, including two tool calls in one turn with a 200 ms handler each finishing in under 350 ms total.
-- [x] 2.5 Embeddings (`embed`, batching, order, `InvalidInput` for Anthropic) and `client.embedder(model)`. Verify: fake-server test of 150 inputs in 3 requests in order; with `BRASA_TEST_ANTHROPIC_KEY` or `BRASA_TEST_OPENAI_URL` set, real chat (and embedding for the OpenAI-compatible URL) tests run, skipped with a printed line otherwise.
+- [x] 2.5 Embeddings (`embed`, batching, order, `InvalidInput` for Anthropic) and `client.embedder(model)`. Verify: fake-server test of 150 inputs in 3 requests in order; with `ZILA_TEST_ANTHROPIC_KEY` or `ZILA_TEST_OPENAI_URL` set, real chat (and embedding for the OpenAI-compatible URL) tests run, skipped with a printed line otherwise.
 
 ## 3. Example and documentation
 

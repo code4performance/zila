@@ -6,7 +6,7 @@ Everything in `use net` waits without blocking the other tasks except one thing:
 
 - Name lookups wait like every other operation in `net`: they use the asynchronous Windows resolver (`GetAddrInfoExW`), and the task that asked is parked until the answer arrives while the others keep running. Numeric IPv4 addresses are still parsed on the spot with no lookup.
 - `net.connect` and `UdpSocket.send_to` use it, so they no longer block on a host name. A new `net.lookup(host)` gives the address of a host as text (`a.b.c.d`) for programs that want to resolve names themselves, and `timeout(ms, net.lookup(host))` gives a lookup a deadline.
-- To receive the answer without threads, the scheduler's wait for I/O becomes alertable: the resolver queues its completion on the thread that asked (a completion routine, written in Brasa), which marks the operation done and wakes the task, exactly as an I/O completion does. All other behaviour of the scheduler stays the same.
+- To receive the answer without threads, the scheduler's wait for I/O becomes alertable: the resolver queues its completion on the thread that asked (a completion routine, written in Zila Lang), which marks the operation done and wakes the task, exactly as an I/O completion does. All other behaviour of the scheduler stays the same.
 - Errors keep their message: `cannot resolve '<host>'`.
 - Still IPv4 only. Names are sent to the resolver as given (no internationalized-name conversion).
 

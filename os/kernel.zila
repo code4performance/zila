@@ -4,7 +4,7 @@
 // A 64-bit long-mode kernel with a text console and a small shell. It
 // runs straight on the hardware (or an emulator): no host operating
 // system, no C. The compiler links it at 0x10000 and the boot sector in
-// os/boot.br loads and starts it.
+// os/boot.zila loads and starts it.
 //
 // Everything the language offers works here, including text, lists,
 // enums, `match`, `try`, closures and reference counting: the kernel

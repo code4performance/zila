@@ -6,7 +6,7 @@ Define what a Zila Lang executable contains and what it loads at run time, so us
 ## Requirements
 
 ### Requirement: Packages are compiled into the executable
-Every package named by `use`, whether from the standard library or a dependency, SHALL be compiled together with the program into the single output executable. The executable SHALL NOT read `.br` files, the package cache, `zila.toml` or `zila.lock` when it runs, and SHALL NOT load Zila Lang packages from shared libraries or plugins.
+Every package named by `use`, whether from the standard library or a dependency, SHALL be compiled together with the program into the single output executable. The executable SHALL NOT read `.zila` files, the package cache, `zila.toml` or `zila.lock` when it runs, and SHALL NOT load Zila Lang packages from shared libraries or plugins.
 
 #### Scenario: Running without sources
 - **WHEN** a program that uses `json` and a locked dependency is built and then run on a machine without the compiler, the cache or the project directory
@@ -42,10 +42,10 @@ For every library, a function, type helper or global that cannot be reached from
 - **THEN** one line per package with sizes is printed, and the total equals the sum of the lines
 
 ### Requirement: Platform layers expose the same surface
-For each standard library with a Linux layer, every public function, type and global of `std/<name>.br` SHALL exist in `std/<name>.linux.br` with the same signature (record types compared by their public field names), except for the differences listed in `tests/data/std_parity_known.txt`: helpers that a layer declares `pub` only so another standard library can call them, and functions that exist for one platform only. A difference that is not in the list SHALL fail the test suite, and an entry that no longer applies SHALL fail it too, so the list can only shrink.
+For each standard library with a Linux layer, every public function, type and global of `std/<name>.zila` SHALL exist in `std/<name>.linux.zila` with the same signature (record types compared by their public field names), except for the differences listed in `tests/data/std_parity_known.txt`: helpers that a layer declares `pub` only so another standard library can call them, and functions that exist for one platform only. A difference that is not in the list SHALL fail the test suite, and an entry that no longer applies SHALL fail it too, so the list can only shrink.
 
 #### Scenario: A missing Linux function
-- **WHEN** `std/fs.br` gains a `pub` function that `std/fs.linux.br` lacks and the list has no entry for it
+- **WHEN** `std/fs.zila` gains a `pub` function that `std/fs.linux.zila` lacks and the list has no entry for it
 - **THEN** the parity test fails naming the library and the function
 
 #### Scenario: A fixed difference

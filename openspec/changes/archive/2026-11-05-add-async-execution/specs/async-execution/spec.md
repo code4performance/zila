@@ -1,6 +1,6 @@
 ## Purpose
 
-Lets a Brasa program start work that runs while the caller continues, and wait for its result with `await`, so one program can overlap many waits without blocking.
+Lets a Zila Lang program start work that runs while the caller continues, and wait for its result with `await`, so one program can overlap many waits without blocking.
 
 ## ADDED Requirements
 

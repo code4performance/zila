@@ -23,7 +23,7 @@ How `ref` works today (`src/codegen_x64.rs`):
 5. **Where to implement.** The walk is pure over the AST (`src/refcheck.rs`); the caller passes the ref names and whether each is scalar (decided from the resolved `sig` in `gen_func`). It is called from `gen_func` and from `lambda` for a lambda's own `ref` parameters. `Local` gets `is_ref: bool` so `address_of` can repeat the check as defense in depth. The interpreter is being removed (`remove-interpreter`) and is not touched.
 6. **Message.** One text for every escape: "`ref` parameter 'r' cannot escape: it is only a temporary borrow and cannot be stored, returned, captured or sent to a task; use `new T` for a value that must live longer", with the source line. Tests assert on the fragments "cannot escape" and "use `new T`".
 7. **Methods.** A `(ref s: T)` receiver makes `s` a ref binding. `s.field = v`, `s.items.add(x)`, `s.other()` and `helper(ref s)` are accepted; `return s`, `registry.add(s)`, `let t = s` and `&s` are rejected. A non-ref receiver `(s: T)` is a copy and unrestricted.
-8. **Grammar.** `brasa.ebnf` keeps `[ 'ref' ]` in `param`, `receiver`, `lambda_param` and `arg`; only the comments change.
+8. **Grammar.** `zila.ebnf` keeps `[ 'ref' ]` in `param`, `receiver`, `lambda_param` and `arg`; only the comments change.
 
 ## Depends on
 

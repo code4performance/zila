@@ -2,7 +2,7 @@
 //
 //   set OPENAI_API_KEY=...
 //   set ANTHROPIC_API_KEY=...
-//   zila-parse examples/rag.br -o rag.exe
+//   zila-parse examples/rag.zila -o rag.exe
 //
 // Documents are split into chunks, each chunk is turned into a vector by an embedding model and
 // stored; a question is embedded the same way, the closest chunks are found, and the model is asked

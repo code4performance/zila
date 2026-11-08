@@ -810,16 +810,16 @@ pub fn load_project(root: &Path, home: &Path) -> Result<Project, String> {
 // Resolution of `use`
 // ---------------------------------------------------------------------------
 
-/// The `.br` files directly in `dir`, sorted, with the `_test.br` files apart.
+/// The `.zila` files directly in `dir`, sorted, with the `_test.zila` files apart.
 fn br_files(dir: &Path) -> (Vec<PathBuf>, Vec<PathBuf>) {
     let (mut files, mut tests) = (Vec::new(), Vec::new());
     if let Ok(rd) = std::fs::read_dir(dir) {
         for e in rd.flatten() {
             let p = e.path();
-            if !p.is_file() || p.extension().and_then(|x| x.to_str()) != Some("br") {
+            if !p.is_file() || p.extension().and_then(|x| x.to_str()) != Some("zila") {
                 continue;
             }
-            if p.file_name().and_then(|n| n.to_str()).map_or(false, |n| n.ends_with("_test.br")) {
+            if p.file_name().and_then(|n| n.to_str()).map_or(false, |n| n.ends_with("_test.zila")) {
                 tests.push(p);
             } else {
                 files.push(p);
@@ -880,7 +880,7 @@ fn merge_text(dir: &Path, expected: &str, extra: &[PathBuf]) -> Result<(String, 
     let (mut files, _) = br_files(dir);
     files.extend(extra.iter().cloned());
     if files.is_empty() {
-        return Err(format!("package '{}' has no .br files in {}", expected, dir.display()));
+        return Err(format!("package '{}' has no .zila files in {}", expected, dir.display()));
     }
     let mut uses: Vec<String> = Vec::new();
     let mut bodies = String::new();
@@ -1018,7 +1018,7 @@ fn check_local_names(p: &Project) -> Result<(), String> {
                 return Err(format!("the local package '{}' has the name of a core standard library package; rename the directory", name));
             }
             if p.manifest.deps.iter().any(|d| d.name == name) {
-                return Err(format!("'{}' is both a dependency in {} and a directory with .br files; a name can exist in one place only", name, MANIFEST));
+                return Err(format!("'{}' is both a dependency in {} and a directory with .zila files; a name can exist in one place only", name, MANIFEST));
             }
         }
     }
@@ -1183,7 +1183,7 @@ fn test_files_of(dir: &Path) -> Vec<PathBuf> {
     TEST_FILES.lock().unwrap().as_ref().and_then(|m| m.get(&dir.to_string_lossy().to_string())).cloned().unwrap_or_default()
 }
 
-/// `_test.br` files to include in a package (set by `--test` for the package under test).
+/// `_test.zila` files to include in a package (set by `--test` for the package under test).
 static TEST_FILES: Mutex<Option<HashMap<String, Vec<PathBuf>>>> = Mutex::new(None);
 
 /// Resolves `use <segs...>` from the module `importer` against the installed project.
@@ -1211,7 +1211,7 @@ pub fn visible_source(name: &str) -> Option<&'static str> {
     r.source_of(&key).ok()
 }
 
-/// Makes the `_test.br` files of the package in `dir` part of it (for `--test`).
+/// Makes the `_test.zila` files of the package in `dir` part of it (for `--test`).
 pub fn include_tests(dir: &Path, files: Vec<PathBuf>) {
     TEST_FILES.lock().unwrap().get_or_insert_with(HashMap::new).insert(dir.to_string_lossy().to_string(), files);
 }
@@ -1222,7 +1222,7 @@ pub fn merged_dir_source(dir: &Path, package: &str, extra: &[PathBuf]) -> Result
     merge_text(dir, package, extra).map(|x| x.0)
 }
 
-/// The `.br` files under `root` (for `--tidy`), skipping hidden directories.
+/// The `.zila` files under `root` (for `--tidy`), skipping hidden directories.
 pub fn all_sources(root: &Path) -> Vec<PathBuf> {
     fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
         if let Ok(rd) = std::fs::read_dir(dir) {
@@ -1233,7 +1233,7 @@ pub fn all_sources(root: &Path) -> Vec<PathBuf> {
                     if !name.starts_with('.') && name != "target" {
                         walk(&p, out);
                     }
-                } else if p.extension().and_then(|x| x.to_str()) == Some("br") {
+                } else if p.extension().and_then(|x| x.to_str()) == Some("zila") {
                     out.push(p);
                 }
             }
@@ -1368,7 +1368,7 @@ mod tests {
     #[test]
     fn tree_hash_ignores_listing_order_and_sees_edits() {
         let (a, b) = (scratch("ha"), scratch("hb"));
-        for (d, order) in [(&a, ["x.br", "sub/y.br"]), (&b, ["sub/y.br", "x.br"])] {
+        for (d, order) in [(&a, ["x.zila", "sub/y.zila"]), (&b, ["sub/y.zila", "x.zila"])] {
             for f in order {
                 let p = d.join(f);
                 std::fs::create_dir_all(p.parent().unwrap()).unwrap();
@@ -1380,10 +1380,10 @@ mod tests {
         std::fs::create_dir_all(a.join(".git")).unwrap();
         std::fs::write(a.join(".git/ignored"), "x").unwrap();
         assert_eq!(h, tree_hash(&a).unwrap());
-        std::fs::write(a.join("x.br"), "content of x.bR").unwrap();
+        std::fs::write(a.join("x.zila"), "content of x.bR").unwrap();
         assert_ne!(h, tree_hash(&a).unwrap());
-        std::fs::write(a.join("x.br"), "content of x.br").unwrap();
-        std::fs::rename(a.join("x.br"), a.join("z.br")).unwrap();
+        std::fs::write(a.join("x.zila"), "content of x.zila").unwrap();
+        std::fs::rename(a.join("x.zila"), a.join("z.zila")).unwrap();
         assert_ne!(h, tree_hash(&a).unwrap());
     }
 
@@ -1394,11 +1394,11 @@ mod tests {
         let commit = "b".repeat(40);
         let tmp = cache_tmp(&home, "github.com/x/codec", &v, &commit).unwrap();
         std::fs::create_dir_all(&tmp).unwrap();
-        std::fs::write(tmp.join("a.br"), "x").unwrap();
+        std::fs::write(tmp.join("a.zila"), "x").unwrap();
         // interrupted: the temporary directory exists, the entry does not
         assert!(cache_lookup(&home, "github.com/x/codec", &v, &commit).is_none());
         let dest = cache_store(&home, "github.com/x/codec", &v, &commit, &tmp).unwrap();
-        assert!(dest.join("a.br").is_file());
+        assert!(dest.join("a.zila").is_file());
         assert_eq!(cache_lookup(&home, "github.com/x/codec", &v, &commit), Some(dest));
     }
 }

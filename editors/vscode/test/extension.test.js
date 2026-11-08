@@ -136,23 +136,23 @@ test('errors appear as you type and clear when fixed; formatting returns edits',
   assert.ok(log.commands.has('zila.restartServer'));
   assert.ok(log.provider);
 
-  const d = doc('file:///t.br', BAD, 1);
+  const d = doc('file:///t.zila', BAD, 1);
   log.handlers.open(d);
-  await until(() => (log.diagnostics.get('file:///t.br') || []).length === 1, 'the syntax error');
-  const item = log.diagnostics.get('file:///t.br')[0];
+  await until(() => (log.diagnostics.get('file:///t.zila') || []).length === 1, 'the syntax error');
+  const item = log.diagnostics.get('file:///t.zila')[0];
   assert.strictEqual(item.range.start.line, 3);
   assert.strictEqual(item.source, 'zila');
 
-  log.handlers.change({ document: doc('file:///t.br', GOOD, 2) });
-  await until(() => (log.diagnostics.get('file:///t.br') || []).length === 0, 'the fix');
+  log.handlers.change({ document: doc('file:///t.zila', GOOD, 2) });
+  await until(() => (log.diagnostics.get('file:///t.zila') || []).length === 0, 'the fix');
 
-  const edits = await log.provider.provideDocumentFormattingEdits(doc('file:///t.br', UNFORMATTED, 3));
+  const edits = await log.provider.provideDocumentFormattingEdits(doc('file:///t.zila', UNFORMATTED, 3));
   assert.strictEqual(edits.length, 1);
   assert.ok(edits[0].newText.includes('    println(1, 2)'));
-  const none = await log.provider.provideDocumentFormattingEdits(doc('file:///t.br', GOOD, 4));
+  const none = await log.provider.provideDocumentFormattingEdits(doc('file:///t.zila', GOOD, 4));
   assert.deepStrictEqual(none, []);
 
-  log.handlers.close(doc('file:///t.br', GOOD, 4));
+  log.handlers.close(doc('file:///t.zila', GOOD, 4));
   await extension.deactivate();
 });
 
@@ -164,8 +164,8 @@ test('a missing executable gives one message with an Open Settings button and no
   assert.ok(vscode.log.errors[0].message.includes(missing));
   assert.deepStrictEqual(vscode.log.errors[0].buttons, ['Open Settings']);
   // highlighting does not depend on the server: the formatting provider just returns nothing
-  vscode.log.handlers.open(doc('file:///m.br', BAD, 1));
-  const edits = await vscode.log.provider.provideDocumentFormattingEdits(doc('file:///m.br', UNFORMATTED, 2));
+  vscode.log.handlers.open(doc('file:///m.zila', BAD, 1));
+  const edits = await vscode.log.provider.provideDocumentFormattingEdits(doc('file:///m.zila', UNFORMATTED, 2));
   assert.deepStrictEqual(edits, []);
   assert.strictEqual(vscode.log.errors.length, 1);
   await extension.deactivate();
@@ -183,11 +183,11 @@ test('the restart command starts the server again with the current settings', { 
   const { vscode, extension } = load({ 'server.path': exe });
   await extension.activate(context());
   const log = vscode.log;
-  log.handlers.open(doc('file:///r.br', BAD, 1));
-  await until(() => (log.diagnostics.get('file:///r.br') || []).length === 1, 'the first error');
-  vscode.workspace.textDocuments.push(doc('file:///r.br', BAD, 1));
+  log.handlers.open(doc('file:///r.zila', BAD, 1));
+  await until(() => (log.diagnostics.get('file:///r.zila') || []).length === 1, 'the first error');
+  vscode.workspace.textDocuments.push(doc('file:///r.zila', BAD, 1));
   await log.commands.get('zila.restartServer')();
-  await until(() => (log.diagnostics.get('file:///r.br') || []).length === 1, 'the error after the restart');
+  await until(() => (log.diagnostics.get('file:///r.zila') || []).length === 1, 'the error after the restart');
   await extension.deactivate();
 });
 

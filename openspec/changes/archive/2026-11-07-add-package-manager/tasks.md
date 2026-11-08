@@ -8,7 +8,7 @@
 ## 2. Fetching and cache
 
 - [x] 2.1 Git runner: `ls-remote --tags`, clone without checkout, detached checkout, `.git` removal, `GIT_TERMINAL_PROMPT=0`, the missing-git message and the moved-tag message. Verify: `tests/package.rs` builds local `file://` repositories with tags (skips with a message when `git` is not usable) and checks fetch, annotated tags, a moved tag, and the missing-git message by running with an empty `PATH`.
-- [x] 2.2 Cache under `BRASA_HOME` / `~/.brasa`, atomic write by rename, lookup by module path, version and commit. Verify: unit tests with a temporary `BRASA_HOME`; an interrupted write leaves no entry.
+- [x] 2.2 Cache under `ZILA_HOME` / `~/.zila`, atomic write by rename, lookup by module path, version and commit. Verify: unit tests with a temporary `ZILA_HOME`; an interrupted write leaves no entry.
 - [x] 2.3 Resolver entry point `package::resolve_project(source_path)`: finds the manifest upward, reads the lock, checks coverage and hashes, returns the packages with their parsed files and import-name maps; never calls git. Verify: tests for stale lock, tampered cache, missing cache entry, with the exact messages; a test that the build path has no reference to the git runner (the runner lives in a module only `--add`, `--fetch` and `--update` import).
 
 ## 3. Command line (`src/cli.rs`, `src/main.rs`)
@@ -27,14 +27,14 @@
 ## 5. Repository content that uses `use`
 
 - [x] 5.1 Fix `examples/hello.br` (`use http, db, json` names nothing that exists) and any other source in `examples/`, `os/` and `std/` that `use`s a missing name. Verify: build every file in `examples/`, `os/` and `std/` and run `cargo test` (excluding `tests/async.rs` in routine runs, per project practice); no `unknown package` errors.
-- [x] 5.2 Add `examples/packages/` (a project with `brasa.toml`, `brasa.lock` pointing to a repository fixture, a local package, and a `main.br`) that builds offline from a cache the test prepares. Verify: `tests/package.rs` builds and runs it and compares the output.
+- [x] 5.2 Add `examples/packages/` (a project with `zila.toml`, `zila.lock` pointing to a repository fixture, a local package, and a `main.br`) that builds offline from a cache the test prepares. Verify: `tests/package.rs` builds and runs it and compares the output.
 - [x] 5.3 Confirm `std/` and `os/` need no rewrite beyond 5.1 (their `use`s are all standard names) and record the confirmation in the PR. Verify: a grep of `^use` in `std/` and `os/` against the embedded name list in `std_source_for`.
 
 ## 6. Documentation
 
 - [x] 6.1 New `docs/packages.html` (manifest, lock, commands, cache, versions and majors, `use` resolution, visibility, git requirement and message, offline, `edition` reserved) with the navigation block shared by every page, linked from `docs/index.html`. Verify: `tests/docs.rs` (shared navigation, internal links and anchors).
 - [x] 6.2 `docs/getting-started.html`: document the new options. Verify: `tests/docs.rs` `documented_flags_match_the_command_line`.
-- [x] 6.3 README feature row and roadmap line; if `examples/packages/` is embedded in a page, regenerate with `brasa-parse --docs`. Verify: `tests/docs.rs` `embedded_examples_match_the_example_files`.
+- [x] 6.3 README feature row and roadmap line; if `examples/packages/` is embedded in a page, regenerate with `zila-parse --docs`. Verify: `tests/docs.rs` `embedded_examples_match_the_example_files`.
 
 ## 7. Final checks
 
@@ -56,6 +56,6 @@ Decisions taken while implementing, where the artifacts predate the changes that
 - **A package's merged text has no original line numbers** in compile errors (the files are joined); duplicate and `package`-line errors name the files.
 - **Hash check (decision 10)** runs for every locked package when the project is loaded, not lazily on first use.
 - **Task 4.4:** `add-visibility-pub` has landed, and because every package has its own module key the existing `pub` check applies across packages: `a_private_item_of_another_package_is_refused` passes.
-- **Known limits:** comptime generators and derives are found through the names visible from the project (a generator package imported only by a dependency under a clashing name is not expanded); `examples/rest_api.br` still `use`s `http` and `db`, which exist nowhere: it is a syntax sketch and is only parsed (the test skips it, saying why); `examples/packages/brasa.lock` has a placeholder commit because its repository is a fixture (the test fills the cache from `fixture/` and records the real hash).
+- **Known limits:** comptime generators and derives are found through the names visible from the project (a generator package imported only by a dependency under a clashing name is not expanded); `examples/rest_api.br` still `use`s `http` and `db`, which exist nowhere: it is a syntax sketch and is only parsed (the test skips it, saying why); `examples/packages/zila.lock` has a placeholder commit because its repository is a fixture (the test fills the cache from `fixture/` and records the real hash).
 
 - **Verification results:** `--asm` of every `examples/*.br` for both targets, before and after the change, is identical after sorting lines (procedure order varies from run to run with the same binary, so a plain diff is not meaningful), except `rest_api.br`, which now stops at the unknown package. `cargo clippy` is not installed on this machine, so the clippy part of 7.1 was not run; the build has no warnings and `Cargo.toml` still has no dependencies (checked by a test). Full suite: every test file passes except the failures that predate this change (`linux`, `error_kinds`, `ui`, `derive::the_os_libraries_and_kernel_still_compile`); `tests/async.rs` was left out as usual.

@@ -901,7 +901,7 @@ impl Compiler {
             self.require_unsafe("inline 'asm'")?;
         }
         // lets an assembler error be reported at the Zila Lang line of the block
-        self.e(format!("; asm {}.br:{}", self.cur_mod, self.line));
+        self.e(format!("; asm {}.zila:{}", self.cur_mod, self.line));
         const POOL: [&str; 4] = ["r10", "r11", "r8", "r9"];
         let mut regs: HashMap<String, String> = HashMap::new();
         let mut next = 0;

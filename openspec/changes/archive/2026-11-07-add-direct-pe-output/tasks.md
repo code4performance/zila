@@ -1,7 +1,7 @@
 ## 1. Reference results
 
 - [x] 1.1 Build every example and run every suite that builds Windows executables with the current `ml64`/`link` path, and save each program's output and exit code under a scratch folder; verify the file list matches the examples directory
-- [x] 1.2 Add a developer-only environment variable (`BRASA_OLD_LINK`, set = the old path) that selects the old path during the migration, and verify that with it set the build still uses `ml64` and `link` (the new path being the default as soon as it existed, the variable is opt-in to the old one; removed in 5.2)
+- [x] 1.2 Add a developer-only environment variable (`ZILA_OLD_LINK`, set = the old path) that selects the old path during the migration, and verify that with it set the build still uses `ml64` and `link` (the new path being the default as soon as it existed, the variable is opt-in to the old one; removed in 5.2)
 
 ## 2. The assembler accepts the Windows output
 
@@ -21,7 +21,7 @@
 - [x] 4.2 Add all DLLs and the IAT slots from the symbol table, and verify programs using sockets, files and `use ui` run
 - [x] 4.3 Embed the manifest as a resource and choose the console or GUI subsystem from `uses_ui`, and verify `examples/ui.br` opens a themed, DPI-aware window with no console
 - [x] 4.4 Set stack reserve and commit like the old image and verify the deep recursion and the 2000-task tests pass
-- [x] 4.5 Make the compiler write the file only when the image is complete and map assembler errors to the Brasa file and line, and verify a program with a bad `asm` block fails with the file and line and leaves no temp directory
+- [x] 4.5 Make the compiler write the file only when the image is complete and map assembler errors to the Zila Lang file and line, and verify a program with a bad `asm` block fails with the file and line and leaves no temp directory
 
 ## 5. Remove the old path
 

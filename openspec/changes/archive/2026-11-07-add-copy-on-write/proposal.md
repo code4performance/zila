@@ -1,6 +1,6 @@
 ## Why
 
-Brasa promises that records have value semantics: a record is copied when it is assigned or passed, and `ref` is how you share. The promise stops at the first heap value. Today `B_copy_<Record>` copies nested plain records, but a `[]T`, a `Map<K,V>` or a text held in a field is only retained, so two "copies" of a record silently share one list:
+Zila Lang promises that records have value semantics: a record is copied when it is assigned or passed, and `ref` is how you share. The promise stops at the first heap value. Today `B_copy_<Record>` copies nested plain records, but a `[]T`, a `Map<K,V>` or a text held in a field is only retained, so two "copies" of a record silently share one list:
 
 ```
 let a = Bag { items: [1, 2] }

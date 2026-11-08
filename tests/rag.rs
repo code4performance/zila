@@ -364,7 +364,7 @@ fn a_real_pgvector_table_orders_hits_like_the_memory_store() {
 
 #[test]
 fn the_rag_example_builds() {
-    let src = std::fs::read_to_string("examples/rag.br").unwrap();
-    let exe = build(&src).unwrap_or_else(|e| panic!("examples/rag.br: {}", e));
+    let src = std::fs::read_to_string("examples/rag.zila").unwrap();
+    let exe = build(&src).unwrap_or_else(|e| panic!("examples/rag.zila: {}", e));
     let _ = std::fs::remove_file(exe);
 }

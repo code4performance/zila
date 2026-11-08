@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 static N: AtomicUsize = AtomicUsize::new(0);
 
 fn temp_file(text: &str) -> PathBuf {
-    let p = std::env::temp_dir().join(format!("zila-testrun-{}-{}.br", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let p = std::env::temp_dir().join(format!("zila-testrun-{}-{}.zila", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     std::fs::write(&p, text).unwrap();
     p
 }
@@ -285,7 +285,7 @@ fn no_opt_is_honoured() {
 
 #[test]
 fn the_example_passes() {
-    let f = PathBuf::from("examples/testing.br");
+    let f = PathBuf::from("examples/testing.zila");
     let Some((out, _, code)) = run_tests(&[&f], &[]) else { return };
     assert_eq!(code, 0, "{}", out);
     assert!(out.contains("test result: 3 passed, 0 failed"), "{}", out);

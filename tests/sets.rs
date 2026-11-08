@@ -163,7 +163,7 @@ fn record_elements() {
 
 #[test]
 fn the_sets_example_runs() {
-    let src = std::fs::read_to_string("examples/sets.br").unwrap();
+    let src = std::fs::read_to_string("examples/sets.zila").unwrap();
     if let Some(out) = native(&src).unwrap_or_else(|e| panic!("compile error: {}", e)) {
         assert!(out.contains("in both: the lazy dog") && out.contains("new: 3\nnew: 1\nnew: 2\n"), "{}", out);
     }

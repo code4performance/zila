@@ -6,10 +6,14 @@
   <title>Packages — Zila Lang</title>
   <meta name="description" content="Packages in Zila Lang: zila.toml, zila.lock, dependencies from git, versions, the cache, and how use finds a package.">
   <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="assets/zila.svg" type="image/svg+xml">
 </head>
 <body>
+  <a class="skip" href="#content">Skip to content</a>
   <header class="site-header">
-    <a class="brand" href="index.html">zila<span class="ember-dot">.</span><small>lang docs</small></a>
+    <a class="brand" href="index.html"><img src="assets/zila.svg" alt="" width="28" height="28"><span>Zila Lang</span><small>docs</small></a>
+    <input type="checkbox" id="menu" class="menu-toggle">
+    <label for="menu" class="menu-button">Menu</label>
     <nav class="site-nav">
       <a href="index.html">Overview</a>
       <a href="syntax.html">Syntax</a>
@@ -26,16 +30,16 @@
     </nav>
   </header>
 
-  <main>
+  <main id="content">
     <h1>Packages</h1>
-    <p>A program can use libraries other people wrote. A library is a <strong>git repository</strong> of <code>.br</code> files; a project lists the ones it needs in <code>zila.toml</code>, and the tool downloads them once into a cache. There is no registry: the address of a repository is its name. Building never uses the network.</p>
+    <p>A program can use libraries other people wrote. A library is a <strong>git repository</strong> of <code>.zila</code> files; a project lists the ones it needs in <code>zila.toml</code>, and the tool downloads them once into a cache. There is no registry: the address of a repository is its name. Building never uses the network.</p>
 
     <section id="quickstart">
       <h2>In practice</h2>
       <pre><code>zila-parse --init myapp                                   <span class="cm"># writes zila.toml</span>
 zila-parse --add https://github.com/someone/codec@1.2.0   <span class="cm"># adds, downloads, writes zila.lock</span>
-zila-parse main.br -o main.exe                            <span class="cm"># builds from the cache, offline</span></code></pre>
-      <p>and in <code>main.br</code>:</p>
+zila-parse main.zila -o main.exe                            <span class="cm"># builds from the cache, offline</span></code></pre>
+      <p>and in <code>main.zila</code>:</p>
       <pre><code><span class="kw">package</span> main
 
 <span class="kw">use</span> codec
@@ -99,7 +103,7 @@ zila-parse --add https://github.com/someone/codec/v2@2.0.0     <span class="cm">
       <p><code>--add</code>, <code>--fetch</code> and <code>--update</code> print the effects of every package they download or whose version changed, and <code>--update</code> marks a package that gained one:</p>
       <pre><code>locked 1 package(s)
   example.org/codec@1.1.0: effects: unsafe  [CHANGED: was none, gained unsafe]</code></pre>
-      <p><code>zila-parse file.br --explain-link</code> shows the effects of the code your program actually reaches next to the size of each package. To refuse an effect, add a policy to <code>zila.toml</code>:</p>
+      <p><code>zila-parse file.zila --explain-link</code> shows the effects of the code your program actually reaches next to the size of each package. To refuse an effect, add a policy to <code>zila.toml</code>:</p>
       <pre><code>[policy]
 forbid = "asm"</code></pre>
       <p>The value is one of <code>"unsafe"</code>, <code>"extern"</code> or <code>"asm"</code> (one value; the manifest has no lists). A build then fails when any dependency, direct or indirect, has that effect, naming the package and the file. Your own code is not checked.</p>
@@ -116,25 +120,25 @@ forbid = "asm"</code></pre>
       <pre><code><span class="kw">use</span> codec.stream        <span class="cm">// the directory stream/ of the dependency codec</span>
 ...
 stream.next()</code></pre>
-      <p>A package is the <code>.br</code> files directly in its directory, merged into one module: they see each other's names, a name declared twice is an error that names both files, and each file's <code>package</code> line must be the package's name (the directory name; for a dependency, its <code>name</code> in <code>[package]</code>). Files ending in <code>_test.br</code> are left out of builds; <code>zila-parse --test dir/name_test.br</code> runs their <code>#[test]</code> functions together with the package's own files. A dependency's own <code>use</code>s are looked up with <em>its</em> manifest, not yours.</p>
-      <p>A name found nowhere is an error: <code>unknown package 'x' (not in the standard library, zila.toml or the project directory); to add one: zila-parse --add &lt;git-url&gt;</code>. A program with no <code>zila.toml</code> still sees the standard library and the <code>name.br</code> files next to it, as before.</p>
+      <p>A package is the <code>.zila</code> files directly in its directory, merged into one module: they see each other's names, a name declared twice is an error that names both files, and each file's <code>package</code> line must be the package's name (the directory name; for a dependency, its <code>name</code> in <code>[package]</code>). Files ending in <code>_test.zila</code> are left out of builds; <code>zila-parse --test dir/name_test.zila</code> runs their <code>#[test]</code> functions together with the package's own files. A dependency's own <code>use</code>s are looked up with <em>its</em> manifest, not yours.</p>
+      <p>A name found nowhere is an error: <code>unknown package 'x' (not in the standard library, zila.toml or the project directory); to add one: zila-parse --add &lt;git-url&gt;</code>. A program with no <code>zila.toml</code> still sees the standard library and the <code>name.zila</code> files next to it, as before.</p>
       <p>Across a package boundary only <code>pub</code> items are visible; see <a href="syntax.html#visibility">visibility</a>.</p>
     </section>
 
     <section id="linking">
       <h2>What goes into the executable</h2>
-      <p>Every package a program names with <code>use</code>, from the standard library or from a dependency, is compiled together with the program into one executable. Nothing is loaded when it runs: the program does not read <code>.br</code> files, the cache, <code>zila.toml</code> or <code>zila.lock</code>, and there are no shared libraries of Zila Lang code. The only thing the operating system links at run time is C code that the program declares with <code>extern</code>.</p>
-      <p>Only what the program can reach is kept. A function, global or string that nothing reachable refers to is left out, and a package's start-up code runs only when it does something the program can observe or sets a global that kept code reads. So <code>use json</code> without calling it adds no bytes, and a program that never opens a window does not import the window system. <code>zila-parse --no-prune</code> turns this off, and <code>zila-parse file.br --explain-link</code> shows how many bytes of code and data each package adds to the program.</p>
+      <p>Every package a program names with <code>use</code>, from the standard library or from a dependency, is compiled together with the program into one executable. Nothing is loaded when it runs: the program does not read <code>.zila</code> files, the cache, <code>zila.toml</code> or <code>zila.lock</code>, and there are no shared libraries of Zila Lang code. The only thing the operating system links at run time is C code that the program declares with <code>extern</code>.</p>
+      <p>Only what the program can reach is kept. A function, global or string that nothing reachable refers to is left out, and a package's start-up code runs only when it does something the program can observe or sets a global that kept code reads. So <code>use json</code> without calling it adds no bytes, and a program that never opens a window does not import the window system. <code>zila-parse --no-prune</code> turns this off, and <code>zila-parse file.zila --explain-link</code> shows how many bytes of code and data each package adds to the program.</p>
     </section>
 
     <section id="sample">
       <h2>A sample project</h2>
-      <p>The repository has one in <code>examples/packages/</code>: a <code>zila.toml</code> with one dependency, its <code>zila.lock</code>, a local package (<code>util/</code>, two files) and <code>main.br</code>. The tests build it offline from a cache they fill from the fixture next to it.</p>
+      <p>The repository has one in <code>examples/packages/</code>: a <code>zila.toml</code> with one dependency, its <code>zila.lock</code>, a local package (<code>util/</code>, two files) and <code>main.zila</code>. The tests build it offline from a cache they fill from the fixture next to it.</p>
     </section>
   </main>
 
   <footer class="site-footer">
-    Zila Lang — a language with a human face. Docs generated from <code>zila.ebnf</code> and <code>examples/*.br</code>.
+    Zila Lang &middot; A small, readable language that compiles straight to machine code. The examples are checked against <code>examples/*.zila</code>; the grammar is <code>zila.ebnf</code>.
   </footer>
 </body>
 </html>

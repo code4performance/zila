@@ -103,7 +103,7 @@ impl Compiler {
                 if let Some((key, src)) = found {
                     if !seen.contains(&key) {
                         seen.insert(key.clone());
-                        let mut f = parse_source(src).map_err(|d| format!("{}{}.br:{}:{}: {}", if std_name { "std/" } else { "package " }, key, d.line, d.col, d.msg))?;
+                        let mut f = parse_source(src).map_err(|d| format!("{}{}.zila:{}:{}: {}", if std_name { "std/" } else { "package " }, key, d.line, d.col, d.msg))?;
                         // generators run at build time only; generated templates have no body here
                         let driver = self.driver;
                         f.decls.retain(|d| match &d.kind {

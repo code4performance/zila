@@ -6,10 +6,14 @@
   <title>AI — Zila Lang</title>
   <meta name="description" content="Language models from Zila Lang: chat, streaming, typed answers, tools and embeddings with the ai library, with safety notes.">
   <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="assets/zila.svg" type="image/svg+xml">
 </head>
 <body>
+  <a class="skip" href="#content">Skip to content</a>
   <header class="site-header">
-    <a class="brand" href="index.html">zila<span class="ember-dot">.</span><small>lang docs</small></a>
+    <a class="brand" href="index.html"><img src="assets/zila.svg" alt="" width="28" height="28"><span>Zila Lang</span><small>docs</small></a>
+    <input type="checkbox" id="menu" class="menu-toggle">
+    <label for="menu" class="menu-button">Menu</label>
     <nav class="site-nav">
       <a href="index.html">Overview</a>
       <a href="syntax.html">Syntax</a>
@@ -26,7 +30,7 @@
     </nav>
   </header>
 
-  <main>
+  <main id="content">
     <h1>AI</h1>
     <p class="note"><code>ai</code>, <code>mcp</code> and <code>rag</code> are packages of the Zila Lang repository (<code>packages/</code>) that the compiler embeds, so <code>use ai</code> needs no manifest; a package of your project with the same name replaces them (see <a href="packages.html#use">Packages</a>).</p>
     <p><code>use ai</code> talks to a language model: the Anthropic Messages API (<code>ai.anthropic</code>) or any OpenAI-compatible server (<code>ai.openai_compatible</code>), including local ones such as Ollama over plain <code>http</code>. It is written in Zila Lang on <code>web</code> and <code>json</code>; nothing in the compiler knows about models. The program names the model every time; the library has no default.</p>
@@ -95,11 +99,11 @@ server.serve_stdio()                              <span class="cm">// a host sta
 
 <span class="kw">var</span> app = web.server(port: 8080)
 server.bearer_token = <span class="str">"secret"</span>
-server.serve_http(app, <span class="str">"/mcp"</span>)                    <span class="cm">// Streamable HTTP</span>
+<span class="kw">try</span> server.serve_http(app, <span class="str">"/mcp"</span>)                <span class="cm">// Streamable HTTP, on 127.0.0.1</span>
 <span class="kw">let</span> client = <span class="kw">try</span> mcp.connect(<span class="str">"http://localhost:8080/mcp"</span>, <span class="str">"secret"</span>)
 <span class="kw">let</span> remote = <span class="kw">try</span> client.ai_tools()                <span class="cm">// for client.run</span></code></pre>
-      <p>Over <strong>stdio</strong> a message is one line of JSON-RPC in each direction and nothing else is written to standard output; requests are handled one at a time. Over <strong>HTTP</strong> a <code>POST</code> carries a message, sessions travel in <code>Mcp-Session-Id</code>, <code>GET</code> is answered 405 and <code>DELETE</code> ends a session. The <code>Origin</code> header must be the same host (or in <code>server.origins</code>), a <code>bearer_token</code> is compared in constant time, and <code>max_message</code> and <code>max_concurrent</code> bound what a client can ask. A tool that fails gives a result with <code>isError</code>; arguments that do not match its input are an invalid-params error (<code>-32602</code>). Lists are paged by <code>cursor</code>, 100 at a time. The client works over HTTP only (starting a child process for stdio needs a process library that does not exist yet).</p>
-      <p>A server is a way to run code for whoever can reach it. Register only what you want exposed, give each tool the least privilege that works (<code>examples/mcp_server.br</code> offers narrow parameterized queries and a read-only <code>run_select</code>, never a writable connection), always set a bearer token when the machine is reachable from elsewhere, and remember that what a tool returns is read by a model as untrusted text. This version does not bind the HTTP server to the loopback address by itself.</p>
+      <p>Over <strong>stdio</strong> a message is one line of JSON-RPC in each direction and nothing else is written to standard output; requests are handled one at a time. Over <strong>HTTP</strong> a <code>POST</code> carries a message, sessions travel in <code>Mcp-Session-Id</code>, <code>GET</code> is answered 405 and <code>DELETE</code> ends a session. <code>serve_http</code> makes the web server listen on <code>127.0.0.1</code> unless <code>app.host</code> says otherwise, and serving on any other address is an error unless <code>bearer_token</code> was set first. The <code>Origin</code> header must be the same host (or in <code>server.origins</code>), a <code>bearer_token</code> is compared in constant time, and <code>max_message</code> and <code>max_concurrent</code> bound what a client can ask. A tool that fails gives a result with <code>isError</code>; arguments that do not match its input are an invalid-params error (<code>-32602</code>). Lists are paged by <code>cursor</code>, 100 at a time. The client works over HTTP only (starting a child process for stdio needs a process library that does not exist yet).</p>
+      <p>A server is a way to run code for whoever can reach it. Register only what you want exposed, give each tool the least privilege that works (<code>examples/mcp_server.zila</code> offers narrow parameterized queries and a read-only <code>run_select</code>, never a writable connection), always set a bearer token when the machine is reachable from elsewhere, and remember that what a tool returns is read by a model as untrusted text. This version does not bind the HTTP server to the loopback address by itself.</p>
     </section>
 
     <section id="rag">
@@ -131,7 +135,7 @@ print(answer.text)                       <span class="cm">// cites the sources a
   </main>
 
   <footer class="site-footer">
-    Zila Lang — a language with a human face. Docs generated from <code>zila.ebnf</code> and <code>examples/*.br</code>.
+    Zila Lang &middot; A small, readable language that compiles straight to machine code. The examples are checked against <code>examples/*.zila</code>; the grammar is <code>zila.ebnf</code>.
   </footer>
 </body>
 </html>

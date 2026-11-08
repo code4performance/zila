@@ -25,5 +25,5 @@
 
 ## 5. Documentation and examples
 
-- [x] 5.1 Add `examples/words.br` (word frequencies from a text, sorted) and its section on `docs/examples.html` (via `brasa-parse --docs`); verify it builds and prints the documented output
+- [x] 5.1 Add `examples/words.br` (word frequencies from a text, sorted) and its section on `docs/examples.html` (via `zila-parse --docs`); verify it builds and prints the documented output
 - [x] 5.2 Add `docs/stdlib.html` documenting both modules, link it from the navigation of every page, and update the status table and roadmap in `README.md`; verify `cargo test` passes, including the docs tests (shared navigation, links, code samples)

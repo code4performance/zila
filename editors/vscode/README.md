@@ -1,6 +1,10 @@
+<img src="icon.png" alt="Zila Lang" width="72" height="72">
+
 # Zila Lang for VS Code
 
-Support for the [Zila Lang](https://github.com/code4performance/zila) programming language (`.br` files):
+A small, readable language that compiles straight to machine code.
+
+Support for the [Zila Lang](https://github.com/code4performance/zila) programming language (`.zila` files):
 
 - **Syntax highlighting**, brackets and comments.
 - **Syntax errors as you type**, from the language server (`zila-parse --lsp`): squiggles and the Problems panel.
@@ -14,7 +18,7 @@ Build and install the extension from this folder:
 
 ```sh
 npx @vscode/vsce package          # writes zila-lang-<version>.vsix
-code --install-extension zila-lang-0.3.0.vsix
+code --install-extension zila-lang-0.4.0.vsix
 ```
 
 The extension has no npm dependencies and needs no build step.
@@ -38,7 +42,3 @@ node --test editors/vscode/test/client.test.js     # needs a built target/debug/
 ```
 
 The protocol client is in `client.js` and does not import `vscode`; `extension.js` connects it to the editor.
-
-## Renamed from Zila Lang
-
-From version 0.3.0 the extension, its language id and its settings use the name Zila Lang: the settings `zila.server.path`, `zila.server.enabled` and `zila.trace` are now `zila.server.path`, `zila.server.enabled` and `zila.trace`, and the command `zila.restartServer` is now `zila.restartServer`. Settings saved under the old keys are ignored. Formerly Zila Lang.

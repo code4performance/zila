@@ -1,7 +1,7 @@
 ## 1. Syntax and the block scanner
 
 - [x] 1.1 Lexer: read a line that is an identifier `sql`, one identifier and the end of the line as the start of a raw block; collect raw lines until a line that is only `end`; keep `sql` an ordinary identifier everywhere else; report an unterminated block with its start line
-- [x] 1.2 AST and parser: a block expression with the dialect name, the raw lines and their positions; add `sql_block` to `brasa.ebnf`
+- [x] 1.2 AST and parser: a block expression with the dialect name, the raw lines and their positions; add `sql_block` to `zila.ebnf`
 - [x] 1.3 Add `src/sqlblock.rs`: the profile-driven scanner (code, string, identifier, line comment, block comment with optional nesting, dollar quote), hole extraction with `{{`/`}}` escapes, placeholder rendering for `$n`, `@pn`, `:n`, `?`, and the diagnostics of the spec (unterminated constructs, unbalanced parentheses, hand-written placeholder, extra statements, empty block, trailing `;` removed)
 - [x] 1.4 Unit tests of the scanner with adversarial input (quotes in comments, `--` in strings, nested comments, `$$` in identifiers, brackets in `tsql` and in `postgres`, `::` casts, `@variables`)
 
@@ -20,7 +20,7 @@
 ## 4. Tooling
 
 - [x] 4.1 Formatter: keep the lines of a `sql` block as written, moved as one unit with relative indentation kept, idempotent; tests next to the `asm` formatter tests
-- [x] 4.2 VS Code grammar: SQL region from the `sql <dialect>` line to `end`, holes as Brasa expressions, no region for an identifier `sql`; extend `tests/vscode.rs` or the extension tests
+- [x] 4.2 VS Code grammar: SQL region from the `sql <dialect>` line to `end`, holes as Zila Lang expressions, no region for an identifier `sql`; extend `tests/vscode.rs` or the extension tests
 - [x] 4.3 Language server: no new diagnostics beyond the compiler's; verify the existing syntax-error report still works with a block in the file and does not flag SQL text
 
 ## 5. Tests
@@ -31,5 +31,5 @@
 
 ## 6. Documentation and examples
 
-- [x] 6.1 Update `docs/databases.html` (the block, holes, the two dialects, the dialect check, how another database would add one) and `docs/syntax.html` (the block next to `asm`), and rewrite `examples/db.br` to use the blocks for the two dialects; run `brasa-parse --docs` and `cargo test --test docs` to verify the pages, the ebnf rule and the code samples
-- [x] 6.2 Update the README database section and the "how Brasa will evolve" list to say Oracle, MySQL and SQLite are planned as new packages with a dialect declaration, and note in the docs that dialects are lexical profiles, not SQL parsers
+- [x] 6.1 Update `docs/databases.html` (the block, holes, the two dialects, the dialect check, how another database would add one) and `docs/syntax.html` (the block next to `asm`), and rewrite `examples/db.br` to use the blocks for the two dialects; run `zila-parse --docs` and `cargo test --test docs` to verify the pages, the ebnf rule and the code samples
+- [x] 6.2 Update the README database section and the "how Zila Lang will evolve" list to say Oracle, MySQL and SQLite are planned as new packages with a dialect declaration, and note in the docs that dialects are lexical profiles, not SQL parsers

@@ -259,7 +259,7 @@ fn return_break_and_continue_inside_if_work() {
 
 #[test]
 fn the_defer_example_builds_and_prints_what_the_docs_say() {
-    let src = std::fs::read_to_string("examples/defer.br").unwrap();
+    let src = std::fs::read_to_string("examples/defer.zila").unwrap();
     let Some((out, code)) = run(&src) else { return };
     assert_eq!(
         out,

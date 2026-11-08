@@ -389,7 +389,7 @@ end
 
 #[test]
 fn the_generics_example_prints_what_the_docs_say() {
-    let src = std::fs::read_to_string("examples/generics.br").unwrap();
+    let src = std::fs::read_to_string("examples/generics.zila").unwrap();
     if let Some((out, code)) = run(&src) {
         assert_eq!(code, 0);
         assert_eq!(out, "popped 4

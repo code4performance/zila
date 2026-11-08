@@ -1,4 +1,8 @@
+<img src="docs/assets/zila.svg" alt="Zila Lang" width="48" height="48">
+
 # Code of Conduct
+
+*A small, readable language that compiles straight to machine code.*
 
 Zila Lang is a project about making programming clearer and more welcoming. The community around it should be the same. This code applies to everyone who takes part: contributors, maintainers, people who only open an issue, and anyone who speaks for the project in public.
 

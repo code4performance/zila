@@ -419,11 +419,11 @@ sqlserver://sa:***@h:1/x
 
 #[test]
 fn the_database_examples_build_and_run_against_the_docker_servers_when_they_are_up() {
-    for name in ["examples/db.br", "examples/users_crud.br"] {
+    for name in ["examples/db.zila", "examples/users_crud.zila"] {
         let src = std::fs::read_to_string(name).unwrap();
         let exe = build(&src).unwrap_or_else(|e| panic!("{}: {}", name, e));
-        // db.br needs both servers, users_crud.br the SQL Server one with the njai database
-        let wanted: &[&str] = if name.ends_with("db.br") { &["ZILA_TEST_POSTGRES", "ZILA_TEST_SQLSERVER_STRICT"] } else { &["ZILA_TEST_SQLSERVER_AI"] };
+        // db.zila needs both servers, users_crud.zila the SQL Server one with the njai database
+        let wanted: &[&str] = if name.ends_with("db.zila") { &["ZILA_TEST_POSTGRES", "ZILA_TEST_SQLSERVER_STRICT"] } else { &["ZILA_TEST_SQLSERVER_AI"] };
         if wanted.iter().any(|v| std::env::var(v).map_or(true, |x| x.is_empty())) {
             eprintln!("skipped running {}: set {} (see tests/docker/README.md)", name, wanted.join(" and "));
             let _ = std::fs::remove_file(exe);
@@ -432,7 +432,7 @@ fn the_database_examples_build_and_run_against_the_docker_servers_when_they_are_
         let out = Command::new(&exe).output().unwrap();
         let _ = std::fs::remove_file(&exe);
         let text = String::from_utf8_lossy(&out.stdout).replace('\r', "");
-        if name.ends_with("db.br") {
+        if name.ends_with("db.zila") {
             let rows = "1 Ana Souza ana@example.com Recife\n2 João D'Arc - São Paulo\n3 Zoë 日本 - -\n4 Владимир Петров vp@example.com Москва\ninside the transaction 1 after the rollback 0\n";
             assert_eq!(text, format!("PostgreSQL\n{rows}SQL Server\n{rows}"), "{}", String::from_utf8_lossy(&out.stderr));
         } else {

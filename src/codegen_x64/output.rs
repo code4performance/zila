@@ -33,7 +33,7 @@ pub(super) fn boot_source(file: &File) -> Result<String, String> {
         }
     }
     if lines.is_empty() {
-        return Err(format!("{}.br: the boot file needs a #[naked] function containing `asm` blocks", file.package));
+        return Err(format!("{}.zila: the boot file needs a #[naked] function containing `asm` blocks", file.package));
     }
     Ok(lines.join("
 "))
@@ -55,7 +55,7 @@ pub fn build_os(boot: &File, kernel: &File) -> Result<Vec<u8>, String> {
     );
     if !ok {
         return Err(format!(
-            "{}.br: the kernel must define `func console_write(s: text)`; `print` sends its output there",
+            "{}.zila: the kernel must define `func console_write(s: text)`; `print` sends its output there",
             kernel.package
         ));
     }

@@ -3,7 +3,7 @@
 //
 // Windows and controls, written in Zila Lang. The compiler embeds this file and compiles it
 // together with the program; nothing here is implemented in Rust or C. This is the Windows
-// layer (native Win32 controls); std/ui.linux.br is the Linux layer (controls drawn on X11).
+// layer (native Win32 controls); std/ui.linux.zila is the Linux layer (controls drawn on X11).
 // Both have the same public API: the shared region is the same text in both files.
 //
 //   var win = ui.Window("Title", 640, 480)
@@ -141,8 +141,8 @@ let SW_SHOW = 5
 let GA_ROOT = 2
 
 // ---- shared begin ----
-// Everything from here to "shared end" is the same text in std/ui.br (Windows) and
-// std/ui.linux.br (Linux); tests/ui.rs checks that. It holds the whole public API, the layout
+// Everything from here to "shared end" is the same text in std/ui.zila (Windows) and
+// std/ui.linux.zila (Linux); tests/ui.rs checks that. It holds the whole public API, the layout
 // and the scripted input. The two files differ only in the `be_*` functions below it, which
 // are the backend: the native controls of Win32 on Windows, controls drawn on X11 on Linux.
 

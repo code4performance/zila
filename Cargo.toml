@@ -2,7 +2,7 @@
 name = "zila"
 version = "0.1.0"
 edition = "2021"
-description = "Lexer and parser for the Zila Lang programming language"
+description = "A small, readable language that compiles straight to machine code."
 
 [lib]
 name = "zila"

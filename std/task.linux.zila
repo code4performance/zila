@@ -1,13 +1,13 @@
 // =====================================================================
 // Zila Lang standard library: tasks, channels and the scheduler (Linux layer)
 //
-// The Linux counterpart of std/task.br, with the same behavior and the same functions: a task
+// The Linux counterpart of std/task.zila, with the same behavior and the same functions: a task
 // is a user-mode stack (from `mmap`, with a guard page) that is switched with a few
 // instructions of assembly; the run queue, the timers, the blocking rules and the channels are
 // the same Zila Lang code. Waiting for the outside world uses `epoll` (a task that waits for a
 // file descriptor parks until it is ready) and the clock is `clock_gettime`.
 //
-// See std/task.br for the rules tasks follow.
+// See std/task.zila for the rules tasks follow.
 // =====================================================================
 
 package task

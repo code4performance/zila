@@ -12,7 +12,7 @@ The shape `T or error` / `try` / `match ok(v) err(e)` is right and stays. What i
 - Constructors: `error("msg")` (kind `errors.Other`, unchanged behavior), `error(kind, "msg")`, `error(kind, "msg", cause)`; `e.context("msg")` wraps `e` in a new error that keeps its kind and has `e` as cause; `e.is(kind)` is true when the error or any cause has that kind; `e.full_message` joins the chain (`context: cause: root`).
 - `try` converts nothing: kind, message and cause travel unchanged.
 - The standard library returns proper kinds on the common failures: `std/fs.br`, `std/net.br`, `std/tls.br`, the parsers in `std/text.br`, `std/format.br` and `std/float.br`, `std/task.br` and the `.linux` variants, through an operating-system-code-to-kind mapping next to `sys.describe`.
-- Documentation (`docs/syntax.html`, `docs/stdlib.html`, README, `brasa.ebnf` semantic notes), `examples/errors.br` and tests are updated.
+- Documentation (`docs/syntax.html`, `docs/stdlib.html`, README, `zila.ebnf` semantic notes), `examples/errors.br` and tests are updated.
 
 ## Capabilities
 
@@ -29,4 +29,4 @@ None. No existing spec describes `error`: the specs `async-io`, `tls-client`, `u
 - Compiler: `src/codegen_x64.rs` (the error object layout and `rt_drop_error`, the `error(...)` call forms near the `name == "error"` case, field access in the `Ty::Err if name == "message"` arm, new methods `context`, `is`, the `ErrorKind` type), `src/lsp.rs` (completion and hover for the new fields, if it lists them), `src/parser.rs` only if `ErrorKind` needs parsing as a type name. `src/interp.rs` is not extended (see design: `remove-interpreter`).
 - Standard library: new `std/errors.br`; `std/sys.br` and `std/sys.linux.br` (`error_for`), `std/fs.br`, `std/fs.linux.br`, `std/net.br`, `std/net.linux.br`, `std/tls.br`, `std/tls.linux.br`, `std/task.br`, `std/task.linux.br`, `std/text.br`, `std/format.br`, `std/float.br`.
 - `examples/errors.br`, new `tests/error_kinds.rs`; existing tests that check message text keep passing.
-- Docs: `docs/syntax.html` (Error handling), `docs/stdlib.html`, README, `brasa.ebnf`.
+- Docs: `docs/syntax.html` (Error handling), `docs/stdlib.html`, README, `zila.ebnf`.

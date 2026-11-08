@@ -37,7 +37,7 @@ fn a_private_helper_is_usable_inside_its_package_only() {
     ok(&main_with("use vis_a", "    print(vis_a.api())"));
     let e = err(&main_with("use vis_a", "    print(vis_a.helper())"));
     assert!(e.contains("'helper' is private to package 'vis_a'; mark it `pub` to use it from another package"), "{}", e);
-    assert!(e.contains("main.br:"), "{}", e);
+    assert!(e.contains("main.zila:"), "{}", e);
 }
 
 #[test]

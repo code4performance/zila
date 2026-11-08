@@ -114,7 +114,7 @@ pub fn of_decls(decls: &[Decl], keep: &dyn Fn(&Decl) -> bool) -> Effects {
     out
 }
 
-/// Every `.br` file in a package directory and its sub-packages, tests left out.
+/// Every `.zila` file in a package directory and its sub-packages, tests left out.
 fn sources(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
     let Ok(rd) = std::fs::read_dir(dir) else { return };
     let mut entries: Vec<_> = rd.flatten().map(|e| e.path()).collect();
@@ -124,7 +124,7 @@ fn sources(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
             if !p.file_name().and_then(|n| n.to_str()).map_or(false, |n| n.starts_with('.')) {
                 sources(&p, out);
             }
-        } else if p.extension().and_then(|x| x.to_str()) == Some("br") && !p.file_name().and_then(|n| n.to_str()).map_or(false, |n| n.ends_with("_test.br")) {
+        } else if p.extension().and_then(|x| x.to_str()) == Some("zila") && !p.file_name().and_then(|n| n.to_str()).map_or(false, |n| n.ends_with("_test.zila")) {
             out.push(p);
         }
     }

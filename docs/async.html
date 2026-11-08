@@ -18,6 +18,9 @@
       <a href="concurrency.html">Tasks</a>
       <a href="async.html" aria-current="page">Async</a>
       <a href="stdlib.html">Library</a>
+      <a href="databases.html">Databases</a>
+      <a href="ai.html">AI</a>
+      <a href="packages.html">Packages</a>
       <a href="os.html">Brasa OS</a>
       <a href="getting-started.html">Getting Started</a>
     </nav>
@@ -111,6 +114,7 @@
     <section id="network">
       <h2>TCP networking</h2>
       <p>With <code>use net</code> you can listen, accept, connect, read and write without blocking the other tasks. <code>read</code> gives empty text when the other side closed the connection.</p>
+      <p>For HTTP, the <a href="stdlib.html#web">web library</a> is built on this: a server that runs one task per connection, with timeouts driven by the scheduler, and a client.</p>
       <pre><code><span class="kw">use</span> net
 
 <span class="kw">async</span> <span class="kw">func</span> echo_server(listener: net.Listener) -&gt; error

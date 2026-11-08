@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Databases — Brasa</title>
+  <meta name="description" content="Databases in Brasa: db, postgres and sqlserver. Typed rows, bound parameters, transactions, TLS, and a Docker environment with real servers to test against.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="index.html">brasa<span class="ember-dot">.</span><small>lang docs</small></a>
+    <nav class="site-nav">
+      <a href="index.html">Overview</a>
+      <a href="syntax.html">Syntax</a>
+      <a href="examples.html">Examples</a>
+      <a href="native.html">Native</a>
+      <a href="concurrency.html">Tasks</a>
+      <a href="async.html">Async</a>
+      <a href="stdlib.html">Library</a>
+      <a href="databases.html" aria-current="page">Databases</a>
+      <a href="ai.html">AI</a>
+      <a href="packages.html">Packages</a>
+      <a href="os.html">Brasa OS</a>
+      <a href="getting-started.html">Getting Started</a>
+    </nav>
+  </header>
+
+  <main>
+    <h1>Databases</h1>
+    <p>Three libraries, all written in Brasa on <code>net</code> and <code>tls</code> (no C library is linked): <code>db</code> is what a program uses, <code>postgres</code> and <code>sqlserver</code> are the drivers. A driver's <code>open</code> returns a <code>db.Conn</code>; everything after that is the same on both databases. <a href="stdlib.html#db">The library page</a> lists every function; this page shows how they fit together.</p>
+
+    <section id="query">
+      <h2>Typed rows and parameters</h2>
+      <pre><code><span class="kw">use</span> db
+<span class="kw">use</span> postgres
+
+<span class="kw">type</span> Customer = <span class="kw">record</span>
+    id: int
+    #[db(<span class="str">"full_name"</span>)] name: text
+    email: text?
+<span class="kw">end</span>
+
+<span class="kw">func</span> main() -&gt; error
+    <span class="kw">let</span> conn = <span class="kw">try</span> postgres.open(<span class="str">"postgres://app:secret@localhost/shop"</span>)
+    <span class="kw">let</span> rows = <span class="kw">try</span> db.query(Customer, conn, <span class="str">"select id, full_name, email from customers where id &gt; $1"</span>, db.int(10))
+    <span class="kw">let</span> one = <span class="kw">try</span> db.one(Customer, conn, <span class="str">"select id, full_name, email from customers where id = $1"</span>, db.int(7))
+    <span class="kw">let</span> n = <span class="kw">try</span> conn.exec(<span class="str">"update customers set email = $1 where id = $2"</span>, db.str(<span class="str">"a@b.c"</span>), db.int(7))
+    <span class="kw">return</span>
+<span class="kw">end</span></code></pre>
+      <p><code>db.query(T, conn, sql, args...)</code> builds a <code>[]T</code> and <code>db.one</code> a single <code>T</code> (an error of kind <code>NotFound</code> for no row, <code>InvalidInput</code> for several). A record matches columns to fields by name, ignoring case; <code>#[db("column")]</code> renames a field and <code>#[db(skip)]</code> leaves it out. A column that may be <code>NULL</code> is an optional field (<code>text?</code>); a <code>NULL</code> in any other field is an error that names the row, field and column. Any other type reads a one-column result (<code>db.query(int, conn, "select count(*) ...")</code>). The decoding is written at build time from the shape of the type, like <code>json</code>.</p>
+      <p>Values never become part of the SQL text: they go to the server as bound parameters, as <code>db.Arg</code> values made with <code>db.int</code>, <code>db.float</code>, <code>db.bool</code>, <code>db.str</code>, <code>db.bytes</code>, <code>db.vector</code> and <code>db.null()</code>. The placeholders are the database's own: <code>$1</code> for PostgreSQL, <code>@p1</code> for SQL Server. A bare <code>5</code> instead of <code>db.int(5)</code> is a compile error. So a name such as <code>x'); drop table customers; --</code> is stored as text.</p>
+    </section>
+
+    <section id="transactions">
+      <h2>Transactions</h2>
+      <pre><code><span class="kw">let</span> tx = <span class="kw">try</span> conn.begin()
+<span class="kw">try</span> tx.conn.exec(<span class="str">"insert into customers(id, name) values ($1, $2)"</span>, db.int(99), db.str(<span class="str">"Zoë"</span>))
+<span class="kw">try</span> tx.commit()      <span class="cm">// or tx.rollback()</span></code></pre>
+      <p>Run the transaction's statements through <code>tx.conn</code>. While it is open, using <code>conn</code> itself, beginning another transaction and using the transaction after it ended are errors. A transaction that goes out of scope without <code>commit</code> or <code>rollback</code> is rolled back before the connection's next statement (a value being dropped cannot wait on the network, so the rollback is sent then).</p>
+    </section>
+
+    <section id="postgres">
+      <h2>PostgreSQL</h2>
+      <p><code>postgres.open("postgres://user:password@host:5432/database?sslmode=require&amp;sslrootcert=ca.pem")</code>. The port defaults to 5432 and the database to the user. <code>sslmode=require</code> is the default: the driver sends the SSLRequest, upgrades the connection with <code>tls.upgrade_with</code> and checks the certificate chain and the host name; if the server refuses TLS, opening fails before any password is sent. <code>sslmode=disable</code> uses plain TCP, for local servers. <code>sslrootcert</code> trusts the certificate authorities of a PEM file for this connection only (it never turns checking off). Login is SCRAM-SHA-256 (the server's signature is verified), <code>md5</code>, or a cleartext password only over TLS.</p>
+      <p>Statements use the extended query protocol with bound parameters. Results are read completely, up to a million rows (<code>?max_rows=N</code> changes it), then an error; the connection stays usable. <code>db.vector([1.0, 2.5])</code> sends a pgvector value, and a <code>vector</code> column reads into a <code>[]float</code> field:</p>
+      <pre><code>db.query(int, conn, <span class="str">"select id from items order by embedding &lt;=&gt; $1 limit 1"</span>, db.vector([0.1, 0.9, 0.0]))</code></pre>
+      <p>SQLSTATE codes become error kinds (<code>23505</code> is <code>AlreadyExists</code>, <code>28P01</code> is <code>Unauthenticated</code>, <code>42501</code> is <code>PermissionDenied</code>, other <code>23</code>, <code>22</code> and <code>42</code> codes are <code>InvalidInput</code>, <code>08</code> and <code>53</code> are <code>Unavailable</code>), and the message carries the server's text and the code.</p>
+    </section>
+
+    <section id="sqlserver">
+      <h2>SQL Server</h2>
+      <p><code>sqlserver.open("sqlserver://user:password@host:1433/database?encrypt=strict&amp;cafile=ca.pem")</code>, with SQL login (no Windows authentication, no named instances). <code>encrypt=strict</code> is the default and means TDS 8.0: TLS first, with the ALPN protocol <code>tds/8.0</code> and the certificate checked (SQL Server 2022 or later, Azure SQL). <code>encrypt=off</code> sends nothing encrypted, the password only obfuscated as TDS defines it: use it for local development. <code>encrypt=on</code> (TLS inside the TDS pre-login) is not supported and is refused before any connection is made.</p>
+      <p><strong>Named instances.</strong> The host may be <code>host\INSTANCE</code>. On this machine (<code>.</code>, <code>localhost</code>) with no port, the driver uses the instance's <strong>named pipe</strong> (<code>\\.\pipe\MSSQL$INSTANCE\sql\query</code>), so an instance with TCP turned off still works; the default is <code>encrypt=off</code> there because a pipe is local, and <code>encrypt=strict</code> over a pipe is refused (a pipe cannot carry TLS). For another machine, the driver asks the SQL Server Browser (UDP 1434) for the instance's TCP port. <code>?transport=pipe</code> (with an optional <code>?pipe=...</code>) and <code>?transport=tcp</code> choose explicitly. Named pipes exist on Windows only. <code>?timeout=ms</code> cancels a statement that runs longer and gives an error of kind <code>Timeout</code>.</p>
+      <p>Statements with arguments run as <code>sp_executesql</code> with typed parameters; without arguments, as a batch. Types: integers, <code>bit</code>, <code>float</code> and <code>real</code>, <code>decimal</code>, <code>numeric</code> and <code>money</code> (as text), <code>char</code> and <code>varchar</code> (code page 1252, 1250 or 1251, chosen by the collation's language, or a UTF-8 collation), <code>nchar</code> and <code>nvarchar</code>, <code>xml</code> (as text), the date and time types (ISO 8601 text), <code>uniqueidentifier</code> (text) and <code>binary</code>/<code>varbinary</code>. A column of another type (<code>sql_variant</code>, <code>text</code>, <code>ntext</code>, ...), or single-byte text in another code page, is an error that names the column and the type. Error numbers become kinds: <code>2627</code> and <code>2601</code> are <code>AlreadyExists</code>, <code>18456</code> is <code>Unauthenticated</code>, <code>229</code> and <code>297</code> are <code>PermissionDenied</code>; the message carries the number, severity and state.</p>
+    </section>
+
+    <section id="crud">
+      <h2>Create, read, update, delete</h2>
+      <p>The same calls cover all four. <code>examples/users_crud.br</code> does them on a <code>Users</code> table, with optional columns, a unique username, a rolled-back delete and the duplicate-key error:</p>
+      <pre><code><span class="kw">let</span> insert = <span class="str">"insert into dbo.Users (Id, Username, DisplayName, AuthSource, Role, AccessStatus, CreatedAtUtc) values (newid(), @p1, @p2, N'Local', N'User', N'Active', sysutcdatetime())"</span>
+<span class="kw">try</span> conn.exec(insert, db.str(<span class="str">"ana"</span>), db.str(<span class="str">"Ana Souza"</span>))                                  <span class="cm">// create</span>
+<span class="kw">let</span> ana = <span class="kw">try</span> db.one(User, conn, <span class="str">"select ... from dbo.Users where Username = @p1"</span>, db.str(<span class="str">"ana"</span>))  <span class="cm">// read</span>
+<span class="kw">try</span> conn.exec(<span class="str">"update dbo.Users set Department = @p1 where Username = @p2"</span>, db.str(<span class="str">"Vendas"</span>), db.str(<span class="str">"ana"</span>))  <span class="cm">// update</span>
+<span class="kw">try</span> conn.exec(<span class="str">"delete from dbo.Users where Username = @p1"</span>, db.str(<span class="str">"ana"</span>))                  <span class="cm">// delete</span></code></pre>
+      <p><code>examples/db.br</code> runs one function against PostgreSQL and SQL Server and prints the same rows.</p>
+    </section>
+
+    <section id="docker">
+      <h2>Servers to try it on</h2>
+      <p><code>tests/docker/</code> starts real servers: PostgreSQL 19 with pgvector (TLS and SCRAM only), SQL Server 2025 on a plain port and on a port that forces encryption (TDS 8.0), and two small TLS servers, all on <code>127.0.0.1</code> with a development certificate authority and a seeded <code>shop</code> database:</p>
+      <pre><code>docker compose -f tests/docker/compose.yml up -d --wait
+. tests/docker/env.ps1                                      <span class="cm"># or: source tests/docker/env.sh</span>
+cargo test --test postgres --test sqlserver
+docker compose -f tests/docker/compose.yml down -v</code></pre>
+      <p>You do not need Docker: <code>BRASA_TEST_POSTGRES</code> and <code>BRASA_TEST_SQLSERVER</code> may name any server (a local PostgreSQL, a local SQL Server instance reached through its named pipe, ...). The tests that write use temporary tables, and the CRUD test only touches rows whose username starts with <code>brasa-crud-</code>. Nothing in <code>cargo test</code> starts Docker: the tests that need these servers print a skip line when <code>BRASA_TEST_POSTGRES</code>, <code>BRASA_TEST_SQLSERVER</code>, <code>BRASA_TEST_SQLSERVER_STRICT</code>, <code>BRASA_TEST_SQLSERVER_AI</code> or <code>BRASA_TEST_CA</code> is not set. The credentials in that folder are for development only.</p>
+    </section>
+
+    <section id="security">
+      <h2>Safety notes</h2>
+      <ul>
+        <li>The password of a URL never appears in an error message: <code>db.redact(url)</code> shows it as <code>***</code>.</li>
+        <li>TLS certificates are always checked. <code>sslrootcert</code> and <code>cafile</code> add authorities for one connection; there is no switch that turns checking off.</li>
+        <li>Give programs the least database privilege that works (a read-only user for a program that only reads): a bound parameter protects against injection, but not against a statement the program itself should not run.</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    Brasa — a language with a human face. Docs generated from <code>brasa.ebnf</code> and <code>examples/*.br</code>.
+  </footer>
+</body>
+</html>

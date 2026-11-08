@@ -137,7 +137,7 @@ pub func checked_add(a: int, b: int) -> int or error
     return int(r)
 end
 
-func checked_sub(a: int, b: int) -> int or error
+pub func checked_sub(a: int, b: int) -> int or error
     let r = long(a) - long(b)
     if r != long(int(r))
         return error(errors.Overflow, "integer overflow: {a} - {b}")
@@ -145,7 +145,7 @@ func checked_sub(a: int, b: int) -> int or error
     return int(r)
 end
 
-func checked_mul(a: int, b: int) -> int or error
+pub func checked_mul(a: int, b: int) -> int or error
     let r = long(a) * long(b)
     if r != long(int(r))
         return error(errors.Overflow, "integer overflow: {a} * {b}")
@@ -173,7 +173,7 @@ pub func checked_add_long(a: long, b: long) -> long or error
     return r
 end
 
-func checked_sub_long(a: long, b: long) -> long or error
+pub func checked_sub_long(a: long, b: long) -> long or error
     let r = a - b
     if (b > 0 and r > a) or (b < 0 and r < a)
         return error(errors.Overflow, "integer overflow: {a} - {b}")
@@ -181,7 +181,7 @@ func checked_sub_long(a: long, b: long) -> long or error
     return r
 end
 
-func checked_mul_long(a: long, b: long) -> long or error
+pub func checked_mul_long(a: long, b: long) -> long or error
     if a == 0 or b == 0
         return 0
     end
@@ -196,7 +196,7 @@ func checked_mul_long(a: long, b: long) -> long or error
     return r
 end
 
-func checked_div_long(a: long, b: long) -> long or error
+pub func checked_div_long(a: long, b: long) -> long or error
     if b == 0
         return error(errors.InvalidInput, "division by zero: {a} / {b}")
     end

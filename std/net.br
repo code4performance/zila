@@ -410,6 +410,25 @@ pub async func (conn: Conn) close()
     end
 end
 
+// Ends the reads and writes that are waiting on this connection (they fail) without closing it,
+// so a task can answer after a timeout. Meant for timers: it is a plain function.
+pub func (conn: Conn) cancel(writes: bool)
+    if conn.open
+        unsafe
+            ws.CancelIoEx(conn.sock, 0)
+        end
+    end
+end
+
+// Ends the accept that is waiting on this listener (it fails) without closing it.
+pub func (l: Listener) cancel()
+    if l.open
+        unsafe
+            ws.CancelIoEx(l.sock, 0)
+        end
+    end
+end
+
 // Stops listening now.
 pub async func (l: Listener) close()
     if l.open

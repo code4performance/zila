@@ -12,6 +12,13 @@
 //   let reply = try await conn.read(4096)
 //
 // `read` returns empty text when the server closed the connection.
+//
+//   tls.connect_with(host, port, tls.Options{ alpn: ["tds/8.0"], require_alpn: false, ca_file: "" })
+//   tls.upgrade(conn, host)       // start TLS on a connection that already exchanged plain bytes
+//
+// `alpn` offers application protocols (`conn.protocol()` is the one the server chose, or empty
+// text); `ca_file` is a PEM file of extra certificate authorities trusted for that one connection
+// (the system's are still trusted, and the chain and host name are always checked).
 // =====================================================================
 
 package tls
@@ -20,6 +27,9 @@ use c
 use sys
 use errors
 use net
+use text
+use crypto
+use fs
 
 #[c_layout]
 type SchannelCred = record
@@ -82,6 +92,17 @@ extern "system" func FreeContextBuffer(p: *u8) -> u32
 extern "system" func DeleteSecurityContext(ctx: *u8) -> u32
 extern "system" func FreeCredentialsHandle(handle: *u8) -> u32
 
+#[link("crypt32")]
+extern "system" func CertOpenStore(provider: usize, encoding: u32, prov: usize, flags: u32, para: *u8) -> usize
+extern "system" func CertAddEncodedCertificateToStore(store: usize, encoding: u32, cert: *u8, length: u32, disposition: u32, out: *u8) -> i32
+extern "system" func CertCloseStore(store: usize, flags: u32) -> i32
+extern "system" func CertCreateCertificateChainEngine(config: *u8, engine: *u8) -> i32
+extern "system" func CertFreeCertificateChainEngine(engine: usize)
+extern "system" func CertGetCertificateChain(engine: usize, cert: usize, time: *u8, store: usize, para: *u8, flags: u32, reserved: *u8, chain: *u8) -> i32
+extern "system" func CertFreeCertificateChain(chain: usize)
+extern "system" func CertVerifyCertificateChainPolicy(policy: usize, chain: usize, para: *u8, status: *u8) -> i32
+extern "system" func CertFreeCertificateContext(cert: usize) -> i32
+
 let SEC_E_OK = 0
 let SEC_I_CONTINUE_NEEDED = 0x00090312
 let SEC_I_CONTEXT_EXPIRED = 0x00090317
@@ -91,6 +112,13 @@ let SECBUFFER_EMPTY = 0
 let SECBUFFER_DATA = 1
 let SECBUFFER_TOKEN = 2
 let SECBUFFER_EXTRA = 5
+let SECBUFFER_APPLICATION_PROTOCOLS = 18
+let SECPKG_ATTR_REMOTE_CERT_CONTEXT = 0x53
+let SECPKG_ATTR_APPLICATION_PROTOCOL = 35
+// ISC_REQ_MANUAL_CRED_VALIDATION: the program validates the server certificate itself
+let ISC_MANUAL_VALIDATION = 0x80000
+let CERT_E_UNTRUSTEDROOT: long = 0x800B0109
+let CERT_E_CHAINING: long = 0x800B010A
 let SECBUFFER_STREAM_TRAILER = 6
 let SECBUFFER_STREAM_HEADER = 7
 let SECPKG_ATTR_STREAM_SIZES = 4
@@ -111,6 +139,7 @@ pub type Conn = record
     sizes: Sizes
     pub pending: text
     plain: text
+    proto: text
     pub ready: bool
     pub open: bool
 end
@@ -147,10 +176,279 @@ func put_text(dest: *u8, data: text, from: long, n: long)
     end
 end
 
+// What a connection asks for beyond the defaults.
+pub type Options = record
+    pub alpn: []text
+    pub require_alpn: bool
+    pub ca_file: text
+end
+
 // Opens a TCP connection and runs the TLS handshake.
 pub async func connect(host: text, port: long) -> Conn or error
+    return await connect_with(host, port, Options{ alpn: [], require_alpn: false, ca_file: "" })
+end
+
+// `connect` with ALPN protocols and a private CA file (see `Options`).
+pub async func connect_with(host: text, port: long, opts: Options) -> Conn or error
     let raw = try await net.connect(host, port)
-    let conn = Conn{ raw: raw, cred: sys.Scratch{}, ctx: sys.Scratch{}, sizes: Sizes{}, pending: "", plain: "", ready: false, open: false }
+    return await upgrade_with(raw, host, opts)
+end
+
+// Starts TLS on a connection that already exchanged plain bytes (PostgreSQL's SSLRequest): read
+// exactly the plain answer before calling, because the first bytes after it belong to TLS.
+// On failure the connection is closed.
+pub async func upgrade(raw: net.Conn, host: text) -> Conn or error
+    return await upgrade_with(raw, host, Options{ alpn: [], require_alpn: false, ca_file: "" })
+end
+
+// `upgrade` with ALPN protocols and a private CA file (see `Options`).
+pub async func upgrade_with(raw: net.Conn, host: text, opts: Options) -> Conn or error
+    let r = await handshake(raw, host, opts)
+    match r
+        ok(conn) -> return conn
+        err(e) ->
+            await raw.close()
+            return error(e.kind, e.message)
+    end
+    return error(errors.Io, "TLS: unreachable")
+end
+
+// The application protocol the server selected through ALPN, or empty text.
+pub func (conn: Conn) protocol() -> text
+    return conn.proto
+end
+
+func wr32(p: *u8, off: long, v: long)
+    unsafe
+        p[off] = u8(v bitand 255)
+        p[off + 1] = u8((v >> 8) bitand 255)
+        p[off + 2] = u8((v >> 16) bitand 255)
+        p[off + 3] = u8((v >> 24) bitand 255)
+    end
+end
+
+func rd32(p: *u8, off: long) -> long
+    var v: long = 0
+    unsafe
+        v = long(p[off]) bitor (long(p[off + 1]) << 8) bitor (long(p[off + 2]) << 16) bitor (long(p[off + 3]) << 24)
+    end
+    return v
+end
+
+func wr64(p: *u8, off: long, v: long)
+    wr32(p, off, v bitand 4294967295)
+    wr32(p, off + 4, (v >> 32) bitand 4294967295)
+end
+
+func rd64(p: *u8, off: long) -> long
+    return rd32(p, off) bitor (rd32(p, off + 4) << 32)
+end
+
+// The certificates of a PEM file, each as DER bytes.
+func pem_certs(pem: text) -> []text
+    var out: []text = []
+    var from = 0
+    while true
+        let a = text.index_from(pem, "-----BEGIN CERTIFICATE-----", from)
+        if a < 0
+            break
+        end
+        let start = a + 27
+        let z = text.index_from(pem, "-----END CERTIFICATE-----", start)
+        if z < 0
+            break
+        end
+        let body = text.replace(text.replace(text.replace(pem.slice(start, z), "\r", ""), "\n", ""), " ", "")
+        match crypto.base64_decode(body)
+            ok(der) -> out.add(der)
+            err(e) -> from = z
+        end
+        from = z + 25
+    end
+    return out
+end
+
+// Builds the chain of `cert` with `engine` (0 is the default one) and checks it as a TLS server
+// certificate for `wide_host`; the policy error code, 0 when it is good.
+func check_chain(engine: usize, cert: usize, store: usize, wide_host: sys.Buf) -> long
+    let para = sys.buffer(48)
+    wr32(para.ptr, 0, 48)
+    let out = sys.buffer(8)
+    var ok: long = 0
+    unsafe
+        ok = long(CertGetCertificateChain(engine, cert, 0, store, para.ptr, u32(0), 0, out.ptr))
+    end
+    if ok == 0
+        return CERT_E_UNTRUSTEDROOT
+    end
+    let chain = usize(rd64(out.ptr, 0))
+    let extra = sys.buffer(24)
+    wr32(extra.ptr, 0, 24)
+    wr32(extra.ptr, 4, 2)
+    wr64(extra.ptr, 16, long(wide_host.ptr))
+    let pol = sys.buffer(16)
+    wr32(pol.ptr, 0, 16)
+    wr64(pol.ptr, 8, long(extra.ptr))
+    let status = sys.buffer(32)
+    wr32(status.ptr, 0, 24)
+    var good: long = 0
+    unsafe
+        good = long(CertVerifyCertificateChainPolicy(usize(4), chain, pol.ptr, status.ptr))
+        CertFreeCertificateChain(chain)
+    end
+    if good == 0
+        return CERT_E_UNTRUSTEDROOT
+    end
+    return rd32(status.ptr, 4)
+end
+
+func chain_message(code: long) -> text
+    if code == 0x800B0109 or code == 0x800B010A
+        return "the certificate is not trusted"
+    end
+    if code == 0x800B010F
+        return "the certificate does not match the host name"
+    end
+    if code == 0x800B0101
+        return "the certificate has expired"
+    end
+    return "certificate validation failed ({code})"
+end
+
+func memory_store() -> usize
+    var store = usize(0)
+    unsafe
+        store = CertOpenStore(usize(2), u32(0), usize(0), u32(0), 0)
+    end
+    return store
+end
+
+// Validates the server certificate against the system roots and, when that finds no trusted
+// root, against the CAs of `pem` alone. The chain and host name are checked either way. Empty
+// text when the certificate is good, else the reason.
+func verify_remote(ref conn: Conn, host: text, pem: text) -> text
+    let certp = sys.buffer(8)
+    var rc: long = 0
+    unsafe
+        rc = code_of(QueryContextAttributesA(&conn.ctx, u32(SECPKG_ATTR_REMOTE_CERT_CONTEXT), certp.ptr))
+    end
+    if rc != SEC_E_OK
+        return "cannot read the server certificate"
+    end
+    let cert_addr = rd64(certp.ptr, 0)
+    let cp: *u8 = cert_addr
+    let leaf_store = usize(rd64(cp, 32))
+    let cert = usize(cert_addr)
+    let wide_host = sys.wide(host)
+    var code = check_chain(usize(0), cert, leaf_store, wide_host)
+    if code != 0 and (code == CERT_E_UNTRUSTEDROOT or code == CERT_E_CHAINING)
+        // the system does not trust it: try the CAs of the file alone
+        let store = memory_store()
+        var added = 0
+        for der in pem_certs(pem)
+            let b = sys.buffer(long(der.len))
+            put_text(b.ptr, der, 0, long(der.len))
+            unsafe
+                CertAddEncodedCertificateToStore(store, u32(1), b.ptr, u32(der.len), u32(4), 0)
+            end
+            added += 1
+        end
+        if added > 0
+            let config = sys.buffer(88)
+            wr32(config.ptr, 0, 88)
+            wr64(config.ptr, 64, long(store))
+            let eng = sys.buffer(8)
+            var made: long = 0
+            unsafe
+                made = long(CertCreateCertificateChainEngine(config.ptr, eng.ptr))
+            end
+            if made != 0
+                let engine = usize(rd64(eng.ptr, 0))
+                code = check_chain(engine, cert, leaf_store, wide_host)
+                unsafe
+                    CertFreeCertificateChainEngine(engine)
+                end
+            end
+        end
+        unsafe
+            CertCloseStore(store, u32(0))
+        end
+    end
+    unsafe
+        CertFreeCertificateContext(cert)
+    end
+    if code != 0
+        return chain_message(code)
+    end
+    return ""
+end
+
+// The protocol the server chose through ALPN, or empty text.
+func selected_protocol(ref conn: Conn) -> text
+    let b = sys.buffer(300)
+    var rc: long = 0
+    unsafe
+        rc = code_of(QueryContextAttributesA(&conn.ctx, u32(SECPKG_ATTR_APPLICATION_PROTOCOL), b.ptr))
+    end
+    if rc != SEC_E_OK
+        return ""
+    end
+    if rd32(b.ptr, 0) != 1
+        return ""
+    end
+    var n: long = 0
+    unsafe
+        n = long(b.ptr[8])
+    end
+    if n == 0
+        return ""
+    end
+    var out = ""
+    unsafe
+        out = c.from_bytes(b.ptr + 9, n)
+    end
+    return out
+end
+
+async func handshake(raw: net.Conn, host: text, opts: Options) -> Conn or error
+    var pem = ""
+    if opts.ca_file != ""
+        match await fs.read(opts.ca_file)
+            ok(t) -> pem = t
+            err(e) -> return error(errors.InvalidInput, "TLS: cannot read the CA file {opts.ca_file}: {e.message}")
+        end
+        if text.index_of(pem, "BEGIN CERTIFICATE") < 0
+            return error(errors.InvalidInput, "TLS: the CA file {opts.ca_file} holds no certificate")
+        end
+    end
+    // the ALPN extension: SEC_APPLICATION_PROTOCOLS { lists size, { extension kind 2, size, names } }
+    var alpn_len: long = 0
+    var alpn_buf = sys.buffer(1)
+    if opts.alpn.len > 0
+        var names: []long = []
+        for n in opts.alpn
+            names.add(long(n.len))
+            for i in 0..n.len
+                names.add(long(n.byte(i)))
+            end
+        end
+        alpn_len = 4 + 4 + 2 + long(names.len)
+        alpn_buf = sys.buffer(alpn_len)
+        wr32(alpn_buf.ptr, 0, 4 + 2 + long(names.len))
+        wr32(alpn_buf.ptr, 4, 2)
+        unsafe
+            alpn_buf.ptr[8] = u8(long(names.len) bitand 255)
+            alpn_buf.ptr[9] = u8((long(names.len) >> 8) bitand 255)
+            for i in 0..names.len
+                alpn_buf.ptr[10 + i] = u8(names[i])
+            end
+        end
+    end
+    var isc_flags = ISC_REQUEST
+    if opts.ca_file != ""
+        isc_flags = ISC_REQUEST bitor ISC_MANUAL_VALIDATION
+    end
+    let conn = Conn{ raw: raw, cred: sys.Scratch{}, ctx: sys.Scratch{}, sizes: Sizes{}, pending: "", plain: "", proto: "", ready: false, open: false }
     let cred = SchannelCred{}
     cred.version = u32(4)
     cred.flags = u32(CRED_FLAGS)
@@ -174,6 +472,12 @@ pub async func connect(host: text, port: long) -> Conn or error
         ib.p0 = c.cstr(inbuf)
         ib.kind1 = u32(SECBUFFER_EMPTY)
         idesc.count = u32(2)
+        if first and alpn_len > 0
+            ib.cb0 = u32(alpn_len)
+            ib.kind0 = u32(SECBUFFER_APPLICATION_PROTOCOLS)
+            ib.p0 = alpn_buf.ptr
+            idesc.count = u32(1)
+        end
         let ob = Bufs{}
         ob.kind0 = u32(SECBUFFER_TOKEN)
         let odesc = Desc{}
@@ -181,10 +485,12 @@ pub async func connect(host: text, port: long) -> Conn or error
         unsafe
             idesc.bufs = &ib
             odesc.bufs = &ob
-            if first
-                rc = code_of(InitializeSecurityContextA(&conn.cred, 0, c.cstr(host), u32(ISC_REQUEST), u32(0), u32(0), 0, u32(0), &conn.ctx, &odesc, &attrs, &expiry))
+            if first and alpn_len > 0
+                rc = code_of(InitializeSecurityContextA(&conn.cred, 0, c.cstr(host), u32(isc_flags), u32(0), u32(0), &idesc, u32(0), &conn.ctx, &odesc, &attrs, &expiry))
+            else if first
+                rc = code_of(InitializeSecurityContextA(&conn.cred, 0, c.cstr(host), u32(isc_flags), u32(0), u32(0), 0, u32(0), &conn.ctx, &odesc, &attrs, &expiry))
             else
-                rc = code_of(InitializeSecurityContextA(&conn.cred, &conn.ctx, c.cstr(host), u32(ISC_REQUEST), u32(0), u32(0), &idesc, u32(0), &conn.ctx, &odesc, &attrs, &expiry))
+                rc = code_of(InitializeSecurityContextA(&conn.cred, &conn.ctx, c.cstr(host), u32(isc_flags), u32(0), u32(0), &idesc, u32(0), &conn.ctx, &odesc, &attrs, &expiry))
             end
         end
         if first and (rc == SEC_I_CONTINUE_NEEDED or rc == SEC_E_OK)
@@ -230,6 +536,20 @@ pub async func connect(host: text, port: long) -> Conn or error
     if rc != SEC_E_OK
         release(ref conn)
         return sys.error_for(rc, "TLS: cannot read the stream sizes")
+    end
+    if opts.ca_file != ""
+        let why = verify_remote(ref conn, host, pem)
+        if why != ""
+            release(ref conn)
+            return error(errors.Io, "TLS handshake with {host} failed: {why}")
+        end
+    end
+    if opts.alpn.len > 0
+        conn.proto = selected_protocol(ref conn)
+        if conn.proto == "" and opts.require_alpn
+            release(ref conn)
+            return error(errors.Io, "TLS handshake with {host} failed: the server selected none of the offered protocols ({text.join(opts.alpn, ", ")})")
+        end
     end
     return conn
 end

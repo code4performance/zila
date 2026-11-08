@@ -1,7 +1,5 @@
 package main
 
-use http, db, json
-
 type Customer = record
     id: i32
     name: text

@@ -1,7 +1,5 @@
 package main
 
-use mem
-
 embed "public/"
 
 let VERSION = "1.0"

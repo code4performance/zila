@@ -593,3 +593,36 @@ fn shared_attribute_name_still_parses() {
     let src = "package t\n#[shared]\ntype Cell = record\n    v: int\nend\n";
     assert!(parse_source(src).is_ok());
 }
+
+fn parse_err(src: &str) -> String {
+    match parse_source(src) {
+        Ok(_) => panic!("expected a parse error for {:?}", src),
+        Err(d) => d.msg,
+    }
+}
+
+#[test]
+fn pub_is_accepted_on_declarations_and_fields() {
+    let src = "package t\n\n#[export(\"x\")]\npub func a()\nend\npub async func b()\nend\npub extern func c()\npub type R = record\n    pub x: int\n    y: int\nend\npub type E = enum\n    One\n    Two\nend\npub let k = 1\npub var v = 2\npub func (r: R) m()\nend\nfunc plain()\nend\n";
+    let file = parse_source(src).unwrap_or_else(|d| panic!("{}", d));
+    let flags: Vec<bool> = file.decls.iter().map(|d| d.public).collect();
+    assert_eq!(flags, vec![true, true, true, true, true, true, true, true, false]);
+    let DeclKind::Type(td) = &file.decls[3].kind else { panic!() };
+    let TypeBody::Record(fields) = &td.body else { panic!() };
+    assert!(fields[0].public && !fields[1].public);
+}
+
+#[test]
+fn pub_is_reserved_but_a_member_may_be_named_pub() {
+    assert!(parse_source("package t\nfunc f()\n    let pub = 1\nend\n").is_err());
+    assert!(parse_source("package t\nfunc f()\n    let x = a.pub\nend\n").is_ok());
+}
+
+#[test]
+fn a_misplaced_pub_is_a_parse_error_that_names_what_it_cannot_apply_to() {
+    assert!(parse_err("package t\npub embed \"x\"\n").contains("'pub' cannot be applied to 'embed'"));
+    assert!(parse_err("package t\ntype E = enum\n    pub A\nend\n").contains("'pub' cannot be applied to an enum variant"));
+    assert!(parse_err("package t\ntype I = interface\n    pub func f(self)\nend\n").contains("interface method signature"));
+    assert!(parse_err("package t\nfunc f(pub x: int)\nend\n").contains("'pub' cannot be applied to a parameter"));
+    assert!(parse_err("package t\npub use x\n").contains("'pub' cannot be applied to 'use'"));
+}

@@ -18,6 +18,9 @@
       <a href="concurrency.html">Tasks</a>
       <a href="async.html">Async</a>
       <a href="stdlib.html" aria-current="page">Library</a>
+      <a href="databases.html">Databases</a>
+      <a href="ai.html">AI</a>
+      <a href="packages.html">Packages</a>
       <a href="os.html">Brasa OS</a>
       <a href="getting-started.html">Getting Started</a>
     </nav>
@@ -25,7 +28,7 @@
 
   <main>
     <h1>Library</h1>
-    <p>The everyday operations live in four modules: <code>text</code>, <code>list</code>, <code>format</code> and <code>set</code>. They are written in Brasa itself (see the files in <code>std/</code>), and you use them by name: <code>use text</code> once at the top of the file, then <code>text.trim(s)</code>. Nothing is added to the types themselves, so the names never clash with your own functions.</p>
+    <p>The everyday operations live in four modules: <code>text</code>, <code>list</code>, <code>format</code> and <code>set</code>; <code>json</code> reads and writes JSON; <code>web</code> is an HTTP server and client. They are written in Brasa itself (see the files in <code>std/</code>), and you use them by name: <code>use text</code> once at the top of the file, then <code>text.trim(s)</code>. Nothing is added to the types themselves, so the names never clash with your own functions.</p>
 
     <section id="text">
       <h2>text</h2>
@@ -111,7 +114,7 @@ print(format.float(3.14159, 2))                                           <span 
         <thead><tr><th>Function</th><th>What it gives</th></tr></thead>
         <tbody>
           <tr><td><code>text(template, args)</code></td><td>The template with its placeholders replaced by the list of texts <code>args</code>. It returns a result: a missing argument, an unclosed <code>(</code> or an unknown layout is an error, never partial text.</td></tr>
-          <tr><td><code>fmt(template, a, b, ...)</code></td><td>Like <code>text</code>, but the values can be integers, floats, booleans or text, up to eight of them: <code>format.fmt("%(&lt;8)|%(&gt;8.2f)", name, price)</code>. A value of your own type is formatted through a method <code>to_value()</code> that returns a <code>format.Value</code>, usually <code>format.Text("...")</code>. Without a type letter a value shows the way <code>print</code> shows it.</td></tr>
+          <tr><td><code>fmt(template, a, b, ...)</code></td><td>Like <code>text</code>, but the values can be integers, floats, booleans or text, up to eight of them: <code>format.fmt("%(&lt;8)|%(&gt;8.2f)", name, price)</code>. A value of your own type is formatted through a <code>pub</code> method <code>to_value()</code> that returns a <code>format.Value</code>, usually <code>format.Text("...")</code>. Without a type letter a value shows the way <code>print</code> shows it.</td></tr>
           <tr><td><code>pad_left(s, width)</code>, <code>pad_right(s, width)</code>, <code>center(s, width)</code></td><td><code>s</code> filled with spaces to <code>width</code> characters. A third argument gives another fill: <code>pad_left("7", 3, "0")</code>.</td></tr>
           <tr><td><code>int(n)</code>, <code>hex(n)</code>, <code>bin(n)</code></td><td>The digits of an integer in base 10, 16 (lowercase) or 2, with no prefix. Negative numbers get a leading <code>-</code>.</td></tr>
           <tr><td><code>thousands(n)</code></td><td>The integer with <code>,</code> between groups of three digits: <code>1,234,567</code>.</td></tr>
@@ -212,12 +215,165 @@ scores.put(<span class="str">"ana"</span>, 90)
         <tbody>
           <tr><td><code>reflect.Field</code></td><td>A record field: <code>name</code>, <code>ty</code> (a <code>Type</code>), <code>attrs</code> and <code>line</code>.</td></tr>
           <tr><td><code>reflect.Variant</code></td><td>An enum variant: <code>name</code>, <code>fields</code>, <code>attrs</code> and <code>line</code>.</td></tr>
-          <tr><td><code>reflect.Attribute</code></td><td><code>name</code> and <code>args</code>, the arguments of <code>#[name(args)]</code> as text.</td></tr>
+          <tr><td><code>reflect.Attribute</code></td><td><code>name</code>, <code>args</code> (the arguments of <code>#[name(args)]</code> as text) and <code>quoted</code>, which tells for each argument whether it was written as a quoted text (<code>"key"</code>) or as a bare word (<code>skip</code>).</td></tr>
           <tr><td><code>reflect.fresh(base)</code></td><td>A name that is unique in the whole build, for local helpers in generated code (<code>__base_...</code>).</td></tr>
           <tr><td><code>reflect.fail(message, at)</code></td><td>Stops the generator; the error is reported at the line of <code>at</code> (a type, a field or a variant) in your code.</td></tr>
           <tr><td><code>reflect.target()</code></td><td>The target of the build, <code>windows</code> or <code>linux</code>.</td></tr>
         </tbody>
       </table>
+    </section>
+
+    <section id="json">
+      <h2>json</h2>
+      <pre><code><span class="kw">use</span> json
+
+<span class="kw">type</span> Config = <span class="kw">record</span>
+    port: int
+    #[json(<span class="str">"host_name"</span>)] host: text
+    #[json(skip)] cache: text
+    proxy: text?
+<span class="kw">end</span>
+
+<span class="kw">let</span> cfg = json.parse(Config, raw)               <span class="cm">// Config or error</span>
+<span class="kw">let</span> out = json.encode(Config, cfg)               <span class="cm">// text or error; also json.encode&lt;Config&gt;(cfg)</span>
+<span class="kw">let</span> tree = json.parse_value(raw)                <span class="cm">// a json.Value, when there is no type</span></code></pre>
+      <p>Reads and writes JSON (strict RFC 8259) as a free-form tree or directly into and out of your own types. The mapping is derived while compiling, by library code that reads the type through comptime reflection (see <a href="syntax.html#comptime">the syntax guide</a>): there is no registration and the compiler knows nothing about JSON. The type is passed as an argument, <code>json.parse(Config, raw)</code>, or as a type argument, <code>json.encode&lt;Config&gt;(cfg)</code>, which is the only way to write a generic type such as <code>Map&lt;text, int&gt;</code>. See <a href="examples.html#json-example">the example</a>.</p>
+      <table>
+        <thead><tr><th>Function</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr><td><code>json.parse(T, s)</code></td><td><code>T or error</code>: builds a value of <code>T</code> from the text.</td></tr>
+          <tr><td><code>json.encode(T, x)</code>, <code>json.encode_with(T, x, opts)</code></td><td><code>text or error</code>: the compact text of <code>x</code>, or indented by <code>opts.indent</code> spaces per level. An error for a float that is <code>NaN</code> or infinite.</td></tr>
+          <tr><td><code>json.parse_value(s)</code></td><td><code>json.Value or error</code>: the document as a tree. Keys keep their order; a repeated key keeps the last value.</td></tr>
+          <tr><td><code>json.stringify(v)</code>, <code>json.stringify_with(v, opts)</code></td><td><code>text or error</code>: a tree as compact or indented text. A number that was read and not changed prints exactly as written, including integers beyond 2^53.</td></tr>
+          <tr><td><code>json.Value</code></td><td>The enum with the cases <code>Null</code>, <code>Bool(bool)</code>, <code>Number(float, text)</code> (the value and its literal; build one by hand with the empty text as the literal), <code>Text(text)</code>, <code>List([]Value)</code> and <code>Object(Map&lt;text, Value&gt;)</code>. The cases are used as <code>json.Null</code>, <code>json.List(xs)</code>.</td></tr>
+          <tr><td><code>json.Options</code></td><td><code>Options { indent: 2 }</code>: spaces per level, <code>0</code> (the default) meaning compact.</td></tr>
+        </tbody>
+      </table>
+      <p>How types map to JSON, in both directions:</p>
+      <table>
+        <thead><tr><th>Brasa</th><th>JSON</th></tr></thead>
+        <tbody>
+          <tr><td>record</td><td>An object whose keys are the field names, in declaration order. Unknown keys are ignored; a missing key is an error unless the field is optional.</td></tr>
+          <tr><td>enum without payloads</td><td>A text holding the case name: <code>"Red"</code>.</td></tr>
+          <tr><td>enum case with a payload</td><td>An object with one key, the case name: <code>{"Circle": 2.5}</code>; several payloads are a list: <code>{"Rect": [2, 3.5]}</code>. In an enum with both kinds, each case uses its own form.</td></tr>
+          <tr><td><code>[]T</code></td><td>A list.</td></tr>
+          <tr><td><code>Map&lt;text, V&gt;</code></td><td>An object, in insertion order. Other key types are refused when compiling.</td></tr>
+          <tr><td><code>T?</code> (for text, lists, maps, records)</td><td><code>null</code> or a missing key is <code>nil</code>.</td></tr>
+          <tr><td>integers (<code>i8</code> to <code>i64</code>, <code>u8</code> to <code>u64</code>, <code>int</code>, <code>long</code>)</td><td>An integral number inside the range of the type: <code>1e2</code> and <code>5.0</code> read as <code>100</code> and <code>5</code>, <code>1.5</code> and <code>300</code> into a <code>u8</code> are errors. Nothing wraps or rounds.</td></tr>
+          <tr><td><code>float</code>, <code>f64</code>, <code>f32</code></td><td>Any number; written as the shortest text that reads back as the same value.</td></tr>
+          <tr><td><code>bool</code>, <code>text</code>, <code>json.Value</code></td><td><code>true</code> or <code>false</code>; a string (UTF-8, escapes handled); anything.</td></tr>
+        </tbody>
+      </table>
+      <p>Attributes on a record field: <code>#[json("key")]</code> uses <code>key</code> as the JSON key in both directions, and <code>#[json(skip)]</code> leaves the field out of the output and ignores its key when reading (the field keeps its zero value). Any other content, and two fields that end up with the same key, are compile errors that name the fields.</p>
+      <p>Errors have the kind <code>InvalidInput</code>. A syntax error says where in the text: <code>expected a text key, found 'x' at line 2, column 3</code>. A value that does not fit the type says where in the document: <code>expected text, found number at $.users[2].email</code> (<code>$</code> is the root, <code>.key</code> an object member, <code>[n]</code> a list position from 0). The first problem is reported and nothing partial is returned. Limits: nesting deeper than 128 levels is an error (so no input can exhaust the stack), a key that appears twice is an error when reading into a record or a map, and a byte order mark or invalid UTF-8 is rejected.</p>
+      <p>Each type used with <code>parse</code> or <code>encode</code> adds a little generated code to the program (five types came to about 33 KB of executable). Types nested more than about six levels deep in one call run into the limit of eight generation rounds; flatten the type or split the call. <code>use json</code> works on Windows and Linux alike.</p>
+    </section>
+
+    <section id="web">
+      <h2>web</h2>
+      <pre><code><span class="kw">use</span> web
+
+<span class="kw">var</span> app = web.server(port: 8080)
+app.use(web.logger())
+app.get(<span class="str">"/hello/:name"</span>, <span class="kw">func</span>(req)
+    <span class="kw">return</span> web.text(200, <span class="str">"hello {req.param("name") ?? "world"}"</span>)
+<span class="kw">end</span>)
+<span class="kw">try</span> app.run()                                  <span class="cm">// or: let running = try app.start()</span>
+
+<span class="kw">let</span> reply = <span class="kw">try</span> web.get(<span class="str">"http://127.0.0.1:8080/hello/ana"</span>)   <span class="cm">// reply.status, reply.body</span></code></pre>
+      <p><code>use web</code> is an HTTP/1.1 server, a router, a middleware chain, JSON helpers, an HTTP client and HTML templates, all written in Brasa on <code>net</code>, <code>tls</code>, <code>task</code> and <code>json</code>; the compiler only knows the name. It works on Windows and Linux alike and is not available in a bare-metal kernel. See <a href="examples.html#rest-api">the REST API example</a> and <a href="examples.html#web-example">the web example</a>.</p>
+      <h3>Server</h3>
+      <p>The server runs one task per connection on the scheduler, so a slow client never delays the others. <code>web.server(port: 8080)</code> makes a <code>Server</code> (port 0 picks a free one). Its limits are fields you can set before starting: <code>max_head</code> (16 KiB of header lines; <code>431</code>), <code>max_line</code> (8 KiB request line; <code>414</code>), <code>max_body</code> (1 MiB; <code>413</code>, answered without reading the body), <code>read_timeout</code> (10 s for a request that has started; <code>408</code>), <code>idle_timeout</code> (5 s between requests on a kept-alive connection; closed silently), <code>write_timeout</code> (10 s) and <code>max_connections</code> (1024; a connection beyond that gets <code>503</code> and is closed). Times are in milliseconds, sizes in bytes. A malformed request gets <code>400</code>, an unsupported method <code>501</code>. Bodies are read with <code>Content-Length</code> or <code>Transfer-Encoding: chunked</code> (both at once is <code>400</code>); HTTP/1.1 connections are kept alive unless either side says <code>Connection: close</code>, HTTP/1.0 ones close unless they ask to keep alive; requests on one connection are answered in order. <code>app.run()</code> serves until the program ends; <code>app.start()</code> serves in the background and returns a <code>Running</code> with <code>.port</code> and <code>.stop()</code>.</p>
+      <table>
+        <thead><tr><th>Call</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr><td><code>app.get(pattern, h)</code>, <code>post</code>, <code>put</code>, <code>delete</code>, <code>patch</code></td><td>Registers a handler <code>func(Request) -&gt; Response or error</code>. A <code>:name</code> segment captures one path segment (<code>req.param("name")</code>, percent-decoded) and a final <code>*rest</code> captures the rest. Static segments win over parameters; a trailing slash does not matter. No route for the path is <code>404</code>; routes for the path but not the method give <code>405</code> with an <code>Allow</code> header; <code>HEAD</code> uses the <code>GET</code> route and sends no body.</td></tr>
+          <tr><td><code>app.use(m)</code></td><td>Adds a middleware <code>func(Request, next: Handler) -&gt; Response or error</code>. The first one added is the outermost; it may return without calling <code>next</code>, change the request it passes or the response it gets back, and it also sees the <code>404</code> and <code>405</code> answers. <code>web.logger()</code> prints <code>METHOD /path status Nms</code>.</td></tr>
+          <tr><td><code>app.on_error(f)</code>, <code>app.log_to(f)</code></td><td>Replaces the function that turns an error into a response, and the function that receives log lines (<code>print</code> by default).</td></tr>
+          <tr><td><code>req.method</code>, <code>path</code>, <code>query</code>, <code>headers</code>, <code>body</code>, <code>params</code></td><td>The request. <code>req.query_param(name)</code>, <code>req.header(name)</code> (any case) and <code>req.param(name)</code> return <code>text?</code>. Header names in <code>req.headers</code> are lower-cased and a repeated header is joined with <code>, </code>.</td></tr>
+          <tr><td><code>web.text(status, s)</code>, <code>web.json_text(status, s)</code>, <code>web.html_page(status, page)</code>, <code>web.not_found()</code>, <code>web.redirect(url)</code>, <code>web.redirect_with(status, url)</code></td><td>Response constructors. The server adds <code>Content-Length</code> and <code>Connection</code> itself; <code>r.with_header(name, value)</code> adds a header.</td></tr>
+        </tbody>
+      </table>
+      <h3>Errors</h3>
+      <p>An error returned by a handler or middleware becomes a response through its kind: <code>InvalidInput</code> 400, <code>Unauthenticated</code> 401, <code>PermissionDenied</code> 403, <code>NotFound</code> 404, <code>AlreadyExists</code> 409, <code>web.UnsupportedMedia</code> 415, <code>Unavailable</code> 503, <code>Timeout</code> 504, anything else 500. A 4xx body is <code>{"error": "message"}</code>; a 5xx body is always <code>internal error</code> and the message goes to the log only (<code>app.log_to</code>), so a failing disk path never reaches a client.</p>
+      <h3>JSON</h3>
+      <p><code>web.read_json(T, req)</code> checks that <code>Content-Type</code> contains <code>json</code> (otherwise the error <code>web.UnsupportedMedia</code>, 415) and decodes the body with <code>json.parse</code> (a body that does not fit <code>T</code> is an <code>InvalidInput</code> error that says where, so 400). <code>web.json(T, status, value)</code> and <code>web.created(T, value)</code> (status 201) encode with <code>json.encode</code> and set <code>Content-Type: application/json</code>; <code>web.json&lt;[]Customer&gt;(200, rows)</code> is the form for a generic type. These functions write code for each type they are used with, like <code>json</code> itself, and that code names <code>json</code>, so a program that calls them also writes <code>use json</code>.</p>
+      <h3>Client</h3>
+      <p><code>web.get(url)</code>, <code>web.post(url, body)</code>, <code>web.post_json(url, text)</code> and <code>web.request(method, url, headers, body)</code> return a <code>ClientResponse</code> (<code>status</code>, <code>headers</code>, <code>body</code>, <code>r.header(name)</code>) or an error. <code>http://</code> goes over <code>net</code>, <code>https://</code> over <code>tls</code> with certificate and host name checks that cannot be turned off. The reply is read until the connection closes, <code>Content-Length</code> bytes or the last chunk. <code>web.request_with(web.client_options(), ...)</code> sets <code>max_response</code> (16 MiB; the error kind <code>Overflow</code>), <code>timeout</code> (30 s for the exchange after connecting, all redirects together; the error kind <code>Timeout</code>) and <code>max_redirects</code> (5). Redirects (301, 302, 303, 307, 308) are followed only to <code>http</code> and <code>https</code> URLs and never from <code>https</code> to <code>http</code> (<code>web.redirect_allowed(from, to)</code> is that rule); 301 to 303 turn a POST into a GET. A server speaks plain <code>http</code> only: put a proxy in front of it for TLS until <code>tls</code> has a server side.</p>
+      <h3>HTML templates</h3>
+      <pre><code><span class="kw">let</span> page = html
+    &lt;h1&gt;Hello, {user}&lt;/h1&gt;
+    @for item in items
+        &lt;li&gt;{item.name}&lt;/li&gt;
+    @end
+<span class="kw">end</span>
+<span class="kw">return</span> web.html_page(200, page)</code></pre>
+      <p><code>html ... end</code> is a block form (see <a href="syntax.html#comptime">the syntax guide</a>) handled by a comptime function of this library. The lines are markup with <code>{expression}</code> holes; lines that start with <code>@</code> are <code>@for x in xs</code>, <code>@if cond</code>, <code>@else</code> (or <code>@else if cond</code>) and <code>@end</code>, and <code>@@</code> at the start of a line writes a literal <code>@</code>; <code>{{</code> and <code>}}</code> are literal braces. Lines are trimmed and joined with newlines. The block evaluates to a <code>web.Safe</code>. A value in a hole is escaped (<code>&amp;</code>, <code>&lt;</code>, <code>&gt;</code>, <code>"</code> and <code>'</code> become entities) unless it is a <code>Safe</code> (so a nested block is not escaped twice) or is written <code>{raw(expr)}</code>; numbers, booleans, characters and text can be interpolated. A malformed template (<code>@for</code> without <code>@end</code>, an unclosed brace, an unknown directive) is a compile error at the block. <code>web.escape(s)</code> and <code>web.raw(s)</code> are available directly. The escaping covers element text and quoted attributes; it does not make values safe inside unquoted attributes, <code>&lt;script&gt;</code> or <code>&lt;style&gt;</code> contents, or URLs.</p>
+    </section>
+
+    <section id="crypto">
+      <h2>crypto</h2>
+      <pre><code><span class="kw">use</span> crypto
+
+<span class="kw">let</span> d = crypto.sha256(<span class="str">"abc"</span>)                      <span class="cm">// 32 bytes, in a text</span>
+print(crypto.hex(d))                             <span class="cm">// ba7816bf...</span>
+<span class="kw">let</span> mac = crypto.hmac_sha256(<span class="str">"key"</span>, <span class="str">"data"</span>)
+<span class="kw">let</span> key = <span class="kw">try</span> crypto.pbkdf2_sha256(<span class="str">"password"</span>, <span class="str">"salt"</span>, 4096, 32)
+<span class="kw">let</span> nonce = <span class="kw">try</span> crypto.random(16)                <span class="cm">// from the operating system</span>
+print(crypto.base64_encode(nonce))</code></pre>
+      <p>Hashes, message authentication, encodings and random bytes for protocols: <code>sha256</code> (and a streaming <code>sha256_new()</code> with <code>add</code> and <code>finish</code>), <code>md5</code> (old protocols only), <code>hmac_sha256</code>, <code>pbkdf2_sha256</code>, <code>base64_encode</code> and <code>base64_decode</code> (RFC 4648; the <code>base64url_</code> forms use <code>-</code> and <code>_</code> without padding), <code>hex</code> and <code>unhex</code>, <code>equal</code> (constant time: use it for secrets and tokens), <code>random</code> and the byte helpers <code>to_bytes</code> and <code>from_bytes</code>. A binary value (a digest, a key) is a <code>text</code> whose bytes are the data, like what a socket returns; show it with <code>hex</code> or <code>base64_encode</code>. Decoding bad input is an error, never a partial result. It offers no ciphers or signatures. Not available in a bare-metal kernel.</p>
+    </section>
+
+    <section id="db">
+      <h2>db</h2>
+      <p><code>use db</code> with a driver (<a href="#postgres">postgres</a> or <a href="#sqlserver">sqlserver</a>); <a href="databases.html">the Databases page</a> explains how it fits together.</p>
+      <dl>
+        <dt><code>db.query(T, conn, sql, args...)</code></dt>
+        <dd>The rows as a <code>[]T or error</code>: a record by column name (<code>#[db("column")]</code> renames, <code>#[db(skip)]</code> leaves out, <code>T?</code> allows <code>NULL</code>), or any other type for a one-column result.</dd>
+        <dt><code>db.one(T, conn, sql, args...)</code></dt>
+        <dd>The one row as a <code>T or error</code> (<code>NotFound</code> for none, <code>InvalidInput</code> for several).</dd>
+        <dt><code>conn.exec(sql, args...)</code></dt>
+        <dd>The number of rows changed, as an <code>int or error</code>.</dd>
+        <dt><code>conn.begin()</code>, <code>tx.conn</code>, <code>tx.commit()</code>, <code>tx.rollback()</code>, <code>conn.close()</code></dt>
+        <dd>Transactions and closing. A transaction dropped without an end is rolled back before the connection's next statement.</dd>
+        <dt><code>db.int(n)</code>, <code>db.float(x)</code>, <code>db.bool(b)</code>, <code>db.str(s)</code>, <code>db.bytes(data)</code>, <code>db.vector(xs)</code>, <code>db.null()</code></dt>
+        <dd>The values of the placeholders (<code>db.Arg</code>); they are sent as bound parameters, never spliced into the SQL.</dd>
+        <dt><code>db.parse_url(url)</code>, <code>db.redact(url)</code></dt>
+        <dd>A connection URL taken apart (percent-decoded), and the same URL with the password shown as <code>***</code> (what error messages use).</dd>
+      </dl>
+      <p>A driver builds a <code>db.Conn</code> with <code>db.connection(run, begin, commit, rollback, close)</code>, so another database only needs those five functions. Errors carry a kind from <code>errors</code> (<code>Unavailable</code>, <code>Unauthenticated</code>, <code>PermissionDenied</code>, <code>NotFound</code>, <code>AlreadyExists</code>, <code>InvalidInput</code>, <code>Closed</code>) and the server's own text and code. Not available in a bare-metal kernel.</p>
+    </section>
+
+    <section id="postgres">
+      <h2>postgres</h2>
+      <pre><code><span class="kw">use</span> postgres
+
+<span class="kw">let</span> conn = <span class="kw">try</span> postgres.open(<span class="str">"postgres://app:secret@localhost:5432/shop?sslmode=require&amp;sslrootcert=ca.pem"</span>)</code></pre>
+      <p>The PostgreSQL wire protocol (version 3) in Brasa. <code>open(url)</code> returns a <code>db.Conn</code>. The URL takes <code>sslmode</code> (<code>require</code>, the default, or <code>disable</code>), <code>sslrootcert</code> (extra authorities for this connection) and <code>max_rows</code>. Login by SCRAM-SHA-256 (server signature verified), <code>md5</code>, or cleartext over TLS. Parameters are bound (extended query protocol, text format); <code>db.vector</code> and <code>vector</code> columns work with pgvector. <code>postgres.on_notice</code> receives the text of server notices (ignored by default).</p>
+    </section>
+
+    <section id="sqlserver">
+      <h2>sqlserver</h2>
+      <pre><code><span class="kw">use</span> sqlserver
+
+<span class="kw">let</span> conn = <span class="kw">try</span> sqlserver.open(<span class="str">"sqlserver://app:secret@localhost:1433/shop?encrypt=strict&amp;cafile=ca.pem"</span>)</code></pre>
+      <p>The TDS protocol in Brasa. <code>open(url)</code> returns a <code>db.Conn</code>. <code>encrypt=strict</code> (the default) is TDS 8.0, with ALPN <code>tds/8.0</code>; <code>encrypt=off</code> is for local development (nothing encrypted); <code>encrypt=on</code> is refused. <code>cafile</code> adds authorities for this connection, <code>max_rows</code> limits a result, <code>timeout</code> (milliseconds) cancels a slow statement. The host may be <code>host\INSTANCE</code>: on this machine the instance's named pipe is used (<code>fs.pipe</code>, Windows only), elsewhere the SQL Server Browser gives the TCP port. SQL login only. Parameters go through <code>sp_executesql</code> as <code>@p1</code>, <code>@p2</code>, ...; the supported column types are listed on <a href="databases.html#sqlserver">the Databases page</a>, and any other type is an error that names the column.</p>
+    </section>
+
+    <section id="tls-extras">
+      <h2>tls: upgrade, ALPN and a private CA</h2>
+      <pre><code><span class="kw">let</span> opts = tls.Options { alpn: [<span class="str">"tds/8.0"</span>], require_alpn: true, ca_file: <span class="str">"ca.pem"</span> }
+<span class="kw">let</span> conn = <span class="kw">try</span> tls.connect_with(<span class="str">"db.example.com"</span>, 1433, opts)
+print(conn.protocol())                                <span class="cm">// the protocol the server chose</span>
+
+<span class="cm">// start TLS on a connection that already exchanged plain bytes (PostgreSQL's SSLRequest)</span>
+<span class="kw">let</span> secure = <span class="kw">try</span> tls.upgrade(plain_conn, <span class="str">"db.example.com"</span>)</code></pre>
+      <p><code>tls.connect_with(host, port, opts)</code> and <code>tls.upgrade_with(conn, host, opts)</code> take <code>tls.Options</code>: <code>alpn</code> (protocols to offer), <code>require_alpn</code> (fail if the server selects none) and <code>ca_file</code> (a PEM file of extra certificate authorities, trusted for that connection only; the system's still apply, and the chain and host name are always checked). <code>tls.upgrade(conn, host)</code> starts TLS on an open connection after a plain exchange: read exactly the plain answer first. On failure the connection is closed. Windows and Linux behave the same.</p>
+    </section>
+
+    <section id="ai">
+      <h2>ai</h2>
+      <p><code>use ai</code> (with <code>use json</code> when you call <code>ask</code> or <code>tool</code>): <code>ai.anthropic(key)</code> and <code>ai.openai_compatible(base_url, key)</code> make a <code>Client</code>; <code>ai.key_from_env(name)</code> reads a key; <code>ai.request(model, messages, max_tokens)</code>, <code>ai.user(text)</code> and <code>ai.assistant(text)</code> build the input; <code>client.chat(req)</code>, <code>client.stream(req, on_text)</code>, <code>client.run(req, tools)</code> (the agent loop), <code>client.embed(model, inputs)</code> and <code>client.embedder(model)</code> talk to the model; <code>ai.ask(T, client, req)</code> returns a value of your type, <code>ai.schema(T)</code> its JSON Schema and <code>ai.tool(T, name, description, handler)</code> a tool. See <a href="ai.html">the AI page</a>. Also new: <code>sys.env(name)</code> returns the value of an environment variable or <code>nil</code>, and <code>web.stream(opts, method, url, headers, body, on_piece)</code> hands the body of a successful response to a function piece by piece. Not available in a bare-metal kernel.</p>
     </section>
 
     <section id="errors">

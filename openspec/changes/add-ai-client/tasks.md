@@ -1,0 +1,20 @@
+## 1. Foundations
+
+- [x] 1.1 `web.stream(opts, method, url, headers, body, on_piece)` in `std/web.br` (named `stream`, not `open`: it hands each piece of a successful response's body to a function) (head, then `read_chunk` over `Content-Length`, chunked or until close) once `add-web` has landed; if it has not, add a private minimal reader in `ai` and note it in design.md. Verify: `tests/web.rs` (or `tests/ai.rs` for the private reader) streams a chunked response with pauses and the pieces arrive before the server finishes.
+- [x] 1.2 Environment: `sys.env(name) -> text?` in `std/sys.br` and `std/sys.linux.br` (the task-friendly standard-input reader that `add-mcp` needs moves to that change, task 2.1). Verify: `tests/stdlib.rs` style programs print an environment variable and echo piped input while a timer task keeps ticking, on Windows and under WSL.
+- [x] 1.3 Register `ai` in the library tables of `src/codegen_x64.rs` and reject it in the bare-metal build next to `net`. Verify: `cargo build`; a test that `use ai` resolves in a hosted program and fails with a message naming `ai` in the kernel build.
+
+## 2. Client
+
+- [x] 2.1 `ai.Client`, `anthropic`/`openai_compatible` constructors, `key_from_env`, neutral `Message`/`Reply`/`Usage`, `chat` for both wire formats, status-to-kind mapping, `timeout`, key redaction. Verify: `tests/ai.rs` with a fake model server in Brasa: simple reply for both providers, 429 → `Unavailable`, 401 → `Unauthenticated`, an error printed without the key, missing environment variable named in the error.
+- [x] 2.2 Retries with exponential back-off, jitter and `retry-after`; no retry on other 4xx; no retry after streamed output began; `stream` with SSE parsing and callback stop. Verify: fake-server tests for 503-then-200, 400-once, `retry-after`, a three-piece stream with pauses (first callback before the server's last event), an error event in the stream, a callback abort that closes the connection.
+- [x] 2.3 `ai.schema(T)` and `ask(T, req)` with `#[desc]`, one repair round, fence stripping, raw answer in the final error. Verify: `tests/ai.rs` schema snapshots for the four-field record, enum with and without payloads, optional, list and map (a recursive type is refused at build time, not given `$defs`); `ask` happy path, one repair, double failure.
+- [x] 2.4 `ai.tool`, `run` agent loop with concurrent tool calls in call order, `max_steps`, handler errors and bad arguments as error results, unknown tool, cumulative usage. Verify: `tests/ai.rs` scenarios of the spec, including two tool calls in one turn with a 200 ms handler each finishing in under 350 ms total.
+- [x] 2.5 Embeddings (`embed`, batching, order, `InvalidInput` for Anthropic) and `client.embedder(model)`. Verify: fake-server test of 150 inputs in 3 requests in order; with `BRASA_TEST_ANTHROPIC_KEY` or `BRASA_TEST_OPENAI_URL` set, real chat (and embedding for the OpenAI-compatible URL) tests run, skipped with a printed line otherwise.
+
+## 3. Example and documentation
+
+- [x] 3.1 `examples/ai.br`: chat with streaming, `ask(Invoice, ...)` and an agent with a weather-style tool, key from `ANTHROPIC_API_KEY`. Verify: `tests/ai.rs` builds it (a program that calls the real API cannot run in the suite) and `cargo test --test fmt` checks its formatting; the loop it uses is covered by the fake-server tests.
+- [x] 3.2 New `docs/ai.html` (providers, chat, streaming, typed output, tools, agent loop, embeddings, retries, safety notes on injection and least privilege; sections for MCP and RAG are added by their changes), updates to `docs/stdlib.html`, `docs/native.html`, navigation of every page and `README.md`. Verify: `cargo test --test docs` passes and the page is linked from every page's navigation.
+- [x] 3.3 Windows and Linux parity for the `ai` fixtures in `tests/linux.rs`. Verify: `cargo test --test linux` passes (leave `tests/async.rs` out of routine runs).
+- [x] 3.4 `openspec validate add-ai-client --strict` passes and full `cargo test` (without `tests/async.rs`) is green; skipped real-API tests are listed in the final report with their variables.

@@ -156,7 +156,7 @@ fn other_integer_widths_and_f32_are_values_too() {
 
 #[test]
 fn a_type_of_the_program_is_formatted_through_to_value() {
-    let src = "package main\n\nuse format\n\ntype Point = record\n    x: int\n    y: int\nend\n\nfunc (p: Point) to_value() -> format.Value\n    return format.Text(\"({p.x}, {p.y})\")\nend\n\nfunc main()\n    print(format.fmt(\"at %, %(>8)|\", Point { x: 1, y: 2 }, Point { x: 3, y: 4 }) ?? \"?\")\nend\n";
+    let src = "package main\n\nuse format\n\ntype Point = record\n    x: int\n    y: int\nend\n\npub func (p: Point) to_value() -> format.Value\n    return format.Text(\"({p.x}, {p.y})\")\nend\n\nfunc main()\n    print(format.fmt(\"at %, %(>8)|\", Point { x: 1, y: 2 }, Point { x: 3, y: 4 }) ?? \"?\")\nend\n";
     if let Some(out) = native(src) {
         assert_eq!(out, "at (1, 2),   (3, 4)|\n");
     }

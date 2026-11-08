@@ -1,0 +1,9 @@
+package greeter
+
+pub func hello(name: text) -> text
+    return "Hello, {name}!"
+end
+
+pub func again(name: text) -> text
+    return "Hello again, {name}!"
+end

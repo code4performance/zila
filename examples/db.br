@@ -1,0 +1,62 @@
+// Databases: the same function on PostgreSQL and on SQL Server.
+//
+//   brasa-parse examples/db.br -o db.exe
+//
+// `postgres.open` and `sqlserver.open` both return a `db.Conn`, so everything after opening is
+// written once: typed rows (`db.query` builds `[]Customer` from the columns by name), parameters
+// that travel as bound values, and transactions. The placeholders are the database's own (`$1`
+// for PostgreSQL, `@p1` for SQL Server), so only the SQL text differs.
+//
+// The URLs are the development servers of tests/docker (`docker compose -f tests/docker/compose.yml
+// up -d --wait`); `sslrootcert` and `cafile` trust the development CA created there.
+
+package main
+
+use db
+use postgres
+use sqlserver
+
+type Customer = record
+    id: int
+    name: text
+    email: text?
+    city: text?
+end
+
+// The customers with an id below `limit`, whichever database `conn` talks to.
+func first_customers(conn: db.Conn, sql: text, limit: int) -> []Customer or error
+    return db.query(Customer, conn, sql, db.int(limit))
+end
+
+func show(conn: db.Conn, sql: text) -> error
+    let rows = try first_customers(conn, sql, 5)
+    for c in rows
+        print(c.id, c.name, c.email ?? "-", c.city ?? "-")
+    end
+    // a transaction: nothing is kept unless it commits
+    let tx = try conn.begin()
+    try tx.conn.exec(sql_insert(sql), db.int(9001), db.str("Temporary"))
+    let inside = try db.one(int, tx.conn, "select count(*) from customers where id = 9001")
+    try tx.rollback()
+    let after = try db.one(int, conn, "select count(*) from customers where id = 9001")
+    print("inside the transaction", inside, "after the rollback", after)
+    return
+end
+
+// `$1` and `$2` for PostgreSQL, `@p1` and `@p2` for SQL Server.
+func sql_insert(select_sql: text) -> text
+    if select_sql.len > 0 and select_sql.slice(select_sql.len - 3, select_sql.len) == "@p1"
+        return "insert into customers(id, name) values (@p1, @p2)"
+    end
+    return "insert into customers(id, name) values ($1, $2)"
+end
+
+func main() -> error
+    let pg = try postgres.open("postgres://app:Brasa_app_dev_1@127.0.0.1:55432/shop?sslmode=require&sslrootcert=tests/docker/certs/ca.pem")
+    print("PostgreSQL")
+    try show(pg, "select id, name, email, city from customers where id < $1 order by id")
+    let ms = try sqlserver.open("sqlserver://sa:Brasa_dev_Sql_1@127.0.0.1:51434/shop?encrypt=strict&cafile=tests/docker/certs/ca.pem")
+    print("SQL Server")
+    try show(ms, "select id, name, email, city from customers where id < @p1")
+    return
+end

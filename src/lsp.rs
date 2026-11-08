@@ -328,6 +328,10 @@ fn register_neighbours(uri: &str, text: &str) {
     }
     // `file:///c:/dir/x.br` -> `c:/dir/x.br`
     let path = if path.len() > 2 && path.as_bytes()[0] == b'/' && path.as_bytes()[2] == b':' { path[1..].to_string() } else { path };
+    // the editor never fetches; a project that does not check out simply has no dependencies here
+    if crate::package::install_for(std::path::Path::new(&path)).is_err() {
+        crate::package::clear();
+    }
     crate::comptime::register_siblings(std::path::Path::new(&path), text);
 }
 

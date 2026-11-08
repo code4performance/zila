@@ -30,3 +30,6 @@ pub extern "system" func GetAddrInfoExW(name: *u8, service: usize, namespace: u3
 pub extern "system" func FreeAddrInfoExW(info: usize)
 extern "system" func getaddrinfo(node: *u8, service: usize, hints: *u8, result: *long) -> i32
 extern "system" func freeaddrinfo(info: usize)
+
+#[link("kernel32")]
+pub extern "system" func CancelIoEx(handle: usize, overlapped: usize) -> i32

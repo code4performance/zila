@@ -35,3 +35,12 @@ fn the_package_manifest_declares_the_settings_command_and_entry_point() {
     // tests are not shipped in the .vsix
     assert!(std::fs::read_to_string("editors/vscode/.vscodeignore").unwrap().contains("test/**"));
 }
+
+#[test]
+fn the_grammar_highlights_every_lexer_keyword_including_pub() {
+    let g = std::fs::read_to_string("editors/vscode/syntaxes/brasa.tmLanguage.json").unwrap();
+    assert!(g.contains("let|var|embed|extern|pub"), "pub is not a declaration keyword in the grammar");
+    for kw in brasa::lexer::KEYWORDS {
+        assert!(g.split(|c: char| !c.is_alphanumeric() && c != '_').any(|w| w == *kw), "the grammar does not mention the keyword {}", kw);
+    }
+}

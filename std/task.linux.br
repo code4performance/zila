@@ -171,7 +171,7 @@ end
 
 // Collects the file descriptors that became ready, waiting up to `ms` milliseconds for the
 // first (a negative time waits for as long as it takes).
-func poll_io(ms: long)
+func poll_io(ms: long, force: bool)
     io_init()
     let base = long(evbuf.ptr)
     let n = sys.syscall(232, epfd, base, 16, ms, 0, 0)
@@ -246,7 +246,7 @@ func wait_events()
             ms = 0
         end
     end
-    poll_io(ms)
+    poll_io(ms, false)
 end
 
 // Runs the next ready task. The caller has already queued itself (yield),
@@ -259,7 +259,7 @@ func switch_away()
             fire_timers()
         end
         if pending_io > 0 and switches % 64 == 0
-            poll_io(0)
+            poll_io(0, false)
         end
         if ready_head < ready.len
             break
@@ -388,6 +388,11 @@ pub func wake(id: long)
         tasks[id].waiting = false
         ready.add(id)
     end
+end
+
+// The id of the running task.
+pub func cur() -> long
+    return current
 end
 
 // Lets other tasks run; the caller continues later.

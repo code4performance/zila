@@ -26,10 +26,12 @@ pub type Type = record
     pub id: int
 end
 
-// `#[json("full_name")]` is the attribute `json` with the argument `full_name`.
+// `#[json("full_name")]` is the attribute `json` with the argument `full_name`. `quoted[i]` tells
+// whether argument `i` was written as a quoted text (`"full_name"`) or as a bare word (`skip`).
 pub type Attribute = record
     pub name: text
     pub args: []text
+    pub quoted: []bool
 end
 
 pub type Field = record
@@ -94,7 +96,7 @@ pub func (t: Type) attrs() -> []Attribute
 end
 
 // The element of a list or set.
-func (t: Type) element() -> Type
+pub func (t: Type) element() -> Type
     return Type { id: need(entries[t.id].elem, t, "element()") }
 end
 

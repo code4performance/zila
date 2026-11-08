@@ -243,45 +243,45 @@ fn both_layers_implement_the_same_backend_functions() {
 
 /// Brasa helpers shared by the X-level test programs below.
 const X_HELPERS: &str = r#"
-func send(window: int, ev: sys.Buf)
+func send(window: long, ev: sys.Buf)
     let r = ui.req(25, 0, 11)
     ui.put32(r + 4, window)
     ui.put32(r + 8, 0)
     for i in 0..32
-        sys.put8(r + 12 + i, sys.get8(int(ev.ptr) + i))
+        sys.put8(r + 12 + i, sys.get8(long(ev.ptr) + i))
     end
     ui.flush_x()
 end
 
-func keycode_of(sym: int) -> int
+func keycode_of(sym: long) -> long
     for code in ui.min_keycode..ui.min_keycode + 240
-        if ui.get32(int(ui.keysyms.ptr) + (code - ui.min_keycode) * ui.keysyms_per * 4) == sym
+        if ui.get32(long(ui.keysyms.ptr) + (code - ui.min_keycode) * ui.keysyms_per * 4) == sym
             return code
         end
     end
     return 0
 end
 
-func key(window: int, sym: int, state: int)
+func key(window: long, sym: long, state: long)
     let ev = sys.buffer(32)
-    sys.put8(int(ev.ptr), 2)
-    sys.put8(int(ev.ptr) + 1, keycode_of(sym))
-    ui.put32(int(ev.ptr) + 12, window)
-    ui.put16(int(ev.ptr) + 28, state)
+    sys.put8(long(ev.ptr), 2)
+    sys.put8(long(ev.ptr) + 1, keycode_of(sym))
+    ui.put32(long(ev.ptr) + 12, window)
+    ui.put16(long(ev.ptr) + 28, state)
     send(window, ev)
 end
 
-func mouse(window: int, kind: int, button: int, x: int, y: int)
+func mouse(window: long, kind: long, button: long, x: long, y: long)
     let ev = sys.buffer(32)
-    sys.put8(int(ev.ptr), kind)
-    sys.put8(int(ev.ptr) + 1, button)
-    ui.put32(int(ev.ptr) + 12, window)
-    ui.put16(int(ev.ptr) + 24, x)
-    ui.put16(int(ev.ptr) + 26, y)
+    sys.put8(long(ev.ptr), kind)
+    sys.put8(long(ev.ptr) + 1, button)
+    ui.put32(long(ev.ptr) + 12, window)
+    ui.put16(long(ev.ptr) + 24, x)
+    ui.put16(long(ev.ptr) + 26, y)
     send(window, ev)
 end
 
-func click(window: int, x: int, y: int)
+func click(window: long, x: long, y: long)
     mouse(window, 4, 1, x, y)
     mouse(window, 5, 1, x, y)
 end
@@ -295,19 +295,19 @@ fn x_program(body: &str) -> String {
 fn a_window_has_the_requested_size_and_title_on_the_server() {
     let src = x_program(
         r#"
-func geometry(id: int) -> []int
+func geometry(id: long) -> []long
     let r = ui.req(14, 0, 2)
     ui.put32(r + 4, id)
     ui.flush_x()
     let reply = sys.buffer(32)
-    ui.read_full(int(reply.ptr), 32)
-    var v: []int
-    v.add(ui.get16(int(reply.ptr) + 16))
-    v.add(ui.get16(int(reply.ptr) + 18))
+    ui.read_full(long(reply.ptr), 32)
+    var v: []long
+    v.add(ui.get16(long(reply.ptr) + 16))
+    v.add(ui.get16(long(reply.ptr) + 18))
     return v
 end
 
-func title_of(id: int) -> text
+func title_of(id: long) -> text
     let r = ui.req(20, 0, 6)
     ui.put32(r + 4, id)
     ui.put32(r + 8, 39)
@@ -316,19 +316,19 @@ func title_of(id: int) -> text
     ui.put32(r + 20, 100)
     ui.flush_x()
     let head = sys.buffer(32)
-    ui.read_full(int(head.ptr), 32)
-    let words = ui.get32(int(head.ptr) + 4)
-    let len = ui.get32(int(head.ptr) + 16)
+    ui.read_full(long(head.ptr), 32)
+    let words = ui.get32(long(head.ptr) + 4)
+    let len = ui.get32(long(head.ptr) + 16)
     let body = sys.buffer(words * 4 + 8)
-    ui.read_full(int(body.ptr), words * 4)
+    ui.read_full(long(body.ptr), words * 4)
     return c.from_bytes(body.ptr, len)
 end
 
 func main()
     let win = ui.Window("Hello X", 400, 300)
-    let g = geometry(int(win.id))
+    let g = geometry(long(win.id))
     let dpi = ui.be_dpi(win.id)
-    println("size {g[0] * 96 / dpi}x{g[1] * 96 / dpi} title {title_of(int(win.id))}")
+    println("size {g[0] * 96 / dpi}x{g[1] * 96 / dpi} title {title_of(long(win.id))}")
 end
 "#,
     );
@@ -340,7 +340,7 @@ end
 fn controls_are_drawn_where_the_layout_puts_them() {
     let src = x_program(
         r#"
-func image(id: int, w: int, h: int) -> sys.Buf
+func image(id: long, w: long, h: long) -> sys.Buf
     let r = ui.req(73, 2, 5)
     ui.put32(r + 4, id)
     ui.put16(r + 8, 0)
@@ -350,15 +350,15 @@ func image(id: int, w: int, h: int) -> sys.Buf
     ui.put32(r + 16, 0xFFFFFFFF)
     ui.flush_x()
     let head = sys.buffer(32)
-    ui.read_full(int(head.ptr), 32)
-    let words = ui.get32(int(head.ptr) + 4)
+    ui.read_full(long(head.ptr), 32)
+    let words = ui.get32(long(head.ptr) + 4)
     let data = sys.buffer(words * 4 + 8)
-    ui.read_full(int(data.ptr), words * 4)
+    ui.read_full(long(data.ptr), words * 4)
     return data
 end
 
-func pixel(data: sys.Buf, w: int, x: int, y: int) -> int
-    return ui.get32(int(data.ptr) + (y * w + x) * 4) bitand 0xFFFFFF
+func pixel(data: sys.Buf, w: long, x: long, y: long) -> long
+    return ui.get32(long(data.ptr) + (y * w + x) * 4) bitand 0xFFFFFF
 end
 
 func main()
@@ -370,7 +370,7 @@ func main()
     win.layout(ui.vstack(box, ok, list))
     win.show()
     ui.paint_dirty()
-    let data = image(ui.wins[ui.win_index(int(win.id))].pixmap, 400, 300)
+    let data = image(ui.wins[ui.win_index(long(win.id))].pixmap, 400, 300)
     println("background {pixel(data, 400, 2, 2) == ui.C_BG}")
     println("focused border {pixel(data, 400, 12, 12) == ui.C_FOCUS}")
     println("field {pixel(data, 400, 380, 20) == ui.C_FIELD}")

@@ -1,0 +1,5 @@
+package util
+
+pub func times(a: int, b: int) -> int
+    return product(a, b)
+end

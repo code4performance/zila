@@ -1,0 +1,1984 @@
+// =====================================================================
+// Brasa standard library: web (`use web`)
+//
+//     use web
+//     use json            // only for the typed JSON helpers
+//
+//     var app = web.server(port: 8080)
+//     app.get("/hello/:name", func(req)
+//         return web.text(200, "hello {req.param("name") ?? "world"}")
+//     end)
+//     app.run()
+//
+// An HTTP/1.1 server, a router, middleware, JSON helpers, an HTTP client and HTML templates,
+// written in Brasa on `net`, `tls`, `task` and `json`. Nothing in the compiler knows about HTTP.
+//
+//   * the server runs one task per connection on the scheduler; limits and timeouts are fields of
+//     the `Server` (milliseconds for times, bytes for sizes) and a timeout never blocks other
+//     connections;
+//   * a handler is `func(Request) -> Response or error`; a middleware is
+//     `func(Request, next: Handler) -> Response or error`; an error becomes a response through
+//     its kind (`errors.NotFound` is 404, ...), replaceable with `app.on_error(f)`;
+//   * `web.read_json(T, req)` and `web.json(T, status, value)` decode and encode with `use json`
+//     (the program that calls them also writes `use json`: the generated code names it);
+//   * `web.get(url)` and `web.post(url, body)` speak plain http and https (`tls`);
+//   * `html ... end` is a block form (a comptime function of this library): markup with `{expr}`
+//     interpolation (escaped), `@for`, `@if`, `@else` and `@end` lines. It yields a `Safe`.
+//
+// Not covered: HTTP/2, WebSocket, TLS on the server side, compression, multipart forms, cookies,
+// streaming bodies. Bodies are whole texts bounded by `max_body` / `max_response`.
+// =====================================================================
+
+package web
+
+use bufio
+use errors
+use json
+use net
+use reflect
+use task
+use text
+use tls
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+pub type Method = enum
+    Get
+    Post
+    Put
+    Delete
+    Patch
+    Head
+    Options
+end
+
+pub func (m: Method) name() -> text
+    match m
+        Get -> return "GET"
+        Post -> return "POST"
+        Put -> return "PUT"
+        Delete -> return "DELETE"
+        Patch -> return "PATCH"
+        Head -> return "HEAD"
+        Options -> return "OPTIONS"
+    end
+end
+
+// What a handler receives. `path` is percent-decoded; `raw_path` is as it came on the wire.
+// Header names are lower-cased; a repeated header is joined with `, `.
+pub type Request = record
+    pub method: Method
+    pub version: text
+    pub path: text
+    pub raw_path: text
+    pub query: Map<text, text>
+    pub headers: Map<text, text>
+    pub body: text
+    pub params: Map<text, text>
+end
+
+// The value of a path parameter (`/users/:id`), or `nil`.
+pub func (r: Request) param(name: text) -> text?
+    if r.params.has(name)
+        return r.params[name]
+    end
+    return nil
+end
+
+// The value of a query string key, or `nil` (when repeated, the last wins).
+pub func (r: Request) query_param(name: text) -> text?
+    if r.query.has(name)
+        return r.query[name]
+    end
+    return nil
+end
+
+// A header by name, in any case, or `nil`.
+pub func (r: Request) header(name: text) -> text?
+    let key = text.lower(name)
+    if r.headers.has(key)
+        return r.headers[key]
+    end
+    return nil
+end
+
+pub type Response = record
+    pub status: int
+    pub headers: Map<text, text>
+    pub body: text
+end
+
+pub type Handler = func(Request) -> Response or error
+pub type Middleware = func(Request, next: Handler) -> Response or error
+
+// The kind of the error `read_json` returns for a body that is not declared as JSON (415).
+pub let UnsupportedMedia: ErrorKind = errors.kind("web.UnsupportedMedia") ?? errors.Other
+
+// ---------------------------------------------------------------------------
+// Responses
+// ---------------------------------------------------------------------------
+
+func with_type(status: int, kind: text, body: text) -> Response
+    var h: Map<text, text> = {}
+    h["Content-Type"] = kind
+    return Response { status: status, headers: h, body: body }
+end
+
+// A plain text response.
+pub func text(status: int, body: text) -> Response
+    return with_type(status, "text/plain; charset=utf-8", body)
+end
+
+// A response whose body is JSON that you already have as text.
+pub func json_text(status: int, body: text) -> Response
+    return with_type(status, "application/json", body)
+end
+
+// An HTML response: `page` is what an `html` block yields (or `web.raw(s)` for trusted markup).
+pub func html_page(status: int, page: Safe) -> Response
+    return with_type(status, "text/html; charset=utf-8", page.markup)
+end
+
+// 404 with a JSON body.
+pub func not_found() -> Response
+    return error_response(404, "not found")
+end
+
+// A redirect (302 by default) to `url`.
+pub func redirect(url: text) -> Response
+    return redirect_with(302, url)
+end
+
+pub func redirect_with(status: int, url: text) -> Response
+    var r = with_type(status, "text/plain; charset=utf-8", "")
+    r.headers["Location"] = url
+    return r
+end
+
+// A response with the headers of `r` plus `name: value`.
+pub func (r: Response) with_header(name: text, value: text) -> Response
+    var out = r
+    out.headers[name] = value
+    return out
+end
+
+// The JSON body `{"error": message}` with a status.
+pub func error_response(status: int, message: text) -> Response
+    var m: Map<text, json.Value> = {}
+    m["error"] = json.Text(message)
+    let body = json.stringify(json.Object(m)) ?? "\{\}"
+    return json_text(status, body)
+end
+
+pub func reason(status: int) -> text
+    match status
+        100 -> return "Continue"
+        200 -> return "OK"
+        201 -> return "Created"
+        202 -> return "Accepted"
+        204 -> return "No Content"
+        301 -> return "Moved Permanently"
+        302 -> return "Found"
+        303 -> return "See Other"
+        304 -> return "Not Modified"
+        307 -> return "Temporary Redirect"
+        308 -> return "Permanent Redirect"
+        400 -> return "Bad Request"
+        401 -> return "Unauthorized"
+        403 -> return "Forbidden"
+        404 -> return "Not Found"
+        405 -> return "Method Not Allowed"
+        408 -> return "Request Timeout"
+        410 -> return "Gone"
+        409 -> return "Conflict"
+        413 -> return "Payload Too Large"
+        414 -> return "URI Too Long"
+        415 -> return "Unsupported Media Type"
+        422 -> return "Unprocessable Entity"
+        429 -> return "Too Many Requests"
+        431 -> return "Request Header Fields Too Large"
+        500 -> return "Internal Server Error"
+        501 -> return "Not Implemented"
+        503 -> return "Service Unavailable"
+        504 -> return "Gateway Timeout"
+        _ -> return "Status"
+    end
+end
+
+// ---------------------------------------------------------------------------
+// Errors to responses
+// ---------------------------------------------------------------------------
+
+// The status of an error's kind: InvalidInput 400, Unauthenticated 401, PermissionDenied 403,
+// NotFound 404, AlreadyExists 409, UnsupportedMedia 415, Unavailable 503, Timeout 504, others 500.
+pub func status_of(e: error) -> int
+    if e.kind == errors.InvalidInput
+        return 400
+    end
+    if e.kind == errors.Unauthenticated
+        return 401
+    end
+    if e.kind == errors.PermissionDenied
+        return 403
+    end
+    if e.kind == errors.NotFound
+        return 404
+    end
+    if e.kind == errors.AlreadyExists
+        return 409
+    end
+    if e.kind == UnsupportedMedia
+        return 415
+    end
+    if e.kind == errors.Unavailable
+        return 503
+    end
+    if e.kind == errors.Timeout
+        return 504
+    end
+    return 500
+end
+
+// The default mapper: 4xx get `{"error": message}`; 5xx get `internal error` (the message is
+// for the log, see `Server.log`).
+pub func default_error(e: error) -> Response
+    let status = status_of(e)
+    if status >= 500
+        return text(status, "internal error")
+    end
+    return error_response(status, e.message)
+end
+
+// ---------------------------------------------------------------------------
+// Escaping and templates
+// ---------------------------------------------------------------------------
+
+// Markup that is safe to put in a page as it is: the result of an `html` block, or `raw(s)`.
+pub type Safe = record
+    pub markup: text
+end
+
+// Trusted text taken as markup, unescaped.
+pub func raw(s: text) -> Safe
+    return Safe { markup: s }
+end
+
+// `& < > " '` as entities: safe in element text and in quoted attributes (not in unquoted
+// attributes, `<script>`, `<style>` or URLs).
+pub func escape(s: text) -> text
+    var dirty = false
+    var i = 0
+    while i < s.len
+        let b = int(s.byte(i))
+        if b == 38 or b == 60 or b == 62 or b == 34 or b == 39
+            dirty = true
+            break
+        end
+        i += 1
+    end
+    if not dirty
+        return s
+    end
+    var parts: []text = []
+    var start = 0
+    i = 0
+    while i < s.len
+        let b = int(s.byte(i))
+        var rep = ""
+        if b == 38
+            rep = "&amp;"
+        else if b == 60
+            rep = "&lt;"
+        else if b == 62
+            rep = "&gt;"
+        else if b == 34
+            rep = "&quot;"
+        else if b == 39
+            rep = "&#39;"
+        end
+        if rep.len > 0
+            parts.add(s.slice(start, i))
+            parts.add(rep)
+            start = i + 1
+        end
+        i += 1
+    end
+    parts.add(s.slice(start, s.len))
+    return text.join(parts, "")
+end
+
+// What can be interpolated in a template: text and `Safe`, numbers, booleans and characters.
+pub type Piece = interface
+    func html_piece(self) -> text
+end
+
+func (s: text) html_piece() -> text
+    return escape(s)
+end
+
+func (s: Safe) html_piece() -> text
+    return s.markup
+end
+
+func (n: int) html_piece() -> text
+    return "{n}"
+end
+
+func (n: long) html_piece() -> text
+    return "{n}"
+end
+
+func (x: float) html_piece() -> text
+    return "{x}"
+end
+
+func (b: bool) html_piece() -> text
+    return "{b}"
+end
+
+func (c: char) html_piece() -> text
+    return escape(c.to_text())
+end
+
+// The collector the code of an `html` block writes into.
+#[shared]
+pub type Builder = record
+    pub parts: []text
+end
+
+pub func __lit(b: Builder, s: text)
+    b.parts.add(s)
+end
+
+pub func __put<T: Piece>(b: Builder, x: T)
+    b.parts.add(x.html_piece())
+end
+
+// Runs the code of an `html` block and gathers what it wrote (one final newline is dropped).
+pub func __page(body: func(Builder)) -> Safe
+    let b = Builder { parts: [] }
+    body(b)
+    var s = text.join(b.parts, "")
+    if s.len > 0 and int(s.byte(s.len - 1)) == 10
+        s = s.slice(0, s.len - 1)
+    end
+    return Safe { markup: s }
+end
+
+// ---- the comptime side: turns the raw lines of an `html` block into code ----
+
+func quote(s: text) -> text
+    var out = "\""
+    for c in s
+        if c == '\\'
+            out = out + "\\\\"
+        else if c == '"'
+            out = out + "\\\""
+        else if c == '{'
+            out = out + "\\\{"
+        else if c == '}'
+            out = out + "\\\}"
+        else if c.code == 10
+            out = out + "\\n"
+        else if c.code == 13
+            out = out + "\\r"
+        else
+            out = out + c.to_text()
+        end
+    end
+    return out + "\""
+end
+
+func template_fail(msg: text, line: int)
+    abort("html template, line {line}: {msg}")
+end
+
+// Code for one line of markup: literals and `{expr}` pieces, then a newline. Works on bytes: the
+// characters it looks for are ASCII, so every cut is on a character boundary.
+func markup_line(t: text, line: int) -> text
+    var out = ""
+    var lit = ""
+    var start = 0
+    var i = 0
+    let n = t.len
+    while i < n
+        let b = int(t.byte(i))
+        if b == 123
+            lit = lit + t.slice(start, i)
+            if i + 1 < n and int(t.byte(i + 1)) == 123
+                lit = lit + "\{"
+                i += 2
+                start = i
+                continue
+            end
+            // the matching close brace, skipping nested braces and quoted text
+            var depth = 1
+            var j = i + 1
+            var inq = false
+            while j < n and depth > 0
+                let cj = int(t.byte(j))
+                if inq
+                    if cj == 92
+                        j += 1
+                    else if cj == 34
+                        inq = false
+                    end
+                else if cj == 34
+                    inq = true
+                else if cj == 123
+                    depth += 1
+                else if cj == 125
+                    depth -= 1
+                end
+                j += 1
+            end
+            if depth > 0
+                template_fail("unclosed '\{'", line)
+            end
+            let expr = text.trim(t.slice(i + 1, j - 1))
+            if expr.len == 0
+                template_fail("empty braces", line)
+            end
+            if lit.len > 0
+                out = out + "    web.__lit(b, {quote(lit)})\n"
+                lit = ""
+            end
+            var code = expr
+            if text.starts_with(expr, "raw(")
+                code = "web." + expr
+            end
+            out = out + "    web.__put(b, {code})\n"
+            i = j
+            start = i
+        else if b == 125
+            lit = lit + t.slice(start, i)
+            if i + 1 < n and int(t.byte(i + 1)) == 125
+                lit = lit + "}"
+                i += 2
+                start = i
+            else
+                template_fail("unmatched '\}' (write two for a brace)", line)
+            end
+        else
+            i += 1
+        end
+    end
+    lit = lit + t.slice(start, n)
+    out = out + "    web.__lit(b, {quote(lit + "\n")})\n"
+    return out
+end
+
+// `html ... end`: the raw lines of the block become code that builds a `web.Safe`.
+#[block]
+comptime func html(raw: text) -> text
+    var out = "web.__page(func(b)\n"
+    var stack: []text = []
+    var no = 0
+    for line in text.lines(raw)
+        no += 1
+        let t = text.trim(line)
+        if t.len == 0
+            continue
+        end
+        if text.starts_with(t, "@@")
+            out = out + markup_line(t.slice(1, t.len), no)
+        else if text.starts_with(t, "@")
+            if t == "@end"
+                if stack.len == 0
+                    template_fail("@end without @for or @if", no)
+                end
+                stack.take()
+                out = out + "end\n"
+            else if t == "@else"
+                if stack.len == 0 or stack[stack.len - 1] != "if"
+                    template_fail("@else without @if", no)
+                end
+                out = out + "else\n"
+            else if text.starts_with(t, "@else if ")
+                if stack.len == 0 or stack[stack.len - 1] != "if"
+                    template_fail("@else if without @if", no)
+                end
+                out = out + "else if " + t.slice(9, t.len) + "\n"
+            else if text.starts_with(t, "@for ")
+                stack.add("for")
+                out = out + "for " + t.slice(5, t.len) + "\n"
+            else if text.starts_with(t, "@if ")
+                stack.add("if")
+                out = out + "if " + t.slice(4, t.len) + "\n"
+            else
+                template_fail("unknown directive '{t}' (use @for, @if, @else, @end)", no)
+            end
+        else
+            out = out + markup_line(t, no)
+        end
+    end
+    if stack.len > 0
+        template_fail("@{stack[stack.len - 1]} without @end", no)
+    end
+    return out + "end)"
+end
+
+// ---------------------------------------------------------------------------
+// JSON helpers (generated per type: the program also writes `use json`)
+// ---------------------------------------------------------------------------
+
+// Checks that the request says its body is JSON (else the error `UnsupportedMedia`, 415).
+pub func __check_json(req: Request) -> error
+    let ct = text.lower(req.header("content-type") ?? "")
+    if not text.contains(ct, "json")
+        return error(UnsupportedMedia, "the body must be JSON (Content-Type: application/json)")
+    end
+    return
+end
+
+// Decodes the JSON body of a request into a `T`: `let c = try web.read_json(Customer, req)`. A
+// wrong Content-Type is an `UnsupportedMedia` error (415), a body that does not fit `T` an
+// `InvalidInput` error (400) that says where.
+#[generated(read_json_gen)]
+pub func read_json(comptime t: Type, req: Request) -> t or error
+
+comptime func read_json_gen(t: Type) -> text
+    return "try web.__check_json(req)\nreturn try json.parse<{t.name()}>(req.body)\n"
+end
+
+// A JSON response for any value that `use json` can encode: `web.json(Customer, 200, c)`.
+#[generated(json_gen)]
+pub func json(comptime t: Type, status: int, value: t) -> Response or error
+
+comptime func json_gen(t: Type) -> text
+    return "let body = try json.encode<{t.name()}>(value)\nreturn web.json_text(status, body)\n"
+end
+
+// 201 with the JSON of `value`.
+#[generated(created_gen)]
+pub func created(comptime t: Type, value: t) -> Response or error
+
+comptime func created_gen(t: Type) -> text
+    return "return try web.json<{t.name()}>(201, value)\n"
+end
+
+// ---------------------------------------------------------------------------
+// Percent-encoding and URLs
+// ---------------------------------------------------------------------------
+
+func hexval(b: int) -> int
+    if b >= 48 and b <= 57
+        return b - 48
+    end
+    if b >= 97 and b <= 102
+        return b - 87
+    end
+    if b >= 65 and b <= 70
+        return b - 55
+    end
+    return -1
+end
+
+// `%XX` escapes decoded (and `+` as a space when `plus`); a bad escape or invalid UTF-8 is an
+// `InvalidInput` error.
+pub func unescape(s: text, plus: bool) -> text or error
+    var special = false
+    for i in 0..s.len
+        let b = int(s.byte(i))
+        if b == 37 or (plus and b == 43)
+            special = true
+        end
+    end
+    if not special
+        return s
+    end
+    var out: []byte = []
+    var i = 0
+    while i < s.len
+        let b = int(s.byte(i))
+        if b == 37
+            if i + 2 >= s.len
+                return error(errors.InvalidInput, "bad percent escape in '{s}'")
+            end
+            let h = hexval(int(s.byte(i + 1)))
+            let l = hexval(int(s.byte(i + 2)))
+            if h < 0 or l < 0
+                return error(errors.InvalidInput, "bad percent escape in '{s}'")
+            end
+            out.add(byte(h * 16 + l))
+            i += 3
+        else if plus and b == 43
+            out.add(byte(32))
+            i += 1
+        else
+            out.add(byte(b))
+            i += 1
+        end
+    end
+    return try text.from_bytes(out)
+end
+
+// ---------------------------------------------------------------------------
+// The server
+// ---------------------------------------------------------------------------
+
+type Route = record
+    method: Method
+    pattern: text
+    segs: []text
+    handler: Handler
+end
+
+// Counters shared by the tasks of one running server.
+#[shared]
+type Stats = record
+    open: long
+    stopped: bool
+end
+
+pub type Server = record
+    pub port: long
+    pub max_head: int
+    pub max_line: int
+    pub max_body: int
+    pub read_timeout: long
+    pub idle_timeout: long
+    pub write_timeout: long
+    pub max_connections: long
+    routes: []Route
+    chain: []Middleware
+    mapper: func(error) -> Response
+    log: func(text)
+end
+
+// A new server on `port` (0 picks a free one; see `Running.port`). Limits are fields: change them
+// before `run()`: `app.read_timeout = 2000`.
+pub func server(port: long = 8080) -> Server
+    return Server {
+        port: port,
+        max_head: 16384,
+        max_line: 8192,
+        max_body: 1048576,
+        read_timeout: 10000,
+        idle_timeout: 5000,
+        write_timeout: 10000,
+        max_connections: 1024,
+        routes: [],
+        chain: [],
+        mapper: default_error,
+        log: default_log
+    }
+end
+
+func default_log(line: text)
+    print(line)
+end
+
+// Where the server writes its log lines (5xx error messages); `print` by default.
+pub func (ref s: Server) log_to(f: func(text))
+    s.log = f
+end
+
+// Replaces the function that turns an error returned by a handler into a response.
+pub func (ref s: Server) on_error(f: func(error) -> Response)
+    s.mapper = f
+end
+
+// Appends a middleware; the first one added is the outermost.
+pub func (ref s: Server) use(m: Middleware)
+    s.chain.add(m)
+end
+
+func path_segments(path: text) -> []text
+    var segs: []text = []
+    for part in text.split(path, "/")
+        if part.len > 0
+            segs.add(part)
+        end
+    end
+    return segs
+end
+
+func add_route(ref s: Server, method: Method, pattern: text, h: Handler)
+    s.routes.add(Route { method: method, pattern: pattern, segs: path_segments(pattern), handler: h })
+end
+
+pub func (ref s: Server) get(pattern: text, h: Handler)
+    add_route(ref s, Get, pattern, h)
+end
+
+pub func (ref s: Server) post(pattern: text, h: Handler)
+    add_route(ref s, Post, pattern, h)
+end
+
+pub func (ref s: Server) put(pattern: text, h: Handler)
+    add_route(ref s, Put, pattern, h)
+end
+
+pub func (ref s: Server) delete(pattern: text, h: Handler)
+    add_route(ref s, Delete, pattern, h)
+end
+
+pub func (ref s: Server) patch(pattern: text, h: Handler)
+    add_route(ref s, Patch, pattern, h)
+end
+
+// ---- routing ----
+
+// How well a route matches the path segments: one digit per path segment (2 static, 1 `:name`,
+// 0 the `*rest` tail) after an `S`, or "" when it does not match. Higher scores (compared as text) win.
+func match_route(r: Route, segs: []text, ref params: Map<text, text>) -> text
+    var score = "S"
+    var i = 0
+    while i < r.segs.len
+        let p = r.segs[i]
+        if int(p.byte(0)) == 42
+            // `*rest` takes everything that is left
+            var rest: []text = []
+            var k = i
+            while k < segs.len
+                rest.add(segs[k])
+                k += 1
+            end
+            params[p.slice(1, p.len)] = text.join(rest, "/")
+            return score + "0"
+        end
+        if i >= segs.len
+            return ""
+        end
+        if int(p.byte(0)) == 58
+            params[p.slice(1, p.len)] = segs[i]
+            score = score + "1"
+        else
+            if p != segs[i]
+                return ""
+            end
+            score = score + "2"
+        end
+        i += 1
+    end
+    if segs.len != r.segs.len
+        return ""
+    end
+    return score
+end
+
+type Found = record
+    ok: bool
+    route: Route
+    params: Map<text, text>
+end
+
+func no_handler(req: Request) -> Response or error
+    return not_found()
+end
+
+func find_route(routes: []Route, method: Method, segs: []text) -> Found
+    var best = ""
+    var found = false
+    var chosen = Route { method: Get, pattern: "", segs: [], handler: no_handler }
+    var chosen_params: Map<text, text> = {}
+    for r in routes
+        if r.method == method
+            var p: Map<text, text> = {}
+            let score = match_route(r, segs, ref p)
+            if score.len > 0 and (not found or text.compare(score, best) > 0)
+                found = true
+                best = score
+                chosen = r
+                chosen_params = p
+            end
+        end
+    end
+    return Found { ok: found, route: chosen, params: chosen_params }
+end
+
+func has_name(names: []text, n: text) -> bool
+    for x in names
+        if x == n
+            return true
+        end
+    end
+    return false
+end
+
+// The methods of the routes whose pattern matches this path, for `Allow`.
+func allowed(routes: []Route, segs: []text) -> text
+    var names: []text = []
+    var has_get = false
+    for r in routes
+        var p: Map<text, text> = {}
+        if match_route(r, segs, ref p).len > 0
+            let n = r.method.name()
+            if not has_name(names, n)
+                names.add(n)
+            end
+            if r.method == Get
+                has_get = true
+            end
+        end
+    end
+    if has_get and not has_name(names, "HEAD")
+        names.add("HEAD")
+    end
+    return text.join(names, ", ")
+end
+
+func route(routes: []Route, req: Request) -> Response or error
+    var decoded: []text = []
+    for s in path_segments(req.raw_path)
+        decoded.add(try unescape(s, false))
+    end
+    var f = find_route(routes, req.method, decoded)
+    if not f.ok and req.method == Head
+        f = find_route(routes, Get, decoded)
+    end
+    if f.ok
+        var r = req
+        r.params = f.params
+        return try f.route.handler(r)
+    end
+    let allow = allowed(routes, decoded)
+    if allow.len > 0
+        return error_response(405, "method not allowed").with_header("Allow", allow)
+    end
+    return not_found()
+end
+
+func wrap(m: Middleware, next: Handler) -> Handler
+    return func(req) return m(req, next) end
+end
+
+// The routes behind the middleware chain, outermost first.
+func build_entry(s: Server) -> Handler
+    let routes = s.routes
+    var h: Handler = func(req) return route(routes, req) end
+    var i = s.chain.len - 1
+    while i >= 0
+        h = wrap(s.chain[i], h)
+        i -= 1
+    end
+    return h
+end
+
+// A middleware that prints `METHOD /path status Nms` for every request.
+pub func logger() -> Middleware
+    return func(req, next)
+        let t0 = task.now()
+        let result = next(req)
+        var status = 500
+        match result
+            ok(r) -> status = r.status
+            err(e) -> status = status_of(e)
+        end
+        print("{req.method.name()} {req.path} {status} {task.now() - t0}ms")
+        return result
+    end
+end
+
+// ---------------------------------------------------------------------------
+// Timers: a task that waits is woken by a timer that cancels its I/O
+// ---------------------------------------------------------------------------
+
+// A generation counter: a timer only acts if the generation it was armed with is still current,
+// so timers never need cancelling.
+#[shared]
+type Guard = record
+    gen: long
+    fired: bool
+end
+
+func arm(conn: net.Conn, g: Guard, ms: long, writes: bool)
+    g.gen += 1
+    g.fired = false
+    let mine = g.gen
+    task.add_timer(task.now() + ms, func()
+        if g.gen == mine
+            g.fired = true
+            conn.cancel(writes)
+        end
+    end)
+end
+
+func disarm(g: Guard)
+    g.gen += 1
+end
+
+// ---------------------------------------------------------------------------
+// Reading from a connection (plain or TLS)
+// ---------------------------------------------------------------------------
+
+#[shared]
+type Source = record
+    conn: net.Conn
+    secure: []tls.Conn
+    buf: bufio.InBuf
+end
+
+func plain_source(conn: net.Conn) -> Source
+    return Source { conn: conn, secure: [], buf: bufio.input() }
+end
+
+func (s: Source) fill() -> error
+    if s.buf.finished()
+        return
+    end
+    var part = ""
+    if s.secure.len > 0
+        part = try await s.secure[0].read(65536)
+    else
+        part = try await s.conn.read(65536)
+    end
+    if part.len == 0
+        s.buf.finish()
+        return
+    end
+    s.buf.feed(part)
+    return
+end
+
+func (s: Source) send(data: text) -> error
+    if s.secure.len > 0
+        try await s.secure[0].write(data)
+    else
+        try await s.conn.write(data)
+    end
+    return
+end
+
+// A line (without its line ending) of at most `limit` bytes. `over` says it would be longer.
+type Line = record
+    text: text
+    over: bool
+end
+
+func (s: Source) line(limit: int) -> Line or error
+    while not s.buf.has_line()
+        if s.buf.finished()
+            break
+        end
+        if s.buf.unread() > limit + 2
+            return Line { text: "", over: true }
+        end
+        try s.fill()
+    end
+    if not s.buf.has_line()
+        return error(errors.UnexpectedEof, "the connection closed in the middle of a message")
+    end
+    let l = s.buf.take_line()
+    if l.len > limit
+        return Line { text: "", over: true }
+    end
+    return Line { text: l, over: false }
+end
+
+// Exactly `n` bytes.
+func (s: Source) exact(n: int) -> text or error
+    var parts: []text = []
+    var left = n
+    while left > 0
+        if s.buf.unread() == 0
+            try s.fill()
+            if s.buf.unread() == 0
+                return error(errors.UnexpectedEof, "the connection closed in the middle of a body")
+            end
+        end
+        let piece = s.buf.take(left)
+        left -= piece.len
+        parts.add(piece)
+    end
+    return text.join(parts, "")
+end
+
+// ---------------------------------------------------------------------------
+// Parsing a request
+// ---------------------------------------------------------------------------
+
+type Parsed = record
+    done: bool
+    status: int
+    msg: text
+    req: Request
+    close: bool
+end
+
+func empty_request() -> Request
+    return Request { method: Get, version: "HTTP/1.1", path: "/", raw_path: "/", query: {}, headers: {}, body: "", params: {} }
+end
+
+func refuse(status: int, msg: text) -> Parsed
+    return Parsed { done: false, status: status, msg: msg, req: empty_request(), close: true }
+end
+
+func is_method(name: text) -> bool
+    return name == "GET" or name == "POST" or name == "PUT" or name == "DELETE" or name == "PATCH" or name == "HEAD" or name == "OPTIONS"
+end
+
+// The method named `name` (Get when it is not one: check with `is_method` first).
+func method_of(name: text) -> Method
+    if name == "POST"
+        return Post
+    end
+    if name == "PUT"
+        return Put
+    end
+    if name == "DELETE"
+        return Delete
+    end
+    if name == "PATCH"
+        return Patch
+    end
+    if name == "HEAD"
+        return Head
+    end
+    if name == "OPTIONS"
+        return Options
+    end
+    return Get
+end
+
+func parse_query(q: text) -> Map<text, text> or error
+    var m: Map<text, text> = {}
+    if q.len == 0
+        return m
+    end
+    for pair in text.split(q, "&")
+        if pair.len == 0
+            continue
+        end
+        let eq = text.index_of(pair, "=")
+        if eq < 0
+            let k = try unescape(pair, true)
+            m[k] = ""
+        else
+            let k = try unescape(pair.slice(0, eq), true)
+            let v = try unescape(pair.slice(eq + 1, pair.len), true)
+            m[k] = v
+        end
+    end
+    return m
+end
+
+// A hexadecimal number (chunk sizes), at most 8 digits; -1 when it is not one.
+func parse_hex(s: text) -> int
+    if s.len == 0 or s.len > 7
+        return -1
+    end
+    var n = 0
+    for i in 0..s.len
+        let d = hexval(int(s.byte(i)))
+        if d < 0
+            return -1
+        end
+        n = n * 16 + d
+    end
+    return n
+end
+
+// Reads the next request; `done` when the peer closed the connection before sending anything.
+// The caller has already made sure that some bytes (or the end) are there.
+func read_request(src: Source, srv: Server) -> Parsed or error
+    if src.buf.unread() == 0 and src.buf.finished()
+        return Parsed { done: true, status: 0, msg: "", req: empty_request(), close: true }
+    end
+    // skip empty lines before a request line (RFC 9112, 2.2)
+    var first = try src.line(srv.max_line)
+    while not first.over and first.text.len == 0
+        first = try src.line(srv.max_line)
+    end
+    if first.over
+        return refuse(414, "request line too long")
+    end
+    let parts = text.split(first.text, " ")
+    if parts.len != 3 or parts[0].len == 0 or parts[1].len == 0
+        return refuse(400, "malformed request line")
+    end
+    let version = parts[2]
+    if version != "HTTP/1.1" and version != "HTTP/1.0"
+        return refuse(400, "unsupported HTTP version")
+    end
+    if not is_method(parts[0])
+        return refuse(501, "method not implemented")
+    end
+    let target = parts[1]
+    if int(target.byte(0)) != 47
+        return refuse(400, "the request target must start with a slash")
+    end
+    var raw_path = target
+    var query = ""
+    let qi = text.index_of(target, "?")
+    if qi >= 0
+        raw_path = target.slice(0, qi)
+        query = target.slice(qi + 1, target.len)
+    end
+    var req = empty_request()
+    req.method = method_of(parts[0])
+    req.version = version
+    req.raw_path = raw_path
+    match unescape(raw_path, false)
+        ok(p) -> req.path = p
+        err(e) -> return refuse(400, e.message)
+    end
+    match parse_query(query)
+        ok(q) -> req.query = q
+        err(e) -> return refuse(400, e.message)
+    end
+    // headers
+    var head_bytes = first.text.len
+    while true
+        let l = try src.line(srv.max_head)
+        if l.over
+            return refuse(431, "request headers too large")
+        end
+        if l.text.len == 0
+            break
+        end
+        head_bytes += l.text.len + 2
+        if head_bytes > srv.max_head
+            return refuse(431, "request headers too large")
+        end
+        let c = int(l.text.byte(0))
+        if c == 32 or c == 9
+            return refuse(400, "folded header lines are not supported")
+        end
+        let colon = text.index_of(l.text, ":")
+        if colon <= 0
+            return refuse(400, "malformed header line")
+        end
+        let name = text.lower(l.text.slice(0, colon))
+        if text.contains(name, " ") or text.contains(name, "\t")
+            return refuse(400, "malformed header name")
+        end
+        let value = text.trim(l.text.slice(colon + 1, l.text.len))
+        if req.headers.has(name)
+            req.headers[name] = req.headers[name] + ", " + value
+        else
+            req.headers[name] = value
+        end
+    end
+    // body framing
+    let has_te = req.headers.has("transfer-encoding")
+    let has_cl = req.headers.has("content-length")
+    if has_te and has_cl
+        return refuse(400, "both Content-Length and Transfer-Encoding")
+    end
+    var close = version == "HTTP/1.0"
+    let conn_h = text.lower(req.headers.get("connection", ""))
+    if text.contains(conn_h, "close")
+        close = true
+    else if version == "HTTP/1.0" and text.contains(conn_h, "keep-alive")
+        close = false
+    end
+    var announced = 0
+    if has_te
+        if text.lower(text.trim(req.headers["transfer-encoding"])) != "chunked"
+            return refuse(501, "unsupported Transfer-Encoding")
+        end
+        announced = -1
+    else if has_cl
+        match text.parse_long(text.trim(req.headers["content-length"]))
+            ok(n) ->
+                if n < 0
+                    return refuse(400, "bad Content-Length")
+                end
+                if n > srv.max_body
+                    return refuse(413, "request body too large")
+                end
+                announced = int(n)
+            err(e) -> return refuse(400, "bad Content-Length")
+        end
+    end
+    if announced != 0 and text.lower(req.headers.get("expect", "")) == "100-continue"
+        try src.send("HTTP/1.1 100 Continue\r\n\r\n")
+    end
+    if announced > 0
+        req.body = try src.exact(announced)
+    else if announced < 0
+        var pieces: []text = []
+        var total = 0
+        while true
+            let sz = try src.line(srv.max_line)
+            if sz.over
+                return refuse(400, "bad chunk size")
+            end
+            var hex = sz.text
+            let semi = text.index_of(hex, ";")
+            if semi >= 0
+                hex = hex.slice(0, semi)
+            end
+            let n = parse_hex(text.trim(hex))
+            if n < 0
+                return refuse(400, "bad chunk size")
+            end
+            if n == 0
+                // trailers are read and ignored
+                while true
+                    let t = try src.line(srv.max_head)
+                    if t.over
+                        return refuse(431, "trailer too large")
+                    end
+                    if t.text.len == 0
+                        break
+                    end
+                end
+                break
+            end
+            total += n
+            if total > srv.max_body
+                return refuse(413, "request body too large")
+            end
+            pieces.add(try src.exact(n))
+            let end_line = try src.line(srv.max_line)
+            if end_line.over or end_line.text.len != 0
+                return refuse(400, "bad chunk")
+            end
+        end
+        req.body = text.join(pieces, "")
+    end
+    return Parsed { done: false, status: 0, msg: "", req: req, close: close }
+end
+
+// ---------------------------------------------------------------------------
+// Writing a response
+// ---------------------------------------------------------------------------
+
+func render(res: Response, head_only: bool, keep: bool) -> text
+    var parts: []text = []
+    parts.add("HTTP/1.1 {res.status} {reason(res.status)}\r\n")
+    for k, v in res.headers
+        let lk = text.lower(k)
+        if lk != "content-length" and lk != "connection"
+            parts.add("{k}: {v}\r\n")
+        end
+    end
+    let bodyless = res.status < 200 or res.status == 204 or res.status == 304
+    if not bodyless
+        parts.add("Content-Length: {res.body.len}\r\n")
+    end
+    if keep
+        parts.add("Connection: keep-alive\r\n")
+    else
+        parts.add("Connection: close\r\n")
+    end
+    parts.add("\r\n")
+    if not head_only and not bodyless
+        parts.add(res.body)
+    end
+    return text.join(parts, "")
+end
+
+// ---------------------------------------------------------------------------
+// Serving connections
+// ---------------------------------------------------------------------------
+
+// Everything one connection task needs.
+type Context = record
+    srv: Server
+    entry: Handler
+    stats: Stats
+end
+
+func sent_ok(src: Source, data: text) -> bool
+    match src.send(data)
+        ok -> return true
+        err(e) -> return false
+    end
+    return false
+end
+
+func reply(src: Source, g: Guard, srv: Server, res: Response, head_only: bool, keep: bool) -> bool
+    arm(src.conn, g, srv.write_timeout, true)
+    let ok = sent_ok(src, render(res, head_only, keep))
+    disarm(g)
+    return ok
+end
+
+func serve(conn: net.Conn, cx: Context)
+    serve_loop(conn, cx)
+    cx.stats.open -= 1
+    await conn.close()
+end
+
+func serve_loop(conn: net.Conn, cx: Context)
+    let srv = cx.srv
+    let src = plain_source(conn)
+    let g = Guard { gen: 0, fired: false }
+    while not cx.stats.stopped
+        // wait for the first byte of the next request (idle) ...
+        arm(conn, g, srv.idle_timeout, false)
+        var idle_ok = true
+        if src.buf.unread() == 0
+            match src.fill()
+                ok -> idle_ok = true
+                err(e) -> idle_ok = false
+            end
+        end
+        disarm(g)
+        if not idle_ok or (src.buf.unread() == 0 and src.buf.finished())
+            return
+        end
+        // ... then the whole request must arrive within read_timeout
+        arm(conn, g, srv.read_timeout, false)
+        var parsed = refuse(400, "")
+        match read_request(src, srv)
+            ok(p) -> parsed = p
+            err(e) ->
+                let timed_out = g.fired
+                disarm(g)
+                if timed_out
+                    reply(src, g, srv, text(408, "request timeout"), false, false)
+                end
+                return
+        end
+        disarm(g)
+        if parsed.done
+            return
+        end
+        if parsed.status != 0
+            reply(src, g, srv, text(parsed.status, parsed.msg), false, false)
+            return
+        end
+        let req = parsed.req
+        var res = not_found()
+        match cx.entry(req)
+            ok(r) -> res = r
+            err(e) ->
+                if status_of(e) >= 500
+                    srv.log("web: {req.method.name()} {req.path}: {e.message}")
+                end
+                res = srv.mapper(e)
+        end
+        let keep = not parsed.close
+        if not reply(src, g, srv, res, req.method == Head, keep) or not keep
+            return
+        end
+    end
+end
+
+// A connection beyond `max_connections`: 503 and close.
+func turn_away(conn: net.Conn, srv: Server)
+    let g = Guard { gen: 0, fired: false }
+    let src = plain_source(conn)
+    arm(conn, g, 2000, true)
+    sent_ok(src, render(text(503, "server busy"), false, false))
+    disarm(g)
+    await conn.close()
+end
+
+// A server that is listening.
+#[shared]
+pub type Running = record
+    pub port: long
+    listener: net.Listener
+    stats: Stats
+end
+
+// Stops accepting connections. Connections that are open finish their current request.
+pub func (r: Running) stop()
+    r.stats.stopped = true
+    r.listener.cancel()
+end
+
+func accept_loop(listener: net.Listener, cx: Context)
+    while not cx.stats.stopped
+        match await listener.accept()
+            ok(conn) ->
+                if cx.stats.open >= cx.srv.max_connections
+                    spawn turn_away(conn, cx.srv)
+                else
+                    cx.stats.open += 1
+                    spawn serve(conn, cx)
+                end
+            err(e) ->
+                if cx.stats.stopped
+                    return
+                end
+                // a failed accept (for example a connection reset in the queue): go on
+                task.yield()
+        end
+    end
+end
+
+func context_of(s: Server) -> Context
+    return Context { srv: s, entry: build_entry(s), stats: Stats { open: 0, stopped: false } }
+end
+
+// Starts listening and serving in the background, then returns (use `Running.port` when the
+// port was 0, and `Running.stop()` to stop). The routes and middleware are fixed at this point.
+pub func (s: Server) start() -> Running or error
+    let listener = try await net.listen(s.port)
+    let cx = context_of(s)
+    spawn accept_loop(listener, cx)
+    return Running { port: listener.port, listener: listener, stats: cx.stats }
+end
+
+// Listens and serves until the program ends.
+pub func (s: Server) run() -> error
+    let listener = try await net.listen(s.port)
+    accept_loop(listener, context_of(s))
+    return
+end
+
+// ---------------------------------------------------------------------------
+// The client
+// ---------------------------------------------------------------------------
+
+pub type ClientResponse = record
+    pub status: int
+    pub headers: Map<text, text>
+    pub body: text
+end
+
+// A header of the response by name, in any case, or `nil`.
+pub func (r: ClientResponse) header(name: text) -> text?
+    let key = text.lower(name)
+    if r.headers.has(key)
+        return r.headers[key]
+    end
+    return nil
+end
+
+// Limits of the client: `max_response` in bytes, `timeout` in milliseconds for the whole
+// exchange once connected (all redirects together), `max_redirects` redirects to follow.
+pub type ClientOptions = record
+    pub max_response: int
+    pub timeout: long
+    pub max_redirects: int
+end
+
+pub func client_options() -> ClientOptions
+    return ClientOptions { max_response: 16777216, timeout: 30000, max_redirects: 5 }
+end
+
+type Url = record
+    secure: bool
+    host: text
+    port: long
+    target: text
+end
+
+func bad_url(u: text, why: text) -> error?
+    return error(errors.InvalidInput, "bad URL '{u}': {why}")
+end
+
+func parse_url(u: text) -> Url or error
+    var rest = ""
+    var secure = false
+    if text.starts_with(u, "http://")
+        rest = u.slice(7, u.len)
+    else if text.starts_with(u, "https://")
+        rest = u.slice(8, u.len)
+        secure = true
+    else
+        return bad_url(u, "only http and https URLs are supported")
+    end
+    var auth = rest
+    var target = "/"
+    var cut = text.index_of(rest, "/")
+    let qcut = text.index_of(rest, "?")
+    if qcut >= 0 and (cut < 0 or qcut < cut)
+        cut = qcut
+        auth = rest.slice(0, cut)
+        target = "/" + rest.slice(cut, rest.len)
+    else if cut >= 0
+        auth = rest.slice(0, cut)
+        target = rest.slice(cut, rest.len)
+    end
+    let hash = text.index_of(target, "#")
+    if hash >= 0
+        target = target.slice(0, hash)
+    end
+    var host = auth
+    var port: long = 80
+    if secure
+        port = 443
+    end
+    let colon = text.index_of(auth, ":")
+    if colon >= 0
+        host = auth.slice(0, colon)
+        match text.parse_long(auth.slice(colon + 1, auth.len))
+            ok(n) -> port = n
+            err(e) -> return bad_url(u, "bad port")
+        end
+    end
+    if host.len == 0
+        return bad_url(u, "no host")
+    end
+    return Url { secure: secure, host: host, port: port, target: target }
+end
+
+func url_text(u: Url) -> text
+    var scheme = "http"
+    var default_port: long = 80
+    if u.secure
+        scheme = "https"
+        default_port = 443
+    end
+    if u.port == default_port
+        return "{scheme}://{u.host}{u.target}"
+    end
+    return "{scheme}://{u.host}:{u.port}{u.target}"
+end
+
+func open_source(u: Url) -> Source or error
+    if u.secure
+        let t = try await tls.connect(u.host, u.port)
+        return Source { conn: t.raw, secure: [t], buf: bufio.input() }
+    end
+    let c = try await net.connect(u.host, u.port)
+    return plain_source(c)
+end
+
+func bodyless_status(status: int) -> bool
+    return status < 200 or status == 204 or status == 304
+end
+
+// One request on one connection (no redirects); the connection is closed afterwards.
+func exchange(src: Source, opts: ClientOptions, method: Method, u: Url, headers: Map<text, text>, body: text) -> ClientResponse or error
+    var have: Map<text, bool> = {}
+    for k, v in headers
+        have[text.lower(k)] = true
+    end
+    var parts: []text = []
+    parts.add("{method.name()} {u.target} HTTP/1.1\r\n")
+    if not have.has("host")
+        if u.port == 80 and not u.secure or u.port == 443 and u.secure
+            parts.add("Host: {u.host}\r\n")
+        else
+            parts.add("Host: {u.host}:{u.port}\r\n")
+        end
+    end
+    if not have.has("user-agent")
+        parts.add("User-Agent: brasa-web\r\n")
+    end
+    if not have.has("accept")
+        parts.add("Accept: */*\r\n")
+    end
+    parts.add("Connection: close\r\n")
+    for k, v in headers
+        let lk = text.lower(k)
+        if lk != "connection" and lk != "content-length"
+            parts.add("{k}: {v}\r\n")
+        end
+    end
+    if body.len > 0 or method == Post or method == Put or method == Patch
+        parts.add("Content-Length: {body.len}\r\n")
+    end
+    parts.add("\r\n")
+    parts.add(body)
+    try src.send(text.join(parts, ""))
+
+    // status line (interim 1xx responses are skipped)
+    var status = 100
+    var head_headers: Map<text, text> = {}
+    while status >= 100 and status < 200
+        let first = try src.line(8192)
+        if first.over
+            return error(errors.InvalidInput, "the status line is too long")
+        end
+        let sp = text.split(first.text, " ")
+        if sp.len < 2 or not text.starts_with(sp[0], "HTTP/1.")
+            return error(errors.InvalidInput, "not an HTTP response: '{first.text}'")
+        end
+        status = try text.parse_int(sp[1])
+        head_headers = {}
+        var head_bytes = 0
+        while true
+            let l = try src.line(65536)
+            if l.over
+                return error(errors.InvalidInput, "a response header line is too long")
+            end
+            if l.text.len == 0
+                break
+            end
+            head_bytes += l.text.len
+            if head_bytes > 262144
+                return error(errors.InvalidInput, "the response headers are too large")
+            end
+            let colon = text.index_of(l.text, ":")
+            if colon <= 0
+                return error(errors.InvalidInput, "malformed response header '{l.text}'")
+            end
+            let name = text.lower(l.text.slice(0, colon))
+            let value = text.trim(l.text.slice(colon + 1, l.text.len))
+            if head_headers.has(name)
+                head_headers[name] = head_headers[name] + ", " + value
+            else
+                head_headers[name] = value
+            end
+        end
+        if status == 101
+            break
+        end
+    end
+    var out = ""
+    if method != Head and not bodyless_status(status)
+        let te = text.lower(head_headers.get("transfer-encoding", ""))
+        if text.contains(te, "chunked")
+            var pieces: []text = []
+            var total = 0
+            while true
+                let sz = try src.line(1024)
+                if sz.over
+                    return error(errors.InvalidInput, "bad chunk size")
+                end
+                var hex = sz.text
+                let semi = text.index_of(hex, ";")
+                if semi >= 0
+                    hex = hex.slice(0, semi)
+                end
+                let n = parse_hex(text.trim(hex))
+                if n < 0
+                    return error(errors.InvalidInput, "bad chunk size '{sz.text}'")
+                end
+                if n == 0
+                    while true
+                        let t = try src.line(65536)
+                        if t.over or t.text.len == 0
+                            break
+                        end
+                    end
+                    break
+                end
+                total += n
+                if total > opts.max_response
+                    return error(errors.Overflow, "the response is larger than max_response")
+                end
+                pieces.add(try src.exact(n))
+                let nl = try src.line(1024)
+                if nl.text.len != 0
+                    return error(errors.InvalidInput, "bad chunk")
+                end
+            end
+            out = text.join(pieces, "")
+        else if head_headers.has("content-length")
+            let n = try text.parse_long(text.trim(head_headers["content-length"]))
+            if n < 0
+                return error(errors.InvalidInput, "bad Content-Length")
+            end
+            if n > opts.max_response
+                return error(errors.Overflow, "the response is larger than max_response")
+            end
+            out = try src.exact(int(n))
+        else
+            // until the server closes the connection
+            while not src.buf.finished()
+                if src.buf.unread() > opts.max_response
+                    return error(errors.Overflow, "the response is larger than max_response")
+                end
+                try src.fill()
+            end
+            out = src.buf.take_all()
+        end
+    end
+    return ClientResponse { status: status, headers: head_headers, body: out }
+end
+
+// One request with its timer; closes the connection.
+func request_once(opts: ClientOptions, method: Method, u: Url, headers: Map<text, text>, body: text) -> ClientResponse or error
+    let src = try open_source(u)
+    let g = Guard { gen: 0, fired: false }
+    arm(src.conn, g, opts.timeout, true)
+    let result = exchange(src, opts, method, u, headers, body)
+    let timed_out = g.fired
+    disarm(g)
+    await src.conn.close()
+    if timed_out
+        return error(errors.Timeout, "the request to {u.host} timed out")
+    end
+    return result
+end
+
+func resolve_location(u: Url, loc: text) -> text
+    if text.starts_with(loc, "http://") or text.starts_with(loc, "https://")
+        return loc
+    end
+    // another scheme (`ftp:...`, `mailto:...`): returned as it is, the policy refuses it
+    let colon = text.index_of(loc, ":")
+    let slash = text.index_of(loc, "/")
+    if colon > 0 and (slash < 0 or colon < slash)
+        return loc
+    end
+    var scheme = "http"
+    if u.secure
+        scheme = "https"
+    end
+    if text.starts_with(loc, "//")
+        return "{scheme}:{loc}"
+    end
+    var base = "{scheme}://{u.host}:{u.port}"
+    if text.starts_with(loc, "/")
+        return base + loc
+    end
+    var dir = u.target
+    let q = text.index_of(dir, "?")
+    if q >= 0
+        dir = dir.slice(0, q)
+    end
+    var i = dir.len - 1
+    while i > 0 and int(dir.byte(i)) != 47
+        i -= 1
+    end
+    return base + dir.slice(0, i + 1) + loc
+end
+
+// The redirect policy of the client: only to `http` and `https` URLs, and never from `https` to
+// `http`.
+pub func redirect_allowed(from: text, to: text) -> bool
+    let to_https = text.starts_with(to, "https://")
+    if not to_https and not text.starts_with(to, "http://")
+        return false
+    end
+    return to_https or not text.starts_with(from, "https://")
+end
+
+// A request with explicit limits: follows up to `max_redirects` redirects to http and https
+// URLs (never from https to http; 301-303 turn a POST into a GET, 307 and 308 keep it).
+pub func request_with(opts: ClientOptions, method: Method, url: text, headers: Map<text, text>, body: text) -> ClientResponse or error
+    var u = try parse_url(url)
+    var m = method
+    var b = body
+    var hops = 0
+    while true
+        let res = try request_once(opts, m, u, headers, b)
+        let loc = res.header("location") ?? ""
+        let redirect = res.status == 301 or res.status == 302 or res.status == 303 or res.status == 307 or res.status == 308
+        if not redirect or loc.len == 0
+            return res
+        end
+        if opts.max_redirects == 0
+            return res
+        end
+        if hops >= opts.max_redirects
+            return error(errors.Other, "too many redirects (more than {opts.max_redirects}) from {url}")
+        end
+        hops += 1
+        let target = resolve_location(u, loc)
+        if not redirect_allowed(url_text(u), target)
+            return error(errors.PermissionDenied, "refusing to follow the redirect from {url_text(u)} to {target}")
+        end
+        let next = try parse_url(target)
+        if res.status != 307 and res.status != 308 and m != Head
+            m = Get
+            b = ""
+        end
+        u = next
+    end
+    return error(errors.Other, "unreachable")
+end
+
+// A request with the default limits (`client_options()`).
+pub func request(method: Method, url: text, headers: Map<text, text>, body: text) -> ClientResponse or error
+    return try request_with(client_options(), method, url, headers, body)
+end
+
+// GET `url`.
+pub func get(url: text) -> ClientResponse or error
+    let none: Map<text, text> = {}
+    return try request(Get, url, none, "")
+end
+
+// POST `body` (as text/plain) to `url`.
+pub func post(url: text, body: text) -> ClientResponse or error
+    var h: Map<text, text> = {}
+    h["Content-Type"] = "text/plain; charset=utf-8"
+    return try request(Post, url, h, body)
+end
+
+// POST a JSON text to `url`.
+pub func post_json(url: text, body: text) -> ClientResponse or error
+    var h: Map<text, text> = {}
+    h["Content-Type"] = "application/json"
+    return try request(Post, url, h, body)
+end
+
+// ---------------------------------------------------------------------------
+// Streaming responses
+// ---------------------------------------------------------------------------
+
+// What the status line and headers of a response said.
+type Head = record
+    status: int
+    headers: Map<text, text>
+end
+
+func read_head(src: Source) -> Head or error
+    var status = 100
+    var hs: Map<text, text> = {}
+    while status >= 100 and status < 200
+        let first = try src.line(8192)
+        if first.over
+            return error(errors.InvalidInput, "the status line is too long")
+        end
+        let sp = text.split(first.text, " ")
+        if sp.len < 2 or not text.starts_with(sp[0], "HTTP/1.")
+            return error(errors.InvalidInput, "not an HTTP response: '{first.text}'")
+        end
+        status = try text.parse_int(sp[1])
+        hs = {}
+        while true
+            let l = try src.line(65536)
+            if l.over
+                return error(errors.InvalidInput, "a response header line is too long")
+            end
+            if l.text.len == 0
+                break
+            end
+            let colon = text.index_of(l.text, ":")
+            if colon <= 0
+                return error(errors.InvalidInput, "malformed response header '{l.text}'")
+            end
+            let name = text.lower(l.text.slice(0, colon))
+            let value = text.trim(l.text.slice(colon + 1, l.text.len))
+            if hs.has(name)
+                hs[name] = hs[name] + ", " + value
+            else
+                hs[name] = value
+            end
+        end
+    end
+    return Head { status: status, headers: hs }
+end
+
+// The body of a response, piece by piece: each chunk of a chunked body, each read of a body
+// that ends when the connection closes, the whole of a `Content-Length` body in blocks. `on_piece`
+// may return an error to stop reading.
+func read_body_pieces(src: Source, hs: Map<text, text>, on_piece: func(text) -> error) -> error
+    let te = text.lower(hs.get("transfer-encoding", ""))
+    if text.contains(te, "chunked")
+        while true
+            let sz = try src.line(1024)
+            if sz.over
+                return error(errors.InvalidInput, "bad chunk size")
+            end
+            var hex = sz.text
+            let semi = text.index_of(hex, ";")
+            if semi >= 0
+                hex = hex.slice(0, semi)
+            end
+            let n = parse_hex(text.trim(hex))
+            if n < 0
+                return error(errors.InvalidInput, "bad chunk size '{sz.text}'")
+            end
+            if n == 0
+                return
+            end
+            try on_piece(try src.exact(n))
+            let nl = try src.line(1024)
+            if nl.text.len != 0
+                return error(errors.InvalidInput, "bad chunk")
+            end
+        end
+    end
+    if hs.has("content-length")
+        var left = try text.parse_long(text.trim(hs["content-length"]))
+        while left > 0
+            var n = 65536
+            if left < 65536
+                n = int(left)
+            end
+            try on_piece(try src.exact(n))
+            left -= long(n)
+        end
+        return
+    end
+    while not src.buf.finished()
+        try src.fill()
+        if src.buf.unread() > 0
+            try on_piece(src.buf.take_all())
+        end
+    end
+    return
+end
+
+// Sends a request and hands the body of a successful (2xx) response to `on_piece` as it arrives
+// (server-sent events, long answers). The returned `ClientResponse` has the status and headers,
+// and a body only for a response that is not 2xx (an error message is small and wanted whole).
+// No redirects are followed. `opts.timeout` limits the whole exchange; an error returned by
+// `on_piece` stops it and closes the connection.
+pub func stream(opts: ClientOptions, method: Method, url: text, headers: Map<text, text>, body: text, on_piece: func(text) -> error) -> ClientResponse or error
+    let u = try parse_url(url)
+    let src = try open_source(u)
+    let g = Guard { gen: 0, fired: false }
+    arm(src.conn, g, opts.timeout, true)
+    var hs: Map<text, text> = {}
+    var status = 0
+    var failed: error? = nil
+    var out = ""
+    match send_and_read_head(src, method, u, headers, body)
+        ok(h) ->
+            status = h.status
+            hs = h.headers
+        err(e) -> failed = e
+    end
+    if failed == nil
+        if status >= 200 and status < 300
+            match read_body_pieces(src, hs, on_piece)
+                ok -> status = status
+                err(e) -> failed = e
+            end
+        else
+            let kept = Kept { pieces: [], total: 0, limit: opts.max_response }
+            match read_body_pieces(src, hs, func(p) return keep_piece(kept, p) end)
+                ok -> out = text.join(kept.pieces, "")
+                err(e) -> out = text.join(kept.pieces, "")
+            end
+        end
+    end
+    let timed_out = g.fired
+    disarm(g)
+    await src.conn.close()
+    if timed_out
+        return error(errors.Timeout, "the request to {u.host} timed out")
+    end
+    if failed != nil
+        return failed
+    end
+    return ClientResponse { status: status, headers: hs, body: out }
+end
+
+// The pieces of a body that is kept whole (an error body), up to a limit.
+#[shared]
+type Kept = record
+    pieces: []text
+    total: int
+    limit: int
+end
+
+func keep_piece(k: Kept, p: text) -> error
+    k.total += p.len
+    if k.total <= k.limit
+        k.pieces.add(p)
+    end
+    return
+end
+
+func send_and_read_head(src: Source, method: Method, u: Url, headers: Map<text, text>, body: text) -> Head or error
+    var parts: []text = []
+    parts.add("{method.name()} {u.target} HTTP/1.1\r\n")
+    var have: Map<text, bool> = {}
+    for k, v in headers
+        have[text.lower(k)] = true
+    end
+    if not have.has("host")
+        if u.port == 80 and not u.secure or u.port == 443 and u.secure
+            parts.add("Host: {u.host}\r\n")
+        else
+            parts.add("Host: {u.host}:{u.port}\r\n")
+        end
+    end
+    if not have.has("user-agent")
+        parts.add("User-Agent: brasa-web\r\n")
+    end
+    parts.add("Connection: close\r\n")
+    for k, v in headers
+        let lk = text.lower(k)
+        if lk != "connection" and lk != "content-length"
+            parts.add("{k}: {v}\r\n")
+        end
+    end
+    if body.len > 0 or method == Post or method == Put or method == Patch
+        parts.add("Content-Length: {body.len}\r\n")
+    end
+    parts.add("\r\n")
+    parts.add(body)
+    try src.send(text.join(parts, ""))
+    return read_head(src)
+end

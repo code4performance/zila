@@ -196,7 +196,7 @@ fn memory_is_given_back_and_big_values_work() {
 #[test]
 fn a_large_list_and_many_small_objects() {
     let src = main_of(
-        "let xs: []int = []\nfor i in 0..300000\n    xs.add(i)\nend\nvar total = 0\nfor x in xs\n    total += x\nend\nlet names: []text = []\nfor i in 0..20000\n    names.add(\"name {i}\")\nend\nprint(\"{total} {names.len} {names[19999]}\")\n",
+        "let xs: []int = []\nfor i in 0..300000\n    xs.add(i)\nend\nvar total: long = 0\nfor x in xs\n    total += x\nend\nlet names: []text = []\nfor i in 0..20000\n    names.add(\"name {i}\")\nend\nprint(\"{total} {names.len} {names[19999]}\")\n",
     );
     let Some((out, code)) = run_linux(&src) else { return };
     assert_eq!((out.as_str(), code), ("44999850000 20000 name 19999\n", 0));
@@ -811,12 +811,12 @@ func reply(query: text, flags: int, answer: bool, prefix: bool) -> text
         skip = 2
     end
     let b = sys.buffer(query.len + extra + 2)
-    let a = int(b.ptr)
+    let a = long(b.ptr)
     for i in 0..query.len
-        sys.put8(a + skip + i, int(query[i]))
+        sys.put8(a + skip + i, long(query.byte(i)))
     end
-    sys.put8(a + skip + 2, flags >> 8)
-    sys.put8(a + skip + 3, flags bitand 255)
+    sys.put8(a + skip + 2, long(flags >> 8))
+    sys.put8(a + skip + 3, long(flags bitand 255))
     if answer
         sys.put8(a + skip + 7, 1)
         let rr = a + skip + query.len
@@ -825,8 +825,8 @@ func reply(query: text, flags: int, answer: bool, prefix: bool) -> text
     end
     var total = query.len + extra
     if prefix
-        sys.put8(a, total >> 8)
-        sys.put8(a + 1, total bitand 255)
+        sys.put8(a, long(total >> 8))
+        sys.put8(a + 1, long(total bitand 255))
         total += 2
     end
     return c.from_bytes(b.ptr, total)
@@ -844,7 +844,7 @@ end
 async func tcp_server(l: net.Listener) -> error
     let conn = try await l.accept()
     var q = ""
-    while q.len < 2 or q.len < int(q[0]) * 256 + int(q[1]) + 2
+    while q.len < 2 or q.len < int(q.byte(0)) * 256 + int(q.byte(1)) + 2
         let piece = try await conn.read(512)
         if piece.len == 0
             break
@@ -923,7 +923,7 @@ fn the_fs_net_and_task_layers_share_their_api() {
             "type Conn", "type Listener", "type Reader", "type Writer", "type UdpSocket", "type Packet", "lookup", "resolve", "connect", "listen",
             "parse_ip", "Listener.accept", "Listener.close", "Conn.read", "Conn.write", "Conn.close", "Conn.reader", "Conn.writer", "Reader.read_line",
             "Reader.read", "Reader.read_all", "Reader.at_end", "Writer.write", "Writer.write_line", "Writer.flush", "Writer.close", "udp",
-            "UdpSocket.send_to", "UdpSocket.recv", "UdpSocket.close",
+            "UdpSocket.send_to", "UdpSocket.recv", "UdpSocket.close", "Conn.cancel", "Listener.cancel",
         ],
     );
     assert_same_api(
@@ -931,7 +931,7 @@ fn the_fs_net_and_task_layers_share_their_api() {
         include_str!("../std/task.linux.br"),
         &[
             "type Task", "type Chan", "init", "fatal", "now", "reap", "add_timer", "fire_timers", "poll_io", "wait_events", "switch_away", "park", "wake",
-            "start", "yield", "chan_new", "wake_one", "chan_send", "chan_recv", "chan_close",
+            "start", "yield", "chan_new", "wake_one", "chan_send", "chan_recv", "chan_close", "cur",
         ],
     );
 }
@@ -1032,11 +1032,11 @@ fn a_function_can_be_given_to_c_as_a_callback() {
 use c
 
 #[link("c")]
-extern "C" func qsort(base: *int, n: usize, size: usize, cmp: extern "C" func(*int, *int) -> i32)
+extern "C" func qsort(base: *long, n: usize, size: usize, cmp: extern "C" func(*long, *long) -> i32)
 
-func by_value(a: *int, b: *int) -> i32
-    var x = 0
-    var y = 0
+func by_value(a: *long, b: *long) -> i32
+    var x: long = 0
+    var y: long = 0
     unsafe
         x = a[0]
         y = b[0]
@@ -1051,7 +1051,7 @@ func by_value(a: *int, b: *int) -> i32
 end
 
 func main()
-    let data: *int = c.alloc(80)
+    let data: *long = c.alloc(80)
     unsafe
         let values = [42, 7, 99, 1, 56, 3, 12, 8, 77, 0]
         for i in 0..10
@@ -1159,6 +1159,123 @@ end
     assert_eq!((out.as_str(), code), ("HTTP/1.1 \ntrue\nrefused\n", 0));
 }
 
+#[test]
+fn tls_upgrade_alpn_and_a_private_ca_work_the_same_on_linux() {
+    // needs the TLS servers of tests/docker (BRASA_TEST_CA names the development CA)
+    let Ok(ca_win) = std::env::var("BRASA_TEST_CA") else {
+        eprintln!("skipped: set BRASA_TEST_CA (see tests/docker/README.md) to run this test");
+        return;
+    };
+    let p = ca_win.replace('\\', "/");
+    let ca = format!("/mnt/{}{}", p[..1].to_ascii_lowercase(), &p[2..]);
+    let src = r#"package main
+
+use net
+use tls
+use crypto
+
+func main() -> error
+    let a = tls.Options{ alpn: ["tds/8.0", "http/1.1"], require_alpn: false, ca_file: "@CA@" }
+    let conn = try await tls.connect_with("localhost", 55444, a)
+    print("protocol=" + conn.protocol())
+    let none = tls.Options{ alpn: ["tds/8.0"], require_alpn: true, ca_file: "@CA@" }
+    match await tls.connect_with("localhost", 55443, none)
+        ok(c) -> print("unexpected success")
+        err(e) -> print(e.message)
+    end
+    match await tls.connect("localhost", 55443)
+        ok(c) -> print("unexpected success")
+        err(e) -> print("untrusted refused")
+    end
+    let bad = tls.Options{ alpn: [], require_alpn: false, ca_file: "/no/such/ca.pem" }
+    match await tls.connect_with("localhost", 55443, bad)
+        ok(c) -> print("unexpected success")
+        err(e) -> print(e.message)
+    end
+    let raw = try await net.connect("127.0.0.1", 55432)
+    try await raw.write(crypto.from_bytes([0, 0, 0, 8, 4, 210, 22, 47]))
+    print(try await raw.read(1))
+    let opts = tls.Options{ alpn: [], require_alpn: false, ca_file: "@CA@" }
+    let up = try await tls.upgrade_with(raw, "localhost", opts)
+    let startup = crypto.from_bytes([0, 0, 0, 32, 0, 3, 0, 0]) + "user" + crypto.from_bytes([0]) + "app" + crypto.from_bytes([0]) + "database" + crypto.from_bytes([0]) + "shop" + crypto.from_bytes([0, 0])
+    try await up.write(startup)
+    print(try await up.read(1))
+    let raw2 = try await net.connect("127.0.0.1", 55432)
+    try await raw2.write(crypto.from_bytes([0, 0, 0, 8, 4, 210, 22, 47]))
+    print(try await raw2.read(1))
+    match await tls.upgrade_with(raw2, "wrong.example", opts)
+        ok(c) -> print("unexpected success")
+        err(e) -> print("wrong name refused")
+    end
+    return
+end
+"#
+    .replace("@CA@", &ca);
+    let Some((out, code)) = run_linux(&src) else { return };
+    let expected = "protocol=http/1.1\nTLS handshake with localhost failed: the server selected none of the offered protocols (tds/8.0)\nuntrusted refused\nTLS: cannot read the CA file /no/such/ca.pem\nS\nR\nS\nwrong name refused\n";
+    assert_eq!((out.as_str(), code), (expected, 0));
+}
+
+#[test]
+fn crypto_db_and_the_database_drivers_behave_the_same_on_linux() {
+    // crypto and db (with a fake driver) always run; the drivers run when the Docker servers of
+    // tests/docker are up (BRASA_TEST_POSTGRES / BRASA_TEST_SQLSERVER_STRICT, source env.ps1)
+    let wsl_path = |p: String| {
+        let p = p.replace('\\', "/");
+        format!("/mnt/{}{}", p[..1].to_ascii_lowercase(), &p[2..])
+    };
+    let ca = std::env::var("BRASA_TEST_CA").ok().map(wsl_path);
+    let mut body = String::from(
+        "    print(crypto.hex(crypto.sha256(\"abc\")))\n    print(crypto.hex(crypto.md5(\"abc\")))\n    print((try crypto.random(8)).len)\n    let fake = db.connection(\n        func(sql, args)\n            var rs = db.rows([\"n\"], [\"int\"])\n            rs.add(\"41\", false)\n            rs.add(\"1\", false)\n            return rs\n        end,\n        func() return end,\n        func() return end,\n        func() return end,\n        func() end\n    )\n    let rows = try db.query(int, fake, \"select\")\n    print(rows[0] + rows[1])\n",
+    );
+    let mut expected = String::from("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\n900150983cd24fb0d6963f7d28e17f72\n8\n42\n");
+    if let (Some(ca), Ok(_)) = (&ca, std::env::var("BRASA_TEST_POSTGRES")) {
+        body.push_str(&format!("    let pg = try postgres.open(\"postgres://app:Brasa_app_dev_1@127.0.0.1:55432/shop?sslmode=require&sslrootcert={ca}\")\n    print(try db.one(int, pg, \"select count(*)::int from customers\"))\n"));
+        expected.push_str("60\n");
+    }
+    if let (Some(ca), Ok(_)) = (&ca, std::env::var("BRASA_TEST_SQLSERVER_STRICT")) {
+        body.push_str(&format!("    let ms = try sqlserver.open(\"sqlserver://sa:Brasa_dev_Sql_1@127.0.0.1:51434/shop?encrypt=strict&cafile={ca}\")\n    print(try db.one(int, ms, \"select count(*) from customers\"))\n"));
+        expected.push_str("60\n");
+    }
+    if ca.is_none() {
+        eprintln!("the Linux half of the drivers is skipped: set BRASA_TEST_CA (see tests/docker/README.md)");
+    }
+    let src = format!("package main\n\nuse crypto\nuse db\nuse postgres\nuse sqlserver\n\nfunc main() -> error\n{body}    return\nend\n");
+    let Some((out, code)) = run_linux(&src) else { return };
+    assert_eq!((out.as_str(), code), (expected.as_str(), 0));
+}
+
+#[test]
+fn ai_environment_and_schema_behave_the_same_on_linux() {
+    // sys.env reads /proc/self/environ on Linux; the schema is made at build time
+    let src = r#"package main
+
+use ai
+use sys
+
+type Item = record
+    #[desc("a name")] name: text
+    count: int
+    tag: text?
+end
+
+func main() -> error
+    print((sys.env("PATH") ?? "").len > 0, sys.env("BRASA_SURELY_UNSET_7") == nil)
+    print(ai.schema(Item))
+    match ai.key_from_env("BRASA_SURELY_UNSET_7")
+        ok(k) -> print("unexpected")
+        err(e) -> print(e.kind.name)
+    end
+    return
+end
+"#;
+    let Some((out, code)) = run_linux(src) else { return };
+    assert_eq!(out.lines().next(), Some("true true"));
+    assert!(out.contains("\"description\":\"a name\"") && out.contains("\"required\":[\"name\",\"count\"]") && out.ends_with("std.InvalidInput
+"), "{}", out);
+    assert_eq!(code, 0);
+}
+
 // ---- the limits that were lifted ----
 
 #[test]
@@ -1193,4 +1310,51 @@ end
     for needle in ["rdi", "rsi", "rdx", "rcx", "r8", "movq rax, xmm0", "movq xmm0, rax", "[rsp + 32]"] {
         assert!(thunk.contains(needle), "the thunk lacks {}: {}", needle, thunk);
     }
+}
+
+/// The `pub` names a library file declares: functions, methods (receiver type included), types,
+/// globals and externs.
+fn pub_names(path: &str) -> std::collections::BTreeSet<String> {
+    let src = std::fs::read_to_string(path).unwrap();
+    let mut names = std::collections::BTreeSet::new();
+    for line in src.lines() {
+        let Some(rest) = line.strip_prefix("pub ") else { continue };
+        let rest = rest.trim_start_matches("async ").trim_start_matches("comptime ");
+        let rest = rest.strip_prefix("extern ").map(|r| r.trim_start_matches(|c: char| c != 'f')).unwrap_or(rest);
+        let (kind, tail) = rest.split_once(' ').unwrap_or((rest, ""));
+        let name: String = match kind {
+            "func" if tail.starts_with('(') => {
+                let close = tail.find(')').unwrap();
+                let recv = tail[1..close].split(':').nth(1).unwrap_or("").trim().to_string();
+                let after = tail[close + 1..].trim_start();
+                format!("({}) {}", recv, after.split(|c: char| !c.is_alphanumeric() && c != '_').next().unwrap())
+            }
+            "func" | "type" | "let" | "var" => tail.split(|c: char| !c.is_alphanumeric() && c != '_').next().unwrap().to_string(),
+            _ => continue,
+        };
+        names.insert(format!("{} {}", kind, name));
+    }
+    names
+}
+
+#[test]
+fn a_library_and_its_linux_variant_export_the_same_names() {
+    let mut checked = 0;
+    for entry in std::fs::read_dir("std").unwrap() {
+        let path = entry.unwrap().path();
+        let file = path.file_name().unwrap().to_string_lossy().to_string();
+        let Some(base) = file.strip_suffix(".linux.br") else { continue };
+        if base == "sys" || base == "task" {
+            continue; // the operating-system layer and the scheduler: each platform has its own calls
+        }
+        let win = pub_names(&format!("std/{}.br", base));
+        let lin = pub_names(&format!("std/{}.linux.br", base));
+        let only_win: Vec<_> = win.difference(&lin).collect();
+        // a program written against the Windows variant must find every public name on Linux; the
+        // Linux variants may export extra names (the resolver of `net` and the X protocol of `ui`
+        // are written in Brasa, and tests reach into them)
+        assert!(only_win.is_empty(), "{}: public in {}.br but missing from {}.linux.br: {:?}", base, base, base, only_win);
+        checked += 1;
+    }
+    assert!(checked >= 4, "expected the Linux variants, found {}", checked);
 }

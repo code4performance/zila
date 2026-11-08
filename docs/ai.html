@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI — Brasa</title>
+  <meta name="description" content="Language models from Brasa: chat, streaming, typed answers, tools and embeddings with the ai library, with safety notes.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="index.html">brasa<span class="ember-dot">.</span><small>lang docs</small></a>
+    <nav class="site-nav">
+      <a href="index.html">Overview</a>
+      <a href="syntax.html">Syntax</a>
+      <a href="examples.html">Examples</a>
+      <a href="native.html">Native</a>
+      <a href="concurrency.html">Tasks</a>
+      <a href="async.html">Async</a>
+      <a href="stdlib.html">Library</a>
+      <a href="databases.html">Databases</a>
+      <a href="ai.html" aria-current="page">AI</a>
+      <a href="packages.html">Packages</a>
+      <a href="os.html">Brasa OS</a>
+      <a href="getting-started.html">Getting Started</a>
+    </nav>
+  </header>
+
+  <main>
+    <h1>AI</h1>
+    <p><code>use ai</code> talks to a language model: the Anthropic Messages API (<code>ai.anthropic</code>) or any OpenAI-compatible server (<code>ai.openai_compatible</code>), including local ones such as Ollama over plain <code>http</code>. It is written in Brasa on <code>web</code> and <code>json</code>; nothing in the compiler knows about models. The program names the model every time; the library has no default.</p>
+
+    <section id="chat">
+      <h2>Chat and streaming</h2>
+      <pre><code><span class="kw">use</span> ai
+
+<span class="kw">let</span> key = <span class="kw">try</span> ai.key_from_env(<span class="str">"ANTHROPIC_API_KEY"</span>)
+<span class="kw">let</span> client = ai.anthropic(key)
+<span class="kw">let</span> reply = <span class="kw">try</span> client.chat(ai.request(<span class="str">"claude-sonnet-5-5"</span>, [ai.user(<span class="str">"Hello"</span>)], 200))
+print(reply.text, reply.usage.input, reply.usage.output)
+
+<span class="kw">let</span> streamed = <span class="kw">try</span> client.stream(req, <span class="kw">func</span>(piece)
+    print(piece)
+    <span class="kw">return</span>
+<span class="kw">end</span>)</code></pre>
+      <p><code>ai.request(model, messages, max_tokens)</code> builds a request; set <code>system</code>, <code>temperature</code> (below zero means "the provider's own") and <code>stop</code> on the record. <code>chat</code> returns a <code>Reply</code> with <code>text</code>, <code>stop</code> (<code>End</code>, <code>MaxTokens</code>, <code>ToolUse</code> or <code>Other(text)</code>), <code>usage</code> and the <code>calls</code> the model made. <code>stream</code> calls your function with each piece of text as it arrives (server-sent events) and returns the same <code>Reply</code> at the end; the function may return an error to stop the stream, which closes the connection.</p>
+      <p>The key is read with <code>ai.key_from_env(name)</code> (an error that names the variable when it is unset) and travels only in a request header: no error message contains it. <code>https</code> is always checked by <code>tls</code>. A failed request has a kind from its status: <code>Unauthenticated</code> (401), <code>PermissionDenied</code> (403), <code>InvalidInput</code> (400, 422), <code>NotFound</code> (404), <code>Unavailable</code> (429 and 5xx) and <code>Timeout</code> after <code>timeout</code> milliseconds. Connection errors, 429, 500, 502, 503, 504 and 529 are retried with back-off (<code>max_retries</code>, 2 by default; <code>retry-after</code> is honored), but never after streamed text reached your function.</p>
+    </section>
+
+    <section id="typed">
+      <h2>A value of your own type</h2>
+      <pre><code><span class="kw">use</span> json
+
+<span class="kw">type</span> Invoice = <span class="kw">record</span>
+    #[desc(<span class="str">"the invoice number as printed"</span>)] number: text
+    total: float
+    paid: bool
+    note: text?
+<span class="kw">end</span>
+
+<span class="kw">let</span> invoice = <span class="kw">try</span> ai.ask(Invoice, client, req)     <span class="cm">// Invoice or error</span></code></pre>
+      <p><code>ai.schema(T)</code> makes a JSON Schema from the type at build time, with the field attributes <code>#[desc("...")]</code>, <code>#[json("name")]</code> and <code>#[json(skip)]</code>; an optional field is not required, an enum is <code>enum</code> or <code>oneOf</code>. <code>ai.ask</code> puts the schema in the system text, asks for JSON only (a Markdown fence is removed), and parses the answer with <code>json.parse</code>. If it does not parse, the model is shown the error once and asked again; a second failure is an error of kind <code>InvalidInput</code> that carries the answer. The program that calls <code>ask</code> or <code>tool</code> also writes <code>use json</code>, because the generated code names it.</p>
+    </section>
+
+    <section id="tools">
+      <h2>Tools and the agent loop</h2>
+      <pre><code><span class="kw">type</span> City = <span class="kw">record</span>
+    #[desc(<span class="str">"the name of a city"</span>)] name: text
+<span class="kw">end</span>
+
+<span class="kw">let</span> tool = ai.tool(City, <span class="str">"get_weather"</span>, <span class="str">"The weather in a city"</span>, <span class="kw">func</span>(c)
+    <span class="kw">return</span> <span class="str">"sunny in {c.name}"</span>
+<span class="kw">end</span>)
+<span class="kw">let</span> run = <span class="kw">try</span> client.run(req, [tool])
+print(run.reply.text, run.steps)</code></pre>
+      <p>A tool's input is a record: its fields make the schema the model sees. <code>client.run</code> sends the conversation and, while the model asks for tools, runs them (the calls of one turn run at the same time, and their results go back in order) until the model answers without asking. A handler that returns an error, arguments that do not match the record, and a tool name that does not exist are all reported to the model as error results; they do not end the loop. After <code>max_steps</code> model calls (10 by default) the loop stops with an error. The <code>Run</code> holds the final reply, the whole conversation, the number of steps and the total tokens.</p>
+    </section>
+
+    <section id="embeddings">
+      <h2>Embeddings</h2>
+      <p><code>client.embed(model, inputs)</code> returns one <code>[]float</code> per input, in order, for OpenAI-compatible servers (<code>batch_size</code>, 64 by default, inputs per request). The Anthropic API has no embeddings endpoint, so <code>ai.anthropic</code> gives an error of kind <code>InvalidInput</code> that says so. <code>client.embedder(model)</code> is a value with the method <code>embed(inputs)</code>, which the retrieval code of a later library asks of an embedder.</p>
+    </section>
+
+    <section id="safety">
+      <h2>Safety notes</h2>
+      <ul>
+        <li>Text from a model, and the output of tools, is untrusted input. A document a tool returns can contain instructions; the library never runs anything the model says except calling the tools you registered.</li>
+        <li>Register only the tools you are willing to have called, and give each the least privilege that works: a read-only database user for a tool that reads.</li>
+        <li><code>max_tokens</code> is required and <code>max_steps</code> limits an agent, which together bound the cost of a run; <code>usage</code> says what was spent.</li>
+        <li>Keep keys in the environment, not in source files.</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    Brasa — a language with a human face. Docs generated from <code>brasa.ebnf</code> and <code>examples/*.br</code>.
+  </footer>
+</body>
+</html>

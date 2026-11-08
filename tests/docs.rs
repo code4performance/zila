@@ -195,3 +195,60 @@ fn internal_links_and_anchors_resolve() {
     }
     assert!(broken.is_empty(), "\n{}", broken.join("\n"));
 }
+
+// ---------------------------------------------------------------- the web library
+
+#[test]
+fn the_web_library_is_documented() {
+    let stdlib = page("stdlib.html").html;
+    assert!(stdlib.contains("id=\"web\""), "docs/stdlib.html has no web section");
+    let text = plain(&stdlib);
+    for needed in [
+        "use web", "web.server", "app.get", "app.use", "app.run", "app.start", "web.logger", "web.read_json", "web.json", "web.created", "web.get", "web.post",
+        "web.request", "max_connections", "read_timeout", "idle_timeout", "max_body", "html", "@for", "web.escape", "web.Safe", "raw(",
+    ] {
+        assert!(text.contains(needed), "docs/stdlib.html does not mention `{}`", needed);
+    }
+    // the examples page and the async and native pages point at it
+    assert!(page("examples.html").html.contains("stdlib.html#web"));
+    assert!(page("async.html").html.contains("stdlib.html#web"));
+    assert!(plain(&page("native.html").html).contains("web: HTTP server"));
+    assert!(std::fs::read_to_string("README.md").unwrap().contains("(`use web`)"));
+}
+
+// ---------------------------------------------------------------- the database libraries
+
+#[test]
+fn the_database_libraries_are_documented() {
+    let stdlib = page("stdlib.html").html;
+    for id in ["crypto", "db", "postgres", "sqlserver", "tls-extras"] {
+        assert!(stdlib.contains(&format!("id=\"{}\"", id)), "docs/stdlib.html has no {} section", id);
+    }
+    for needed in ["db.query", "db.one", "conn.exec", "db.int", "db.redact", "postgres.open", "sqlserver.open", "sslrootcert", "encrypt=strict", "sha256", "tls.upgrade", "connect_with", "ca_file"] {
+        assert!(stdlib.contains(needed), "docs/stdlib.html does not mention `{}`", needed);
+    }
+    let databases = page("databases.html").html;
+    for needed in ["db.query", "postgres.open", "sqlserver.open", "encrypt=on", "tests/docker", "BRASA_TEST_POSTGRES", "examples/users_crud.br", "examples/db.br", "#[db("] {
+        assert!(databases.contains(needed), "docs/databases.html does not mention `{}`", needed);
+    }
+    let native = page("native.html").html;
+    for lib in ["crypto", "postgres", "sqlserver"] {
+        assert!(native.contains(&format!("<code>{}</code>", lib)), "the Linux table of docs/native.html does not mention {}", lib);
+    }
+    assert!(std::fs::read_to_string("README.md").unwrap().contains("docs/databases.html"));
+}
+
+// ---------------------------------------------------------------- the ai library
+
+#[test]
+fn the_ai_library_is_documented() {
+    let stdlib = page("stdlib.html").html;
+    assert!(stdlib.contains("id=\"ai\""), "docs/stdlib.html has no ai section");
+    for needed in ["ai.anthropic", "ai.openai_compatible", "client.chat", "client.stream", "client.run", "ai.ask", "ai.tool", "ai.schema", "sys.env", "web.stream"] {
+        assert!(stdlib.contains(needed), "docs/stdlib.html does not mention `{}`", needed);
+    }
+    let ai = page("ai.html").html;
+    for needed in ["key_from_env", "max_steps", "retry-after", "#[desc(", "untrusted", "embeddings"] {
+        assert!(ai.contains(needed), "docs/ai.html does not mention `{}`", needed);
+    }
+}

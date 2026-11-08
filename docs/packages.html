@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Packages — Brasa</title>
+  <meta name="description" content="Packages in Brasa: brasa.toml, brasa.lock, dependencies from git, versions, the cache, and how use finds a package.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="index.html">brasa<span class="ember-dot">.</span><small>lang docs</small></a>
+    <nav class="site-nav">
+      <a href="index.html">Overview</a>
+      <a href="syntax.html">Syntax</a>
+      <a href="examples.html">Examples</a>
+      <a href="native.html">Native</a>
+      <a href="concurrency.html">Tasks</a>
+      <a href="async.html">Async</a>
+      <a href="stdlib.html">Library</a>
+      <a href="databases.html">Databases</a>
+      <a href="ai.html">AI</a>
+      <a href="packages.html" aria-current="page">Packages</a>
+      <a href="os.html">Brasa OS</a>
+      <a href="getting-started.html">Getting Started</a>
+    </nav>
+  </header>
+
+  <main>
+    <h1>Packages</h1>
+    <p>A program can use libraries other people wrote. A library is a <strong>git repository</strong> of <code>.br</code> files; a project lists the ones it needs in <code>brasa.toml</code>, and the tool downloads them once into a cache. There is no registry: the address of a repository is its name. Building never uses the network.</p>
+
+    <section id="quickstart">
+      <h2>In practice</h2>
+      <pre><code>brasa-parse --init myapp                                   <span class="cm"># writes brasa.toml</span>
+brasa-parse --add https://github.com/someone/codec@1.2.0   <span class="cm"># adds, downloads, writes brasa.lock</span>
+brasa-parse main.br -o main.exe                            <span class="cm"># builds from the cache, offline</span></code></pre>
+      <p>and in <code>main.br</code>:</p>
+      <pre><code><span class="kw">package</span> main
+
+<span class="kw">use</span> codec
+
+<span class="kw">func</span> main()
+    print(codec.version())
+<span class="kw">end</span></code></pre>
+      <p>Commit <code>brasa.toml</code> and <code>brasa.lock</code>. Anyone who clones the project and runs <code>brasa-parse --fetch</code> gets the same sources, checked byte by byte.</p>
+    </section>
+
+    <section id="manifest">
+      <h2>The manifest</h2>
+      <pre><code>[package]
+name = "myapp"
+version = "0.1.0"
+
+[dependencies.codec]
+git = "https://github.com/someone/codec"
+version = "1.2.0"</code></pre>
+      <p><code>brasa.toml</code> is written in a small, strict subset of TOML: tables, <code>key = "string"</code> lines and comments. Arrays, inline tables and multi-line strings are rejected with the line number and the name of the construct. The table name after <code>dependencies.</code> is the name you write after <code>use</code>. <code>version</code> is a <em>minimum</em>. Unknown keys are errors.</p>
+      <p><code>[package]</code> may hold an <code>edition</code>. It is stored and ignored for now: no edition exists before version 1.0, and 1.0 will use it to let a package choose the rules of the language it was written for. <code>--init</code> leaves it out.</p>
+    </section>
+
+    <section id="versions">
+      <h2>Versions</h2>
+      <p>A version is <code>MAJOR.MINOR.PATCH</code> and the tags of the repository are <code>vMAJOR.MINOR.PATCH</code>. The tool picks versions by <strong>minimal version selection</strong>: for each package, the highest of the minimums that your manifest and the manifests of the packages you use ask for. It never picks a newer version just because one exists, and it has no solver, so you can work the result out by hand and adding a package never upgrades another. <code>--update</code> is what raises a minimum, to the newest tag of the same major.</p>
+      <p>A different <strong>major version</strong> is a different package. Version 2 and up ends its module path with <code>/v2</code> (the same repository, tags <code>v2.*</code>) and gets its own import name, so both can be used, even by different dependencies, and their types are different types:</p>
+      <pre><code>brasa-parse --add https://github.com/someone/codec@1.2.0
+brasa-parse --add https://github.com/someone/codec/v2@2.0.0     <span class="cm"># named codec_v2</span></code></pre>
+      <p>A package whose manifest asks for another major than yours is compiled against its own: two packages can each <code>use codec</code> and mean different ones, without clashing. Major 0 is one package like any other.</p>
+    </section>
+
+    <section id="lock">
+      <h2>The lock file and the cache</h2>
+      <p><code>brasa.lock</code> is written by the tool. For every package in the final selection it records the version, the full 40-character commit the tag points to and a <code>sha256:</code> hash of the files. Fetched sources go to <code>~/.brasa</code> (<code>%USERPROFILE%\.brasa</code> on Windows, or the directory named by <code>BRASA_HOME</code>), one directory per package version and commit, shared by all your projects and written atomically.</p>
+      <p>Every build recomputes the hash of each package in the cache and compares it with the lock. A changed file stops the build and says what was expected and what was found; a manifest the lock does not cover says <code>brasa.lock is out of date</code>; a missing cache entry says <code>package 'X' is not in the cache; run brasa-parse --fetch</code>. If a tag is later moved to another commit, <code>--fetch</code> reports it and leaves the lock alone; <code>--update</code> accepts it.</p>
+    </section>
+
+    <section id="commands">
+      <h2>Commands</h2>
+      <dl class="cli">
+        <dt>--init [name]</dt>
+        <dd>Writes <code>brasa.toml</code>.</dd>
+        <dt>--add git-url[@version] [--as name]</dt>
+        <dd>Adds the dependency and fetches. Without a version, the newest tag of the highest major that matches the URL. The name defaults to the last part of the URL (<code>codec_v2</code> for <code>/v2</code>).</dd>
+        <dt>--fetch</dt>
+        <dd>Resolves the graph, downloads what the cache lacks, verifies, writes the lock.</dd>
+        <dt>--tidy</dt>
+        <dd>Removes dependencies no source file uses and trims the lock. No network.</dd>
+        <dt>--update [name]</dt>
+        <dd>Raises minimums to the newest tag of the same major, then fetches.</dd>
+        <dt>--offline</dt>
+        <dd>Never contacts a remote; a command that needs to fails and names what is missing.</dd>
+      </dl>
+      <p>They act on the project that holds the current directory (the nearest <code>brasa.toml</code> upward) and need no source file.</p>
+    </section>
+
+    <section id="git">
+      <h2>Git</h2>
+      <p>Only the commands that download (<code>--add</code>, <code>--fetch</code>, <code>--update</code>) run <code>git</code>, found on your <code>PATH</code>, with fixed arguments and no shell, and with password prompts turned off (ssh agents and credential helpers work as you configured them). URLs may be <code>https://</code>, <code>ssh://</code>, <code>git@host:path</code> or <code>file://</code>. If git is missing the tool says <code>git was not found on PATH. It is used only to download dependencies</code>. Building from a populated cache needs neither git nor a network, and the compiler needs no other external tool: <code>brasa-parse</code> writes executables itself.</p>
+    </section>
+
+    <section id="use">
+      <h2>How <code>use</code> finds a package</h2>
+      <p>For <code>use a.b.c</code> the first name is looked up among the <strong>standard library</strong>, the project's <strong>dependencies</strong> and its <strong>local packages</strong> (a directory <code>a/</code> next to <code>brasa.toml</code>). A name can be in only one place and the standard names are reserved: <code>--add</code> and the manifest refuse them. The remaining names are directories inside the package, and the name you write in code is the last one:</p>
+      <pre><code><span class="kw">use</span> codec.stream        <span class="cm">// the directory stream/ of the dependency codec</span>
+...
+stream.next()</code></pre>
+      <p>A package is the <code>.br</code> files directly in its directory, merged into one module: they see each other's names, a name declared twice is an error that names both files, and each file's <code>package</code> line must be the package's name (the directory name; for a dependency, its <code>name</code> in <code>[package]</code>). Files ending in <code>_test.br</code> are left out of builds; <code>brasa-parse --test dir/name_test.br</code> runs their <code>#[test]</code> functions together with the package's own files. A dependency's own <code>use</code>s are looked up with <em>its</em> manifest, not yours.</p>
+      <p>A name found nowhere is an error: <code>unknown package 'x' (not in the standard library, brasa.toml or the project directory); to add one: brasa-parse --add &lt;git-url&gt;</code>. A program with no <code>brasa.toml</code> still sees the standard library and the <code>name.br</code> files next to it, as before.</p>
+      <p>Across a package boundary only <code>pub</code> items are visible; see <a href="syntax.html#visibility">visibility</a>.</p>
+    </section>
+
+    <section id="sample">
+      <h2>A sample project</h2>
+      <p>The repository has one in <code>examples/packages/</code>: a <code>brasa.toml</code> with one dependency, its <code>brasa.lock</code>, a local package (<code>util/</code>, two files) and <code>main.br</code>. The tests build it offline from a cache they fill from the fixture next to it.</p>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    Brasa — a language with a human face. Docs generated from <code>brasa.ebnf</code> and <code>examples/*.br</code>.
+  </footer>
+</body>
+</html>

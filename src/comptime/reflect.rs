@@ -35,6 +35,8 @@ impl Universe {
 pub struct AttrData {
     pub name: String,
     pub args: Vec<String>,
+    /// For each argument: was it written as a quoted text (`"full_name"`) rather than a bare word (`skip`)?
+    pub quoted: Vec<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -126,7 +128,14 @@ fn attr_text(e: &Expr) -> String {
 }
 
 pub fn attr_data(attrs: &[Attr]) -> Vec<AttrData> {
-    attrs.iter().map(|a| AttrData { name: a.name.clone(), args: a.args.iter().map(attr_text).collect() }).collect()
+    attrs
+        .iter()
+        .map(|a| AttrData {
+            name: a.name.clone(),
+            args: a.args.iter().map(attr_text).collect(),
+            quoted: a.args.iter().map(|e| matches!(e.kind, ExprKind::Text(_))).collect(),
+        })
+        .collect()
 }
 
 /// `User`, `[]User`, `Map<text, int>`, `User?`: how a type is written.
@@ -391,6 +400,10 @@ fn attr_line(out: &mut String, tag: &str, owner: &[String], a: &AttrData) {
     }
     out.push(' ');
     out.push_str(&esc(&a.name));
+    out.push_str(" #");
+    for q in &a.quoted {
+        out.push(if *q { '1' } else { '0' });
+    }
     for x in &a.args {
         out.push(' ');
         out.push_str(&esc(x));
@@ -488,7 +501,12 @@ pub fn parse_wire(text: &str) -> Result<Vec<WireCall>, String> {
                     "tattr" | "fattr" | "vattr" => {
                         let owners = if tag == "tattr" { 1 } else { 2 };
                         let ti = ty_of(c, num(parts.get(1)).map_err(bad)? as usize)?;
-                        let a = AttrData { name: unesc(parts.get(owners + 1).copied().unwrap_or("")), args: parts.iter().skip(owners + 2).map(|s| unesc(s)).collect() };
+                        let flags = parts.get(owners + 2).copied().unwrap_or("#");
+                        let a = AttrData {
+                            name: unesc(parts.get(owners + 1).copied().unwrap_or("")),
+                            args: parts.iter().skip(owners + 3).map(|s| unesc(s)).collect(),
+                            quoted: flags.trim_start_matches('#').chars().map(|c| c == '1').collect(),
+                        };
                         match tag {
                             "tattr" => c.table.types[ti].attrs.push(a),
                             "fattr" => {
@@ -570,7 +588,8 @@ fn attrs_lit(attrs: &[AttrData]) -> String {
         .iter()
         .map(|a| {
             let args: Vec<String> = a.args.iter().map(|x| brasa_lit(x)).collect();
-            format!("reflect.Attribute {{ name: {}, args: [{}] }}", brasa_lit(&a.name), args.join(", "))
+            let quoted: Vec<String> = a.quoted.iter().map(|q| q.to_string()).collect();
+            format!("reflect.Attribute {{ name: {}, args: [{}], quoted: [{}] }}", brasa_lit(&a.name), args.join(", "), quoted.join(", "))
         })
         .collect();
     format!("[{}]", items.join(", "))

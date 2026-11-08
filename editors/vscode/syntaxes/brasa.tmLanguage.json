@@ -228,7 +228,7 @@
         },
         {
           "name": "keyword.declaration.brasa",
-          "match": "\\b(let|var|embed|extern)\\b"
+          "match": "\\b(let|var|embed|extern|pub)\\b"
         },
         {
           "name": "keyword.control.brasa",

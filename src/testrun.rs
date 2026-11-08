@@ -67,7 +67,24 @@ fn entry_point(tests: &[Test]) -> String {
 
 /// Builds and runs the tests of one file.
 fn run_file(path: &str, optimize: bool) -> Result<Outcome, String> {
-    let src = std::fs::read_to_string(path).map_err(|e| format!("cannot read {}: {}", path, e))?;
+    let mut src = std::fs::read_to_string(path).map_err(|e| format!("cannot read {}: {}", path, e))?;
+    crate::package::install_for(std::path::Path::new(path))?;
+    // a `_test.br` file of a package is tested together with the package's own files, as one
+    // module (so its tests see the package's private declarations); the module is built as main
+    if path.ends_with("_test.br") {
+        let pkg = src.lines().find_map(|l| l.trim().strip_prefix("package ").map(|p| p.trim().to_string()));
+        if let Some(pkg) = pkg.filter(|p| p != "main") {
+            let p = std::path::Path::new(path);
+            let dir = match p.parent() {
+                Some(d) if !d.as_os_str().is_empty() => d.to_path_buf(),
+                _ => std::path::PathBuf::from("."),
+            };
+            let merged = crate::package::merged_dir_source(&dir, &pkg, &[p.to_path_buf()])?;
+            src = merged.replacen(&format!("package {}
+", pkg), "package main
+", 1);
+        }
+    }
     crate::comptime::register_siblings(std::path::Path::new(path), &src);
     let mut file = parse_source(&src).map_err(|d| format!("{}:{}:{}: {}", path, d.line, d.col, d.msg))?;
     let tests = find_tests(&file).map_err(|e| format!("{}: {}", path, e))?;

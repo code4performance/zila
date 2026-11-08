@@ -242,7 +242,7 @@ Everything in this list is implemented and covered by tests.
 
 **A standard library written in Brasa**
 
-- `task`, `future`, `fs`, `net` (TCP, UDP, DNS), `tls` (an HTTPS client: SChannel on Windows, OpenSSL on Linux) and `ui` (windows and controls with one API: native Win32 controls on Windows, controls drawn over the X11 protocol on Linux). On Windows they talk to the operating system through Brasa's own `extern` declarations, on Linux through system calls. No Rust or C glue.
+- `task`, `future`, `fs`, `net` (TCP, UDP, DNS), `tls` (an HTTPS client: SChannel on Windows, OpenSSL on Linux), `crypto` (SHA-256, HMAC, PBKDF2, base64, random bytes), `ai` (chat, streaming, typed answers and tools for language models; see docs/ai.html), `db`, `postgres` and `sqlserver` (typed rows, bound parameters, transactions, written in Brasa over `net` and `tls`; see docs/databases.html), `web` (an HTTP/1.1 server with routing and middleware, an HTTP client and HTML templates) and `ui` (windows and controls with one API: native Win32 controls on Windows, controls drawn over the X11 protocol on Linux). On Windows they talk to the operating system through Brasa's own `extern` declarations, on Linux through system calls. No Rust or C glue.
 
 **Systems programming**
 
@@ -310,8 +310,10 @@ Brasa is **pre-alpha**. The design is settling, but breaking changes are still p
 | VS Code extension | ✅ Highlighting, syntax errors and formatting through the language server (package it with `npx @vscode/vsce package`; the manual smoke test is still open) |
 | TLS (`use tls`) | ✅ HTTPS client on Windows (SChannel) and Linux (OpenSSL 3), with certificate and host-name checks. Server side: ⏳ not started |
 | Windows and controls (`use ui`) | ✅ One API on both systems: native on Windows, drawn on X11 on Linux |
-| Compile-time reflection (`comptime func`, `#[derive]`, `#[generated]`, blocks) | ✅ Works: the `Type` API, derives, type-indexed functions and block syntax, the checked comptime subset, limits, hygiene, source-mapped errors, a result cache and `--comptime-*` options. Libraries that use it (`json`, `web`) and the package manager: ⏳ not started |
-| Package manager | ⏳ Specified (`add-package-manager`), not started |
+| Compile-time reflection (`comptime func`, `#[derive]`, `#[generated]`, blocks) | ✅ Works: the `Type` API, derives, type-indexed functions and block syntax, the checked comptime subset, limits, hygiene, source-mapped errors, a result cache and `--comptime-*` options. Libraries that use it: `json` ✅, `web` ✅ |
+| JSON (`use json`) | ✅ `json.parse(T, text)` and `json.encode(T, x)` for any record, enum, list, map, optional, number, `bool` and `text` (derived at build time through reflection: no registration, no JSON in the compiler), `#[json("key")]` and `#[json(skip)]`, the dynamic `json.Value` tree, strict RFC 8259, errors with line and column or a `$.path`, pretty printing, a depth limit; Windows and Linux |
+| Web (`use web`) | ✅ An HTTP/1.1 server (one task per connection; `Content-Length` and chunked bodies, keep-alive, size limits, scheduler-driven timeouts, `408`/`413`/`414`/`431`/`503`), routes with `:name` and `*rest`, middleware with `app.use`, errors mapped to statuses by kind, `web.read_json(T, req)` and `web.json(T, status, value)` on `use json`, a client (`web.get`, `web.post`, `web.request`, https through `tls`, redirects, limits) and `html ... end` templates that escape every interpolated value. Windows and Linux; rejected in a bare-metal kernel. Not covered: HTTP/2, WebSocket, TLS on the server side, cookies, multipart, streaming bodies |
+| Package manager (`brasa.toml`, `brasa.lock`, `--init`, `--add`, `--fetch`, `--tidy`, `--update`) | ✅ Dependencies are git repositories pinned by commit and checked by a SHA-256 tree hash; semver with minimal version selection (no solver); majors coexist as different packages; a cache in `~/.brasa`; a normal build never touches the network or runs `git`; local packages are directories; `use name.path`; only `pub` items cross packages. No registry, publishing or signing |
 | Linux x86-64 (`--target linux`) | ✅ ELF written by the compiler (no linker; static unless the program calls C): the language and every library, `ui` included (drawn on an X11 display), with the same output as Windows (tasks, `async`, files, TCP/UDP, DNS, calling C) |
 | macOS, ARM64, Android, iOS | ⏳ Not started |
 
@@ -352,9 +354,7 @@ Every item below is an [OpenSpec](openspec) change that is already written (prop
 
 | Change | What it does |
 |---|---|
-| `add-json` | `use json`: dynamic values, typed `json.parse(T, text)` and `json.encode`, derived through reflection. |
-| `add-web` | `use web`: an HTTP/1.1 server with routing, middleware, JSON helpers and error-to-status mapping, on top of `net`, `tls` and `json`. |
-| `add-package-manager` | A `brasa.toml` manifest, a lock file, `--init`, `--add <git-url>`, a cache outside the project, and `use name.path` across packages. |
+| `add-web` | `use web`: an HTTP/1.1 server with routing, middleware, JSON helpers and error-to-status mapping, an HTTP client and escaping HTML templates, on top of `net`, `tls` and `json`. |
 
 **Compiler and tooling**
 
@@ -456,7 +456,8 @@ src/
   fmt.rs, testrun.rs, lsp.rs   the formatter, the test runner, the language server
   comptime.rs, comptime/   compile-time code generation: reflection data, subset check, generator driver and cache, expansion
   cli.rs, docs.rs  command-line options; the documentation generator
-std/               standard library, written in Brasa: ui, task, future, fs, net, tls, sys, text, list, format, set, sorted, bufio (and ws, internal to net); `*.linux.br` are the Linux layers
+  package.rs, fetch.rs   the package manager: manifest, lock, versions, hashes, cache and resolver; the git runner and the package commands
+std/               standard library, written in Brasa: ui, task, future, fs, net, tls, web, crypto, db, postgres, sqlserver, sys, text, list, format, set, sorted, bufio (and ws, internal to net); `*.linux.br` are the Linux layers
 os/                Brasa OS: boot.br (boot sector) and kernel.br
 examples/          example programs
 docs/              the documentation site (static HTML)

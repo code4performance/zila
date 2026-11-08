@@ -186,7 +186,7 @@ struct Pending {
     kind: Kind,
     /// The generator: module and function name.
     gen: (String, String),
-    /// The display name of the generator (`json.json` when it is in another package).
+    /// The display name of the generator (`pkg.name` when it is in another package).
     gen_label: String,
     table: TypeTable,
     root: usize,
@@ -416,9 +416,9 @@ impl Expander {
                     }
                     return Err(format!("{} no derive named `{}.{}` was found in the imported packages (on type `{}`)", at, p, name, ty));
                 }
-                Err(format!("{} a derive is named like `describe` or `json.json` (on type `{}`)", at, ty))
+                Err(format!("{} a derive is named like `describe` or `pkg.describe` (on type `{}`)", at, ty))
             }
-            _ => Err(format!("{} a derive is named like `describe` or `json.json` (on type `{}`)", at, ty)),
+            _ => Err(format!("{} a derive is named like `describe` or `pkg.describe` (on type `{}`)", at, ty)),
         }
     }
 
@@ -443,24 +443,30 @@ impl Expander {
         self.uni.type_decl(&self.main_name, n).is_some()
     }
 
-    /// Qualifies the names of the program's own types, for use in another module.
-    fn qualify_for(&self, t: &Type, module: &str) -> Type {
-        if module == self.main_name {
-            return t.clone();
-        }
-        struct Q<'a>(&'a Expander, &'a str);
-        impl<'a> Visit for Q<'a> {
-            fn ty(&mut self, t: &mut Type) {
-                if let Type::Named { path, .. } = t {
-                    if path.len() == 1 && self.0.user_type_in_main(&path[0]) && !is_builtin_type(&path[0]) {
-                        path.insert(0, self.1.to_string());
+    /// Writes the types a library template names in its signature as `module.Type`.
+    fn qualify_signature(&self, fd: &mut FuncDecl, module: &str) {
+        let q = |t: &mut Type, this: &Expander| {
+            struct Q<'a>(&'a Expander, &'a str);
+            impl<'a> Visit for Q<'a> {
+                fn ty(&mut self, t: &mut Type) {
+                    if let Type::Named { path, .. } = t {
+                        if path.len() == 1 && !is_builtin_type(&path[0]) && self.0.uni.type_decl(self.1, &path[0]).is_some() {
+                            path.insert(0, self.1.to_string());
+                        }
                     }
                 }
             }
+            walk_ty(t, &mut Q(this, module));
+        };
+        for p in fd.params.iter_mut() {
+            if let Some(t) = p.ty.as_mut() {
+                q(t, self);
+            }
         }
-        let mut t = t.clone();
-        walk_ty(&mut t, &mut Q(self, &self.main_name));
-        t
+        if let Some(t) = fd.ret.as_mut().and_then(|r| r.ty.as_mut()) {
+            q(t, self);
+        }
+        fd.public = false;
     }
 
     /// Is `e` a call to a generated function? Returns what is needed to specialize it.
@@ -834,16 +840,20 @@ impl Expander {
                     fd.body = body;
                     fd.comptime = false;
                     let tname = sp.template.params[sp.comptime_idx].name.clone();
-                    let arg = self.qualify_for(&sp.arg_ty, &sp.module);
+                    if sp.module != self.main_name {
+                        self.qualify_signature(&mut fd, &sp.module);
+                    }
+                    let arg = sp.arg_ty.clone();
                     subst_type(&mut fd, &tname, &arg);
                     let attrs: Vec<Attr> = sp.template_attrs.iter().filter(|a| a.name != "generated").cloned().collect();
-                    let decl = Decl { attrs, public: sp.template_public, kind: DeclKind::Func(fd), line: base };
+                    // A specialization lives in the module of the program that asked for it, so that
+                    // it sees that program's own types (private ones too) and the generated calls
+                    // it makes are expanded in the next round. The types the template names in its
+                    // signature belong to the library that wrote it: they are written qualified.
+                    let public = sp.module == self.main_name && sp.template_public;
+                    let decl = Decl { attrs, public, kind: DeclKind::Func(fd), line: base };
                     self.specs.insert(sp.key.clone(), sp.name.clone());
-                    if sp.module == self.main_name {
-                        new_decls.push(decl);
-                    } else {
-                        self.extra.entry(sp.module.clone()).or_default().push(decl);
-                    }
+                    new_decls.push(decl);
                 }
                 Kind::Block => {
                     let stmt_form = p.decl_idx == 1;
@@ -956,14 +966,7 @@ impl Expander {
                                     args.remove(ci.comptime_idx);
                                 }
                                 let ident = Expr { kind: ExprKind::Ident(spec.clone()), line };
-                                **callee = if ci.module == self.x.main_name {
-                                    ident
-                                } else {
-                                    Expr {
-                                        kind: ExprKind::Field { expr: Box::new(Expr { kind: ExprKind::Ident(ci.module.clone()), line }), name: spec.clone(), safe: false },
-                                        line,
-                                    }
-                                };
+                                **callee = ident;
                             }
                         }
                         Ok(None) => {}

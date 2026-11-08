@@ -35,7 +35,7 @@ pub fn registered_source(name: &str) -> Option<&'static str> {
 
 /// The source of package `name`: the standard library first, then registered packages.
 pub fn package_source(name: &str, target: crate::codegen_x64::Target) -> Option<&'static str> {
-    crate::codegen_x64::std_source_for(name, target).or_else(|| registered_source(name))
+    crate::codegen_x64::std_source_for(name, target).or_else(|| crate::package::visible_source(name)).or_else(|| registered_source(name))
 }
 
 /// Registers the packages a program asks for with `use` that are files next to `path`

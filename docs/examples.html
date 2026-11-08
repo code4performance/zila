@@ -18,6 +18,9 @@
       <a href="concurrency.html">Tasks</a>
       <a href="async.html">Async</a>
       <a href="stdlib.html">Library</a>
+      <a href="databases.html">Databases</a>
+      <a href="ai.html">AI</a>
+      <a href="packages.html">Packages</a>
       <a href="os.html">Brasa OS</a>
       <a href="getting-started.html">Getting Started</a>
     </nav>
@@ -41,8 +44,6 @@
       <h2>Hello world</h2>
       <div class="file-label">examples/hello.br</div>
       <pre><code><span class="kw">package</span> main
-
-<span class="kw">use</span> http, db, json
 
 <span class="kw">type</span> Customer = <span class="kw">record</span>
     id: i32
@@ -70,40 +71,69 @@
     <section id="rest-api">
       <h2>REST API</h2>
       <div class="file-label">examples/rest_api.br</div>
-      <pre><code><span class="kw">package</span> main
+      <pre><code><span class="cm">// A small REST service on `use web`: routes with path parameters, JSON in and out, a middleware.</span>
+<span class="cm">//</span>
+<span class="cm">//   brasa-parse examples/rest_api.br -o rest_api.exe</span>
+<span class="cm">//   rest_api.exe                      (then: curl http://localhost:8080/customers)</span>
+<span class="cm">//</span>
+<span class="cm">// The customers live in memory. Handlers are closures that capture by value, so state that</span>
+<span class="cm">// requests share is a package-level variable. A handler returns `Response or error`; an error</span>
+<span class="cm">// becomes a status through its kind (`errors.NotFound` is 404, `errors.InvalidInput` is 400).</span>
+<span class="cm">// `use json` is there because `web.read_json` and `web.json` write code for your types with it.</span>
 
-<span class="kw">use</span> http, db, db.postgres, json
+<span class="kw">package</span> main
+
+<span class="kw">use</span> errors
+<span class="kw">use</span> json
+<span class="kw">use</span> text
+<span class="kw">use</span> web
 
 <span class="kw">type</span> Customer = <span class="kw">record</span>
-    id: i32
+    id: int
     name: text
 <span class="kw">end</span>
 
+<span class="kw">var</span> customers: Map&lt;int, Customer&gt; = {}
+<span class="kw">var</span> next_id = 1
+
+<span class="kw">func</span> list(req: web.Request) -&gt; web.Response <span class="kw">or</span> error
+    <span class="kw">var</span> rows: []Customer = []
+    <span class="kw">for</span> id, c <span class="kw">in</span> customers
+        rows.add(c)
+    <span class="kw">end</span>
+    <span class="kw">return</span> web.json&lt;[]Customer&gt;(200, rows)
+<span class="kw">end</span>
+
+<span class="kw">func</span> show(req: web.Request) -&gt; web.Response <span class="kw">or</span> error
+    <span class="kw">let</span> id = <span class="kw">try</span> text.parse_int(req.param(<span class="str">"id"</span>) ?? <span class="str">""</span>)
+    <span class="kw">if</span> <span class="kw">not</span> customers.has(id)
+        <span class="kw">return</span> error(errors.NotFound, <span class="str">"no customer {id}"</span>)
+    <span class="kw">end</span>
+    <span class="kw">return</span> web.json&lt;Customer&gt;(200, customers[id])
+<span class="kw">end</span>
+
+<span class="kw">func</span> create(req: web.Request) -&gt; web.Response <span class="kw">or</span> error
+    <span class="kw">var</span> c = <span class="kw">try</span> web.read_json(Customer, req)
+    <span class="kw">if</span> c.name == <span class="str">""</span>
+        <span class="kw">return</span> error(errors.InvalidInput, <span class="str">"a customer needs a name"</span>)
+    <span class="kw">end</span>
+    c.id = next_id
+    next_id += 1
+    customers[c.id] = c
+    <span class="kw">return</span> web.created(Customer, c)
+<span class="kw">end</span>
+
 <span class="kw">func</span> main() -&gt; error
-    <span class="kw">let</span> conn = <span class="kw">try</span> db.open(<span class="str">"postgres://localhost/shop"</span>)
-    <span class="kw">defer</span> conn.close()
-
-    <span class="kw">var</span> app = http.server(port: 8080)
-
-    app.get(<span class="str">"/customers"</span>, <span class="kw">func</span>(req)
-        <span class="kw">let</span> rows = <span class="kw">try</span> conn.query(Customer, <span class="str">"select id, name from customers"</span>)
-        <span class="kw">return</span> http.json(rows)
-    <span class="kw">end</span>)
-
-    app.get(<span class="str">"/customers/:id"</span>, <span class="kw">func</span>(req)
-        <span class="kw">let</span> c = <span class="kw">try</span> conn.one(Customer, <span class="str">"select * from customers where id = $1"</span>, req.param(<span class="str">"id"</span>))
-        <span class="kw">return</span> http.json(c)
-    <span class="kw">end</span>)
-
-    app.post(<span class="str">"/customers"</span>, <span class="kw">func</span>(req)
-        <span class="kw">let</span> c = <span class="kw">try</span> req.body(Customer)
-        <span class="kw">try</span> conn.exec(<span class="str">"insert into customers(name) values($1)"</span>, c.name)
-        <span class="kw">return</span> http.created(c)
-    <span class="kw">end</span>)
-
-    app.run()
+    <span class="kw">var</span> app = web.server(port: 8080)
+    app.use(web.logger())
+    app.get(<span class="str">"/customers"</span>, list)
+    app.get(<span class="str">"/customers/:id"</span>, show)
+    app.post(<span class="str">"/customers"</span>, create)
+    print(<span class="str">"listening on http://localhost:8080"</span>)
+    <span class="kw">try</span> app.run()
+    <span class="kw">return</span>
 <span class="kw">end</span></code></pre>
-      <p>This example shows error propagation and resource cleanup working together: <code>main</code> is declared <code>-&gt; error</code> (it can fail), so every fallible call starts with <code>try</code> — <code>try db.open(...)</code>, the queries, <code>try req.body(Customer)</code> — and any failure short-circuits the function immediately. <code>defer conn.close()</code> guarantees the connection is released whenever <code>main</code> returns, success or failure. Route handlers are passed as inline lambdas (<code>func(req) ... end</code>), and <code>conn.query(Customer, "...")</code> passes the <code>Customer</code> type itself as a value so the database layer knows how to shape the result rows — no reflection or code generation required.</p>
+      <p>A small REST service on <code>use web</code>: <code>web.server(port: 8080)</code> makes the server, <code>app.get</code>, <code>app.post</code> add routes (<code>/customers/:id</code> has a path parameter read with <code>req.param("id")</code>), and <code>app.use(web.logger())</code> adds a middleware that prints one line per request. A handler returns <code>Response or error</code>: <code>web.json&lt;[]Customer&gt;(200, rows)</code> and <code>web.created(Customer, c)</code> encode with <code>use json</code> (the program writes <code>use json</code> too, because the code that does it is generated for your types), and <code>web.read_json(Customer, req)</code> decodes the body. An error is turned into a status by its kind: <code>errors.NotFound</code> becomes 404 with <code>{"error": "no customer 9"}</code>, <code>errors.InvalidInput</code> becomes 400, and an unknown kind becomes 500 with the fixed body <code>internal error</code> (the message goes to the log, never to the client). The customers are kept in a package-level <code>Map</code>, because handlers are closures that capture by value; there is no database library yet. The <a href="stdlib.html#web">web library</a> page lists everything the server, router, client and templates do.</p>
     </section>
 
     <section id="types">
@@ -821,6 +851,114 @@
     print(<span class="str">"objects left after the tree is gone: {live_objects() - before}"</span>)
 <span class="kw">end</span></code></pre>
       <p>A tree whose children point back at their parent. <code>new Node{ ... }</code> makes a shared, reference-counted <code>Rc&lt;Node&gt;</code>; the child's <code>parent</code> field is a <code>Weak&lt;Node&gt;</code>, so the parent and its children do not keep each other alive. <code>live_objects()</code> shows that the whole tree is freed when the last outside reference goes away.</p>
+    </section>
+    <section id="json-example">
+      <h2>json: read and write your own types</h2>
+      <div class="file-label">examples/json.br</div>
+      <pre><code><span class="cm">// JSON: read and write your own types, or a free-form tree.</span>
+<span class="cm">//</span>
+<span class="cm">//   brasa-parse examples/json.br -o json.exe</span>
+<span class="cm">//</span>
+<span class="cm">// `json.parse(T, text)` turns JSON into a value of any type you declare, and `json.encode(T, x)`</span>
+<span class="cm">// does the reverse. There is nothing to register: the library reads the shape of `T` at build</span>
+<span class="cm">// time (comptime reflection) and writes the code for it. A field attribute renames a key</span>
+<span class="cm">// (`#[json("host_name")]`) or leaves the field out (`#[json(skip)]`), and a field of type `text?`</span>
+<span class="cm">// may be `null` or missing. Errors say where: `at $.port` is the path to the bad value, and a</span>
+<span class="cm">// syntax error says the line and column.</span>
+
+<span class="kw">package</span> main
+
+<span class="kw">use</span> json
+
+<span class="kw">type</span> Config = <span class="kw">record</span>
+    port: int
+    #[json(<span class="str">"host_name"</span>)] host: text
+    proxy: text?
+    tags: []text
+    #[json(skip)] cache: text
+<span class="kw">end</span>
+
+<span class="kw">func</span> main()
+    <span class="kw">let</span> raw = <span class="str">"\{\"port\": 8080, \"host_name\": \"example.org\", \"tags\": [\"a\", \"b\"], \"extra\": true\}"</span>
+    <span class="kw">match</span> json.parse(Config, raw)
+        ok(cfg) -&gt;
+            print(<span class="str">"port: {cfg.port}"</span>)
+            print(<span class="str">"host: {cfg.host}"</span>)
+            print(<span class="str">"proxy: {cfg.proxy ?? "none"}"</span>)
+            print(json.encode_with(Config, cfg, json.Options { indent: 2 }) ?? <span class="str">""</span>)
+        err(e) -&gt; print(<span class="str">"bad config: {e.message}"</span>)
+    <span class="kw">end</span>
+
+    <span class="kw">match</span> json.parse(Config, <span class="str">"\{\"port\": \"80\"\}"</span>)
+        ok(cfg) -&gt; print(<span class="str">"unexpected"</span>)
+        err(e) -&gt; print(<span class="str">"bad config: {e.message}"</span>)
+    <span class="kw">end</span>
+
+    <span class="cm">// a free-form tree, when there is no type to read into</span>
+    <span class="kw">match</span> json.parse_value(<span class="str">"[1, \{\"a\": null\}]"</span>)
+        ok(v) -&gt; print(json.stringify(v) ?? <span class="str">""</span>)
+        err(e) -&gt; print(e.message)
+    <span class="kw">end</span>
+<span class="kw">end</span></code></pre>
+      <p><code>json.parse(Config, raw)</code> reads JSON into a record you declare, and <code>json.encode_with(Config, cfg, ...)</code> writes it back, indented. Nothing is registered anywhere: the library reads the shape of the type while compiling and writes the decoder for it. <code>#[json("host_name")]</code> renames a key, <code>#[json(skip)]</code> leaves a field out, <code>text?</code> accepts <code>null</code> or a missing key, and unknown keys are ignored. A wrong value is an error that carries its path (<code>at $.port</code>); <code>json.parse_value</code> gives a free-form tree when there is no type to read into. See <a href="stdlib.html#json">the json library</a>.</p>
+    </section>
+
+    <section id="web-example">
+      <h2>web: a server, a template and the client</h2>
+      <div class="file-label">examples/web.br</div>
+      <pre><code><span class="cm">// The web library: a server, an HTML template and the client in one program.</span>
+<span class="cm">//</span>
+<span class="cm">//   brasa-parse examples/web.br -o web.exe</span>
+<span class="cm">//</span>
+<span class="cm">// The server listens on a free port (0) in the background; the client asks it for a page. An</span>
+<span class="cm">// `html` block is markup with `{expression}` holes: every value is escaped, so the user name below</span>
+<span class="cm">// cannot inject markup. `@for`, `@if`, `@else` and `@end` lines make loops and branches.</span>
+
+<span class="kw">package</span> main
+
+<span class="kw">use</span> web
+
+<span class="kw">type</span> Item = <span class="kw">record</span>
+    name: text
+    price: int
+<span class="kw">end</span>
+
+<span class="kw">func</span> page(user: text, items: []Item) -&gt; web.Safe
+    <span class="kw">return</span> html
+        &lt;h1&gt;Hello, {user}&lt;/h1&gt;
+        &lt;ul&gt;
+        @<span class="kw">for</span> item <span class="kw">in</span> items
+            @<span class="kw">if</span> item.price &gt; 100
+                &lt;li&gt;&lt;b&gt;{item.name}&lt;/b&gt; costs {item.price} (expensive)&lt;/li&gt;
+            @<span class="kw">else</span>
+                &lt;li&gt;{item.name} costs {item.price}&lt;/li&gt;
+            @<span class="kw">end</span>
+        @<span class="kw">end</span>
+        &lt;/ul&gt;
+    <span class="kw">end</span>
+<span class="kw">end</span>
+
+<span class="kw">func</span> main() -&gt; error
+    <span class="kw">let</span> items = [Item { name: <span class="str">"pen"</span>, price: 3 }, Item { name: <span class="str">"&lt;laptop&gt;"</span>, price: 900 }]
+    <span class="kw">var</span> app = web.server(port: 0)
+    app.get(<span class="str">"/"</span>, <span class="kw">func</span>(req)
+        <span class="kw">return</span> web.html_page(200, page(req.query_param(<span class="str">"user"</span>) ?? <span class="str">"world"</span>, items))
+    <span class="kw">end</span>)
+    app.get(<span class="str">"/ping"</span>, <span class="kw">func</span>(req)
+        <span class="kw">return</span> web.text(200, <span class="str">"pong"</span>)
+    <span class="kw">end</span>)
+    <span class="kw">let</span> running = <span class="kw">try</span> app.start()
+    <span class="kw">let</span> base = <span class="str">"http://127.0.0.1:{running.port}"</span>
+
+    <span class="kw">let</span> pong = <span class="kw">try</span> web.get(base + <span class="str">"/ping"</span>)
+    print(<span class="str">"{pong.status} {pong.body}"</span>)
+    <span class="kw">let</span> home = <span class="kw">try</span> web.get(base + <span class="str">"/?user=%3Cb%3EAna%3C/b%3E"</span>)
+    print(home.status)
+    print(home.body)
+    running.stop()
+    <span class="kw">return</span>
+<span class="kw">end</span></code></pre>
+      <p>The program starts a server on a free port in the background (<code>app.start()</code> returns at once; <code>app.run()</code> would serve until the program ends), asks it for a page with <code>web.get</code> and prints the reply. The page comes from an <code>html</code> block: markup with <code>{expression}</code> holes and <code>@for</code>, <code>@if</code>, <code>@else</code>, <code>@end</code> lines. Every value is escaped, which is why the user name <code>&lt;b&gt;Ana&lt;/b&gt;</code> and the item <code>&lt;laptop&gt;</code> come out as text. The block yields a <code>web.Safe</code>, so one template can be placed inside another without being escaped twice.</p>
     </section>
   </main>
 

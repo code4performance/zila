@@ -1,33 +1,62 @@
+// A small REST service on `use web`: routes with path parameters, JSON in and out, a middleware.
+//
+//   brasa-parse examples/rest_api.br -o rest_api.exe
+//   rest_api.exe                      (then: curl http://localhost:8080/customers)
+//
+// The customers live in memory. Handlers are closures that capture by value, so state that
+// requests share is a package-level variable. A handler returns `Response or error`; an error
+// becomes a status through its kind (`errors.NotFound` is 404, `errors.InvalidInput` is 400).
+// `use json` is there because `web.read_json` and `web.json` write code for your types with it.
+
 package main
 
-use http, db, db.postgres, json
+use errors
+use json
+use text
+use web
 
 type Customer = record
-    id: i32
+    id: int
     name: text
 end
 
+var customers: Map<int, Customer> = {}
+var next_id = 1
+
+func list(req: web.Request) -> web.Response or error
+    var rows: []Customer = []
+    for id, c in customers
+        rows.add(c)
+    end
+    return web.json<[]Customer>(200, rows)
+end
+
+func show(req: web.Request) -> web.Response or error
+    let id = try text.parse_int(req.param("id") ?? "")
+    if not customers.has(id)
+        return error(errors.NotFound, "no customer {id}")
+    end
+    return web.json<Customer>(200, customers[id])
+end
+
+func create(req: web.Request) -> web.Response or error
+    var c = try web.read_json(Customer, req)
+    if c.name == ""
+        return error(errors.InvalidInput, "a customer needs a name")
+    end
+    c.id = next_id
+    next_id += 1
+    customers[c.id] = c
+    return web.created(Customer, c)
+end
+
 func main() -> error
-    let conn = try db.open("postgres://localhost/shop")
-    defer conn.close()
-
-    var app = http.server(port: 8080)
-
-    app.get("/customers", func(req)
-        let rows = try conn.query(Customer, "select id, name from customers")
-        return http.json(rows)
-    end)
-
-    app.get("/customers/:id", func(req)
-        let c = try conn.one(Customer, "select * from customers where id = $1", req.param("id"))
-        return http.json(c)
-    end)
-
-    app.post("/customers", func(req)
-        let c = try req.body(Customer)
-        try conn.exec("insert into customers(name) values($1)", c.name)
-        return http.created(c)
-    end)
-
-    app.run()
+    var app = web.server(port: 8080)
+    app.use(web.logger())
+    app.get("/customers", list)
+    app.get("/customers/:id", show)
+    app.post("/customers", create)
+    print("listening on http://localhost:8080")
+    try app.run()
+    return
 end

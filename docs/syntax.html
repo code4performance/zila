@@ -18,6 +18,9 @@
       <a href="concurrency.html">Tasks</a>
       <a href="async.html">Async</a>
       <a href="stdlib.html">Library</a>
+      <a href="databases.html">Databases</a>
+      <a href="ai.html">AI</a>
+      <a href="packages.html">Packages</a>
       <a href="os.html">Brasa OS</a>
       <a href="getting-started.html">Getting Started</a>
     </nav>
@@ -49,7 +52,8 @@
       <p>Every file starts with a <code>package</code> declaration, followed by zero or more <code>use</code> declarations naming modules the file depends on.</p>
       <pre><code><span class="kw">package</span> main
 
-<span class="kw">use</span> http, db, db.postgres, json</code></pre>
+<span class="kw">use</span> text, list</code></pre>
+      <p>A name after <code>use</code> is a standard library module, a dependency listed in <code>brasa.toml</code> or a directory of <code>.br</code> files next to it; a name that is none of them is a compile error. <a href="packages.html">Packages</a> explains the rest.</p>
     </section>
 
     <section id="types">
@@ -247,7 +251,7 @@
       <p>These words belong to the language and cannot be used as names.</p>
       <dl class="cli">
         <dt>Declarations</dt>
-        <dd><code>package</code> <code>use</code> <code>type</code> <code>record</code> <code>enum</code> <code>interface</code> <code>func</code> <code>return</code> <code>var</code> <code>let</code> <code>extern</code> <code>embed</code> <code>end</code> <code>comptime</code> (see <a href="#comptime">Compile-time code generation</a>)</dd>
+        <dd><code>package</code> <code>use</code> <code>type</code> <code>record</code> <code>enum</code> <code>interface</code> <code>func</code> <code>return</code> <code>var</code> <code>let</code> <code>extern</code> <code>embed</code> <code>pub</code> <code>end</code> <code>comptime</code> (see <a href="#comptime">Compile-time code generation</a>)</dd>
 
         <dt>Control flow</dt>
         <dd><code>if</code> <code>else</code> <code>match</code> <code>for</code> <code>in</code> <code>while</code> <code>break</code> <code>continue</code> <code>defer</code> <code>try</code></dd>
@@ -262,6 +266,26 @@
         <dd><code>true</code> <code>false</code> <code>nil</code> <code>self</code> <code>ref</code> <code>new</code> <code>unsafe</code> <code>asm</code></dd>
       </dl>
       <p><code>new T{ ... }</code> makes a shared, reference-counted object of type <code>Rc&lt;T&gt;</code> (it needs a record literal; see <a href="native.html#weak">shared objects and weak references</a>); <code>Weak&lt;T&gt;</code>, <code>weak(x)</code> and <code>upgrade()</code> break reference cycles. A method or field may be named like a keyword after a dot (<code>app.use(x)</code>).</p>
+    </section>
+    <section id="visibility">
+      <h2>Visibility: <code>pub</code></h2>
+      <p>Every function, type, <code>let</code> / <code>var</code>, method and record field is private to its package unless it is written with <code><span class="kw">pub</span></code>. All the files of one package see each other's names; another package sees only the <code>pub</code> ones, and only as <code>package.name</code>. <code>pub</code> comes after attributes and before <code>async</code>, <code>func</code>, <code>type</code>, <code>let</code>, <code>var</code> and <code>extern</code>, and before a field name. A <code>pub</code> enum exports all its variants. Using a private name from another package is a compile error that says it is private.</p>
+      <pre><code><span class="kw">package</span> geo
+
+<span class="kw">pub</span> <span class="kw">type</span> Point = <span class="kw">record</span>
+    <span class="kw">pub</span> x: int
+    <span class="kw">pub</span> y: int
+<span class="kw">end</span>
+
+<span class="kw">pub</span> <span class="kw">type</span> Counter = <span class="kw">record</span>
+    n: int
+<span class="kw">end</span>
+
+<span class="cm">// a record with a private field is built by a function of its own package</span>
+<span class="kw">pub</span> <span class="kw">func</span> new_counter() -&gt; Counter
+    <span class="kw">return</span> Counter { n: 0 }
+<span class="kw">end</span></code></pre>
+      <p>A record literal (or <code>new</code>) of another package's type is allowed only when every field is <code>pub</code> (<code>geo.Point { x: 1, y: 2 }</code>); otherwise use a constructor function. Copying, passing and storing a whole value is always allowed. A <code>pub</code> declaration may not name a private type of its own package in its signature. A generic function keeps the access rights of the package that wrote it. A type satisfies an interface of another package only through <code>pub</code> methods. <code>main</code>, <code>test_</code> functions, <code>#[export]</code> functions and the calls the compiler inserts need no <code>pub</code>.</p>
     </section>
 
     <section id="generics">

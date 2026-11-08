@@ -5,7 +5,7 @@
 //! entry and nothing else.
 
 /// Every option `brasa-parse` accepts.
-pub const FLAGS: &[&str] = &["--ast", "--tokens", "--asm", "--run", "--build", "-o", "--os", "--docs", "--no-opt", "--fmt", "--fmt-check", "--test", "--target", "--lsp", "--comptime-timeout", "--no-comptime-cache", "--comptime-dump"];
+pub const FLAGS: &[&str] = &["--ast", "--tokens", "--asm", "--run", "--build", "-o", "--os", "--docs", "--no-opt", "--fmt", "--fmt-check", "--test", "--target", "--lsp", "--comptime-timeout", "--no-comptime-cache", "--comptime-dump", "--init", "--add", "--as", "--fetch", "--tidy", "--update", "--offline"];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Mode {
@@ -28,6 +28,16 @@ pub enum Mode {
     Test,
     /// Run the language server on standard input and output.
     Lsp,
+    /// Write `brasa.toml`.
+    Init,
+    /// Add a dependency to the manifest and fetch it.
+    Add,
+    /// Resolve the dependencies, fill the cache and write `brasa.lock`.
+    Fetch,
+    /// Remove unused dependencies and rewrite the lock.
+    Tidy,
+    /// Raise dependency minimums to the newest tags.
+    Update,
 }
 
 #[derive(Debug)]
@@ -51,13 +61,19 @@ pub struct Options {
     pub no_comptime_cache: bool,
     /// `--comptime-dump`: print the text every generator produced to standard error.
     pub comptime_dump: bool,
+    /// `--add <git-url>[@version]`.
+    pub add: Option<String>,
+    /// `--as <name>`: the import name of an added dependency.
+    pub as_name: Option<String>,
+    /// `--offline`: package commands use the cache only.
+    pub offline: bool,
 }
 
 /// The targets `--target` accepts.
 pub const TARGETS: &[&str] = &["windows", "linux"];
 
 pub fn parse(args: &[String]) -> Result<Options, String> {
-    let mut o = Options { mode: Mode::Check, path: None, extra: Vec::new(), out: None, optimize: true, target: "windows".to_string(), target_explicit: false, comptime_timeout: None, no_comptime_cache: false, comptime_dump: false };
+    let mut o = Options { mode: Mode::Check, path: None, extra: Vec::new(), out: None, optimize: true, target: "windows".to_string(), target_explicit: false, comptime_timeout: None, no_comptime_cache: false, comptime_dump: false, add: None, as_name: None, offline: false };
     let mut explicit = false;
     let mut i = 0;
     while i < args.len() {
@@ -73,6 +89,26 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
             "--fmt-check" => o.mode = Mode::FmtCheck,
             "--test" => o.mode = Mode::Test,
             "--lsp" => o.mode = Mode::Lsp,
+            "--init" => o.mode = Mode::Init,
+            "--fetch" => o.mode = Mode::Fetch,
+            "--tidy" => o.mode = Mode::Tidy,
+            "--update" => o.mode = Mode::Update,
+            "--offline" => o.offline = true,
+            "--add" => {
+                i += 1;
+                match args.get(i) {
+                    Some(v) if !v.starts_with('-') => o.add = Some(v.clone()),
+                    _ => return Err("--add needs a git URL, optionally followed by @version".into()),
+                }
+                o.mode = Mode::Add;
+            }
+            "--as" => {
+                i += 1;
+                match args.get(i) {
+                    Some(v) if !v.starts_with('-') => o.as_name = Some(v.clone()),
+                    _ => return Err("--as needs an import name".into()),
+                }
+            }
             "--no-opt" => o.optimize = false,
             "--no-comptime-cache" => o.no_comptime_cache = true,
             "--comptime-dump" => o.comptime_dump = true,
@@ -115,7 +151,7 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
                 }
             }
         }
-        if FLAGS.contains(&a) && !matches!(a, "-o" | "--no-opt" | "--target" | "--comptime-timeout" | "--no-comptime-cache" | "--comptime-dump") {
+        if FLAGS.contains(&a) && !matches!(a, "-o" | "--no-opt" | "--target" | "--comptime-timeout" | "--no-comptime-cache" | "--comptime-dump" | "--as" | "--offline") {
             explicit = true;
         }
         i += 1;
@@ -164,6 +200,20 @@ mod tests {
     }
 
     #[test]
+    fn package_commands() {
+        assert_eq!(p(&["--init"]).unwrap().mode, Mode::Init);
+        assert_eq!(p(&["--init", "app"]).unwrap().path.as_deref(), Some("app"));
+        let a = p(&["--add", "https://x.org/a/codec@1.2.0", "--as", "js", "--offline"]).unwrap();
+        assert!(a.mode == Mode::Add && a.add.as_deref() == Some("https://x.org/a/codec@1.2.0") && a.as_name.as_deref() == Some("js") && a.offline);
+        assert_eq!(p(&["--fetch"]).unwrap().mode, Mode::Fetch);
+        assert_eq!(p(&["--tidy"]).unwrap().mode, Mode::Tidy);
+        let u = p(&["--update", "codec"]).unwrap();
+        assert!(u.mode == Mode::Update && u.path.as_deref() == Some("codec"));
+        assert!(p(&["--add"]).is_err() && p(&["--add", "--fetch"]).is_err());
+        assert!(p(&["--as"]).is_err());
+    }
+
+    #[test]
     fn unknown_options_are_rejected() {
         assert!(p(&["a.br", "--bogus"]).unwrap_err().contains("unknown option"));
         assert!(p(&["a.br", "-o"]).is_err());
@@ -176,6 +226,8 @@ mod tests {
                 "-o" => vec!["a.br", "-o", "x"],
                 "--target" => vec!["a.br", "--target", "linux"],
                 "--comptime-timeout" => vec!["a.br", "--comptime-timeout", "9"],
+                "--add" => vec!["--add", "https://example.org/x/codec@1.0.0"],
+                "--as" => vec!["--add", "https://example.org/x/codec", "--as", "js"],
                 _ => vec!["a.br", f],
             };
             assert!(p(&args).is_ok(), "{} is listed in FLAGS but not parsed", f);

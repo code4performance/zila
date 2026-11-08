@@ -7,7 +7,7 @@
    operators and '='. A line starting with '.' or '?.' continues the
    previous expression (method chains). Comparisons do not chain.
    A multi-line match arm body runs until the next arm or 'end'.
-   Method/field names after '.' may be keywords (app.use(...)).
+   Method/field names after '.' may be keywords (app.use(...), the middleware call of 'use web').
    =========================================================== *)
 
 
@@ -36,7 +36,7 @@ comment    = '//' { any } EOL | '/*' { any } '*/' ;
    package use type record enum func return var let
    if else match for in while break continue defer spawn asm end async await
    unsafe extern embed new try and or not true false nil
-   bitand bitor bitxor bitnot interface ref self shared spawn_thread *)
+   bitand bitor bitxor bitnot interface ref self shared spawn_thread pub *)
 
 
 (* ---------- Program and declarations ---------- *)
@@ -46,8 +46,9 @@ package_decl = 'package' ident ;
 use_decl     = 'use' qname { ',' qname } ;
 qname        = ident { '.' ident } ;
 
-top_decl      = [ attrs ] ( func_decl | type_decl | const_decl
-                          | var_decl | extern_decl | embed_decl ) ;
+top_decl      = [ attrs ] ( [ 'pub' ] ( func_decl | type_decl | const_decl
+                                  | var_decl | extern_decl )
+                          | embed_decl ) ;      (* 'pub' goes before async/comptime/func, type, let/var, extern *)
 
 attrs         = { '#[' ident [ '(' [ args ] ')' ] ']' } ;
 const_decl    = 'let' ident [ ':' type ] '=' expr ;
@@ -65,7 +66,7 @@ type_body  = 'record' { field } 'end'
            | 'interface' { method_sig } 'end'   (* structural, Go-style *)
            | type ;
 method_sig = 'func' ident '(' 'self' [ ',' params ] ')' [ '->' result ] ;
-field      = ident ':' type ;
+field      = [ 'pub' ] ident ':' type ;
 variant    = ident [ '(' type { ',' type } ')' ] [ ',' ] ;   (* Red, Green  or  Circle(int) *)
 generics   = '<' tparam { ',' tparam } '>' ;
 tparam     = ident [ ':' qname ] ;              (* T: Printable *)
@@ -227,6 +228,17 @@ spawn_thread_expr = 'spawn_thread' call ;      (* statement or expression; the r
      captured or sent to a task (use `new T{ ... }`, an Rc<T>, for a value that must live longer).
    - Integer arithmetic wraps at the width of the type.
    - 'text' is immutable UTF-8 (pointer + length); []u8 for raw bytes.
+   Visibility
+   - A top-level func, method, type, let/var and record field is private to its package unless
+     written 'pub'. Every file of the same package sees all its names; another package sees only
+     the 'pub' ones, as pkg.name. A 'pub' enum exports its variants; 'pub' is not allowed on
+     variants, interface method signatures, parameters, 'embed', 'package' or 'use'.
+   - A record literal or `new` of another package's type needs every field to be 'pub'; otherwise
+     the package offers a constructor function. Copying or passing a whole value is always allowed.
+   - A 'pub' declaration may not name a private type of its own package in its signature.
+   - A generic keeps the access rights of the package that wrote it. An interface of another
+     package is satisfied only by 'pub' methods. main, test_ functions, #[export] functions and
+     compiler-inserted calls need no 'pub'.
    FFI & Assembly
    - Calling C requires declaring `extern [abi] func ...` (abi defaults to "C").
    - Calling extern functions, dereferencing raw pointers (`*T`), and inline `asm`

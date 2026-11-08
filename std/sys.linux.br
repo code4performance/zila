@@ -240,3 +240,58 @@ end
 pub func error_for(code: long, what: text) -> error?
     return error(kind_of(code), describe(code, what))
 end
+
+// Fills `n` bytes at `p` with random bytes from the kernel (getrandom, system call 318).
+// False when the kernel could not.
+pub func random_fill(p: *u8, n: long) -> bool
+    var done: long = 0
+    while done < n
+        let r = syscall(318, long(p) + done, n - done, 0, 0, 0, 0)
+        if r < 0
+            if r == -4
+                continue
+            end
+            return false
+        end
+        done += r
+    end
+    return true
+end
+
+// The value of the environment variable `name`, or `nil` when it is not set (read from
+// /proc/self/environ).
+pub func env(name: text) -> text?
+    let fd = syscall(2, long(c.cstr("/proc/self/environ")), 0, 0, 0, 0, 0)
+    if fd < 0
+        return nil
+    end
+    var all = ""
+    let b = buffer(65536)
+    while true
+        let n = syscall(0, fd, long(b.ptr), 65536, 0, 0, 0)
+        if n <= 0
+            break
+        end
+        unsafe
+            all = all + c.from_bytes(b.ptr, n)
+        end
+        if all.len > 4194304
+            break
+        end
+    end
+    syscall(3, fd, 0, 0, 0, 0, 0)
+    let want = name + "="
+    var start = 0
+    while start < all.len
+        var z = start
+        while z < all.len and all.byte(z) != 0
+            z += 1
+        end
+        let item = all.__raw_slice(start, z)
+        if item.len > want.len and item.__raw_slice(0, want.len) == want
+            return item.__raw_slice(want.len, item.len)
+        end
+        start = z + 1
+    end
+    return nil
+end

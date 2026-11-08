@@ -18,6 +18,9 @@
       <a href="concurrency.html">Tasks</a>
       <a href="async.html">Async</a>
       <a href="stdlib.html">Library</a>
+      <a href="databases.html">Databases</a>
+      <a href="ai.html">AI</a>
+      <a href="packages.html">Packages</a>
       <a href="os.html">Brasa OS</a>
       <a href="getting-started.html">Getting Started</a>
     </nav>
@@ -140,14 +143,18 @@
         <thead><tr><th>Library or feature</th><th>Windows</th><th>Linux</th><th>Notes</th></tr></thead>
         <tbody>
           <tr><td>The language, <code>print</code>, text, lists, maps, records, enums, generics, interfaces, closures, <code>defer</code>, errors, floats, <code>unsafe</code>, <code>asm</code></td><td>yes</td><td>yes</td><td>same output</td></tr>
-          <tr><td><code>text</code>, <code>list</code>, <code>math</code>, <code>float</code>, <code>format</code>, <code>set</code>, <code>sorted</code>, <code>bufio</code>, <code>errors</code></td><td>yes</td><td>yes</td><td>written in Brasa, no operating system calls</td></tr>
+          <tr><td><code>text</code>, <code>list</code>, <code>math</code>, <code>float</code>, <code>format</code>, <code>set</code>, <code>sorted</code>, <code>bufio</code>, <code>errors</code>, <code>derive</code>, <code>reflect</code>, <code>json</code></td><td>yes</td><td>yes</td><td>written in Brasa, no operating system calls</td></tr>
           <tr><td><code>task</code>, <code>future</code>: <code>spawn</code>, <code>sleep</code>, channels, <code>async</code>, <code>await</code></td><td>yes</td><td>yes</td><td>cooperative tasks, one scheduler per thread; each task has a 256 KiB stack with a guard page (Windows fibers there)</td></tr>
           <tr><td><code>thread</code>, <code>sync</code>: <code>spawn_thread</code>, <code>shared</code>, <code>Mutex</code>, <code>Atomic</code></td><td>yes</td><td>not yet</td><td>operating-system threads with atomic reference counts; rejected with a message in a bare-metal kernel</td></tr>
           <tr><td><code>fs</code></td><td>yes</td><td>yes</td><td>on Linux a regular file is read and written in pieces of at most 64 KiB and the other tasks run between the pieces (Windows moves the data in the background); errors read <code>path: reason</code> with the operating system's wording</td></tr>
           <tr><td><code>net</code>: TCP, UDP, <code>lookup</code>, <code>resolve</code></td><td>yes</td><td>yes</td><td>IPv4 only on both. Names: <code>/etc/hosts</code>, then the servers of <code>/etc/resolv.conf</code> over UDP (2 seconds, two tries, TCP when the answer is cut short, CNAME chains followed)</td></tr>
           <tr><td><code>sys</code></td><td>yes</td><td>yes</td><td>internal helpers of <code>fs</code> and <code>net</code>: the operating system's error messages</td></tr>
           <tr><td><code>extern</code> and <code>#[link]</code></td><td>yes</td><td>yes</td><td>System V calling convention on Linux; <code>#[link("c")]</code> is <code>libc.so.6</code>, <code>"m"</code> is <code>libm.so.6</code>, any other name is <code>lib&lt;name&gt;.so</code>; callbacks take up to six integer, pointer or float arguments; what C printed is flushed before each <code>print</code> and when the program ends, so the output keeps its order</td></tr>
-          <tr><td><code>tls</code>: HTTPS client</td><td>yes</td><td>yes</td><td>SChannel on Windows; OpenSSL 3 (<code>libssl.so.3</code>, needed at run time) on Linux, which makes the program dynamically linked. Both check the certificate and the host name</td></tr>
+          <tr><td><code>web</code>: HTTP server, router, client, templates</td><td>yes</td><td>yes</td><td>written only on <code>net</code>, <code>tls</code>, <code>task</code> and <code>json</code>, so it behaves the same on both targets; rejected in a bare-metal kernel</td></tr>
+          <tr><td><code>tls</code>: HTTPS client, <code>upgrade</code>, ALPN, private CA file</td><td>yes</td><td>yes</td><td>SChannel on Windows; OpenSSL 3 (<code>libssl.so.3</code>, needed at run time) on Linux, which makes the program dynamically linked. Both check the certificate and the host name, offer ALPN protocols and trust the extra authorities of <code>ca_file</code> for one connection</td></tr>
+          <tr><td><code>crypto</code>: hashes, HMAC, PBKDF2, base64, random bytes</td><td>yes</td><td>yes</td><td>plain Brasa; random bytes from <code>BCryptGenRandom</code> on Windows and <code>getrandom</code> on Linux</td></tr>
+          <tr><td><code>db</code>, <code>postgres</code>, <code>sqlserver</code>: databases</td><td>yes</td><td>yes</td><td>written only on <code>net</code>, <code>tls</code> and <code>crypto</code>; the same programs behave the same on both targets</td></tr>
+          <tr><td><code>ai</code>: language models (chat, streaming, typed answers, tools)</td><td>yes</td><td>yes</td><td>written only on <code>web</code> and <code>json</code>; reads keys with <code>sys.env</code> (<code>GetEnvironmentVariable</code> on Windows, <code>/proc/self/environ</code> on Linux)</td></tr>
           <tr><td><code>ui</code>: windows and controls</td><td>yes</td><td>yes</td><td>the same functions and behavior; native Win32 controls on Windows, controls drawn by the library on an X11 display on Linux (<a href="#ui">see below</a>)</td></tr>
           <tr><td><code>ws</code> (Winsock)</td><td>internal</td><td>n/a</td><td>an internal helper of <code>net</code> on Windows; programs cannot <code>use ws</code> on either target</td></tr>
           <tr><td><code>--os</code> (bare-metal kernel)</td><td>n/a</td><td>n/a</td><td>its own target, unchanged</td></tr>

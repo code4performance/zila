@@ -1,0 +1,67 @@
+// A language model from Brasa: chat, streaming, a value of your own type, and tools.
+//
+//   set ANTHROPIC_API_KEY=...
+//   brasa-parse examples/ai.br -o ai.exe
+//
+// `ai.anthropic` talks to the Anthropic Messages API; `ai.openai_compatible(base_url, key)` to any
+// OpenAI-style server, such as a local Ollama. The key is read from the environment and travels
+// only in a request header. The model is always named by the program: the library has none by
+// default.
+//
+//   * `client.chat` returns the whole answer, `client.stream` hands over the pieces as they arrive.
+//   * `ai.ask(T, client, request)` returns a value of your own type: the library makes a JSON
+//     Schema from `T` at build time, asks the model for matching JSON and parses it.
+//   * `ai.tool(T, name, description, handler)` makes a tool whose input is the record `T`;
+//     `client.run` lets the model call tools until it has an answer.
+//
+// Text from a model, and the output of tools, is untrusted input: register only tools you are
+// willing to have called, with the least privilege that works.
+
+package main
+
+use ai
+use json
+
+type Invoice = record
+    #[desc("the invoice number as printed")] number: text
+    #[desc("the total to pay")] total: float
+    paid: bool
+    note: text?
+end
+
+type City = record
+    #[desc("the name of a city")] name: text
+end
+
+func weather(c: City) -> text or error
+    return "sunny, 28 degrees in {c.name}"
+end
+
+func main() -> error
+    let key = try ai.key_from_env("ANTHROPIC_API_KEY")
+    let client = ai.anthropic(key)
+    let model = "claude-haiku-5-5"
+
+    // chat
+    let hello = try client.chat(ai.request(model, [ai.user("Say hello in one short sentence.")], 100))
+    print(hello.text)
+    print("tokens:", hello.usage.input, "in,", hello.usage.output, "out")
+
+    // streaming: the pieces are printed as they arrive
+    let streamed = try client.stream(ai.request(model, [ai.user("Count from one to five, in words.")], 100), func(piece)
+        print(piece)
+        return
+    end)
+    print("[done: {streamed.text.len} characters]")
+
+    // a value of your own type
+    let invoice = try ai.ask(Invoice, client, ai.request(model, [ai.user("Invoice A-1042, total 1299.90 BRL, already paid.")], 200))
+    print("invoice", invoice.number, invoice.total, invoice.paid, invoice.note ?? "no note")
+
+    // tools: the model decides when to call the function
+    let tool = ai.tool(City, "get_weather", "The current weather in a city", weather)
+    let run = try client.run(ai.request(model, [ai.user("Is it nice in Recife today?")], 300), [tool])
+    print(run.reply.text)
+    print("model calls:", run.steps)
+    return
+end

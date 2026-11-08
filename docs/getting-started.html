@@ -18,6 +18,9 @@
       <a href="concurrency.html">Tasks</a>
       <a href="async.html">Async</a>
       <a href="stdlib.html">Library</a>
+      <a href="databases.html">Databases</a>
+      <a href="ai.html">AI</a>
+      <a href="packages.html">Packages</a>
       <a href="os.html">Brasa OS</a>
       <a href="getting-started.html" aria-current="page">Getting Started</a>
     </nav>
@@ -91,6 +94,27 @@ cargo test</code></pre>
 
         <dt>--comptime-dump</dt>
         <dd>Prints the text every comptime generator produced to standard error, so you can see what was compiled.</dd>
+
+        <dt>--init [name]</dt>
+        <dd>Writes <code>brasa.toml</code> in the current directory. See <a href="packages.html">Packages</a>.</dd>
+
+        <dt>--add git-url[@version]</dt>
+        <dd>Adds a dependency to the manifest and fetches it (the newest tag when no version is given). The one command, with <code>--fetch</code> and <code>--update</code>, that uses the network.</dd>
+
+        <dt>--as name</dt>
+        <dd>With <code>--add</code>: the import name of the dependency (default: the last part of the URL).</dd>
+
+        <dt>--fetch</dt>
+        <dd>Chooses the versions of every dependency, downloads what the cache lacks, checks the hashes and writes <code>brasa.lock</code>.</dd>
+
+        <dt>--tidy</dt>
+        <dd>Removes the dependencies no source file uses and rewrites <code>brasa.lock</code> to the packages that are needed. No network.</dd>
+
+        <dt>--update [name]</dt>
+        <dd>Raises the minimum version of a dependency (or all) to the newest tag of its major version, then fetches.</dd>
+
+        <dt>--offline</dt>
+        <dd>With the package commands: use only the cache and the lock, and fail naming what is missing. Builds never use the network, so it changes nothing for them.</dd>
 
         <dt>--os boot.br kernel.br -o disk.img</dt>
         <dd>Builds a bootable disk image from a boot sector and a kernel, both written in Brasa (see <code>os/</code> in the repository). Run it with QEMU.</dd>

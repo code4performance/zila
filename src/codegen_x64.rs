@@ -100,6 +100,13 @@ pub fn std_source(name: &str) -> Option<&'static str> {
         "bufio" => Some(include_str!("../std/bufio.br")),
         "derive" => Some(include_str!("../std/derive.br")),
         "reflect" => Some(include_str!("../std/reflect.br")),
+        "json" => Some(include_str!("../std/json.br")),
+        "web" => Some(include_str!("../std/web.br")),
+        "crypto" => Some(include_str!("../std/crypto.br")),
+        "db" => Some(include_str!("../std/db.br")),
+        "postgres" => Some(include_str!("../std/postgres.br")),
+        "sqlserver" => Some(include_str!("../std/sqlserver.br")),
+        "ai" => Some(include_str!("../std/ai.br")),
         _ => None,
     }
 }
@@ -696,6 +703,9 @@ pub struct Compiler {
     driver: bool,
     modules: Vec<Module>,
     imports: HashMap<String, HashSet<String>>,
+    /// `(importing module, qualifier)` to the module key when a package is imported under a name
+    /// that is not its key (two packages with the same name, or one package under two names).
+    mod_aliases: HashMap<(String, String), String>,
     rec_decls: HashMap<String, (String, Vec<Field>)>,
     /// `#[shared]` records have reference semantics: never copied on assignment, capture or iteration.
     shared_recs: HashSet<String>,
@@ -816,6 +826,7 @@ impl Compiler {
             driver: crate::comptime::driver_mode(),
             modules: Vec::new(),
             imports: HashMap::new(),
+            mod_aliases: HashMap::new(),
             rec_decls: HashMap::new(),
             shared_recs: HashSet::new(),
             rc_recs: HashSet::new(),
@@ -1254,20 +1265,20 @@ impl Compiler {
         seen.insert(main.package.clone());
         while let Some((name, file)) = queue.pop() {
             let mut imps = HashSet::new();
-            let mut wanted: Vec<String> = file.uses.iter().map(|u| u[0].clone()).collect();
+            let mut wanted: Vec<Vec<String>> = file.uses.clone();
             if file_uses_concurrency(&file) {
                 if self.target == Target::Bare {
                     return Err("'spawn', 'channel', 'async' and 'await' need the task library, which needs Windows".into());
                 }
-                wanted.push("task".into());
-                wanted.push("future".into());
+                wanted.push(vec!["task".into()]);
+                wanted.push(vec!["future".into()]);
             }
             let (uses_shared, uses_spawn) = file_uses_threads(&file);
             if uses_spawn {
                 if self.target == Target::Bare {
                     return Err("'spawn_thread' needs operating-system threads: it is not available in a bare-metal kernel".into());
                 }
-                wanted.push("thread".into());
+                wanted.push(vec!["thread".into()]);
             }
             if (uses_shared || uses_spawn) && self.target != Target::Bare {
                 self.threads = true;
@@ -1276,13 +1287,15 @@ impl Compiler {
                 if self.target == Target::Bare {
                     return Err("floating point is not available in a bare-metal kernel".into());
                 }
-                wanted.push("float".into());
+                wanted.push(vec!["float".into()]);
             }
-            for m in wanted {
+            for segs in wanted {
+                let std_name = crate::codegen_x64::std_source(&segs[0]).is_some();
+                let m = if std_name { segs[0].clone() } else { segs.last().unwrap().clone() };
                 if m == "ws" && name == main.package {
                     return Err("'ws' is internal to 'net' and cannot be used by programs; use 'net' instead".into());
                 }
-                if self.target == Target::Bare && (matches!(m.as_str(), "ui" | "task" | "future" | "fs" | "net" | "sys" | "ws" | "tls" | "thread" | "sync")) {
+                if self.target == Target::Bare && (matches!(m.as_str(), "ui" | "task" | "future" | "fs" | "net" | "sys" | "ws" | "tls" | "thread" | "sync" | "web" | "crypto" | "db" | "postgres" | "sqlserver" | "ai")) {
                     return Err(format!("'{}' needs Windows and cannot be used in a bare-metal kernel", m));
                 }
                 if self.target == Target::Linux
@@ -1290,27 +1303,51 @@ impl Compiler {
                 {
                     return Err(format!("'{}' is not available on Linux yet (it uses the Windows API)", m));
                 }
+                // where the package is: the standard library, the project (brasa.toml and its
+                // directories), then the files registered next to the source
+                let found: Option<(String, &'static str)> = if std_name {
+                    crate::comptime::package_source(&m, self.target).map(|s| (m.clone(), s))
+                } else {
+                    match crate::package::resolve_use(&name, &segs)? {
+                        Some(r) => Some((r.key, r.source)),
+                        None => match crate::comptime::registered_source(&segs[0]) {
+                            Some(s) if segs.len() == 1 => Some((segs[0].clone(), s)),
+                            _ if segs[0] == "c" => None,
+                            _ => {
+                                return Err(format!(
+                                    "unknown package '{}' (not in the standard library, brasa.toml or the project directory); to add one: brasa-parse --add <git-url>",
+                                    segs.join(".")
+                                ))
+                            }
+                        },
+                    }
+                };
                 imps.insert(m.clone());
+                if let Some((k, _)) = &found {
+                    if *k != m {
+                        self.mod_aliases.insert((name.clone(), m.clone()), k.clone());
+                    }
+                }
                 if m == "thread" {
                     self.threads = true;
                 }
                 if m == "ui" {
                     self.uses_ui = true;
                 }
-                if !seen.contains(&m) {
-                    if let Some(src) = crate::comptime::package_source(&m, self.target) {
-                        seen.insert(m.clone());
-                        let mut f = parse_source(src).map_err(|d| format!("std/{}.br:{}:{}: {}", m, d.line, d.col, d.msg))?;
+                if let Some((key, src)) = found {
+                    if !seen.contains(&key) {
+                        seen.insert(key.clone());
+                        let mut f = parse_source(src).map_err(|d| format!("{}{}.br:{}:{}: {}", if std_name { "std/" } else { "package " }, key, d.line, d.col, d.msg))?;
                         // generators run at build time only; generated templates have no body here
                         let driver = self.driver;
                         f.decls.retain(|d| match &d.kind {
                             DeclKind::Func(fd) => !(d.attrs.iter().any(|a| a.name == "generated") || (fd.comptime && !driver)),
                             _ => true,
                         });
-                        if let Some(extra) = expansion.as_ref().and_then(|x| x.extra.get(&m)) {
+                        if let Some(extra) = expansion.as_ref().and_then(|x| x.extra.get(&key)) {
                             f.decls.extend(extra.iter().cloned());
                         }
-                        queue.push((m.clone(), f));
+                        queue.push((key.clone(), f));
                     }
                 }
             }
@@ -1695,7 +1732,7 @@ end
     }
 
     fn record_name(&mut self, path: &[String], m: &str) -> R<String> {
-        let q = if path.len() == 1 { format!("{}.{}", m, path[0]) } else { path.join(".") };
+        let q = self.qname(m, path);
         if path.len() > 1 && !self.type_visible(&q, m) && self.type_exists(&q) {
             return self.private_name(path.last().unwrap(), type_owner(&q));
         }
@@ -1844,7 +1881,7 @@ end
                         return Ok(t);
                     }
                 }
-                let q = if path.len() == 1 { format!("{}.{}", m, path[0]) } else { path.join(".") };
+                let q = self.qname(m, path);
                 if path.len() > 1 && !self.type_visible(&q, m) && self.type_exists(&q) {
                     return self.private_name(path.last().unwrap(), type_owner(&q));
                 }
@@ -2616,7 +2653,7 @@ end
 
     /// A function, global or variant of package `m` may be named from the current package.
     fn check_member_vis(&self, m: &str, name: &str, public: bool) -> R<()> {
-        if public || m == self.cur_mod {
+        if public || m == self.cur_mod || self.cur_mod == "comptime_run" {
             Ok(())
         } else {
             self.private_name(name, m)
@@ -2672,7 +2709,7 @@ end
 
     /// A method of another package must be `pub`.
     fn check_method_vis(&self, sig: &Sig, name: &str) -> R<()> {
-        if sig.public || sig.module == self.cur_mod || name == "drop" {
+        if sig.public || sig.module == self.cur_mod || name == "drop" || self.cur_mod == "comptime_run" {
             Ok(())
         } else {
             self.private_name(name, &sig.module)
@@ -2690,6 +2727,21 @@ end
             }
         }
         None
+    }
+
+    /// The module key a qualifier written in module `from` stands for.
+    fn modkey(&self, from: &str, q: &str) -> String {
+        self.mod_aliases.get(&(from.to_string(), q.to_string())).cloned().unwrap_or_else(|| q.to_string())
+    }
+
+    /// The qualified name of the type a path names: one segment is a type of `m`, two are
+    /// `<imported package>.<type>`.
+    fn qname(&self, m: &str, path: &[String]) -> String {
+        if path.len() == 1 {
+            format!("{}.{}", m, path[0])
+        } else {
+            format!("{}.{}", self.modkey(m, &path[0]), path[1..].join("."))
+        }
     }
 
     fn is_module(&self, name: &str) -> bool {
@@ -4744,7 +4796,8 @@ end
                     return self.err(format!("'c.{}' must be called", name));
                 }
                 // `want` lets a function of the module be passed where the system wants a callback
-                return self.member(&m.clone(), name, want);
+                let mk = self.modkey(&self.cur_mod, m);
+                return self.member(&mk, name, want);
             }
             if let Some(q) = self.enum_type_named(m) {
                 let Some(idx) = self.enums[&q].variants.iter().position(|v| v.0 == name) else {
@@ -5717,6 +5770,8 @@ end
                         if m == "c" {
                             return self.c_intrinsic(name, args);
                         }
+                        let mk = self.modkey(&self.cur_mod, m);
+                        let m = &mk;
                         // `format.fmt(template, a, b)` is `format.fmt2(template, a, b)`
                         let renamed;
                         let name = if m == "format" && name == "fmt" && !self.funcs.contains_key(&(m.clone(), name.clone())) {
@@ -6770,7 +6825,7 @@ impl Compiler {
         if args.is_empty() {
             return None;
         }
-        let q = if path.len() == 1 { format!("{}.{}", m, path[0]) } else { path.join(".") };
+        let q = self.qname(m, path);
         self.tmpl_recs.contains_key(&q).then_some(q)
     }
 
@@ -7067,7 +7122,7 @@ impl Compiler {
     /// The generic record a literal `Name { ... }` builds: the expected type decides the arguments.
     fn generic_literal(&mut self, path: &[String], want: Option<&Ty>) -> R<Option<String>> {
         let m = self.cur_mod.clone();
-        let q = if path.len() == 1 { format!("{}.{}", m, path[0]) } else { path.join(".") };
+        let q = self.qname(&m, path);
         if !self.tmpl_recs.contains_key(&q) {
             return Ok(None);
         }
@@ -7122,7 +7177,7 @@ impl Compiler {
                         _ => {}
                     }
                 }
-                let q = if path.len() == 1 { format!("{}.{}", m, path[0]) } else { path.join(".") };
+                let q = self.qname(m, path);
                 if self.tmpl_recs.contains_key(&q) {
                     if let Ty::Rec(inst) = actual {
                         if let Some((tq, targs)) = self.inst_args.get(inst).cloned() {

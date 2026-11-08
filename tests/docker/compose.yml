@@ -1,0 +1,104 @@
+# Local test databases for the Brasa drivers. Development only; nothing here is used by cargo.
+#   docker compose -f tests/docker/compose.yml up -d --wait
+#   docker compose -f tests/docker/compose.yml down -v
+name: brasa-test-db
+
+services:
+  certs:
+    image: alpine/openssl
+    entrypoint: ["sh", "/gen-certs.sh"]
+    volumes:
+      - ./gen-certs.sh:/gen-certs.sh:ro
+      - ./certs:/certs
+    restart: "no"
+
+  postgres:
+    build: ./postgres
+    image: brasa-postgres19:dev
+    depends_on:
+      certs: { condition: service_completed_successfully }
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+    entrypoint: ["sh", "/start.sh"]
+    ports: ["127.0.0.1:55432:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql
+      - ./certs:/certs:ro
+      - ./postgres/start.sh:/start.sh:ro
+      - ./postgres/00-hba.sh:/docker-entrypoint-initdb.d/00-hba.sh:ro
+      - ./postgres/10-seed.sql:/docker-entrypoint-initdb.d/10-seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d shop"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2025-latest
+    environment: &mssql_env
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Developer
+      MSSQL_SA_PASSWORD: ${SQLSERVER_SA_PASSWORD}
+    ports: ["127.0.0.1:51433:1433"]
+    volumes:
+      - mssqldata:/var/opt/mssql
+      - ./mssql/mssql-plain.conf:/var/opt/mssql/mssql.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q 'select 1' >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+
+  sqlserver-strict:
+    image: mcr.microsoft.com/mssql/server:2025-latest
+    depends_on:
+      certs: { condition: service_completed_successfully }
+    environment: *mssql_env
+    ports: ["127.0.0.1:51434:1433"]
+    volumes:
+      - mssqlstrictdata:/var/opt/mssql
+      - ./mssql/mssql-strict.conf:/var/opt/mssql/mssql.conf:ro
+      - ./certs:/certs:ro
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q 'select 1' >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+
+  sqlserver-init:
+    image: mcr.microsoft.com/mssql/server:2025-latest
+    depends_on:
+      sqlserver: { condition: service_healthy }
+      sqlserver-strict: { condition: service_healthy }
+    environment:
+      MSSQL_SA_PASSWORD: ${SQLSERVER_SA_PASSWORD}
+    entrypoint: ["sh", "-c", "HOST=sqlserver sh /init.sh && HOST=sqlserver-strict sh /init.sh"]
+    volumes:
+      - ./mssql/init.sh:/init.sh:ro
+      - ./mssql/init.sql:/init.sql:ro
+    restart: "no"
+
+  # plain TLS servers for the tls library tests (no database): one ignores ALPN, one selects http/1.1
+  tls-plain:
+    image: alpine/openssl
+    depends_on:
+      certs: { condition: service_completed_successfully }
+    command: ["s_server", "-accept", "4433", "-cert", "/certs/server.crt", "-key", "/certs/server.key", "-www", "-quiet"]
+    ports: ["127.0.0.1:55443:4433"]
+    volumes:
+      - ./certs:/certs:ro
+
+  tls-alpn:
+    image: alpine/openssl
+    depends_on:
+      certs: { condition: service_completed_successfully }
+    command: ["s_server", "-accept", "4433", "-cert", "/certs/server.crt", "-key", "/certs/server.key", "-alpn", "http/1.1", "-www", "-quiet"]
+    ports: ["127.0.0.1:55444:4433"]
+    volumes:
+      - ./certs:/certs:ro
+
+volumes:
+  pgdata:
+  mssqldata:
+  mssqlstrictdata:

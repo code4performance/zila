@@ -168,3 +168,42 @@ fn a_non_transferable_spawn_thread_argument_is_a_diagnostic() {
     let m = d[0].get("message").str().unwrap();
     assert!(m.contains("argument 'n'") && m.contains("not transferable") && m.contains("Mutex"), "{}", m);
 }
+
+#[test]
+fn pub_declarations_have_no_diagnostics_and_a_misplaced_pub_is_reported_on_its_line() {
+    let mut docs = HashMap::new();
+    let good = "package lib\n\npub type P = record\n    pub x: int\n    y: int\nend\n\n#[export(\"f\")]\npub func f() -> int\n    return 1\nend\n\npub async func g()\nend\n\npub let K = 1\n";
+    let r = open(&mut docs, "file:///pub.br", good);
+    assert_eq!(r[0].get("params").get("diagnostics"), &Json::Arr(vec![]));
+    let r = open(&mut docs, "file:///bad.br", "package lib\n\npub embed \"x\"\n");
+    let Json::Arr(d) = r[0].get("params").get("diagnostics") else { panic!() };
+    assert_eq!(d.len(), 1);
+    assert_eq!(d[0].get("range").get("start").get("line"), &Json::Num(2.0));
+    assert!(d[0].get("message").str().unwrap().contains("'pub' cannot be applied to 'embed'"));
+}
+
+#[test]
+fn packages_of_the_project_are_seen_by_the_editor() {
+    // a project with a local package: names resolve, a block of the package is a block, and a
+    // name found nowhere is reported with the hint
+    let dir = std::env::temp_dir().join(format!("brasa_lsp_pkg_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("util")).unwrap();
+    std::fs::write(dir.join("brasa.toml"), "[package]\nname = \"app\"\n").unwrap();
+    std::fs::write(dir.join("util/util.br"), "package util\n\npub func twice(n: int) -> int\n    return n * 2\nend\n\n#[block]\npub comptime func raw_text(raw: text) -> text\n    return raw\nend\n").unwrap();
+    let p = dir.to_string_lossy().replace('\\', "/").replace(' ', "%20");
+    let uri = |f: &str| if p.starts_with('/') { format!("file://{}/{}", p, f) } else { format!("file:///{}/{}", p, f) };
+    let mut docs = HashMap::new();
+    let good = "package main\n\nuse util\n\nfunc main()\n    print(\"{util.twice(2)}\")\nend\n";
+    let r = open(&mut docs, &uri("main.br"), good);
+    assert_eq!(r[0].get("params").get("diagnostics"), &Json::Arr(vec![]), "a package of the project resolves");
+    let blocks = "package main\n\nuse util\n\nfunc main()\n    let s = raw_text\n        {{ not ) Brasa ((\n    end\n    print(s)\nend\n";
+    let r = open(&mut docs, &uri("blocks.br"), blocks);
+    assert_eq!(r[0].get("params").get("diagnostics"), &Json::Arr(vec![]), "a block of a package of the project");
+    let r = open(&mut docs, &uri("bad.br"), &good.replace("use util", "use nothing"));
+    let Json::Arr(d) = r[0].get("params").get("diagnostics") else { panic!() };
+    assert_eq!(d.len(), 1);
+    let m = d[0].get("message").str().unwrap();
+    assert!(m.contains("unknown package 'nothing'") && m.contains("--add"), "{}", m);
+    let _ = std::fs::remove_dir_all(&dir);
+}

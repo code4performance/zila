@@ -1,0 +1,780 @@
+// =====================================================================
+// Brasa standard library: databases (`use db`)
+//
+//     use db
+//     use postgres            // or: use sqlserver
+//
+//     type Customer = record
+//         id: int
+//         #[db("full_name")] name: text
+//         email: text?
+//     end
+//
+//     let conn = try postgres.open("postgres://app:secret@localhost/shop")
+//     let rows = try db.query(Customer, conn, "select id, full_name, email from customers where id > $1", db.int(10))
+//     let one = try db.one(Customer, conn, "select * from customers where id = $1", db.int(7))
+//     let n = try conn.exec("update customers set email = $1 where id = $2", db.str("a@b.c"), db.int(7))
+//
+//     let tx = try conn.begin()
+//     try tx.conn.exec("insert into customers(id, full_name) values($1, $2)", db.int(99), db.str("Zoë"))
+//     try tx.commit()
+//
+// One `db.Conn` works with every driver: the driver (`postgres`, `sqlserver`) builds the `Conn`
+// from its own functions, and everything here (typed rows, parameters, transactions, errors) is
+// written once. Values are never spliced into the SQL text: they travel as bound parameters, made
+// with `db.int`, `db.float`, `db.bool`, `db.str`, `db.bytes`, `db.vector` and `db.null()`, and the
+// placeholders are the database's own (`$1` for PostgreSQL, `@p1` for SQL Server).
+//
+// `db.query(T, conn, ...)` and `db.one(T, conn, ...)` build values of `T` from the rows: a record
+// matches columns to fields by name (ignoring case; `#[db("column")]` renames a field and
+// `#[db(skip)]` leaves it out), any other type reads a one-column result. The decoding is written
+// at build time from the shape of `T` by comptime reflection, like `json`.
+// =====================================================================
+
+package db
+
+use errors
+use text
+use reflect
+use crypto
+
+// ---------------------------------------------------------------------------
+// Parameters
+// ---------------------------------------------------------------------------
+
+// A value for a placeholder. Make one with `db.int`, `db.float`, `db.bool`, `db.str`, `db.bytes`,
+// `db.vector` or `db.null()`.
+pub type Arg = enum
+    Int(long)
+    Float(float)
+    Bool(bool)
+    Text(text)
+    Bytes(text)
+    Vector([]float)
+    Null
+end
+
+// An integer parameter.
+pub func int(n: long) -> Arg
+    return Int(n)
+end
+
+// A floating-point parameter.
+pub func float(x: float) -> Arg
+    return Float(x)
+end
+
+// A boolean parameter.
+pub func bool(b: bool) -> Arg
+    return Bool(b)
+end
+
+// A text parameter.
+pub func str(s: text) -> Arg
+    return Text(s)
+end
+
+// A binary parameter: the bytes of `data`.
+pub func bytes(data: text) -> Arg
+    return Bytes(data)
+end
+
+// A vector parameter (PostgreSQL with pgvector).
+pub func vector(xs: []float) -> Arg
+    return Vector(xs)
+end
+
+// SQL NULL.
+pub func null() -> Arg
+    return Null
+end
+
+// ---------------------------------------------------------------------------
+// Rows
+// ---------------------------------------------------------------------------
+
+// The result of a statement as the drivers hand it over: column names, a type tag for each
+// column, and the cells row by row as text (`nulls` says which cells are NULL).
+pub type Rows = record
+    pub columns: []text
+    pub kinds: []text
+    pub cells: []text
+    pub nulls: []bool
+    pub affected: long
+end
+
+// An empty result with these columns.
+pub func rows(columns: []text, kinds: []text) -> Rows
+    return Rows { columns: columns, kinds: kinds, cells: [], nulls: [], affected: 0 }
+end
+
+// Adds one cell to the row being built (`width` cells make a row).
+pub func (ref r: Rows) add(value: text, is_null: bool)
+    r.cells.add(value)
+    r.nulls.add(is_null)
+end
+
+// The number of rows.
+pub func (r: Rows) count() -> int
+    if r.columns.len == 0
+        return 0
+    end
+    return r.nulls.len / r.columns.len
+end
+
+// The index of the column called `name` (ignoring case), or -1.
+pub func __col(ref r: Rows, name: text) -> int
+    let want = text.lower(name)
+    for k in 0..r.columns.len
+        if text.lower(r.columns[k]) == want
+            return k
+        end
+    end
+    return -1
+end
+
+// ---------------------------------------------------------------------------
+// Errors
+// ---------------------------------------------------------------------------
+
+// The message of a database error: the server's text and, when there is one, its code.
+pub func with_code(message: text, code: text) -> text
+    if code == ""
+        return message
+    end
+    return "{message} ({code})"
+end
+
+// The URL with its password replaced by `***`, for messages.
+pub func redact(url: text) -> text
+    let scheme_end = text.index_of(url, "://")
+    if scheme_end < 0
+        return url
+    end
+    let auth_start = scheme_end + 3
+    var auth_end = text.index_from(url, "/", auth_start)
+    if auth_end < 0
+        auth_end = url.len
+    end
+    let at = lastat(url, auth_start, auth_end)
+    if at < 0
+        return url
+    end
+    let colon = text.index_from(url, ":", auth_start)
+    if colon < 0 or colon > at
+        return url
+    end
+    return url.slice(0, colon + 1) + "***" + url.slice(at, url.len)
+end
+
+func lastat(s: text, from: int, to: int) -> int
+    var k = to - 1
+    while k >= from
+        if s.byte(k) == 64
+            return k
+        end
+        k -= 1
+    end
+    return -1
+end
+
+// ---------------------------------------------------------------------------
+// URLs (shared by the drivers)
+// ---------------------------------------------------------------------------
+
+// A connection URL taken apart: `scheme://user:password@host:port/database?name=value&...`.
+// Everything is percent-decoded; `port` is 0 when absent.
+pub type Url = record
+    pub scheme: text
+    pub user: text
+    pub password: text
+    pub host: text
+    pub port: int
+    pub database: text
+    pub params: Map<text, text>
+end
+
+func hex_digit(b: int) -> int
+    if b >= 48 and b <= 57
+        return b - 48
+    end
+    if b >= 97 and b <= 102
+        return b - 87
+    end
+    if b >= 65 and b <= 70
+        return b - 55
+    end
+    return -1
+end
+
+// Undoes %XX escapes; an error for a bad escape.
+pub func unescape(s: text) -> text or error
+    if text.index_of(s, "%") < 0
+        return s
+    end
+    var out: []long = []
+    var i = 0
+    while i < s.len
+        let b = int(s.byte(i))
+        if b == 37
+            if i + 2 >= s.len
+                return error(errors.InvalidInput, "bad percent escape in the URL")
+            end
+            let hi = hex_digit(int(s.byte(i + 1)))
+            let lo = hex_digit(int(s.byte(i + 2)))
+            if hi < 0 or lo < 0
+                return error(errors.InvalidInput, "bad percent escape in the URL")
+            end
+            out.add(long(hi * 16 + lo))
+            i += 3
+        else
+            out.add(long(b))
+            i += 1
+        end
+    end
+    return crypto.from_bytes(out)
+end
+
+// Takes a connection URL apart. An error (kind InvalidInput) for a malformed one, whose message
+// never contains the password.
+pub func parse_url(url: text) -> Url or error
+    let scheme_end = text.index_of(url, "://")
+    if scheme_end <= 0
+        return error(errors.InvalidInput, "not a database URL: {redact(url)}")
+    end
+    let u = Url { scheme: text.lower(url.slice(0, scheme_end)), user: "", password: "", host: "", port: 0, database: "", params: {} }
+    var rest = url.slice(scheme_end + 3, url.len)
+    let q = text.index_of(rest, "?")
+    var query = ""
+    if q >= 0
+        query = rest.slice(q + 1, rest.len)
+        rest = rest.slice(0, q)
+    end
+    var auth = rest
+    var path = ""
+    let slash = text.index_of(rest, "/")
+    if slash >= 0
+        auth = rest.slice(0, slash)
+        path = rest.slice(slash + 1, rest.len)
+    end
+    var hostport = auth
+    let at = lastat(auth, 0, auth.len)
+    if at >= 0
+        let info = auth.slice(0, at)
+        hostport = auth.slice(at + 1, auth.len)
+        let colon = text.index_of(info, ":")
+        if colon >= 0
+            u.user = try unescape(info.slice(0, colon))
+            u.password = try unescape(info.slice(colon + 1, info.len))
+        else
+            u.user = try unescape(info)
+        end
+    end
+    let pc = text.index_of(hostport, ":")
+    if pc >= 0
+        u.host = hostport.slice(0, pc)
+        match text.parse_int(hostport.slice(pc + 1, hostport.len))
+            ok(p) -> u.port = p
+            err(e) -> return error(errors.InvalidInput, "bad port in the database URL {redact(url)}")
+        end
+        if u.port < 1 or u.port > 65535
+            return error(errors.InvalidInput, "bad port in the database URL {redact(url)}")
+        end
+    else
+        u.host = hostport
+    end
+    if u.host == ""
+        return error(errors.InvalidInput, "the database URL has no host: {redact(url)}")
+    end
+    u.database = try unescape(path)
+    if query != ""
+        for pair in text.split(query, "&")
+            if pair == ""
+                continue
+            end
+            let eq = text.index_of(pair, "=")
+            if eq < 0
+                let name = try unescape(pair)
+                u.params[name] = ""
+            else
+                let name = try unescape(pair.slice(0, eq))
+                let value = try unescape(pair.slice(eq + 1, pair.len))
+                u.params[name] = value
+            end
+        end
+    end
+    return u
+end
+
+// ---------------------------------------------------------------------------
+// Connections and transactions
+// ---------------------------------------------------------------------------
+
+// What every connection and its transactions share.
+#[shared]
+pub type State = record
+    pub open: bool
+    pub tx_id: long
+    pub next_tx: long
+    pub dirty: bool
+end
+
+// A connection. The driver fills in the functions; programs only use the methods below and
+// `db.query`/`db.one`.
+pub type Conn = record
+    pub state: State
+    pub tx_id: long
+    pub run: func(text, []Arg) -> Rows or error
+    pub begin_tx: func() -> error
+    pub commit_tx: func() -> error
+    pub rollback_tx: func() -> error
+    pub close_conn: func()
+end
+
+// A transaction. Run its statements through `tx.conn`; end it with `commit` or `rollback`. One
+// that goes out of scope without either is rolled back before the connection's next statement.
+#[shared]
+pub type Tx = record
+    pub conn: Conn
+    done: bool
+end
+
+pub func (ref tx: Tx) drop()
+    if not tx.done
+        tx.done = true
+        if tx.conn.state.tx_id == tx.conn.tx_id
+            tx.conn.state.dirty = true
+        end
+    end
+end
+
+// A new connection value for a driver.
+pub func connection(run: func(text, []Arg) -> Rows or error, begin_tx: func() -> error, commit_tx: func() -> error, rollback_tx: func() -> error, close_conn: func()) -> Conn
+    return Conn { state: State { open: true, tx_id: 0, next_tx: 1, dirty: false }, tx_id: 0, run: run, begin_tx: begin_tx, commit_tx: commit_tx, rollback_tx: rollback_tx, close_conn: close_conn }
+end
+
+// Rolls back a transaction that was dropped without an end.
+func settle(c: Conn) -> error
+    if c.state.dirty
+        c.state.dirty = false
+        c.state.tx_id = 0
+        try c.rollback_tx()
+    end
+    return
+end
+
+func guard(c: Conn) -> error
+    if not c.state.open
+        return error(errors.Closed, "the database connection is closed")
+    end
+    try settle(c)
+    if c.state.tx_id != c.tx_id
+        if c.tx_id == 0
+            return error(errors.InvalidInput, "a transaction is open on this connection: use its `conn` or end it first")
+        end
+        return error(errors.InvalidInput, "this transaction has ended")
+    end
+    return
+end
+
+// Runs a statement and returns its rows (and rows affected).
+pub func (c: Conn) rows(sql: text, args: ...Arg) -> Rows or error
+    try guard(c)
+    return c.run(sql, args)
+end
+
+// Runs a statement and returns the number of rows it changed.
+pub func (c: Conn) exec(sql: text, args: ...Arg) -> int or error
+    try guard(c)
+    let rs = try c.run(sql, args)
+    return int(rs.affected)
+end
+
+// Starts a transaction. An error if one is already open on this connection.
+pub func (c: Conn) begin() -> Tx or error
+    try guard(c)
+    if c.state.tx_id != 0
+        return error(errors.InvalidInput, "a transaction is already open on this connection")
+    end
+    try c.begin_tx()
+    let id = c.state.next_tx
+    c.state.next_tx = id + 1
+    c.state.tx_id = id
+    let inner = Conn { state: c.state, tx_id: id, run: c.run, begin_tx: c.begin_tx, commit_tx: c.commit_tx, rollback_tx: c.rollback_tx, close_conn: c.close_conn }
+    return Tx { conn: inner, done: false }
+end
+
+// Makes the transaction's changes permanent.
+pub func (tx: Tx) commit() -> error
+    if tx.done
+        return error(errors.InvalidInput, "this transaction has ended")
+    end
+    tx.done = true
+    tx.conn.state.tx_id = 0
+    try tx.conn.commit_tx()
+    return
+end
+
+// Undoes the transaction's changes.
+pub func (tx: Tx) rollback() -> error
+    if tx.done
+        return error(errors.InvalidInput, "this transaction has ended")
+    end
+    tx.done = true
+    tx.conn.state.tx_id = 0
+    try tx.conn.rollback_tx()
+    return
+end
+
+// Closes the connection (an open transaction is lost).
+pub func (c: Conn) close()
+    if c.state.open
+        c.state.open = false
+        c.state.tx_id = 0
+        c.close_conn()
+    end
+end
+
+// ---------------------------------------------------------------------------
+// Reading rows
+// ---------------------------------------------------------------------------
+
+// Runs the statement for `query` and `one`.
+pub func __fetch(c: Conn, sql: text, args: []Arg) -> Rows or error
+    try guard(c)
+    return c.run(sql, args)
+end
+
+pub func __count(r: Rows) -> int
+    return r.count()
+end
+
+pub func __missing_column(field: text, column: text) -> error?
+    return error(errors.InvalidInput, "no column \"{column}\" for field {field}")
+end
+
+pub func __not_one(sql: text, n: int) -> error?
+    if n == 0
+        return error(errors.NotFound, "the query returned no row")
+    end
+    return error(errors.InvalidInput, "the query returned {n} rows where one was expected")
+end
+
+pub func __width(ref r: Rows, want: int) -> error?
+    if r.columns.len != want
+        return error(errors.InvalidInput, "expected a result with one column, got {r.columns.len}")
+    end
+    return nil
+end
+
+pub func __is_null(ref r: Rows, i: int, c: int) -> bool
+    return r.nulls[i * r.columns.len + c]
+end
+
+func place(ref r: Rows, i: int, c: int, field: text) -> text
+    if field == ""
+        return "row {i + 1}, column {r.columns[c]}"
+    end
+    return "row {i + 1}, field {field} (column {r.columns[c]})"
+end
+
+func cell(ref r: Rows, i: int, c: int, field: text) -> text or error
+    let at = i * r.columns.len + c
+    if r.nulls[at]
+        return error(errors.InvalidInput, "{place(ref r, i, c, field)}: NULL in a field that is not optional")
+    end
+    return r.cells[at]
+end
+
+pub func __text(ref r: Rows, i: int, c: int, field: text) -> text or error
+    return cell(ref r, i, c, field)
+end
+
+pub func __bool(ref r: Rows, i: int, c: int, field: text) -> bool or error
+    let s = text.lower(try cell(ref r, i, c, field))
+    if s == "t" or s == "true" or s == "1" or s == "yes"
+        return true
+    end
+    if s == "f" or s == "false" or s == "0" or s == "no"
+        return false
+    end
+    return error(errors.InvalidInput, "{place(ref r, i, c, field)}: \"{s}\" is not a boolean")
+end
+
+pub func __int(ref r: Rows, i: int, c: int, field: text, bits: int, signed: bool) -> long or error
+    let s = try cell(ref r, i, c, field)
+    var n: long = 0
+    match text.parse_long(s)
+        ok(v) -> n = v
+        err(e) -> return error(errors.InvalidInput, "{place(ref r, i, c, field)}: \"{s}\" is not an integer")
+    end
+    if bits < 64
+        let one: long = 1
+        var lo: long = 0
+        var hi: long = (one << bits) - 1
+        if signed
+            lo = 0 - (one << (bits - 1))
+            hi = (one << (bits - 1)) - 1
+        end
+        if n < lo or n > hi
+            var tn = "u"
+            if signed
+                tn = "i"
+            end
+            return error(errors.InvalidInput, "{place(ref r, i, c, field)}: {n} does not fit in {tn}{bits}")
+        end
+    else if not signed and n < 0
+        return error(errors.InvalidInput, "{place(ref r, i, c, field)}: {n} does not fit in u64")
+    end
+    return n
+end
+
+pub func __float(ref r: Rows, i: int, c: int, field: text) -> float or error
+    let s = try cell(ref r, i, c, field)
+    match text.parse_float(s)
+        ok(v) -> return v
+        err(e) -> return error(errors.InvalidInput, "{place(ref r, i, c, field)}: \"{s}\" is not a number")
+    end
+    return 0.0
+end
+
+// A vector column in pgvector's text form: `[1,2.5,3]`.
+pub func __vector(ref r: Rows, i: int, c: int, field: text) -> []float or error
+    let s = text.trim(try cell(ref r, i, c, field))
+    if s.len < 2 or s.byte(0) != 91 or s.byte(s.len - 1) != 93
+        return error(errors.InvalidInput, "{place(ref r, i, c, field)}: \"{s}\" is not a vector")
+    end
+    var out: []float = []
+    let inner = text.trim(s.slice(1, s.len - 1))
+    if inner == ""
+        return out
+    end
+    for part in text.split(inner, ",")
+        match text.parse_float(text.trim(part))
+            ok(v) -> out.add(v)
+            err(e) -> return error(errors.InvalidInput, "{place(ref r, i, c, field)}: bad vector element \"{part}\"")
+        end
+    end
+    return out
+end
+
+// ---------------------------------------------------------------------------
+// The generators
+// ---------------------------------------------------------------------------
+
+// For a record: the index of the column of each field (-1 for a skipped field or a missing column
+// of an optional field), or an error naming a field with no column.
+#[generated(plan_gen)]
+pub func __plan(comptime t: Type, ref r: Rows) -> []int or error
+
+// Builds the value of row `i` from the column indexes `plan` gave.
+#[generated(row_gen)]
+pub func __row(comptime t: Type, ref r: Rows, plan: []int, i: int) -> t or error
+
+// All the rows of a statement as values of `T`: `db.query(Customer, conn, "select ...", db.int(1))`.
+#[generated(query_gen)]
+pub func query(comptime t: Type, c: Conn, sql: text, args: ...Arg) -> []t or error
+
+// The one row of a statement as a `T`: an error of kind NotFound when there is none and
+// InvalidInput when there are several.
+#[generated(one_gen)]
+pub func one(comptime t: Type, c: Conn, sql: text, args: ...Arg) -> t or error
+
+comptime func int_name(name: text) -> text
+    if name == "byte"
+        return "u8"
+    end
+    return name
+end
+
+comptime func int_args(name: text) -> text
+    if name == "i8"
+        return "8, true"
+    else if name == "i16"
+        return "16, true"
+    else if name == "i32" or name == "int"
+        return "32, true"
+    else if name == "i64" or name == "long" or name == "isize"
+        return "64, true"
+    else if name == "u8" or name == "byte"
+        return "8, false"
+    else if name == "u16"
+        return "16, false"
+    else if name == "u32"
+        return "32, false"
+    end
+    return "64, false"
+end
+
+// Source text of a text literal holding `s`.
+comptime func quote(s: text) -> text
+    var out = "\""
+    for c in s
+        if c == '"'
+            out = out + "\\\""
+        else if c == '\\'
+            out = out + "\\\\"
+        else if c == '{'
+            out = out + "\\\{"
+        else if c == '}'
+            out = out + "\\\}"
+        else if c == '\n'
+            out = out + "\\n"
+        else
+            out = out + c.to_text()
+        end
+    end
+    return out + "\""
+end
+
+// The column of a field, "" when it is skipped: a `db` attribute holds one quoted column name or
+// the bare word `skip`.
+comptime func column_of(f: reflect.Field) -> text
+    var col = f.name
+    var seen = false
+    for a in f.attrs
+        if a.name == "db"
+            if seen
+                reflect.fail("field {f.name} has more than one db attribute", f)
+            end
+            seen = true
+            if a.args.len != 1
+                reflect.fail("the db attribute of field {f.name} takes one argument: a quoted column name, or skip", f)
+            end
+            if not a.quoted[0]
+                if a.args[0] == "skip"
+                    return ""
+                end
+                reflect.fail("bad db attribute on field {f.name}: write db(\"column\") to rename it or db(skip) to leave it out", f)
+            end
+            if a.args[0] == ""
+                reflect.fail("the db column of field {f.name} is empty", f)
+            end
+            col = a.args[0]
+        end
+    end
+    return col
+end
+
+// The zero of a skipped field's type.
+comptime func zero_of(t: Type, f: reflect.Field) -> text
+    let k = t.kind()
+    if k == "int"
+        return "0"
+    else if k == "float"
+        return "0.0"
+    else if k == "bool"
+        return "false"
+    else if k == "text"
+        return "\"\""
+    else if k == "list"
+        return "[]"
+    else if k == "optional"
+        return "nil"
+    else if k == "alias"
+        return zero_of(t.inner(), f)
+    end
+    reflect.fail("db(skip) on field {f.name}: no zero value for {t.name()}", f)
+    return ""
+end
+
+// The expression that reads one cell as type `t` (not optional): row `i` of `r`, column in the variable `cv`.
+// `field` is "" for a scalar result.
+comptime func cell_expr(t: Type, field: text, cv: text) -> text
+    let k = t.kind()
+    let n = t.name()
+    let f = quote(field)
+    if k == "bool"
+        return "try db.__bool(ref r, i, {cv}, {f})"
+    else if k == "text"
+        return "try db.__text(ref r, i, {cv}, {f})"
+    else if k == "int"
+        return "{int_name(n)}(try db.__int(ref r, i, {cv}, {f}, {int_args(n)}))"
+    else if k == "float"
+        if n == "f32"
+            return "f32(try db.__float(ref r, i, {cv}, {f}))"
+        end
+        return "try db.__float(ref r, i, {cv}, {f})"
+    else if k == "list" and t.element().kind() == "float"
+        return "try db.__vector(ref r, i, {cv}, {f})"
+    else if k == "alias"
+        return cell_expr(t.inner(), field, cv)
+    end
+    reflect.fail("db cannot read a column into {n} (field {field}); use a number, bool, text, []float or an optional of those", t)
+    return ""
+end
+
+comptime func check_columns(t: Type)
+    let seen: Map<text, text> = {}
+    for f in t.fields()
+        let col = column_of(f)
+        if col != ""
+            let key = text.lower(col)
+            if seen.has(key)
+                reflect.fail("the fields {seen[key]} and {f.name} of {t.name()} both read the column \"{col}\"", f)
+            end
+            seen[key] = f.name
+        end
+    end
+end
+
+comptime func plan_gen(t: Type) -> text
+    if t.kind() == "record"
+        check_columns(t)
+        var out = "var plan: []int = []\n"
+        for f in t.fields()
+            let col = column_of(f)
+            if col == ""
+                out = out + "plan.add(-1)\n"
+            else
+                out = out + "let k_{f.name} = db.__col(ref r, {quote(col)})\n"
+                if f.ty.kind() != "optional"
+                    out = out + "if k_{f.name} < 0\n    return db.__missing_column({quote(f.name)}, {quote(col)})\nend\n"
+                end
+                out = out + "plan.add(k_{f.name})\n"
+            end
+        end
+        return out + "return plan\n"
+    end
+    return "let bad = db.__width(ref r, 1)\nif bad != nil\n    return bad\nend\nreturn [0]\n"
+end
+
+comptime func row_gen(t: Type) -> text
+    if t.kind() == "record"
+        var out = ""
+        var build = ""
+        var idx = 0
+        for f in t.fields()
+            let col = column_of(f)
+            if build != ""
+                build = build + ", "
+            end
+            if col == ""
+                build = build + "{f.name}: {zero_of(f.ty, f)}"
+            else
+                out = out + "let c_{f.name} = plan[{idx}]\n"
+                if f.ty.kind() == "optional"
+                    out = out + "var v_{f.name}: {f.ty.name()} = nil\n"
+                    out = out + "if c_{f.name} >= 0\n    if not db.__is_null(ref r, i, c_{f.name})\n        v_{f.name} = {cell_expr(f.ty.inner(), f.name, "c_" + f.name)}\n    end\nend\n"
+                else
+                    out = out + "let v_{f.name} = {cell_expr(f.ty, f.name, "c_" + f.name)}\n"
+                end
+                build = build + "{f.name}: v_{f.name}"
+            end
+            idx += 1
+        end
+        return out + "return t \{ {build} \}\n"
+    end
+    if t.kind() == "optional"
+        return "if db.__is_null(ref r, i, 0)\n    return nil\nend\nlet c0 = 0\nreturn {cell_expr(t.inner(), "", "c0")}\n"
+    end
+    return "let c0 = 0\nreturn {cell_expr(t, "", "c0")}\n"
+end
+
+comptime func query_gen(t: Type) -> text
+    return "var rs = try db.__fetch(c, sql, args)\nlet plan = try db.__plan<{t.name()}>(ref rs)\nlet out: []{t.name()} = []\nlet n = db.__count(rs)\nfor i in 0..n\n    out.add(try db.__row<{t.name()}>(ref rs, plan, i))\nend\nreturn out\n"
+end
+
+comptime func one_gen(t: Type) -> text
+    return "var rs = try db.__fetch(c, sql, args)\nlet n = db.__count(rs)\nif n != 1\n    return db.__not_one(sql, n)\nend\nlet plan = try db.__plan<{t.name()}>(ref rs)\nreturn try db.__row<{t.name()}>(ref rs, plan, 0)\n"
+end

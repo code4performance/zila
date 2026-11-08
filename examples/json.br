@@ -1,0 +1,45 @@
+// JSON: read and write your own types, or a free-form tree.
+//
+//   brasa-parse examples/json.br -o json.exe
+//
+// `json.parse(T, text)` turns JSON into a value of any type you declare, and `json.encode(T, x)`
+// does the reverse. There is nothing to register: the library reads the shape of `T` at build
+// time (comptime reflection) and writes the code for it. A field attribute renames a key
+// (`#[json("host_name")]`) or leaves the field out (`#[json(skip)]`), and a field of type `text?`
+// may be `null` or missing. Errors say where: `at $.port` is the path to the bad value, and a
+// syntax error says the line and column.
+
+package main
+
+use json
+
+type Config = record
+    port: int
+    #[json("host_name")] host: text
+    proxy: text?
+    tags: []text
+    #[json(skip)] cache: text
+end
+
+func main()
+    let raw = "\{\"port\": 8080, \"host_name\": \"example.org\", \"tags\": [\"a\", \"b\"], \"extra\": true\}"
+    match json.parse(Config, raw)
+        ok(cfg) ->
+            print("port: {cfg.port}")
+            print("host: {cfg.host}")
+            print("proxy: {cfg.proxy ?? "none"}")
+            print(json.encode_with(Config, cfg, json.Options { indent: 2 }) ?? "")
+        err(e) -> print("bad config: {e.message}")
+    end
+
+    match json.parse(Config, "\{\"port\": \"80\"\}")
+        ok(cfg) -> print("unexpected")
+        err(e) -> print("bad config: {e.message}")
+    end
+
+    // a free-form tree, when there is no type to read into
+    match json.parse_value("[1, \{\"a\": null\}]")
+        ok(v) -> print(json.stringify(v) ?? "")
+        err(e) -> print(e.message)
+    end
+end

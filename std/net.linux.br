@@ -651,6 +651,26 @@ pub async func (conn: Conn) close()
     end
 end
 
+// Ends the reads and writes that are waiting on this connection (they fail or see the end of
+// the data) without closing it, so a task can answer after a timeout. `writes` also ends the
+// sending side. Meant for timers: it is a plain function.
+pub func (conn: Conn) cancel(writes: bool)
+    if conn.open
+        var how: long = 0
+        if writes
+            how = 2
+        end
+        sys.syscall(48, conn.sock, how, 0, 0, 0, 0)
+    end
+end
+
+// Ends the accept that is waiting on this listener (it fails) without closing it.
+pub func (l: Listener) cancel()
+    if l.open
+        sys.syscall(48, l.sock, 2, 0, 0, 0, 0)
+    end
+end
+
 // Stops listening now.
 pub async func (l: Listener) close()
     if l.open

@@ -252,7 +252,7 @@ fn scrambled_indentation_formats_back_to_the_same_text() {
     for f in repo_files() {
         let src = std::fs::read_to_string(&f).unwrap();
         // asm lines and block forms (raw text) depend on their own indentation
-        if src.contains("asm\n") || src.contains("asm\r\n") || src.contains("/*") || src.contains("#[block]") {
+        if src.contains("asm\n") || src.contains("asm\r\n") || src.contains("/*") || !brasa::comptime::block_names(&src).is_empty() {
             continue;
         }
         let formatted = format_source(&src).unwrap();
@@ -344,4 +344,17 @@ fn block_content_stays_byte_for_byte_and_only_the_name_and_end_are_aligned() {
 fn a_name_that_is_not_a_block_formats_as_ordinary_code() {
     let src = "package t\nfunc f()\nlet s = nothing_here\n  print(s)\nend\n";
     assert_eq!(fmt(src), "package t\nfunc f()\n    let s = nothing_here\n    print(s)\nend\n");
+}
+
+#[test]
+fn pub_declarations_format_with_one_space_and_are_idempotent() {
+    let src = "package t\n\npub func f()\nend\n\npub type X = record\n    pub a: int\n    b: int\nend\n\n#[export(\"f\")]\npub func g() -> int\n    return 1\nend\n\npub async func h()\nend\n\npub let k = 1\n\npub func (x: X) m()\nend\n";
+    let once = fmt(src);
+    assert!(once.contains("pub func f()"), "{}", once);
+    assert!(once.contains("pub type X = record"), "{}", once);
+    assert!(once.contains("    pub a: int\n    b: int"), "{}", once);
+    assert!(once.contains("#[export(\"f\")]\npub func g()"), "{}", once);
+    assert!(once.contains("pub async func h()"), "{}", once);
+    assert!(once.contains("pub func (x: X) m()"), "{}", once);
+    assert_eq!(fmt(&once), once);
 }

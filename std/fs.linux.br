@@ -283,3 +283,34 @@ pub async func (w: Writer) close() -> error
     w.file.close()
     return
 end
+
+// ---- named pipes (Windows only) ----
+
+// The client end of a named pipe. Named pipes exist on Windows only: on Linux `pipe` always
+// returns an error of kind Unsupported (use `net` for sockets).
+#[shared]
+pub type Pipe = record
+    pub handle: long
+    pub path: text
+    pub open: bool
+end
+
+pub func (ref p: Pipe) drop()
+    p.open = false
+end
+
+pub async func pipe(path: text) -> Pipe or error
+    return error(errors.Unsupported, "{path}: named pipes exist on Windows only")
+end
+
+pub async func (p: Pipe) read(max: long) -> text or error
+    return ""
+end
+
+pub async func (p: Pipe) write(data: text) -> error
+    return error(errors.Closed, "write: the pipe is closed")
+end
+
+pub async func (p: Pipe) close()
+    p.open = false
+end

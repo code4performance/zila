@@ -13,6 +13,13 @@
 //   let reply = try await conn.read(4096)
 //
 // `read` returns empty text when the server closed the connection.
+//
+//   tls.connect_with(host, port, tls.Options{ alpn: ["tds/8.0"], require_alpn: false, ca_file: "" })
+//   tls.upgrade(conn, host)       // start TLS on a connection that already exchanged plain bytes
+//
+// `alpn` offers application protocols (`conn.protocol()` is the one the server chose, or empty
+// text); `ca_file` is a PEM file of extra certificate authorities trusted for that one connection
+// (the system's are still trusted, and the chain and host name are always checked).
 // =====================================================================
 
 package tls
@@ -21,12 +28,16 @@ use c
 use sys
 use errors
 use net
+use text
 
 #[link("ssl")]
 extern "C" func TLS_client_method() -> usize
 extern "C" func SSL_CTX_new(method: usize) -> usize
 extern "C" func SSL_CTX_free(ctx: usize)
 extern "C" func SSL_CTX_set_default_verify_paths(ctx: usize) -> i32
+extern "C" func SSL_CTX_load_verify_locations(ctx: usize, file: *u8, dir: *u8) -> i32
+extern "C" func SSL_CTX_set_alpn_protos(ctx: usize, protos: *u8, length: u32) -> i32
+extern "C" func SSL_get0_alpn_selected(ssl: usize, data: *long, length: *long)
 extern "C" func SSL_new(ctx: usize) -> usize
 extern "C" func SSL_free(ssl: usize)
 extern "C" func SSL_set_bio(ssl: usize, rbio: usize, wbio: usize)
@@ -65,6 +76,7 @@ pub type Conn = record
     ssl: usize
     rbio: usize
     wbio: usize
+    proto: text
     pub open: bool
 end
 
@@ -143,10 +155,50 @@ async func feed(conn: Conn) -> bool or error
     return true
 end
 
+// What a connection asks for beyond the defaults.
+pub type Options = record
+    pub alpn: []text
+    pub require_alpn: bool
+    pub ca_file: text
+end
+
 // Opens a TCP connection and runs the TLS handshake.
 pub async func connect(host: text, port: long) -> Conn or error
+    return await connect_with(host, port, Options{ alpn: [], require_alpn: false, ca_file: "" })
+end
+
+// `connect` with ALPN protocols and a private CA file (see `Options`).
+pub async func connect_with(host: text, port: long, opts: Options) -> Conn or error
     let raw = try await net.connect(host, port)
-    let conn = Conn{ raw: raw, ssl: usize(0), rbio: usize(0), wbio: usize(0), open: false }
+    return await upgrade_with(raw, host, opts)
+end
+
+// Starts TLS on a connection that already exchanged plain bytes (PostgreSQL's SSLRequest): read
+// exactly the plain answer before calling, because the first bytes after it belong to TLS.
+// On failure the connection is closed.
+pub async func upgrade(raw: net.Conn, host: text) -> Conn or error
+    return await upgrade_with(raw, host, Options{ alpn: [], require_alpn: false, ca_file: "" })
+end
+
+// `upgrade` with ALPN protocols and a private CA file (see `Options`).
+pub async func upgrade_with(raw: net.Conn, host: text, opts: Options) -> Conn or error
+    let r = await handshake(raw, host, opts)
+    match r
+        ok(conn) -> return conn
+        err(e) ->
+            await raw.close()
+            return error(e.kind, e.message)
+    end
+    return error(errors.Io, "TLS: unreachable")
+end
+
+// The application protocol the server selected through ALPN, or empty text.
+pub func (conn: Conn) protocol() -> text
+    return conn.proto
+end
+
+async func handshake(raw: net.Conn, host: text, opts: Options) -> Conn or error
+    let conn = Conn{ raw: raw, ssl: usize(0), rbio: usize(0), wbio: usize(0), proto: "", open: false }
     var ctx = usize(0)
     unsafe
         ctx = SSL_CTX_new(TLS_client_method())
@@ -157,6 +209,39 @@ pub async func connect(host: text, port: long) -> Conn or error
     var ok: long = 0
     unsafe
         ok = long(SSL_CTX_set_default_verify_paths(ctx))
+    end
+    if opts.ca_file != ""
+        var loaded: long = 0
+        unsafe
+            loaded = long(SSL_CTX_load_verify_locations(ctx, c.cstr(opts.ca_file), 0))
+        end
+        if loaded != 1
+            unsafe
+                SSL_CTX_free(ctx)
+            end
+            return error(errors.InvalidInput, "TLS: cannot read the CA file {opts.ca_file}")
+        end
+    end
+    var offered = ""
+    if opts.alpn.len > 0
+        // bytes above 127 would not survive as a char: protocol names are ASCII
+        var wire: []long = []
+        for n in opts.alpn
+            wire.add(long(n.len))
+            for i in 0..n.len
+                wire.add(long(n.byte(i)))
+            end
+        end
+        let wb = sys.buffer(long(wire.len))
+        unsafe
+            for i in 0..wire.len
+                wb.ptr[i] = u8(wire[i])
+            end
+            SSL_CTX_set_alpn_protos(ctx, wb.ptr, u32(wire.len))
+        end
+        offered = text.join(opts.alpn, ", ")
+    end
+    unsafe
         conn.ssl = SSL_new(ctx)
         SSL_CTX_free(ctx)
     end
@@ -206,6 +291,22 @@ pub async func connect(host: text, port: long) -> Conn or error
                 release(ref conn)
                 return error(errors.ConnectionReset, "TLS handshake with {host} failed: the connection was closed")
             end
+        end
+    end
+    if opts.alpn.len > 0
+        let out = sys.Scratch{}
+        unsafe
+            SSL_get0_alpn_selected(conn.ssl, &out.a, &out.b)
+        end
+        if out.a != 0 and out.b > 0
+            let name_ptr: *u8 = out.a
+            unsafe
+                conn.proto = c.from_bytes(name_ptr, out.b)
+            end
+        end
+        if conn.proto == "" and opts.require_alpn
+            release(ref conn)
+            return error(errors.Io, "TLS handshake with {host} failed: the server selected none of the offered protocols ({offered})")
         end
     end
     return conn

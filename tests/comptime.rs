@@ -867,3 +867,68 @@ fn the_comptime_example_prints_what_the_docs_say() {
     let src = std::fs::read_to_string("examples/comptime.br").unwrap();
     assert_eq!(run(&src).trim(), "Pair(left=a, right=b)\nzero(Config): port 0, name length 0\nHELLO FROM A BLOCK\n7");
 }
+
+// ---- library generated functions and attribute arguments ----
+
+#[test]
+fn a_library_generated_function_works_for_private_types_and_recurses_through_fields() {
+    brasa::comptime::register_package(
+        "ctl_sizes",
+        r##"package ctl_sizes
+use reflect
+
+pub func leaf() -> int
+    return 1
+end
+
+#[generated(count_gen)]
+pub func count(comptime t: Type) -> int
+
+comptime func count_gen(t: Type) -> text
+    if t.kind() != "record"
+        return "return ctl_sizes.leaf()\n"
+    end
+    var body = "var n = 0\n"
+    for f in t.fields()
+        body = body + "n += ctl_sizes.count<{f.ty.name()}>()\n"
+    end
+    return body + "return n\n"
+end
+"##,
+    );
+    let src = "package main\nuse ctl_sizes\n\ntype Inner = record\n    a: int\n    b: text\nend\n\ntype Outer = record\n    x: int\n    inner: Inner\nend\n\nfunc main()\n    print(ctl_sizes.count(Outer))\n    print(ctl_sizes.count(Inner))\nend\n";
+    assert_eq!(run(src).trim(), "3\n2");
+}
+
+#[test]
+fn attribute_arguments_say_whether_they_were_quoted() {
+    let src = format!(
+        r##"package main
+use reflect
+
+type Tagged = record
+    #[label(skip)] a: int
+    #[label("skip")] b: int
+end
+
+#[generated(show_gen)]
+func show(comptime t: Type) -> text
+
+comptime func show_gen(t: Type) -> text
+    var out = ""
+    for f in t.fields()
+        for at in f.attrs
+            out = out + "{{f.name}}:{{at.args[0]}}:{{at.quoted[0]}} "
+        end
+    end
+    return "return \"{{out}}\""
+end
+{}
+func main()
+    print(show(Tagged))
+end
+"##,
+        ""
+    );
+    assert_eq!(run(&src).trim(), "a:skip:false b:skip:true");
+}

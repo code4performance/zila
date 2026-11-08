@@ -1,0 +1,73 @@
+// Create, read, update and delete on a `Users` table in SQL Server.
+//
+//   brasa-parse examples/users_crud.br -o users_crud.exe
+//
+// The table has the shape of the `Users` table of an application database (a GUID key, a unique
+// username, optional columns, status and role texts, UTC timestamps). The URL points at the
+// database server of your choice (a local instance `.\SQL2025` reached through its named pipe, or a
+// copy in the Docker environment of tests/docker). It only touches rows whose username starts with
+// `brasa-crud-`, so it is safe on a table that holds real users.
+//
+// Every value goes to the server as a bound parameter (`db.str`, `db.null`), never as SQL text,
+// and a column that may be NULL is an optional field (`text?`).
+
+package main
+
+use db
+use sqlserver
+
+type User = record
+    id: text
+    username: text
+    #[db("display_name")] display: text?
+    email: text?
+    department: text?
+    role: text
+    access_status: text
+    created: text
+end
+
+// The columns of Users under the names of the fields of `User`.
+let SELECT = "select cast(Id as nvarchar(36)) as id, Username as username, DisplayName as display_name, Email as email, Department as department, Role as role, AccessStatus as access_status, convert(nvarchar(30), CreatedAtUtc, 126) as created from dbo.Users"
+
+func describe(u: User) -> text
+    return "{u.username} ({u.display ?? "no display name"}) {u.role}/{u.access_status} {u.department ?? "-"}"
+end
+
+func main() -> error
+    let conn = try sqlserver.open("sqlserver://ai:ai@.\\SQL2025/njai")
+    // only rows this program makes are ever touched: their usernames start with brasa-crud-
+    try conn.exec("delete from dbo.Users where Username like N'brasa-crud-%'")
+
+    // Create
+    let insert = "insert into dbo.Users (Id, Username, DisplayName, Email, Department, AuthSource, Role, AccessStatus, CreatedAtUtc) values (newid(), @p1, @p2, @p3, @p4, N'Local', @p5, N'Active', sysutcdatetime())"
+    try conn.exec(insert, db.str("brasa-crud-ana"), db.str("Ana Souza"), db.str("ana@example.com"), db.null(), db.str("User"))
+    try conn.exec(insert, db.str("brasa-crud-joão"), db.str("João D'Arc 日本"), db.null(), db.str("Engenharia"), db.str("Admin"))
+
+    // Read: one user, then all of them
+    let ana = try db.one(User, conn, "{SELECT} where Username = @p1", db.str("brasa-crud-ana"))
+    print("read:", describe(ana), "id", ana.id)
+    for u in try db.query(User, conn, "{SELECT} where Username like N'brasa-crud-%' order by Username")
+        print("list:", describe(u))
+    end
+
+    // Update
+    let changed = try conn.exec("update dbo.Users set DisplayName = @p1, Department = @p2, AccessStatus = @p3 where Username = @p4", db.str("Ana S."), db.str("Vendas"), db.str("Suspended"), db.str("brasa-crud-ana"))
+    let updated = try db.one(User, conn, "{SELECT} where Username = @p1", db.str("brasa-crud-ana"))
+    print("updated", changed, "row:", describe(updated))
+
+    // a duplicate username is refused by the unique index
+    match conn.exec(insert, db.str("brasa-crud-ana"), db.null(), db.null(), db.null(), db.str("User"))
+        ok(n) -> print("duplicate accepted?")
+        err(e) -> print("duplicate refused:", e.kind.name)
+    end
+
+    // Delete, inside a transaction that is rolled back first
+    let tx = try conn.begin()
+    try tx.conn.exec("delete from dbo.Users where Username = @p1", db.str("brasa-crud-ana"))
+    try tx.rollback()
+    print("after the rollback:", try db.one(int, conn, "select count(*) from dbo.Users where Username like N'brasa-crud-%'"), "users")
+    let gone = try conn.exec("delete from dbo.Users where Username in (@p1, @p2)", db.str("brasa-crud-ana"), db.str("brasa-crud-joão"))
+    print("deleted", gone, "left", try db.one(int, conn, "select count(*) from dbo.Users where Username like N'brasa-crud-%'"))
+    return
+end

@@ -11,6 +11,7 @@ fn usage() -> ! {
     eprintln!("       brasa-parse --fmt | --fmt-check <file.br>...");
     eprintln!("       brasa-parse --test <file.br>... [--no-opt]");
     eprintln!("       brasa-parse <file.br> --target linux -o <program>");
+    eprintln!("       packages: --init [name] | --add <git-url>[@version] [--as <name>] | --fetch | --tidy | --update [name] [--offline]");
     eprintln!("       comptime: [--comptime-timeout <seconds>] [--no-comptime-cache] [--comptime-dump]");
     exit(2);
 }
@@ -67,6 +68,9 @@ fn main() {
     if mode == Mode::Lsp {
         exit(brasa::lsp::run());
     }
+    if matches!(mode, Mode::Init | Mode::Add | Mode::Fetch | Mode::Tidy | Mode::Update) {
+        exit(brasa::fetch::run(&opts));
+    }
     if let Some(secs) = opts.comptime_timeout {
         brasa::comptime::set_timeout_secs(secs);
     }
@@ -111,6 +115,10 @@ fn main() {
             exit(2);
         }
     };
+    if let Err(e) = brasa::package::install_for(std::path::Path::new(&path)) {
+        eprintln!("error: {}", e);
+        exit(1);
+    }
     brasa::comptime::register_siblings(std::path::Path::new(&path), &src);
 
     if mode == Mode::Tokens {
@@ -245,6 +253,7 @@ fn run_fmt(files: &[String], check: bool) -> ! {
                 continue;
             }
         };
+        let _ = brasa::package::install_for(std::path::Path::new(path));
         brasa::comptime::register_siblings(std::path::Path::new(path), &src);
         match brasa::fmt::format_source(&src) {
             Err(e) => {

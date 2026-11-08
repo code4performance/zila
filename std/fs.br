@@ -21,6 +21,7 @@ use sys
 use errors
 use task
 use bufio
+use text
 
 #[link("kernel32")]
 extern "system" func CreateFileW(name: *u8, access: u32, share: u32, security: usize, disposition: u32, flags: u32, template: usize) -> usize
@@ -328,4 +329,102 @@ pub async func (w: Writer) close() -> error
     try await w.drain()
     w.file.close()
     return
+end
+
+// ---- named pipes (Windows) ----
+
+let ERROR_BROKEN_PIPE = 109
+let ERROR_PIPE_BUSY = 231
+
+// The client end of a named pipe, such as `\.\pipe\MSSQL$SQL2025\sql\query`: a byte stream that
+// reads and writes without blocking the other tasks. Closes when the last reference goes away.
+#[shared]
+pub type Pipe = record
+    pub handle: usize
+    pub path: text
+    pub open: bool
+end
+
+pub func (ref p: Pipe) drop()
+    if p.open
+        p.open = false
+        unsafe
+            CloseHandle(p.handle)
+        end
+    end
+end
+
+// Opens the named pipe `path` for reading and writing. A pipe whose server is busy with other
+// clients is retried for about a second. Errors name the path and the reason Windows gives.
+pub async func pipe(path: text) -> Pipe or error
+    task.io_init()
+    let w = wide(path)
+    var tries = 0
+    while true
+        var h: usize = 0
+        unsafe
+            h = CreateFileW(w.ptr, 0xC0000000, 0, 0, 3, 0x40000000, 0)
+        end
+        if h != 0xFFFFFFFFFFFFFFFF
+            task.io_attach(h)
+            return Pipe{ handle: h, path: path, open: true }
+        end
+        let err = task.last_error()
+        tries += 1
+        if err != ERROR_PIPE_BUSY or tries > 20
+            return sys.error_for(err, path)
+        end
+        await sleep(50)
+    end
+    return error(errors.Io, path)
+end
+
+// Receives up to `max` bytes; empty text means the other end closed the pipe.
+pub async func (p: Pipe) read(max: long) -> text or error
+    if not p.open
+        return ""
+    end
+    let view = File{ handle: p.handle, open: false }
+    let b = sys.buffer(max + 1)
+    var got: long = 0
+    match transfer(view, b.ptr, max, 0, false, p.path)
+        ok(n) -> got = n
+        err(e) ->
+            if text.contains(e.message, "pipe has been ended") or text.contains(e.message, "pipe is being closed")
+                return ""
+            end
+            return e
+    end
+    return c.from_bytes(b.ptr, got)
+end
+
+// Sends all of `data`.
+pub async func (p: Pipe) write(data: text) -> error
+    if not p.open
+        return error(errors.Closed, "write: the pipe is closed")
+    end
+    let view = File{ handle: p.handle, open: false }
+    var done: long = 0
+    while done < data.len
+        var count = data.len - done
+        if count > CHUNK
+            count = CHUNK
+        end
+        let put = try transfer(view, c.cstr(data) + done, count, 0, true, p.path)
+        if put == 0
+            return error(errors.Closed, "write: the pipe is closed")
+        end
+        done += put
+    end
+    return
+end
+
+// Closes the pipe now.
+pub async func (p: Pipe) close()
+    if p.open
+        p.open = false
+        unsafe
+            CloseHandle(p.handle)
+        end
+    end
 end

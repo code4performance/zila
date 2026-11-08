@@ -1,0 +1,52 @@
+// The web library: a server, an HTML template and the client in one program.
+//
+//   brasa-parse examples/web.br -o web.exe
+//
+// The server listens on a free port (0) in the background; the client asks it for a page. An
+// `html` block is markup with `{expression}` holes: every value is escaped, so the user name below
+// cannot inject markup. `@for`, `@if`, `@else` and `@end` lines make loops and branches.
+
+package main
+
+use web
+
+type Item = record
+    name: text
+    price: int
+end
+
+func page(user: text, items: []Item) -> web.Safe
+    return html
+        <h1>Hello, {user}</h1>
+        <ul>
+        @for item in items
+            @if item.price > 100
+                <li><b>{item.name}</b> costs {item.price} (expensive)</li>
+            @else
+                <li>{item.name} costs {item.price}</li>
+            @end
+        @end
+        </ul>
+    end
+end
+
+func main() -> error
+    let items = [Item { name: "pen", price: 3 }, Item { name: "<laptop>", price: 900 }]
+    var app = web.server(port: 0)
+    app.get("/", func(req)
+        return web.html_page(200, page(req.query_param("user") ?? "world", items))
+    end)
+    app.get("/ping", func(req)
+        return web.text(200, "pong")
+    end)
+    let running = try app.start()
+    let base = "http://127.0.0.1:{running.port}"
+
+    let pong = try web.get(base + "/ping")
+    print("{pong.status} {pong.body}")
+    let home = try web.get(base + "/?user=%3Cb%3EAna%3C/b%3E")
+    print(home.status)
+    print(home.body)
+    running.stop()
+    return
+end

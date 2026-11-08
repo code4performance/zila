@@ -15,7 +15,7 @@ type Point = record
     y: int
 end
 
-func (p: Point) to_value() -> format.Value
+pub func (p: Point) to_value() -> format.Value
     return format.Text("({p.x}, {p.y})")
 end
 

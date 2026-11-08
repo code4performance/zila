@@ -37,6 +37,9 @@ pub enum Tok {
     /// A block form: `name`, raw lines, `end` (spec `comptime-reflection`). `raw` is the text
     /// between the name line and the `end` line, unchanged.
     Block { name: String, raw: String },
+    /// A `sql <dialect>` block (spec `sql-blocks`): the dialect name and the raw lines up to the
+    /// `end` line, unchanged. The first raw line is on the line after the token.
+    Sql { dialect: String, raw: String },
     Newline,
     Eof,
 }
@@ -219,6 +222,18 @@ impl Lexer {
                             continue;
                         }
                     }
+                    if let Tok::Ident(name) = &tok {
+                        if name == "sql" && !matches!(self.out.last().map(|t| &t.tok), Some(Tok::Op(".")) | Some(Tok::Op("?.")) | Some(Tok::Kw("func")) | Some(Tok::Kw("type")) | Some(Tok::Kw("use")) | Some(Tok::Kw("package"))) {
+                            if let Some((dialect, after)) = self.sql_dialect_ahead() {
+                                while self.pos < after {
+                                    self.bump();
+                                }
+                                let raw = self.block_lines("sql", line, col)?;
+                                self.push(Tok::Sql { dialect, raw }, line, col);
+                                continue;
+                            }
+                        }
+                    }
                     let starts_block = matches!(tok, Tok::Kw("asm")) && self.rest_of_line_is_blank();
                     self.push(tok, line, col);
                     if starts_block {
@@ -253,7 +268,7 @@ impl Lexer {
         let mut lines: Vec<String> = Vec::new();
         loop {
             if self.peek().is_none() {
-                return Err(Diag { line, col, msg: format!("block '{}' is not closed with 'end'", name) });
+                return Err(Diag { line, col, msg: if name == "sql" { "the `sql` block that begins here is not closed with 'end'".to_string() } else { format!("block '{}' is not closed with 'end'", name) } });
             }
             self.bump(); // the newline before this line
             let mut i = self.pos;
@@ -271,14 +286,37 @@ impl Lexer {
             }
             lines.push(text);
             if self.peek().is_none() {
-                return Err(Diag { line, col, msg: format!("block '{}' is not closed with 'end'", name) });
+                return Err(Diag { line, col, msg: if name == "sql" { "the `sql` block that begins here is not closed with 'end'".to_string() } else { format!("block '{}' is not closed with 'end'", name) } });
             }
         }
     }
 
+    /// After the word `sql`: an identifier (the dialect) and then the end of the line. Returns the
+    /// dialect and the position after it, or `None` when `sql` is an ordinary identifier here.
+    fn sql_dialect_ahead(&self) -> Option<(String, usize)> {
+        let mut i = self.pos;
+        let mut gap = 0;
+        while matches!(self.chars.get(i), Some(' ' | '\t')) {
+            i += 1;
+            gap += 1;
+        }
+        let start = i;
+        while self.chars.get(i).map_or(false, |c| c.is_ascii_alphanumeric() || *c == '_') {
+            i += 1;
+        }
+        if gap == 0 || i == start || self.chars[start].is_ascii_digit() || !self.blank_from(i) {
+            return None;
+        }
+        Some((self.chars[start..i].iter().collect(), i))
+    }
+
     /// Only blanks or a `//` comment follow on this line.
     fn rest_of_line_is_blank(&self) -> bool {
-        let mut i = self.pos;
+        self.blank_from(self.pos)
+    }
+
+    fn blank_from(&self, from: usize) -> bool {
+        let mut i = from;
         while let Some(c) = self.chars.get(i) {
             match c {
                 ' ' | '\t' | '\r' => i += 1,

@@ -29,6 +29,7 @@
   <main>
     <h1>Library</h1>
     <p>The everyday operations live in four modules: <code>text</code>, <code>list</code>, <code>format</code> and <code>set</code>; <code>json</code> reads and writes JSON; <code>web</code> is an HTTP server and client. They are written in Brasa itself (see the files in <code>std/</code>), and you use them by name: <code>use text</code> once at the top of the file, then <code>text.trim(s)</code>. Nothing is added to the types themselves, so the names never clash with your own functions.</p>
+    <p>Not all of it is the core. <code>text</code>, <code>list</code>, <code>set</code>, <code>sorted</code>, <code>format</code>, <code>bufio</code>, <code>errors</code>, <code>math</code>, <code>float</code>, <code>fs</code>, <code>net</code>, <code>sync</code>, <code>task</code>, <code>future</code>, <code>thread</code>, <code>sys</code>, <code>reflect</code> and <code>derive</code> are the core of the standard library: the compiler and the runtime rest on them, and their names are reserved. <code>json</code>, <code>crypto</code>, <code>tls</code>, <code>ui</code>, <code>web</code>, <code>ai</code>, <code>mcp</code>, <code>rag</code>, <code>db</code>, <code>postgres</code> and <code>sqlserver</code> follow external formats and services and change faster than the compiler, so they are becoming packages of their own: their sources are in <code>packages/</code>, a package of your project may take their name, and using them as part of the standard library prints a warning. See <a href="packages.html#use">Packages</a>.</p>
 
     <section id="text">
       <h2>text</h2>
@@ -332,6 +333,8 @@ print(crypto.base64_encode(nonce))</code></pre>
         <dd>The rows as a <code>[]T or error</code>: a record by column name (<code>#[db("column")]</code> renames, <code>#[db(skip)]</code> leaves out, <code>T?</code> allows <code>NULL</code>), or any other type for a one-column result.</dd>
         <dt><code>db.one(T, conn, sql, args...)</code></dt>
         <dd>The one row as a <code>T or error</code> (<code>NotFound</code> for none, <code>InvalidInput</code> for several).</dd>
+        <dt><code>db.query_sql(T, conn, q)</code>, <code>db.one_sql(T, conn, q)</code>, <code>conn.rows_sql(q)</code>, <code>conn.exec_sql(q)</code></dt>
+        <dd>The same, for a <code>db.Sql</code> made by a <code>sql postgres</code> or <code>sql tsql</code> block (<a href="databases.html#sql">SQL blocks</a>): the values in the block are bound parameters. A statement written for another dialect than the connection's is an <code>InvalidInput</code> error.</dd>
         <dt><code>conn.exec(sql, args...)</code></dt>
         <dd>The number of rows changed, as an <code>int or error</code>.</dd>
         <dt><code>conn.begin()</code>, <code>tx.conn</code>, <code>tx.commit()</code>, <code>tx.rollback()</code>, <code>conn.close()</code></dt>

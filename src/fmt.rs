@@ -72,6 +72,16 @@ pub fn tok_eq(a: &Tok, b: &Tok) -> bool {
                     _ => false,
                 })
         }
+        // a `sql` block may move and its lines keep their indentation relative to each other
+        (Tok::Sql { dialect: da, raw: x }, Tok::Sql { dialect: db, raw: y }) => {
+            let shape = |raw: &str| -> String {
+                let lines: Vec<&str> = raw.split('\n').map(|l| l.trim_end()).collect();
+                let lead = |l: &str| l.chars().take_while(|c| *c == ' ' || *c == '\t').count();
+                let shared = lines.iter().filter(|l| !l.is_empty()).map(|l| lead(l)).min().unwrap_or(0);
+                lines.iter().map(|l| l.chars().skip(shared).collect::<String>()).collect::<Vec<_>>().join("\n")
+            };
+            da == db && shape(x) == shape(y)
+        }
         _ => a == b,
     }
 }
@@ -281,15 +291,29 @@ fn render(text: &str, toks: &[Token], comments: &[Comment], layout: &Layout) -> 
             match e.kind {
                 // a block form: its lines are not Brasa and stay byte for byte; only the closing
                 // `end` is aligned with the line that opens the block
-                Kind::Tok(ti) if matches!(toks[ti].tok, Tok::Block { .. }) => {
+                Kind::Tok(ti) if matches!(toks[ti].tok, Tok::Block { .. } | Tok::Sql { .. }) => {
                     let whole: String = cs[e.start..e.end].iter().collect();
                     let mut parts: Vec<&str> = whole.split('\n').collect();
                     parts.pop();
                     let first = parts.remove(0);
                     s.push_str(first.trim_end());
-                    for p in parts {
-                        s.push('\n');
-                        s.push_str(p);
+                    if matches!(toks[ti].tok, Tok::Sql { .. }) {
+                        // a `sql` block moves as one unit: one level inside the line that holds
+                        // it, with the lines keeping their indentation relative to each other
+                        let lead = |p: &str| p.chars().take_while(|c| *c == ' ' || *c == '\t').count();
+                        let shared = parts.iter().filter(|p| !p.trim().is_empty()).map(|p| lead(p)).min().unwrap_or(0);
+                        for p in parts {
+                            s.push('\n');
+                            if !p.trim().is_empty() {
+                                s.push_str(&" ".repeat(cols[li] + INDENT));
+                                s.push_str(p.chars().skip(shared).collect::<String>().trim_end());
+                            }
+                        }
+                    } else {
+                        for p in parts {
+                            s.push('\n');
+                            s.push_str(p);
+                        }
                     }
                     s.push('\n');
                     s.push_str(&" ".repeat(cols[li]));

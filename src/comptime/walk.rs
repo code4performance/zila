@@ -112,7 +112,8 @@ pub fn walk_expr(e: &mut Expr, v: &mut dyn Visit) -> R<()> {
         | ExprKind::Bool(_)
         | ExprKind::Nil
         | ExprKind::Ident(_)
-        | ExprKind::Block { .. } => {}
+        | ExprKind::Block { .. }
+        | ExprKind::Sql { .. } => {}
         ExprKind::Text(parts) => {
             for p in parts {
                 if let TextPart::Expr(x) = p {

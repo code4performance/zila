@@ -1568,13 +1568,29 @@ func start(s: Session, host: text, user: text, password: text, database: text, m
     return
 end
 
+// The SQL dialect `sql tsql` blocks are read with: `@p1` placeholders, single-quoted strings
+// (`N'...'`), `[x]` and double-quoted identifiers, `--` and nesting `/* */` comments, several
+// statements per block. A `GO` line is a command of client tools and is refused.
+#[sql_dialect("tsql")]
+#[sql_placeholder("@pn")]
+#[sql_string("'")]
+#[sql_ident("[", "]")]
+#[sql_ident("\"")]
+#[sql_line_comment("--")]
+#[sql_block_comment("/*", "*/", "nested")]
+#[sql_multi]
+#[sql_reject("GO", "GO is a command of client tools such as sqlcmd, not T-SQL: run the batches as separate statements")]
+pub type Dialect = record
+end
+
 func connection(s: Session) -> db.Conn
     return db.connection(
         func(sql, args) return run(s, sql, args) end,
         func() return simple(s, "BEGIN TRANSACTION") end,
         func() return simple(s, "COMMIT TRANSACTION") end,
         func() return simple(s, "IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION") end,
-        func() terminate(s) end
+        func() terminate(s) end,
+        "tsql"
     )
 end
 

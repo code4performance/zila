@@ -24,12 +24,12 @@
 
 ## 5. Phase 2: small std and official packages
 
-- [ ] 5.1 Write the core std list into `std_source` as data (core vs non-core) and update `is_reserved` to reserve only core names
-- [ ] 5.2 Implement shadowing of non-core std names by dependencies and local packages, with the warning, and tests for both scenarios in the delta spec
-- [ ] 5.3 Create `packages/<name>/` with its own `brasa.toml` for `json`, `crypto`, `tls`, `ui`, `web`, `ai`, `mcp`, `rag`, `db`, `postgres`, `sqlserver`; each builds and passes its tests as a local package
-- [ ] 5.4 Print the deprecation warning when a non-core library is used as `std`, naming the package and the `--add` command; the programs and tests keep working
-- [ ] 5.5 Update `docs/stdlib.html`, `docs/packages.html`, `docs/databases.html`, `docs/ai.html` and the README: which libraries are core, which are official packages, the deprecation; verify with `cargo test --test docs`
-- [ ] 5.6 Record the open question (bundled copy for manifest-less builds) in the proposal of the later removal change
+- [x] 5.1 Write the core std list into `std_source` as data (core vs non-core) and update `is_reserved` to reserve only core names
+- [x] 5.2 Implement shadowing of non-core std names by dependencies and local packages, with the warning, and tests for both scenarios in the delta spec
+- [x] 5.3 Create `packages/<name>/` with its own `brasa.toml` for `json`, `crypto`, `tls`, `ui`, `web`, `ai`, `mcp`, `rag`, `db`, `postgres`, `sqlserver`; each builds and passes its tests as a local package
+- [x] 5.4 Print the deprecation warning when a non-core library is used as `std`, naming the library and its place in `packages/` (no `--add` command yet: the hosting question is open, recorded in the proposal); the programs and tests keep working
+- [x] 5.5 Update `docs/stdlib.html`, `docs/packages.html`, `docs/databases.html`, `docs/ai.html` and the README: which libraries are core, which are official packages, the deprecation; verify with `cargo test --test docs`
+- [x] 5.6 Record the open question (bundled copy for manifest-less builds) in the proposal of the later removal change
 
 ## 6. Phase 3: compiler structure (start only after 1 to 5 are merged)
 

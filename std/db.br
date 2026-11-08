@@ -329,6 +329,9 @@ pub type Conn = record
     pub commit_tx: func() -> error
     pub rollback_tx: func() -> error
     pub close_conn: func()
+    // The SQL dialect the server speaks ("postgres", "tsql"); empty for a connection that accepts
+    // a statement written for any dialect (a test double).
+    pub dialect: text
 end
 
 // A transaction. Run its statements through `tx.conn`; end it with `commit` or `rollback`. One
@@ -348,9 +351,9 @@ pub func (ref tx: Tx) drop()
     end
 end
 
-// A new connection value for a driver.
-pub func connection(run: func(text, []Arg) -> Rows or error, begin_tx: func() -> error, commit_tx: func() -> error, rollback_tx: func() -> error, close_conn: func()) -> Conn
-    return Conn { state: State { open: true, tx_id: 0, next_tx: 1, dirty: false }, tx_id: 0, run: run, begin_tx: begin_tx, commit_tx: commit_tx, rollback_tx: rollback_tx, close_conn: close_conn }
+// A new connection value for a driver. `dialect` names the SQL dialect of the server.
+pub func connection(run: func(text, []Arg) -> Rows or error, begin_tx: func() -> error, commit_tx: func() -> error, rollback_tx: func() -> error, close_conn: func(), dialect: text = "") -> Conn
+    return Conn { state: State { open: true, tx_id: 0, next_tx: 1, dirty: false }, tx_id: 0, run: run, begin_tx: begin_tx, commit_tx: commit_tx, rollback_tx: rollback_tx, close_conn: close_conn, dialect: dialect }
 end
 
 // Rolls back a transaction that was dropped without an end.
@@ -390,6 +393,67 @@ pub func (c: Conn) exec(sql: text, args: ...Arg) -> int or error
     return int(rs.affected)
 end
 
+// ---------------------------------------------------------------------------
+// Statements written in `sql` blocks
+// ---------------------------------------------------------------------------
+
+// A statement made by a `sql <dialect>` block: the dialect it is written for, the text with the
+// dialect's placeholders and the values of its holes, in order.
+pub type Sql = record
+    pub dialect: text
+    pub text: text
+    pub args: []Arg
+end
+
+// What a `sql` block with holes becomes.
+pub func sql(dialect: text, body: text, args: []Arg) -> Sql
+    return Sql { dialect: dialect, text: body, args: args }
+end
+
+// What a `sql` block without holes becomes.
+pub func sql_const(dialect: text, body: text) -> Sql
+    let none: []Arg = []
+    return Sql { dialect: dialect, text: body, args: none }
+end
+
+// A `text` hole: NULL when the value is nil (a `text?`).
+pub func opt_str(v: text?) -> Arg
+    if v == nil
+        return null()
+    end
+    return str(v ?? "")
+end
+
+// A statement written for another dialect is never sent.
+func check_dialect(c: Conn, q: Sql) -> error
+    if c.dialect != "" and q.dialect != c.dialect
+        return error(errors.InvalidInput, "this statement is written for {q.dialect} but the connection speaks {c.dialect}")
+    end
+    return
+end
+
+// Runs a statement from a `sql` block and returns its rows (and rows affected).
+pub func (c: Conn) rows_sql(q: Sql) -> Rows or error
+    try check_dialect(c, q)
+    try guard(c)
+    return c.run(q.text, q.args)
+end
+
+// Runs a statement from a `sql` block and returns the number of rows it changed.
+pub func (c: Conn) exec_sql(q: Sql) -> int or error
+    try check_dialect(c, q)
+    try guard(c)
+    let rs = try c.run(q.text, q.args)
+    return int(rs.affected)
+end
+
+// Runs the statement for `query_sql` and `one_sql`.
+pub func __fetch_sql(c: Conn, q: Sql) -> Rows or error
+    try check_dialect(c, q)
+    try guard(c)
+    return c.run(q.text, q.args)
+end
+
 // Starts a transaction. An error if one is already open on this connection.
 pub func (c: Conn) begin() -> Tx or error
     try guard(c)
@@ -400,7 +464,7 @@ pub func (c: Conn) begin() -> Tx or error
     let id = c.state.next_tx
     c.state.next_tx = id + 1
     c.state.tx_id = id
-    let inner = Conn { state: c.state, tx_id: id, run: c.run, begin_tx: c.begin_tx, commit_tx: c.commit_tx, rollback_tx: c.rollback_tx, close_conn: c.close_conn }
+    let inner = Conn { state: c.state, tx_id: id, run: c.run, begin_tx: c.begin_tx, commit_tx: c.commit_tx, rollback_tx: c.rollback_tx, close_conn: c.close_conn, dialect: c.dialect }
     return Tx { conn: inner, done: false }
 end
 
@@ -579,6 +643,14 @@ pub func query(comptime t: Type, c: Conn, sql: text, args: ...Arg) -> []t or err
 // InvalidInput when there are several.
 #[generated(one_gen)]
 pub func one(comptime t: Type, c: Conn, sql: text, args: ...Arg) -> t or error
+
+// All the rows of a `sql` block as values of `T`: `db.query_sql(Customer, conn, q)`.
+#[generated(query_sql_gen)]
+pub func query_sql(comptime t: Type, c: Conn, q: Sql) -> []t or error
+
+// The one row of a `sql` block as a `T` (NotFound for none, InvalidInput for several).
+#[generated(one_sql_gen)]
+pub func one_sql(comptime t: Type, c: Conn, q: Sql) -> t or error
 
 comptime func int_name(name: text) -> text
     if name == "byte"
@@ -773,6 +845,14 @@ end
 
 comptime func query_gen(t: Type) -> text
     return "var rs = try db.__fetch(c, sql, args)\nlet plan = try db.__plan<{t.name()}>(ref rs)\nlet out: []{t.name()} = []\nlet n = db.__count(rs)\nfor i in 0..n\n    out.add(try db.__row<{t.name()}>(ref rs, plan, i))\nend\nreturn out\n"
+end
+
+comptime func query_sql_gen(t: Type) -> text
+    return "var rs = try db.__fetch_sql(c, q)\nlet plan = try db.__plan<{t.name()}>(ref rs)\nlet out: []{t.name()} = []\nlet n = db.__count(rs)\nfor i in 0..n\n    out.add(try db.__row<{t.name()}>(ref rs, plan, i))\nend\nreturn out\n"
+end
+
+comptime func one_sql_gen(t: Type) -> text
+    return "var rs = try db.__fetch_sql(c, q)\nlet n = db.__count(rs)\nif n != 1\n    return db.__not_one(q.text, n)\nend\nlet plan = try db.__plan<{t.name()}>(ref rs)\nreturn try db.__row<{t.name()}>(ref rs, plan, 0)\n"
 end
 
 comptime func one_gen(t: Type) -> text

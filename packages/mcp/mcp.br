@@ -1,0 +1,1059 @@
+// =====================================================================
+// Brasa standard library: the Model Context Protocol (`use mcp`)
+//
+//     use mcp
+//     use ai
+//
+//     let server = mcp.server("customers", "1.0")
+//     server.tool(ai.tool(Search, "find_customer", "Find a customer by name", handler))
+//     server.resource("db://schema", "schema", "text/plain", func() return "..." end)
+//     server.serve_stdio()                          // for a host that starts the program
+//
+//     var app = web.server(port: 8080)
+//     server.bearer_token = "secret"
+//     server.serve_http(app, "/mcp")                // Streamable HTTP on a `web` server
+//     app.run()
+//
+//     let client = try mcp.connect("http://localhost:8080/mcp", "secret")
+//     let tools = client.ai_tools()                  // remote tools for `ai`'s agent loop
+//
+// A server that exposes tools (the same `ai.Tool` values a local agent uses), resources and
+// prompts to any MCP host, over stdio (one JSON-RPC message per line) or Streamable HTTP, and a
+// client for Streamable HTTP servers. Written in Brasa on `json`, `web` and `ai`.
+//
+//   * JSON-RPC 2.0: errors have the standard codes (-32700 parse error, -32600 invalid request,
+//     -32601 method not found, -32602 invalid params, -32603 internal error) and -32002 for a
+//     resource that does not exist. Batches are not supported.
+//   * `initialize` negotiates the protocol version; any other request before it is refused.
+//   * A tool that fails gives a result with `isError`: a failing tool is not a protocol failure.
+//     Arguments that do not match the tool's input are an invalid-params error.
+//   * HTTP: sessions in `Mcp-Session-Id`, the `Origin` header checked (only the same host, or an
+//     origin in `origins`), an optional bearer token compared in constant time.
+//   * stdio handles one request at a time (reading standard input blocks the program), so a
+//     cancellation notice arrives after its request is done and changes nothing. The HTTP
+//     transport serves requests concurrently.
+//   * Not covered: server-initiated messages (sampling, roots, progress, subscriptions), OAuth,
+//     batches, an stdio client.
+//
+// Whatever a tool, resource or prompt returns goes to the host as it is; the library adds and
+// runs nothing of its own, and only exposes what the program registered. Output from tools is
+// untrusted input for the model that reads it.
+// =====================================================================
+
+package mcp
+
+use web
+use json
+use ai
+use errors
+use text
+use crypto
+use sys
+use bufio
+
+// The protocol versions this library speaks, newest first.
+let VERSIONS: []text = ["2025-06-18", "2025-03-26", "2024-11-05"]
+
+pub type Resource = record
+    pub uri: text
+    pub name: text
+    pub mime: text
+    pub read: func() -> text or error
+end
+
+// A family of resources: `pattern` has `{name}` segments (`db://tables/{table}`), and `read`
+// gets the matched values.
+pub type Template = record
+    pub pattern: text
+    pub name: text
+    pub mime: text
+    pub read: func(Map<text, text>) -> text or error
+end
+
+pub type PromptArg = record
+    pub name: text
+    pub description: text
+    pub required: bool
+end
+
+pub type Prompt = record
+    pub name: text
+    pub description: text
+    pub args: []PromptArg
+    pub build: func(Map<text, text>) -> []ai.Message or error
+end
+
+// One client's conversation with a server (for stdio there is one).
+#[shared]
+pub type Session = record
+    pub id: text
+    pub initialized: bool
+end
+
+#[shared]
+pub type Server = record
+    pub name: text
+    pub version: text
+    tools: []ai.Tool
+    resources: []Resource
+    templates: []Template
+    prompts: []Prompt
+    sessions: Map<text, Session>
+    active: int
+    pub max_message: int
+    pub max_concurrent: int
+    pub bearer_token: text
+    pub origins: []text
+end
+
+// A server with a name and version, and nothing registered yet.
+pub func server(name: text, version: text) -> Server
+    return Server { name: name, version: version, tools: [], resources: [], templates: [], prompts: [], sessions: {}, active: 0, max_message: 4194304, max_concurrent: 32, bearer_token: "", origins: [] }
+end
+
+// Exposes a tool (the same `ai.Tool` a local agent can use).
+pub func (s: Server) tool(t: ai.Tool)
+    s.tools.add(t)
+end
+
+// Exposes a resource: `read` is called each time a host reads `uri`.
+pub func (s: Server) resource(uri: text, name: text, mime: text, read: func() -> text or error)
+    s.resources.add(Resource { uri: uri, name: name, mime: mime, read: read })
+end
+
+// Exposes a family of resources by a pattern with `{name}` segments.
+pub func (s: Server) template(pattern: text, name: text, mime: text, read: func(Map<text, text>) -> text or error)
+    s.templates.add(Template { pattern: pattern, name: name, mime: mime, read: read })
+end
+
+// Exposes a prompt: `build` makes its messages from the arguments the host gives.
+pub func (s: Server) prompt(name: text, description: text, args: []PromptArg, build: func(Map<text, text>) -> []ai.Message or error)
+    s.prompts.add(Prompt { name: name, description: description, args: args, build: build })
+end
+
+// ---------------------------------------------------------------------------
+// JSON helpers
+// ---------------------------------------------------------------------------
+
+func jtext(s: text) -> json.Value
+    return json.Text(s)
+end
+
+func jnum(n: long) -> json.Value
+    return json.Number(float(n), "")
+end
+
+func jget(v: json.Value, key: text) -> json.Value
+    match v
+        Object(m) ->
+            if m.has(key)
+                return m[key]
+            end
+            return json.Null
+        _ -> return json.Null
+    end
+    return json.Null
+end
+
+func jhas(v: json.Value, key: text) -> bool
+    match v
+        Object(m) -> return m.has(key)
+        _ -> return false
+    end
+    return false
+end
+
+func jstr(v: json.Value) -> text
+    match v
+        Text(s) -> return s
+        _ -> return ""
+    end
+    return ""
+end
+
+func jint(v: json.Value) -> int
+    match v
+        Number(x, lit) -> return int(x)
+        _ -> return 0
+    end
+    return 0
+end
+
+func jlist(v: json.Value) -> []json.Value
+    match v
+        List(xs) -> return xs
+        _ -> return []
+    end
+    return []
+end
+
+func jbool(v: json.Value) -> bool
+    match v
+        Bool(b) -> return b
+        _ -> return false
+    end
+    return false
+end
+
+func obj(pairs: Map<text, json.Value>) -> json.Value
+    return json.Object(pairs)
+end
+
+func parse_json(s: text) -> json.Value
+    match json.parse_value(s)
+        ok(v) -> return v
+        err(e) -> return json.Null
+    end
+    return json.Null
+end
+
+func dump(v: json.Value) -> text
+    match json.stringify(v)
+        ok(s) -> return s
+        err(e) -> return "null"
+    end
+    return "null"
+end
+
+// ---------------------------------------------------------------------------
+// Responses
+// ---------------------------------------------------------------------------
+
+func reply(id: json.Value, result: json.Value) -> text
+    var m: Map<text, json.Value> = {}
+    m["jsonrpc"] = jtext("2.0")
+    m["id"] = id
+    m["result"] = result
+    return dump(obj(m))
+end
+
+func fail(id: json.Value, code: int, message: text) -> text
+    var e: Map<text, json.Value> = {}
+    e["code"] = jnum(long(code))
+    e["message"] = jtext(message)
+    var m: Map<text, json.Value> = {}
+    m["jsonrpc"] = jtext("2.0")
+    m["id"] = id
+    m["error"] = obj(e)
+    return dump(obj(m))
+end
+
+func text_content(s: text) -> json.Value
+    var c: Map<text, json.Value> = {}
+    c["type"] = jtext("text")
+    c["text"] = jtext(s)
+    return obj(c)
+end
+
+// ---------------------------------------------------------------------------
+// The server core
+// ---------------------------------------------------------------------------
+
+// A new session (for stdio there is one; HTTP makes one per `initialize`).
+pub func (s: Server) new_session() -> Session
+    return Session { id: "", initialized: false }
+end
+
+// One page of a list: the items from the cursor (an index in text), and the cursor of the next page
+// when there is one.
+func page(items: []json.Value, cursor: text) -> []json.Value
+    var start = 0
+    match text.parse_int(cursor)
+        ok(n) -> start = n
+        err(e) -> start = 0
+    end
+    if start < 0 or start > items.len
+        start = 0
+    end
+    var out: []json.Value = []
+    var i = start
+    while i < items.len and i < start + 100
+        out.add(items[i])
+        i += 1
+    end
+    return out
+end
+
+func next_cursor(total: int, cursor: text) -> text
+    var start = 0
+    match text.parse_int(cursor)
+        ok(n) -> start = n
+        err(e) -> start = 0
+    end
+    if start < 0 or start > total
+        start = 0
+    end
+    if start + 100 < total
+        return "{start + 100}"
+    end
+    return ""
+end
+
+func list_result(key: text, items: []json.Value, cursor: text) -> json.Value
+    var m: Map<text, json.Value> = {}
+    m[key] = json.List(page(items, cursor))
+    let next = next_cursor(items.len, cursor)
+    if next != ""
+        m["nextCursor"] = jtext(next)
+    end
+    return obj(m)
+end
+
+func negotiate(asked: text) -> text
+    for v in VERSIONS
+        if v == asked
+            return v
+        end
+    end
+    return VERSIONS[0]
+end
+
+func initialize_result(s: Server, asked: text) -> json.Value
+    var caps: Map<text, json.Value> = {}
+    var empty: Map<text, json.Value> = {}
+    if s.tools.len > 0
+        caps["tools"] = obj(empty)
+    end
+    if s.resources.len > 0 or s.templates.len > 0
+        caps["resources"] = obj(empty)
+    end
+    if s.prompts.len > 0
+        caps["prompts"] = obj(empty)
+    end
+    var info: Map<text, json.Value> = {}
+    info["name"] = jtext(s.name)
+    info["version"] = jtext(s.version)
+    var m: Map<text, json.Value> = {}
+    m["protocolVersion"] = jtext(negotiate(asked))
+    m["capabilities"] = obj(caps)
+    m["serverInfo"] = obj(info)
+    return obj(m)
+end
+
+func tool_info(t: ai.Tool) -> json.Value
+    var m: Map<text, json.Value> = {}
+    m["name"] = jtext(t.name)
+    m["description"] = jtext(t.description)
+    m["inputSchema"] = parse_json(t.schema)
+    return obj(m)
+end
+
+// The values matched by a pattern with `{name}` segments, or `nil`.
+func match_template(pattern: text, uri: text) -> Map<text, text>?
+    var values: Map<text, text> = {}
+    var p = 0
+    var u = 0
+    while p < pattern.len
+        if pattern.byte(p) == 123
+            var close = p
+            while close < pattern.len and pattern.byte(close) != 125
+                close += 1
+            end
+            let name = pattern.slice(p + 1, close)
+            // the value runs to the next literal character of the pattern, or to the end
+            p = close + 1
+            var stop = uri.len
+            if p < pattern.len
+                let lit = pattern.slice(p, p + 1)
+                let at = text.index_from(uri, lit, u)
+                if at < 0
+                    return nil
+                end
+                stop = at
+            end
+            if stop <= u
+                return nil
+            end
+            values[name] = uri.slice(u, stop)
+            u = stop
+        else
+            if u >= uri.len or uri.byte(u) != pattern.byte(p)
+                return nil
+            end
+            p += 1
+            u += 1
+        end
+    end
+    if u != uri.len
+        return nil
+    end
+    return values
+end
+
+func contents(uri: text, mime: text, body: text) -> json.Value
+    var c: Map<text, json.Value> = {}
+    c["uri"] = jtext(uri)
+    c["mimeType"] = jtext(mime)
+    c["text"] = jtext(body)
+    var m: Map<text, json.Value> = {}
+    m["contents"] = json.List([obj(c)])
+    return obj(m)
+end
+
+func prompt_info(p: Prompt) -> json.Value
+    var m: Map<text, json.Value> = {}
+    m["name"] = jtext(p.name)
+    m["description"] = jtext(p.description)
+    var args: []json.Value = []
+    for a in p.args
+        var d: Map<text, json.Value> = {}
+        d["name"] = jtext(a.name)
+        d["description"] = jtext(a.description)
+        d["required"] = json.Bool(a.required)
+        args.add(obj(d))
+    end
+    m["arguments"] = json.List(args)
+    return obj(m)
+end
+
+func call_tool(s: Server, id: json.Value, params: json.Value) -> text
+    let name = jstr(jget(params, "name"))
+    var chosen = -1
+    for i in 0..s.tools.len
+        if s.tools[i].name == name
+            chosen = i
+        end
+    end
+    if chosen < 0
+        return fail(id, -32602, "unknown tool: {name}")
+    end
+    var args = "\{\}"
+    if jhas(params, "arguments")
+        args = dump(jget(params, "arguments"))
+    end
+    var m: Map<text, json.Value> = {}
+    match s.tools[chosen].call(args)
+        ok(out) ->
+            m["content"] = json.List([text_content(out)])
+            m["isError"] = json.Bool(false)
+        err(e) ->
+            if e.kind == errors.InvalidInput and text.starts_with(e.message, "the arguments do not match")
+                return fail(id, -32602, e.message)
+            end
+            m["content"] = json.List([text_content(e.message)])
+            m["isError"] = json.Bool(true)
+    end
+    return reply(id, obj(m))
+end
+
+func get_prompt(s: Server, id: json.Value, params: json.Value) -> text
+    let name = jstr(jget(params, "name"))
+    for p in s.prompts
+        if p.name == name
+            var given: Map<text, text> = {}
+            match jget(params, "arguments")
+                Object(a) ->
+                    for k, v in a
+                        given[k] = jstr(v)
+                    end
+                _ -> given = given
+            end
+            for a in p.args
+                if a.required and not given.has(a.name)
+                    return fail(id, -32602, "missing argument: {a.name}")
+                end
+            end
+            match p.build(given)
+                ok(msgs) ->
+                    var out: []json.Value = []
+                    for m in msgs
+                        var one: Map<text, json.Value> = {}
+                        if m.role == ai.Assistant
+                            one["role"] = jtext("assistant")
+                        else
+                            one["role"] = jtext("user")
+                        end
+                        one["content"] = text_content(m.content)
+                        out.add(obj(one))
+                    end
+                    var r: Map<text, json.Value> = {}
+                    r["description"] = jtext(p.description)
+                    r["messages"] = json.List(out)
+                    return reply(id, obj(r))
+                err(e) -> return fail(id, -32603, e.message)
+            end
+        end
+    end
+    return fail(id, -32602, "unknown prompt: {name}")
+end
+
+func read_resource(s: Server, id: json.Value, params: json.Value) -> text
+    let uri = jstr(jget(params, "uri"))
+    for r in s.resources
+        if r.uri == uri
+            match r.read()
+                ok(body) -> return reply(id, contents(uri, r.mime, body))
+                err(e) -> return fail(id, -32603, e.message)
+            end
+        end
+    end
+    for t in s.templates
+        let found = match_template(t.pattern, uri)
+        if found != nil
+            match t.read(found ?? {})
+                ok(body) -> return reply(id, contents(uri, t.mime, body))
+                err(e) -> return fail(id, -32603, e.message)
+            end
+        end
+    end
+    return fail(id, -32002, "resource not found: {uri}")
+end
+
+// Handles one JSON-RPC message of a session and returns the response text, or `nil` for a
+// notification (and for a response from the client, which a server of this library never waits
+// for).
+pub func (s: Server) handle(session: Session, message: text) -> text?
+    let v = match json.parse_value(message)
+        ok(x) -> x
+        err(e) -> return fail(json.Null, -32700, "parse error: {e.message}")
+    end
+    var is_object = false
+    match v
+        List(items) -> return fail(json.Null, -32600, "batches are not supported")
+        Object(m) -> is_object = true
+        _ -> return fail(json.Null, -32600, "a JSON-RPC message is an object")
+    end
+    let method = jstr(jget(v, "method"))
+    let id = jget(v, "id")
+    let has_id = jhas(v, "id")
+    if method == ""
+        // a response to something this server asked: it asks nothing
+        return nil
+    end
+    if not has_id
+        if method == "notifications/initialized"
+            session.initialized = true
+        end
+        return nil
+    end
+    let params = jget(v, "params")
+    if method == "initialize"
+        session.initialized = true
+        return reply(id, initialize_result(s, jstr(jget(params, "protocolVersion"))))
+    end
+    if method == "ping"
+        var empty: Map<text, json.Value> = {}
+        return reply(id, obj(empty))
+    end
+    if not session.initialized
+        return fail(id, -32600, "the session is not initialized: send initialize first")
+    end
+    if s.active >= s.max_concurrent
+        return fail(id, -32000, "too many requests at the same time")
+    end
+    s.active += 1
+    let out = dispatch(s, id, method, params)
+    s.active -= 1
+    return out
+end
+
+func dispatch(s: Server, id: json.Value, method: text, params: json.Value) -> text
+    let cursor = jstr(jget(params, "cursor"))
+    if method == "tools/list"
+        var items: []json.Value = []
+        for t in s.tools
+            items.add(tool_info(t))
+        end
+        return reply(id, list_result("tools", items, cursor))
+    end
+    if method == "tools/call"
+        return call_tool(s, id, params)
+    end
+    if method == "resources/list"
+        var items: []json.Value = []
+        for r in s.resources
+            var d: Map<text, json.Value> = {}
+            d["uri"] = jtext(r.uri)
+            d["name"] = jtext(r.name)
+            d["mimeType"] = jtext(r.mime)
+            items.add(obj(d))
+        end
+        return reply(id, list_result("resources", items, cursor))
+    end
+    if method == "resources/templates/list"
+        var items: []json.Value = []
+        for t in s.templates
+            var d: Map<text, json.Value> = {}
+            d["uriTemplate"] = jtext(t.pattern)
+            d["name"] = jtext(t.name)
+            d["mimeType"] = jtext(t.mime)
+            items.add(obj(d))
+        end
+        return reply(id, list_result("resourceTemplates", items, cursor))
+    end
+    if method == "resources/read"
+        return read_resource(s, id, params)
+    end
+    if method == "prompts/list"
+        var items: []json.Value = []
+        for p in s.prompts
+            items.add(prompt_info(p))
+        end
+        return reply(id, list_result("prompts", items, cursor))
+    end
+    if method == "prompts/get"
+        return get_prompt(s, id, params)
+    end
+    return fail(id, -32601, "method not found: {method}")
+end
+
+// ---------------------------------------------------------------------------
+// stdio
+// ---------------------------------------------------------------------------
+
+// Reads one JSON-RPC message per line from standard input and writes one per line to standard
+// output until the input ends. Nothing else is written to standard output. A line that is not
+// JSON gets a parse-error answer and the loop goes on. Requests are handled one at a time.
+pub func (s: Server) serve_stdio()
+    let session = s.new_session()
+    let input = bufio.input()
+    while true
+        while not input.has_line() and not input.finished()
+            let chunk = sys.stdin_read(65536)
+            if chunk == ""
+                input.finish()
+            else
+                input.feed(chunk)
+            end
+        end
+        if not input.has_line()
+            break
+        end
+        let line = text.trim(input.take_line())
+        if line == ""
+            continue
+        end
+        if line.len > s.max_message
+            print(fail(json.Null, -32600, "the message is larger than {s.max_message} bytes"))
+            continue
+        end
+        let out = s.handle(session, line)
+        if out != nil
+            print(out ?? "")
+        end
+    end
+end
+
+// ---------------------------------------------------------------------------
+// Streamable HTTP
+// ---------------------------------------------------------------------------
+
+func host_of(origin: text) -> text
+    var rest = origin
+    let at = text.index_of(rest, "://")
+    if at >= 0
+        rest = rest.slice(at + 3, rest.len)
+    end
+    let slash = text.index_of(rest, "/")
+    if slash >= 0
+        rest = rest.slice(0, slash)
+    end
+    let colon = text.index_of(rest, ":")
+    if colon >= 0
+        rest = rest.slice(0, colon)
+    end
+    return text.lower(rest)
+end
+
+// Is the `Origin` of a request acceptable: absent (not a browser), the same host as the request,
+// or one the program allows.
+func origin_ok(s: Server, req: web.Request) -> bool
+    let origin = req.header("origin") ?? ""
+    if origin == ""
+        return true
+    end
+    let host = host_of(req.header("host") ?? "")
+    if host_of(origin) == host and host != ""
+        return true
+    end
+    for o in s.origins
+        if o == origin
+            return true
+        end
+    end
+    return false
+end
+
+func authorized(s: Server, req: web.Request) -> bool
+    if s.bearer_token == ""
+        return true
+    end
+    let h = req.header("authorization") ?? ""
+    if not text.starts_with(text.lower(h), "bearer ")
+        return false
+    end
+    return crypto.equal(text.trim(h.slice(7, h.len)), s.bearer_token)
+end
+
+func refuse(status: int, message: text) -> web.Response
+    return web.text(status, message)
+end
+
+func http_post(s: Server, req: web.Request) -> web.Response or error
+    if not origin_ok(s, req)
+        return refuse(403, "forbidden origin")
+    end
+    if not authorized(s, req)
+        return refuse(401, "unauthorized").with_header("WWW-Authenticate", "Bearer")
+    end
+    if req.body.len > s.max_message
+        return web.json_text(413, fail(json.Null, -32600, "the message is larger than {s.max_message} bytes"))
+    end
+    let pv = req.header("mcp-protocol-version") ?? ""
+    if pv != ""
+        var known = false
+        for v in VERSIONS
+            if v == pv
+                known = true
+            end
+        end
+        if not known
+            return refuse(400, "unsupported MCP-Protocol-Version: {pv}")
+        end
+    end
+    let sid = req.header("mcp-session-id") ?? ""
+    let probe = parse_json(req.body)
+    let is_init = jstr(jget(probe, "method")) == "initialize"
+    var session = s.new_session()
+    var new_id = ""
+    if is_init
+        new_id = crypto.hex(try crypto.random(16))
+        session.id = new_id
+        s.sessions[new_id] = session
+    else
+        if sid == ""
+            return refuse(400, "the Mcp-Session-Id header is missing")
+        end
+        if not s.sessions.has(sid)
+            return refuse(404, "unknown session")
+        end
+        session = s.sessions[sid]
+    end
+    let out = s.handle(session, req.body)
+    if out == nil
+        return web.text(202, "")
+    end
+    var res = web.json_text(200, out ?? "")
+    if new_id != ""
+        res = res.with_header("Mcp-Session-Id", new_id)
+    end
+    return res
+end
+
+func http_delete(s: Server, req: web.Request) -> web.Response or error
+    if not origin_ok(s, req)
+        return refuse(403, "forbidden origin")
+    end
+    if not authorized(s, req)
+        return refuse(401, "unauthorized").with_header("WWW-Authenticate", "Bearer")
+    end
+    let sid = req.header("mcp-session-id") ?? ""
+    if not s.sessions.has(sid)
+        return refuse(404, "unknown session")
+    end
+    s.sessions.remove(sid)
+    return web.text(200, "")
+end
+
+// Attaches the server to a `web` application at `path`: POST carries the JSON-RPC messages, GET
+// is answered 405 (this version sends no messages of its own) and DELETE ends a session.
+pub func (s: Server) serve_http(ref app: web.Server, path: text)
+    app.post(path, func(req) return http_post(s, req) end)
+    app.delete(path, func(req) return http_delete(s, req) end)
+    app.get(path, func(req) return refuse(405, "this server does not stream messages to the client").with_header("Allow", "POST, DELETE") end)
+end
+
+// ---------------------------------------------------------------------------
+// The client
+// ---------------------------------------------------------------------------
+
+// A remote tool as the server lists it.
+pub type ToolInfo = record
+    pub name: text
+    pub description: text
+    pub schema: text
+end
+
+pub type ResourceInfo = record
+    pub uri: text
+    pub name: text
+    pub mime: text
+end
+
+pub type PromptInfo = record
+    pub name: text
+    pub description: text
+end
+
+#[shared]
+pub type Client = record
+    pub url: text
+    token: text
+    session: text
+    version: text
+    next_id: int
+end
+
+func kind_of_code(code: int) -> ErrorKind
+    if code == -32602
+        return errors.InvalidInput
+    end
+    if code == -32601
+        return errors.Unsupported
+    end
+    if code == -32002
+        return errors.NotFound
+    end
+    return errors.Other
+end
+
+// The response with the id `want` in the body of a server-sent-events reply.
+func event_response(body: text, want: int) -> json.Value
+    var data = ""
+    var found = json.Null
+    for line in text.split(body, "\n")
+        let l = text.trim(line)
+        if text.starts_with(l, "data:")
+            data = data + text.trim(l.slice(5, l.len))
+        else if l == ""
+            if data != ""
+                let v = parse_json(data)
+                if jhas(v, "id") and jint(jget(v, "id")) == want and (jhas(v, "result") or jhas(v, "error"))
+                    found = v
+                end
+                data = ""
+            end
+        end
+    end
+    if data != ""
+        let v = parse_json(data)
+        if jhas(v, "id") and jint(jget(v, "id")) == want
+            found = v
+        end
+    end
+    return found
+end
+
+func post_message(c: Client, body: text, expect: int) -> json.Value or error
+    var h: Map<text, text> = {}
+    h["Content-Type"] = "application/json"
+    h["Accept"] = "application/json, text/event-stream"
+    if c.session != ""
+        h["Mcp-Session-Id"] = c.session
+    end
+    if c.version != ""
+        h["MCP-Protocol-Version"] = c.version
+    end
+    if c.token != ""
+        h["Authorization"] = "Bearer " + c.token
+    end
+    let res = try web.request_with(web.client_options(), web.Post, c.url, h, body)
+    let sid = res.header("mcp-session-id") ?? ""
+    if sid != ""
+        c.session = sid
+    end
+    if res.status == 202 and expect < 0
+        return json.Null
+    end
+    if res.status < 200 or res.status >= 300
+        var why = res.body
+        if why.len > 200
+            why = why.slice(0, 200)
+        end
+        if res.status == 401
+            return error(errors.Unauthenticated, "the MCP server refused the credentials")
+        end
+        if res.status == 403
+            return error(errors.PermissionDenied, "the MCP server refused the request: {why}")
+        end
+        return error(errors.Other, "the MCP server answered {res.status}: {why}")
+    end
+    if expect < 0
+        return json.Null
+    end
+    let ct = text.lower(res.header("content-type") ?? "")
+    var v = json.Null
+    if text.contains(ct, "text/event-stream")
+        v = event_response(res.body, expect)
+    else
+        v = parse_json(res.body)
+    end
+    if is_none(v)
+        return error(errors.Io, "the MCP server's answer is missing or malformed")
+    end
+    if jhas(v, "error")
+        let e = jget(v, "error")
+        return error(kind_of_code(jint(jget(e, "code"))), jstr(jget(e, "message")))
+    end
+    return jget(v, "result")
+end
+
+func is_none(v: json.Value) -> bool
+    match v
+        Null -> return true
+        _ -> return false
+    end
+    return false
+end
+
+func rpc(c: Client, method: text, params: json.Value) -> json.Value or error
+    c.next_id += 1
+    var m: Map<text, json.Value> = {}
+    m["jsonrpc"] = jtext("2.0")
+    m["id"] = jnum(long(c.next_id))
+    m["method"] = jtext(method)
+    m["params"] = params
+    return post_message(c, dump(obj(m)), c.next_id)
+end
+
+func notify(c: Client, method: text) -> error
+    var m: Map<text, json.Value> = {}
+    m["jsonrpc"] = jtext("2.0")
+    m["method"] = jtext(method)
+    let r = try post_message(c, dump(obj(m)), -1)
+    return
+end
+
+// Connects to a Streamable HTTP server and performs the handshake. `token` is sent as a bearer
+// token (empty for none).
+pub func connect(url: text, token: text) -> Client or error
+    let c = Client { url: url, token: token, session: "", version: "", next_id: 0 }
+    var info: Map<text, json.Value> = {}
+    info["name"] = jtext("brasa")
+    info["version"] = jtext("1.0")
+    var p: Map<text, json.Value> = {}
+    p["protocolVersion"] = jtext(VERSIONS[0])
+    var caps: Map<text, json.Value> = {}
+    p["capabilities"] = obj(caps)
+    p["clientInfo"] = obj(info)
+    let r = try rpc(c, "initialize", obj(p))
+    c.version = jstr(jget(r, "protocolVersion"))
+    try notify(c, "notifications/initialized")
+    return c
+end
+
+func no_params() -> json.Value
+    var m: Map<text, json.Value> = {}
+    return obj(m)
+end
+
+// Every page of a list method: the items under `key`.
+func all_pages(c: Client, method: text, key: text) -> []json.Value or error
+    var out: []json.Value = []
+    var cursor = ""
+    while true
+        var p: Map<text, json.Value> = {}
+        if cursor != ""
+            p["cursor"] = jtext(cursor)
+        end
+        let r = try rpc(c, method, obj(p))
+        for x in jlist(jget(r, key))
+            out.add(x)
+        end
+        cursor = jstr(jget(r, "nextCursor"))
+        if cursor == ""
+            break
+        end
+    end
+    return out
+end
+
+pub func (c: Client) tools() -> []ToolInfo or error
+    var out: []ToolInfo = []
+    for t in try all_pages(c, "tools/list", "tools")
+        out.add(ToolInfo { name: jstr(jget(t, "name")), description: jstr(jget(t, "description")), schema: dump(jget(t, "inputSchema")) })
+    end
+    return out
+end
+
+// Calls a tool with its arguments as JSON text. The text of the result; an error (with the tool's
+// message) when the tool reported a failure.
+pub func (c: Client) call(name: text, args: text) -> text or error
+    var p: Map<text, json.Value> = {}
+    p["name"] = jtext(name)
+    p["arguments"] = parse_json(args)
+    let r = try rpc(c, "tools/call", obj(p))
+    var parts: []text = []
+    for item in jlist(jget(r, "content"))
+        parts.add(jstr(jget(item, "text")))
+    end
+    let joined = text.join(parts, "\n")
+    if jbool(jget(r, "isError"))
+        return error(errors.Other, joined)
+    end
+    return joined
+end
+
+pub func (c: Client) resources() -> []ResourceInfo or error
+    var out: []ResourceInfo = []
+    for r in try all_pages(c, "resources/list", "resources")
+        out.add(ResourceInfo { uri: jstr(jget(r, "uri")), name: jstr(jget(r, "name")), mime: jstr(jget(r, "mimeType")) })
+    end
+    return out
+end
+
+// The text of a resource.
+pub func (c: Client) read(uri: text) -> text or error
+    var p: Map<text, json.Value> = {}
+    p["uri"] = jtext(uri)
+    let r = try rpc(c, "resources/read", obj(p))
+    let items = jlist(jget(r, "contents"))
+    if items.len == 0
+        return error(errors.NotFound, "the resource has no contents")
+    end
+    return jstr(jget(items[0], "text"))
+end
+
+pub func (c: Client) prompts() -> []PromptInfo or error
+    var out: []PromptInfo = []
+    for p in try all_pages(c, "prompts/list", "prompts")
+        out.add(PromptInfo { name: jstr(jget(p, "name")), description: jstr(jget(p, "description")) })
+    end
+    return out
+end
+
+// The messages of a prompt for the given arguments.
+pub func (c: Client) prompt(name: text, args: Map<text, text>) -> []ai.Message or error
+    var a: Map<text, json.Value> = {}
+    for k, v in args
+        a[k] = jtext(v)
+    end
+    var p: Map<text, json.Value> = {}
+    p["name"] = jtext(name)
+    p["arguments"] = obj(a)
+    let r = try rpc(c, "prompts/get", obj(p))
+    var out: []ai.Message = []
+    for m in jlist(jget(r, "messages"))
+        let content = jstr(jget(jget(m, "content"), "text"))
+        if jstr(jget(m, "role")) == "assistant"
+            out.add(ai.assistant(content))
+        else
+            out.add(ai.user(content))
+        end
+    end
+    return out
+end
+
+// Ends the session on the server.
+pub func (c: Client) close()
+    if c.session != ""
+        var h: Map<text, text> = {}
+        h["Mcp-Session-Id"] = c.session
+        if c.token != ""
+            h["Authorization"] = "Bearer " + c.token
+        end
+        let r = web.request_with(web.client_options(), web.Delete, c.url, h, "")
+        c.session = ""
+    end
+end
+
+// The remote tools as `ai.Tool` values (their schemas as the server gave them, the arguments
+// passed through as JSON), for `client.run` of the `ai` library next to local tools.
+pub func (c: Client) ai_tools() -> []ai.Tool or error
+    var out: []ai.Tool = []
+    for t in try c.tools()
+        let name = t.name
+        out.add(ai.Tool { name: t.name, description: t.description, schema: t.schema, call: func(args) return c.call(name, args) end })
+    end
+    return out
+end

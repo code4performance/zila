@@ -1,0 +1,664 @@
+// =====================================================================
+// Brasa standard library: PostgreSQL driver (`use postgres`)
+//
+//     use db
+//     use postgres
+//
+//     let conn = try postgres.open("postgres://app:secret@localhost:5432/shop?sslmode=require")
+//     let rows = try db.query(Customer, conn, "select id, name from customers where id > $1", db.int(10))
+//
+// The wire protocol (version 3) written in Brasa over `net` and `tls`; there is no C library.
+// `postgres.open(url)` returns a `db.Conn`, so the code of `use db` (typed rows, parameters,
+// transactions, errors) works unchanged.
+//
+//   * URL: `postgres://user:password@host:port/database?sslmode=...&sslrootcert=...` (also
+//     `postgresql://`; the port is 5432 by default and the database defaults to the user).
+//   * `sslmode=require` (the default) sends the SSLRequest, upgrades with `tls.upgrade_with` and
+//     validates the certificate chain and the host name; `sslrootcert=<file>` adds the CA
+//     certificates of a PEM file for this connection only. `sslmode=disable` uses plain TCP. If
+//     the server refuses TLS under `require`, opening fails before any password is sent.
+//     (`prefer` and `allow` are not supported; `verify-ca` and `verify-full` mean `require`.)
+//   * Login: SCRAM-SHA-256 (the server signature is verified), `md5`, and a cleartext password
+//     only over TLS. Any other method is refused by name.
+//   * Statements use the extended query protocol with bound parameters (text format); results
+//     are read completely, up to `max_rows` (1,000,000, or `?max_rows=N` in the URL) rows, then
+//     an error; the connection stays usable.
+//   * `db.vector(xs)` sends a `[]float` as a pgvector value; a `vector` column reads back as
+//     `[]float`.
+//
+// SQLSTATE codes become error kinds: `28P01`/`28000` Unauthenticated, `23505` AlreadyExists,
+// `42501` PermissionDenied, other `23xxx`, `22xxx` and `42xxx` InvalidInput, `08xxx`, `53xxx`
+// and `57P0x` Unavailable, `57014` Timeout. The message carries the server's text and the code.
+// =====================================================================
+
+package postgres
+
+use net
+use tls
+use crypto
+use db
+use errors
+use text
+
+// How many rows one statement may return.
+pub let MAX_ROWS = 1000000
+
+// One server message: its type byte and its body.
+type Msg = record
+    kind: int
+    body: text
+end
+
+// What an open connection keeps. Shared by the closures of its `db.Conn`.
+#[shared]
+type Session = record
+    raw: net.Conn
+    write: func(text) -> error
+    read: func() -> text or error
+    secure: bool
+    buf: text
+    pos: int
+    open: bool
+    host: text
+    url: text
+    max_rows: int
+end
+
+// ---------------------------------------------------------------------------
+// Framing
+// ---------------------------------------------------------------------------
+
+func be32(n: long) -> text
+    return crypto.from_bytes([(n >> 24) bitand 255, (n >> 16) bitand 255, (n >> 8) bitand 255, n bitand 255])
+end
+
+func be16(n: long) -> text
+    return crypto.from_bytes([(n >> 8) bitand 255, n bitand 255])
+end
+
+func zero() -> text
+    return crypto.from_bytes([0])
+end
+
+func cstr(s: text) -> text
+    return s + zero()
+end
+
+// A signed 32-bit big-endian integer in `s` at `at`.
+func get32(s: text, at: int) -> long
+    var v: long = (long(s.byte(at)) << 24) bitor (long(s.byte(at + 1)) << 16) bitor (long(s.byte(at + 2)) << 8) bitor long(s.byte(at + 3))
+    if v >= 2147483648
+        v = v - 4294967296
+    end
+    return v
+end
+
+func get16(s: text, at: int) -> int
+    return int(s.byte(at)) * 256 + int(s.byte(at + 1))
+end
+
+// A frontend message: type byte, length (counting itself), body.
+func frame(kind: int, body: text) -> text
+    return crypto.from_bytes([long(kind)]) + be32(long(body.len) + 4) + body
+end
+
+func send(s: Session, data: text) -> error
+    if not s.open
+        return error(errors.Unavailable, "the database connection is closed")
+    end
+    match s.write(data)
+        ok -> return
+        err(e) ->
+            s.open = false
+            return error(errors.Unavailable, "the database connection was lost: {e.message}")
+    end
+    return
+end
+
+// Makes `n` more bytes available in the buffer.
+func fill(s: Session, need: int) -> error
+    while s.buf.len - s.pos < need
+        var more = ""
+        match s.read()
+            ok(chunk) -> more = chunk
+            err(e) ->
+                s.open = false
+                return error(errors.Unavailable, "the database connection was lost: {e.message}")
+        end
+        if more.len == 0
+            s.open = false
+            return error(errors.Unavailable, "the database server closed the connection")
+        end
+        if s.pos > 0
+            s.buf = s.buf.__raw_slice(s.pos, s.buf.len) + more
+            s.pos = 0
+        else
+            s.buf = s.buf + more
+        end
+    end
+    return
+end
+
+func take(s: Session, n: int) -> text
+    let out = s.buf.__raw_slice(s.pos, s.pos + n)
+    s.pos += n
+    return out
+end
+
+// The next message from the server.
+func next_msg(s: Session) -> Msg or error
+    try fill(s, 5)
+    let kind = int(s.buf.byte(s.pos))
+    let len = int(get32(s.buf, s.pos + 1))
+    if len < 4 or len > 1073741824
+        s.open = false
+        return error(errors.Io, "the database server sent a malformed message")
+    end
+    try fill(s, 1 + len)
+    s.pos += 5
+    let body = take(s, len - 4)
+    return Msg { kind: kind, body: body }
+end
+
+// ---------------------------------------------------------------------------
+// Errors
+// ---------------------------------------------------------------------------
+
+// The kind of error for a SQLSTATE code.
+func kind_of(code: text) -> ErrorKind
+    if code == "28P01" or code == "28000"
+        return errors.Unauthenticated
+    end
+    if code == "23505"
+        return errors.AlreadyExists
+    end
+    if code == "42501"
+        return errors.PermissionDenied
+    end
+    if code == "57014"
+        return errors.Timeout
+    end
+    if text.starts_with(code, "08") or text.starts_with(code, "53") or text.starts_with(code, "57P")
+        return errors.Unavailable
+    end
+    if text.starts_with(code, "23") or text.starts_with(code, "22") or text.starts_with(code, "42") or text.starts_with(code, "3D") or text.starts_with(code, "3F")
+        return errors.InvalidInput
+    end
+    return errors.Other
+end
+
+// The fields of an ErrorResponse or NoticeResponse: severity, SQLSTATE and message.
+type Notice = record
+    severity: text
+    code: text
+    message: text
+end
+
+func parse_notice(body: text) -> Notice
+    var n = Notice { severity: "", code: "", message: "" }
+    var i = 0
+    while i < body.len
+        let f = int(body.byte(i))
+        if f == 0
+            break
+        end
+        var z = i + 1
+        while z < body.len and body.byte(z) != 0
+            z += 1
+        end
+        let v = body.slice(i + 1, z)
+        if f == 83
+            n.severity = v
+        else if f == 67
+            n.code = v
+        else if f == 77
+            n.message = v
+        end
+        i = z + 1
+    end
+    return n
+end
+
+func server_error(body: text) -> error?
+    let n = parse_notice(body)
+    return error(kind_of(n.code), db.with_code(n.message, n.code))
+end
+
+// ---------------------------------------------------------------------------
+// Opening
+// ---------------------------------------------------------------------------
+
+// Called with the text of each NOTICE the server sends (ignored by default).
+pub var on_notice: func(text) = func(m) end
+
+func plain_read(raw: net.Conn) -> func() -> text or error
+    return func() return await raw.read(16384) end
+end
+
+func plain_write(raw: net.Conn) -> func(text) -> error
+    return func(data) return await raw.write(data) end
+end
+
+func secure_read(conn: tls.Conn) -> func() -> text or error
+    return func() return await conn.read(16384) end
+end
+
+func secure_write(conn: tls.Conn) -> func(text) -> error
+    return func(data) return await conn.write(data) end
+end
+
+// Opens a connection. The URL's password never appears in an error message.
+pub func open(url: text) -> db.Conn or error
+    let u = try db.parse_url(url)
+    if u.scheme != "postgres" and u.scheme != "postgresql"
+        return error(errors.InvalidInput, "not a PostgreSQL URL: {db.redact(url)}")
+    end
+    if u.user == ""
+        return error(errors.InvalidInput, "the PostgreSQL URL has no user: {db.redact(url)}")
+    end
+    var port = u.port
+    if port == 0
+        port = 5432
+    end
+    var database = u.database
+    if database == ""
+        database = u.user
+    end
+    var mode = "require"
+    if u.params.has("sslmode")
+        mode = u.params["sslmode"]
+    end
+    if mode == "verify-ca" or mode == "verify-full"
+        mode = "require"
+    end
+    if mode != "require" and mode != "disable"
+        return error(errors.InvalidInput, "unsupported sslmode \"{mode}\" (use require or disable)")
+    end
+    var root = ""
+    if u.params.has("sslrootcert")
+        root = u.params["sslrootcert"]
+    end
+    var max_rows = MAX_ROWS
+    if u.params.has("max_rows")
+        match text.parse_int(u.params["max_rows"])
+            ok(n) -> max_rows = n
+            err(e) -> return error(errors.InvalidInput, "bad max_rows in the PostgreSQL URL")
+        end
+    end
+    let safe = db.redact(url)
+    let raw = match await net.connect(u.host, long(port))
+        ok(c) -> c
+        err(e) -> return error(errors.Unavailable, "cannot connect to {u.host}:{port}: {e.message}")
+    end
+    let s = Session { raw: raw, write: plain_write(raw), read: plain_read(raw), secure: false, buf: "", pos: 0, open: true, host: u.host, url: safe, max_rows: max_rows }
+    if mode == "require"
+        // SSLRequest: length 8, code 80877103
+        try await raw.write(be32(8) + be32(80877103))
+        let answer = try await raw.read(1)
+        if answer != "S"
+            await raw.close()
+            return error(errors.Unavailable, "the server at {u.host}:{port} does not accept TLS and sslmode=require")
+        end
+        let opts = tls.Options { alpn: [], require_alpn: false, ca_file: root }
+        let sec = try await tls.upgrade_with(raw, u.host, opts)
+        s.write = secure_write(sec)
+        s.read = secure_read(sec)
+        s.secure = true
+    end
+    try startup(s, u.user, u.password, database)
+    return connection(s)
+end
+
+// ---------------------------------------------------------------------------
+// Login
+// ---------------------------------------------------------------------------
+
+func startup(s: Session, user: text, password: text, database: text) -> error
+    var params = cstr("user") + cstr(user) + cstr("database") + cstr(database) + cstr("client_encoding") + cstr("UTF8") + cstr("application_name") + cstr("brasa") + zero()
+    let body = be32(196608) + params
+    try send(s, be32(long(body.len) + 4) + body)
+    var scram_state = ""
+    var scram_nonce = ""
+    var scram_first = ""
+    var scram_salted = ""
+    var scram_auth = ""
+    while true
+        let m = try next_msg(s)
+        if m.kind == 69
+            await s.raw.close()
+            s.open = false
+            return server_error(m.body)
+        end
+        if m.kind == 90
+            return
+        end
+        if m.kind == 82
+            let code = get32(m.body, 0)
+            if code == 0
+                continue
+            end
+            if code == 3
+                if not s.secure
+                    s.open = false
+                    await s.raw.close()
+                    return error(errors.Unsupported, "the server asked for a cleartext password on a connection without TLS")
+                end
+                try send(s, frame(112, cstr(password)))
+                continue
+            end
+            if code == 5
+                let salt = m.body.__raw_slice(4, 8)
+                let inner = crypto.hex(crypto.md5(password + user))
+                let outer = "md5" + crypto.hex(crypto.md5(inner + salt))
+                try send(s, frame(112, cstr(outer)))
+                continue
+            end
+            if code == 10
+                // SASL: the list of mechanisms ends with an empty name
+                if not text.contains(m.body.slice(4, m.body.len), "SCRAM-SHA-256")
+                    s.open = false
+                    await s.raw.close()
+                    return error(errors.Unsupported, "the server offers no SASL mechanism this driver supports (only SCRAM-SHA-256)")
+                end
+                let nonce = crypto.base64_encode(try crypto.random(18))
+                scram_nonce = nonce
+                scram_first = "n=,r=" + nonce
+                let initial = "n,," + scram_first
+                try send(s, frame(112, cstr("SCRAM-SHA-256") + be32(long(initial.len)) + initial))
+                continue
+            end
+            if code == 11
+                let server_first = m.body.slice(4, m.body.len)
+                let proof = try scram_proof(password, scram_first, server_first, scram_nonce)
+                scram_salted = proof.salted
+                scram_auth = proof.auth
+                try send(s, frame(112, proof.message))
+                continue
+            end
+            if code == 12
+                let final = m.body.slice(4, m.body.len)
+                if not text.starts_with(final, "v=")
+                    await s.raw.close()
+                    s.open = false
+                    return error(errors.Unauthenticated, "the server's SCRAM answer is malformed")
+                end
+                let their = try crypto.base64_decode(final.slice(2, final.len))
+                let server_key = crypto.hmac_sha256(scram_salted, "Server Key")
+                let mine = crypto.hmac_sha256(server_key, scram_auth)
+                if not crypto.equal(their, mine)
+                    await s.raw.close()
+                    s.open = false
+                    return error(errors.Unauthenticated, "the server's SCRAM signature is wrong: it does not know the password")
+                end
+                continue
+            end
+            await s.raw.close()
+            s.open = false
+            return error(errors.Unsupported, "the server asked for an authentication method this driver does not support (code {code})")
+        end
+        // ParameterStatus, BackendKeyData and notices during startup are not needed
+    end
+    return
+end
+
+type Proof = record
+    message: text
+    salted: text
+    auth: text
+end
+
+// The SCRAM client-final message for the server's first message.
+func scram_proof(password: text, client_first: text, server_first: text, nonce: text) -> Proof or error
+    var rnonce = ""
+    var salt = ""
+    var iterations = 0
+    for part in text.split(server_first, ",")
+        if text.starts_with(part, "r=")
+            rnonce = part.slice(2, part.len)
+        else if text.starts_with(part, "s=")
+            salt = try crypto.base64_decode(part.slice(2, part.len))
+        else if text.starts_with(part, "i=")
+            match text.parse_int(part.slice(2, part.len))
+                ok(n) -> iterations = n
+                err(e) -> return error(errors.Unauthenticated, "bad SCRAM iteration count")
+            end
+        end
+    end
+    if not text.starts_with(rnonce, nonce) or rnonce.len == nonce.len or salt == "" or iterations < 1
+        return error(errors.Unauthenticated, "the server's SCRAM message is malformed")
+    end
+    let salted = try crypto.pbkdf2_sha256(password, salt, iterations, 32)
+    let client_key = crypto.hmac_sha256(salted, "Client Key")
+    let stored = crypto.sha256(client_key)
+    let without_proof = "c=biws,r=" + rnonce
+    let auth = client_first + "," + server_first + "," + without_proof
+    let sig = crypto.hmac_sha256(stored, auth)
+    var proof: []long = []
+    for k in 0..32
+        proof.add(long(client_key.byte(k)) bitxor long(sig.byte(k)))
+    end
+    let final = without_proof + ",p=" + crypto.base64_encode(crypto.from_bytes(proof))
+    return Proof { message: final, salted: salted, auth: auth }
+end
+
+// ---------------------------------------------------------------------------
+// Statements
+// ---------------------------------------------------------------------------
+
+func arg_text(a: db.Arg) -> text
+    match a
+        Int(n) -> return "{n}"
+        Float(x) -> return "{x}"
+        Bool(b) ->
+            if b
+                return "t"
+            end
+            return "f"
+        Text(t) -> return t
+        Bytes(d) -> return "\\x" + crypto.hex(d)
+        Vector(v) -> return vector_text(v)
+        Null -> return ""
+    end
+    return ""
+end
+
+func vector_text(v: []float) -> text
+    var parts: []text = []
+    for x in v
+        parts.add("{x}")
+    end
+    return "[" + text.join(parts, ",") + "]"
+end
+
+func is_null(a: db.Arg) -> bool
+    match a
+        Null -> return true
+        _ -> return false
+    end
+    return false
+end
+
+// The cell type tag for a type OID.
+func kind_for(oid: long) -> text
+    if oid == 16
+        return "bool"
+    end
+    if oid == 20 or oid == 21 or oid == 23 or oid == 26
+        return "int"
+    end
+    if oid == 700 or oid == 701
+        return "float"
+    end
+    if oid == 1700
+        return "numeric"
+    end
+    if oid == 17
+        return "bytes"
+    end
+    if oid == 2950
+        return "uuid"
+    end
+    if oid == 1082 or oid == 1083 or oid == 1114 or oid == 1184 or oid == 1266
+        return "time"
+    end
+    return "text"
+end
+
+// Runs one statement and reads its whole result.
+func run(s: Session, sql: text, args: []db.Arg) -> db.Rows or error
+    var bind = zero() + zero() + be16(0) + be16(long(args.len))
+    for a in args
+        if is_null(a)
+            bind = bind + be32(-1)
+        else
+            let v = arg_text(a)
+            bind = bind + be32(long(v.len)) + v
+        end
+    end
+    bind = bind + be16(0)
+    let parse = frame(80, zero() + cstr(sql) + be16(0))
+    let bindm = frame(66, bind)
+    let describe = frame(68, crypto.from_bytes([80]) + zero())
+    let execute = frame(69, zero() + be32(0))
+    let sync = frame(83, "")
+    try send(s, parse + bindm + describe + execute + sync)
+    var rs = db.rows([], [])
+    var failure: error? = nil
+    var kinds: []text = []
+    var width = 0
+    var count = 0
+    var too_many = false
+    while true
+        let m = try next_msg(s)
+        if m.kind == 90
+            break
+        end
+        if m.kind == 69
+            if failure == nil
+                failure = server_error(m.body)
+            end
+            continue
+        end
+        if m.kind == 78
+            let n = parse_notice(m.body)
+            on_notice(n.message)
+            continue
+        end
+        if m.kind == 84
+            var names: []text = []
+            var tags: []text = []
+            let n = get16(m.body, 0)
+            var at = 2
+            for k in 0..n
+                var z = at
+                while m.body.byte(z) != 0
+                    z += 1
+                end
+                names.add(m.body.slice(at, z))
+                // the type OID is 6 bytes after the name's end: table (4), column (2), then the OID
+                tags.add(kind_for(get32(m.body, z + 1 + 6)))
+                at = z + 1 + 18
+            end
+            rs = db.rows(names, tags)
+            kinds = tags
+            width = n
+            continue
+        end
+        if m.kind == 68
+            if count >= s.max_rows
+                too_many = true
+                continue
+            end
+            count += 1
+            let n = get16(m.body, 0)
+            var at = 2
+            for k in 0..n
+                let len = int(get32(m.body, at))
+                at += 4
+                if len < 0
+                    rs.add("", true)
+                else
+                    var v = m.body.__raw_slice(at, at + len)
+                    if kinds[k] == "bytes" and text.starts_with(v, "\\x")
+                        match crypto.unhex(v.slice(2, v.len))
+                            ok(b) -> v = b
+                            err(e) -> v = v
+                        end
+                    end
+                    rs.add(v, false)
+                    at += len
+                end
+            end
+            continue
+        end
+        if m.kind == 67
+            // CommandComplete: "INSERT 0 5", "UPDATE 3", "SELECT 2"
+            var tag = m.body.slice(0, m.body.len - 1)
+            let sp = lastspace(tag)
+            if sp >= 0
+                match text.parse_long(tag.slice(sp + 1, tag.len))
+                    ok(n) -> rs.affected = n
+                    err(e) -> rs.affected = 0
+                end
+            end
+            continue
+        end
+        // ParseComplete, BindComplete, NoData, EmptyQuery, ParameterStatus: nothing to keep
+    end
+    if failure != nil
+        return failure
+    end
+    if too_many
+        return error(errors.Overflow, "the statement returned more than {s.max_rows} rows (the limit of this connection)")
+    end
+    return rs
+end
+
+func lastspace(s: text) -> int
+    var k = s.len - 1
+    while k >= 0
+        if s.byte(k) == 32
+            return k
+        end
+        k -= 1
+    end
+    return -1
+end
+
+// The SQL dialect `sql postgres` blocks are read with: `$1` placeholders, single-quoted strings
+// (`E'...'` with backslash escapes), double-quoted identifiers, `--` and nesting `/* */` comments,
+// dollar-quoted text, one statement per block.
+#[sql_dialect("postgres")]
+#[sql_placeholder("$n")]
+#[sql_string("'")]
+#[sql_ident("\"")]
+#[sql_line_comment("--")]
+#[sql_block_comment("/*", "*/", "nested")]
+#[sql_dollar_quote]
+#[sql_estring]
+pub type Dialect = record
+end
+
+func connection(s: Session) -> db.Conn
+    return db.connection(
+        func(sql, args) return run(s, sql, args) end,
+        func() return simple(s, "BEGIN") end,
+        func() return simple(s, "COMMIT") end,
+        func() return simple(s, "ROLLBACK") end,
+        func() terminate(s) end,
+        "postgres"
+    )
+end
+
+func simple(s: Session, sql: text) -> error
+    let r = try run(s, sql, [])
+    return
+end
+
+func terminate(s: Session)
+    if s.open
+        s.open = false
+        let r = s.write(frame(88, ""))
+        await s.raw.close()
+    end
+end

@@ -28,6 +28,7 @@
 
   <main>
     <h1>Databases</h1>
+    <p class="note"><code>db</code>, <code>postgres</code> and <code>sqlserver</code> are libraries that are becoming packages of their own: their sources are in <code>packages/</code>, and using them as part of the standard library prints a warning (see <a href="packages.html#use">Packages</a>).</p>
     <p>Three libraries, all written in Brasa on <code>net</code> and <code>tls</code> (no C library is linked): <code>db</code> is what a program uses, <code>postgres</code> and <code>sqlserver</code> are the drivers. A driver's <code>open</code> returns a <code>db.Conn</code>; everything after that is the same on both databases. <a href="stdlib.html#db">The library page</a> lists every function; this page shows how they fit together.</p>
 
     <section id="query">
@@ -50,6 +51,24 @@
 <span class="kw">end</span></code></pre>
       <p><code>db.query(T, conn, sql, args...)</code> builds a <code>[]T</code> and <code>db.one</code> a single <code>T</code> (an error of kind <code>NotFound</code> for no row, <code>InvalidInput</code> for several). A record matches columns to fields by name, ignoring case; <code>#[db("column")]</code> renames a field and <code>#[db(skip)]</code> leaves it out. A column that may be <code>NULL</code> is an optional field (<code>text?</code>); a <code>NULL</code> in any other field is an error that names the row, field and column. Any other type reads a one-column result (<code>db.query(int, conn, "select count(*) ...")</code>). The decoding is written at build time from the shape of the type, like <code>json</code>.</p>
       <p>Values never become part of the SQL text: they go to the server as bound parameters, as <code>db.Arg</code> values made with <code>db.int</code>, <code>db.float</code>, <code>db.bool</code>, <code>db.str</code>, <code>db.bytes</code>, <code>db.vector</code> and <code>db.null()</code>. The placeholders are the database's own: <code>$1</code> for PostgreSQL, <code>@p1</code> for SQL Server. A bare <code>5</code> instead of <code>db.int(5)</code> is a compile error. So a name such as <code>x'); drop table customers; --</code> is stored as text.</p>
+    </section>
+
+    <section id="sql">
+      <h2>SQL blocks</h2>
+      <p>SQL can be written in the program as it is, the way <code>asm</code> is: a <code>sql</code> line with the name of a dialect, the statement as raw lines, and a line that is just <code>end</code>. The block is a value of type <code>db.Sql</code>.</p>
+      <pre><code><span class="kw">let</span> min = 10
+<span class="kw">let</span> city: text? = <span class="kw">nil</span>
+<span class="kw">let</span> q = sql postgres
+    select id, full_name, email from customers
+    where id &gt; {min} and city = {city}
+<span class="kw">end</span>
+<span class="kw">let</span> rows = <span class="kw">try</span> db.query_sql(Customer, conn, q)
+<span class="kw">let</span> n = <span class="kw">try</span> conn.exec_sql(q)</code></pre>
+      <p><strong>Values are parameters.</strong> A <code>{expr}</code> in the SQL is never pasted into the text: the compiler writes the dialect's placeholder (<code>$1</code> for PostgreSQL, <code>@p1</code> for T-SQL) and the value goes to the server as a bound parameter, converted by its type (integers, <code>float</code>, <code>bool</code>, <code>text</code>, a <code>text?</code> that is <code>nil</code> as <code>NULL</code>, <code>[]float</code> as a vector, or a <code>db.Arg</code> as it is). Any other type is a compile error that names it. Braces inside strings, quoted identifiers and comments are text, and <code>{{</code> and <code>}}</code> write a brace.</p>
+      <p><strong>Dialects.</strong> <code>sql postgres</code> (from <code>use postgres</code>) and <code>sql tsql</code> (from <code>use sqlserver</code>) are the two there are. The compiler reads each block with its dialect's lexical rules and reports, at compile time and with the line, an unterminated string, quoted identifier, comment or dollar-quoted text, unbalanced parentheses, a placeholder written by hand, a second statement where the dialect allows one, and a <code>GO</code> line in T-SQL (a command of client tools, not T-SQL). It does not parse SQL or know your tables: the server stays the judge of the grammar. <code>use db</code> is needed in the file, and a dialect is found only among the packages the file imports.</p>
+      <p><strong>Running them.</strong> <code>conn.rows_sql(q)</code>, <code>conn.exec_sql(q)</code>, <code>db.query_sql(T, conn, q)</code> and <code>db.one_sql(T, conn, q)</code> behave like the text versions, with the same typed rows, transactions and errors. A connection knows its dialect, and a statement written for another one is an error of kind <code>InvalidInput</code> that names both; nothing is sent. Text statements with <code>db.query</code> and <code>conn.exec</code> keep working.</p>
+      <p><code>examples/db.br</code> writes one query once per dialect and runs it on both servers.</p>
+      <p><strong>Another database.</strong> A dialect is a declaration, not compiler code: a package marks a type with attributes that state the lexical rules (<code>#[sql_dialect("name")]</code>, <code>#[sql_placeholder("$n")]</code> or <code>"@pn"</code>, <code>":n"</code>, <code>"?"</code>, <code>#[sql_string]</code>, <code>#[sql_ident]</code>, <code>#[sql_line_comment]</code>, <code>#[sql_block_comment]</code>, <code>#[sql_dollar_quote]</code>, <code>#[sql_multi]</code> and a few more), and its connections set <code>dialect</code> when they are made. Oracle, MySQL and SQLite are planned as packages of that kind, with no change to the compiler.</p>
     </section>
 
     <section id="transactions">

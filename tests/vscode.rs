@@ -44,3 +44,33 @@ fn the_grammar_highlights_every_lexer_keyword_including_pub() {
         assert!(g.split(|c: char| !c.is_alphanumeric() && c != '_').any(|w| w == *kw), "the grammar does not mention the keyword {}", kw);
     }
 }
+
+#[test]
+fn the_grammar_opens_a_sql_region_only_for_a_sql_block() {
+    let g = std::fs::read_to_string("editors/vscode/syntaxes/brasa.tmLanguage.json").unwrap();
+    assert!(g.contains("\"sql-blocks\"") && g.contains("\"include\": \"source.sql\"") && g.contains("\"include\": \"source.brasa\""), "the SQL region and its embedded languages are missing");
+    if !node_available() {
+        eprintln!("node is not installed: skipping the pattern check");
+        return;
+    }
+    // the begin and end patterns are plain regular expressions: try them on lines
+    let script = r#"
+const g = JSON.parse(require('fs').readFileSync('editors/vscode/syntaxes/brasa.tmLanguage.json', 'utf8'));
+const r = g.repository['sql-blocks'].patterns[0];
+const begin = new RegExp(r.begin), end = new RegExp(r.end);
+const check = (ok, what) => { if (!ok) { console.error('FAIL ' + what); process.exit(1); } };
+check(begin.test('    let q = sql postgres'), 'sql postgres opens');
+check(begin.test('return sql tsql // note'), 'a comment may follow');
+check(!begin.test('func run(sql: text)'), 'a parameter named sql');
+check(!begin.test('    print(sql)'), 'sql in a call');
+check(!begin.test('    let sql = "x"'), 'a variable named sql');
+check(end.test('    end'), 'end closes');
+check(end.test('end // done'), 'end with a comment closes');
+check(!end.test('    end_date is null'), 'end_date does not close');
+check(!end.test('    -- end'), 'a SQL comment does not close');
+console.log('ok');
+"#;
+    let out = Command::new("node").args(["-e", script]).output().unwrap();
+    let text = String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success() && text.contains("ok"), "{}", text);
+}

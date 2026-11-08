@@ -1,0 +1,10 @@
+package main
+
+use db
+use postgres
+
+func main()
+    let q = sql postgres
+        select {[1,2]}
+    end
+end

@@ -625,13 +625,28 @@ func lastspace(s: text) -> int
     return -1
 end
 
+// The SQL dialect `sql postgres` blocks are read with: `$1` placeholders, single-quoted strings
+// (`E'...'` with backslash escapes), double-quoted identifiers, `--` and nesting `/* */` comments,
+// dollar-quoted text, one statement per block.
+#[sql_dialect("postgres")]
+#[sql_placeholder("$n")]
+#[sql_string("'")]
+#[sql_ident("\"")]
+#[sql_line_comment("--")]
+#[sql_block_comment("/*", "*/", "nested")]
+#[sql_dollar_quote]
+#[sql_estring]
+pub type Dialect = record
+end
+
 func connection(s: Session) -> db.Conn
     return db.connection(
         func(sql, args) return run(s, sql, args) end,
         func() return simple(s, "BEGIN") end,
         func() return simple(s, "COMMIT") end,
         func() return simple(s, "ROLLBACK") end,
-        func() terminate(s) end
+        func() terminate(s) end,
+        "postgres"
     )
 end
 

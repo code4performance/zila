@@ -35,6 +35,12 @@ pub fn registered_source(name: &str) -> Option<&'static str> {
 
 /// The source of package `name`: the standard library first, then registered packages.
 pub fn package_source(name: &str, target: crate::codegen_x64::Target) -> Option<&'static str> {
+    // a package of the project may shadow a standard library that is not core
+    if !crate::codegen_x64::is_core_std(name) {
+        if let Some(s) = crate::package::visible_source(name) {
+            return Some(s);
+        }
+    }
     crate::codegen_x64::std_source_for(name, target).or_else(|| crate::package::visible_source(name)).or_else(|| registered_source(name))
 }
 

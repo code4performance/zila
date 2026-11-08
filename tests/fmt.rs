@@ -255,6 +255,10 @@ fn scrambled_indentation_formats_back_to_the_same_text() {
         if src.contains("asm\n") || src.contains("asm\r\n") || src.contains("/*") || !brasa::comptime::block_names(&src).is_empty() {
             continue;
         }
+        // so do the lines of a `sql` block
+        if brasa::lexer::Lexer::new(&src).tokenize().map_or(false, |t| t.iter().any(|t| matches!(t.tok, brasa::lexer::Tok::Sql { .. }))) {
+            continue;
+        }
         let formatted = format_source(&src).unwrap();
         let scrambled: String = formatted
             .lines()
@@ -357,4 +361,26 @@ fn pub_declarations_format_with_one_space_and_are_idempotent() {
     assert!(once.contains("pub async func h()"), "{}", once);
     assert!(once.contains("pub func (x: X) m()"), "{}", once);
     assert_eq!(fmt(&once), once);
+}
+
+#[test]
+fn a_sql_block_moves_as_a_unit_and_keeps_its_relative_indentation() {
+    let src = "package t\nuse db\nuse postgres\nfunc f() -> db.Sql\n        return sql postgres\n    select id\n        from t\n    where a = {x}\nend\nend\n";
+    let want = "package t\nuse db\nuse postgres\nfunc f() -> db.Sql\n    return sql postgres\n        select id\n            from t\n        where a = {x}\n    end\nend\n";
+    assert_eq!(fmt(src), want);
+    // a second pass changes nothing
+    assert_eq!(fmt(want), want);
+}
+
+#[test]
+fn text_in_a_sql_block_that_looks_like_brasa_stays_in_the_block() {
+    let src = "package t\nuse db\nuse postgres\nfunc f() -> db.Sql\n    let q = sql postgres\n        select 1 where end_date is null -- end\n    end\n    return q\nend\n";
+    assert_eq!(fmt(src), src);
+}
+
+#[test]
+fn an_identifier_called_sql_is_formatted_as_code() {
+    let src = "package t\nfunc f(sql: text) -> text\nreturn sql\nend\n";
+    let want = "package t\nfunc f(sql: text) -> text\n    return sql\nend\n";
+    assert_eq!(fmt(src), want);
 }

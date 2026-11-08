@@ -207,3 +207,35 @@ fn packages_of_the_project_are_seen_by_the_editor() {
     assert!(m.contains("unknown package 'nothing'") && m.contains("--add"), "{}", m);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_sql_block_has_no_diagnostics_and_syntax_errors_around_it_are_reported() {
+    let mut docs = HashMap::new();
+    let good = "package main\n\nuse db\nuse postgres\n\nfunc main()\n    let limit = 5\n    let q = sql postgres\n        select id from customers\n        where id < {limit} and name = 'it''s {not a hole}'\n    end\n    print(q.text)\nend\n";
+    let r = open(&mut docs, "file:///sql_good.br", good);
+    assert_eq!(r[0].get("params").get("diagnostics"), &Json::Arr(vec![]));
+    // a syntax error after the block is still reported on its own line, and the SQL text is not
+    // taken for Brasa (the server does not compile files that use `db`, which has generators)
+    let bad = good.replace("print(q.text)", "print(q.text");
+    let r = open(&mut docs, "file:///sql_bad.br", &bad);
+    let Json::Arr(d) = r[0].get("params").get("diagnostics") else { panic!() };
+    assert_eq!(d.len(), 1, "{:?}", d);
+    assert_eq!(d[0].get("range").get("start").get("line"), &Json::Num(12.0));
+    // a block that never ends is a syntax error at the line where it began
+    let open_block = "package main
+
+use db
+use postgres
+
+func main()
+    let q = sql postgres
+        select 1
+";
+    let r = open(&mut docs, "file:///sql_open.br", open_block);
+    let Json::Arr(d) = r[0].get("params").get("diagnostics") else { panic!() };
+    assert_eq!(d.len(), 1, "{:?}", d);
+    assert_eq!(d[0].get("range").get("start").get("line"), &Json::Num(6.0));
+    // an ordinary identifier called sql is not a block
+    let r = open(&mut docs, "file:///sql_ident.br", "package main\n\nfunc f(sql: text) -> text\n    return sql\nend\n\nfunc main()\n    print(f(\"x\"))\nend\n");
+    assert_eq!(r[0].get("params").get("diagnostics"), &Json::Arr(vec![]));
+}

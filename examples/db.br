@@ -3,9 +3,11 @@
 //   brasa-parse examples/db.br -o db.exe
 //
 // `postgres.open` and `sqlserver.open` both return a `db.Conn`, so everything after opening is
-// written once: typed rows (`db.query` builds `[]Customer` from the columns by name), parameters
-// that travel as bound values, and transactions. The placeholders are the database's own (`$1`
-// for PostgreSQL, `@p1` for SQL Server), so only the SQL text differs.
+// written once: typed rows (`db.query_sql` builds `[]Customer` from the columns by name) and
+// transactions. SQL is written in `sql <dialect>` blocks, as raw lines. A `{value}` in a block is
+// never pasted into the text: the compiler writes the dialect's placeholder (`$1` for PostgreSQL,
+// `@p1` for T-SQL) and the value travels as a bound parameter. A block for the wrong database is
+// refused before anything is sent.
 //
 // The URLs are the development servers of tests/docker (`docker compose -f tests/docker/compose.yml
 // up -d --wait`); `sslrootcert` and `cafile` trust the development CA created there.
@@ -23,40 +25,69 @@ type Customer = record
     city: text?
 end
 
-// The customers with an id below `limit`, whichever database `conn` talks to.
-func first_customers(conn: db.Conn, sql: text, limit: int) -> []Customer or error
-    return db.query(Customer, conn, sql, db.int(limit))
+// The customers with an id below `limit`: one block per dialect.
+func below_postgres(limit: int) -> db.Sql
+    return sql postgres
+        select id, name, email, city from customers
+        where id < {limit}
+        order by id
+    end
 end
 
-func show(conn: db.Conn, sql: text) -> error
-    let rows = try first_customers(conn, sql, 5)
+func below_tsql(limit: int) -> db.Sql
+    return sql tsql
+        select id, name, email, city from customers
+        where id < {limit}
+        order by id
+    end
+end
+
+func add_postgres(id: int, name: text) -> db.Sql
+    return sql postgres
+        insert into customers(id, name) values ({id}, {name})
+    end
+end
+
+func add_tsql(id: int, name: text) -> db.Sql
+    return sql tsql
+        insert into customers(id, name) values ({id}, {name})
+    end
+end
+
+func count_postgres(id: int) -> db.Sql
+    return sql postgres
+        select count(*) from customers where id = {id}
+    end
+end
+
+func count_tsql(id: int) -> db.Sql
+    return sql tsql
+        select count(*) from customers where id = {id}
+    end
+end
+
+// Whichever database `conn` talks to, given the statements written for it.
+func show(conn: db.Conn, list: db.Sql, add: db.Sql, count: db.Sql) -> error
+    let rows = try db.query_sql(Customer, conn, list)
     for c in rows
         print(c.id, c.name, c.email ?? "-", c.city ?? "-")
     end
     // a transaction: nothing is kept unless it commits
     let tx = try conn.begin()
-    try tx.conn.exec(sql_insert(sql), db.int(9001), db.str("Temporary"))
-    let inside = try db.one(int, tx.conn, "select count(*) from customers where id = 9001")
+    try tx.conn.exec_sql(add)
+    let inside = try db.one_sql(int, tx.conn, count)
     try tx.rollback()
-    let after = try db.one(int, conn, "select count(*) from customers where id = 9001")
+    let after = try db.one_sql(int, conn, count)
     print("inside the transaction", inside, "after the rollback", after)
     return
-end
-
-// `$1` and `$2` for PostgreSQL, `@p1` and `@p2` for SQL Server.
-func sql_insert(select_sql: text) -> text
-    if select_sql.len > 0 and select_sql.slice(select_sql.len - 3, select_sql.len) == "@p1"
-        return "insert into customers(id, name) values (@p1, @p2)"
-    end
-    return "insert into customers(id, name) values ($1, $2)"
 end
 
 func main() -> error
     let pg = try postgres.open("postgres://app:Brasa_app_dev_1@127.0.0.1:55432/shop?sslmode=require&sslrootcert=tests/docker/certs/ca.pem")
     print("PostgreSQL")
-    try show(pg, "select id, name, email, city from customers where id < $1 order by id")
+    try show(pg, below_postgres(5), add_postgres(9001, "Temporary"), count_postgres(9001))
     let ms = try sqlserver.open("sqlserver://sa:Brasa_dev_Sql_1@127.0.0.1:51434/shop?encrypt=strict&cafile=tests/docker/certs/ca.pem")
     print("SQL Server")
-    try show(ms, "select id, name, email, city from customers where id < @p1")
+    try show(ms, below_tsql(5), add_tsql(9001, "Temporary"), count_tsql(9001))
     return
 end

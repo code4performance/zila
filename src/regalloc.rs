@@ -146,7 +146,7 @@ impl Walk {
                 self.expr(expr, depth);
             }
             ExprKind::Deref(x) | ExprKind::Propagate(x) => self.expr(x, depth),
-            ExprKind::Await(_) | ExprKind::Block { .. } => self.blocked = true,
+            ExprKind::Await(_) | ExprKind::Block { .. } | ExprKind::Sql { .. } => self.blocked = true,
             ExprKind::Field { expr, .. } => self.expr(expr, depth),
             ExprKind::Binary { lhs, rhs, .. } => {
                 self.expr(lhs, depth);

@@ -156,7 +156,13 @@ arg        = [ '...' ] [ 'ref' ] [ ident ':' ] expr ;   (* '...' = spread a list
                                                    site for visibility; the borrow cannot escape *)
 
 primary    = literal | ident | '(' expr ')' | list_lit | map_lit | record_lit
-           | lambda | if_expr | match_expr | new_expr | spawn_thread_expr | block_expr ;
+           | lambda | if_expr | match_expr | new_expr | spawn_thread_expr | block_expr
+           | sql_block ;
+sql_block  = 'sql' ident NEWLINE { raw_line } 'end' ;   (* 'sql' starts a block only when an ident and
+                                                     the end of the line follow; the ident names a
+                                                     dialect declared by an imported package. In the
+                                                     raw lines "{" expr "}" is a value passed as a
+                                                     bound parameter; "{{" and "}}" are braces *)
 block_expr = ident NEWLINE { raw_line } 'end' ;   (* ident must be a #[block] comptime func of an
                                                      imported package (or of this file); the raw lines
                                                      are handed to it unchanged *)

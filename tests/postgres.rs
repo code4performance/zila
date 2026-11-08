@@ -598,3 +598,51 @@ fn recorded_answers_of_the_real_server_decode_into_the_expected_values() {
     assert!(out.contains("dead true 10\n") || out.contains(" true 10\n"), "{}", out);
     assert!(out.ends_with("std.AlreadyExists: duplicate key value violates unique constraint \"customers_pkey\" (23505)\n"), "{}", out);
 }
+
+// ---------------------------------------------------------------------------
+// `sql postgres` blocks on a real server
+// ---------------------------------------------------------------------------
+
+const SQL_BLOCKS_BODY: &str = r#"    let evil = "x'); drop table customers; --"
+    let ins = sql postgres
+        insert into customers (id, name, email, city) values ({7}, {evil}, {nil}, {"São Paulo"})
+    end
+    print(try conn.exec_sql(ins))
+    let q = sql postgres
+        select id, name, email, city from customers where id = {7} and name = {evil}
+    end
+    let c = try db.one_sql(Customer, conn, q)
+    print(c.id, c.name, c.email ?? "-", c.city ?? "-")
+    let d = sql postgres
+        select $$it's {not a hole}$$ as t, {7}::int8 as n, 'a{{b}}' as braces
+    end
+    let row = try db.one_sql(Dollar, conn, d)
+    print(row.t, row.n, row.braces)
+    let tx = try conn.begin()
+    let del = sql postgres
+        delete from customers where id = {7}
+    end
+    print(try tx.conn.exec_sql(del))
+    try tx.rollback()
+    let cnt = sql postgres
+        select count(*) from customers where id = {7}
+    end
+    print(try db.one_sql(int, conn, cnt))
+    let wrong = sql tsql
+        select 1
+    end
+    match conn.exec_sql(wrong)
+        ok(n) -> print("unexpected")
+        err(e) -> print(e.kind.name, e.message)
+    end
+"#;
+
+#[test]
+fn the_real_server_runs_sql_blocks_with_parameters_dollar_quotes_and_rollback() {
+    let Some(u) = real_url() else { return };
+    let src = real_program(&u, SQL_BLOCKS_BODY).replace("use text", "use text\nuse sqlserver").replace("func main()", "type Dollar = record\n    t: text\n    n: long\n    braces: text\nend\n\nfunc main()");
+    assert_eq!(
+        run(&src),
+        "1\n7 x'); drop table customers; -- - São Paulo\nit's {not a hole} 7 a{{b}}\n1\n1\nstd.InvalidInput this statement is written for tsql but the connection speaks postgres\n"
+    );
+}

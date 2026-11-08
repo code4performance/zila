@@ -77,6 +77,18 @@ pub fn std_source_for(name: &str, target: Target) -> Option<&'static str> {
 }
 
 /// Standard library modules written in Brasa and embedded in the compiler.
+/// The standard library packages the compiler and the runtime rest on, or that most programs need:
+/// their names are reserved and a package of a project cannot take them. Every other standard
+/// library (`json`, `crypto`, `tls`, `ui`, `web`, `ai`, `mcp`, `rag`, `db`, `postgres`, `sqlserver`)
+/// is on its way to being a package of its own and may be shadowed by one.
+pub const CORE_STD: [&str; 19] = [
+    "bufio", "derive", "errors", "float", "format", "fs", "future", "list", "math", "net", "reflect", "set", "sorted", "sync", "sys", "task", "text", "thread", "ws",
+];
+
+pub fn is_core_std(name: &str) -> bool {
+    CORE_STD.contains(&name)
+}
+
 pub fn std_source(name: &str) -> Option<&'static str> {
     match name {
         "ui" => Some(include_str!("../std/ui.br")),
@@ -1305,23 +1317,41 @@ impl Compiler {
                 wanted.push(vec!["float".into()]);
             }
             for segs in wanted {
-                let std_name = crate::codegen_x64::std_source(&segs[0]).is_some();
+                let mut std_name = crate::codegen_x64::std_source(&segs[0]).is_some();
+                // a package of the project may take the name of a standard library that is not core
+                // (spec `package-manager`); the standard libraries themselves keep their own
+                let importer_is_std = name != main.package && crate::codegen_x64::std_source(&name).is_some();
+                let mut shadowing: Option<(String, &'static str)> = None;
+                if std_name && !is_core_std(&segs[0]) && !importer_is_std {
+                    if let Some(r) = crate::package::resolve_use(&name, &segs)? {
+                        if !self.driver {
+                            crate::warn::push(format!("the package '{}' shadows the standard library's '{}'", segs.join("."), segs[0]));
+                        }
+                        shadowing = Some((r.key, r.source));
+                        std_name = false;
+                    } else if !self.driver {
+                        crate::warn::push(format!("'{}' is moving out of the standard library into a package of its own (its source is packages/{} in the Brasa repository); it still works as `use {}`", segs[0], segs[0], segs[0]));
+                    }
+                }
                 let m = if std_name { segs[0].clone() } else { segs.last().unwrap().clone() };
                 if m == "ws" && name == main.package {
                     return Err("'ws' is internal to 'net' and cannot be used by programs; use 'net' instead".into());
                 }
-                if self.target == Target::Bare && (matches!(m.as_str(), "ui" | "task" | "future" | "fs" | "net" | "sys" | "ws" | "tls" | "thread" | "sync" | "web" | "crypto" | "db" | "postgres" | "sqlserver" | "ai" | "mcp" | "rag")) {
+                if std_name && self.target == Target::Bare && (matches!(m.as_str(), "ui" | "task" | "future" | "fs" | "net" | "sys" | "ws" | "tls" | "thread" | "sync" | "web" | "crypto" | "db" | "postgres" | "sqlserver" | "ai" | "mcp" | "rag")) {
                     return Err(format!("'{}' needs Windows and cannot be used in a bare-metal kernel", m));
                 }
-                if self.target == Target::Linux
+                if std_name
+                    && self.target == Target::Linux
                     && (m == "ws" || (OS_LIBRARIES.contains(&m.as_str()) && std_linux_source(&m).is_none()))
                 {
                     return Err(format!("'{}' is not available on Linux yet (it uses the Windows API)", m));
                 }
                 // where the package is: the standard library, the project (brasa.toml and its
                 // directories), then the files registered next to the source
-                let found: Option<(String, &'static str)> = if std_name {
-                    crate::comptime::package_source(&m, self.target).map(|s| (m.clone(), s))
+                let found: Option<(String, &'static str)> = if shadowing.is_some() {
+                    shadowing
+                } else if std_name {
+                    std_source_for(&m, self.target).map(|s| (m.clone(), s))
                 } else {
                     match crate::package::resolve_use(&name, &segs)? {
                         Some(r) => Some((r.key, r.source)),
@@ -2320,6 +2350,100 @@ end
             self.threads = self.threads || self.uses_thread_lib;
         }
         out
+    }
+
+    /// The profile of the dialect `name` as the current module sees it: declared by a package the
+    /// module imports with `use`.
+    fn sql_profile(&mut self, name: &str) -> R<crate::sqlblock::Profile> {
+        let imps: Vec<String> = self.imports.get(&self.cur_mod).map(|s| s.iter().cloned().collect()).unwrap_or_default();
+        let mut found: Vec<(String, crate::sqlblock::Profile)> = Vec::new();
+        for m in &imps {
+            let key = self.mod_aliases.get(&(self.cur_mod.clone(), m.clone())).cloned().unwrap_or_else(|| m.clone());
+            let Some(module) = self.modules.iter().find(|x| x.name == key) else { continue };
+            for d in &module.file.decls {
+                if let Some(p) = crate::sqlblock::profile_from_attrs(&d.attrs) {
+                    match p {
+                        Ok(p) if p.name == name => found.push((key.clone(), p)),
+                        Ok(_) => {}
+                        Err(e) => return self.err(format!("package '{}': {}", key, e)),
+                    }
+                }
+            }
+        }
+        match found.len() {
+            1 => Ok(found.remove(0).1),
+            0 => {
+                // a dialect of the standard library names its package
+                let provider = [("postgres", "postgres"), ("tsql", "sqlserver")].iter().find(|(d, _)| *d == name).map(|(_, p)| *p);
+                match provider {
+                    Some(p) => self.err(format!("the sql dialect '{}' is provided by the package '{}', which must be imported with `use {}`", name, p, p)),
+                    None => self.err(format!("no imported package declares the sql dialect '{}'", name)),
+                }
+            }
+            _ => self.err(format!("the sql dialect '{}' is declared by more than one imported package ({})", name, found.iter().map(|f| f.0.clone()).collect::<Vec<_>>().join(", "))),
+        }
+    }
+
+    /// A `sql <dialect>` block: a `db.Sql` made from the text with placeholders and the values of
+    /// the holes, each converted to a `db.Arg` by its type.
+    fn sql_block(&mut self, dialect: &str, raw: &str, line: u32, want: Option<&Ty>) -> R<Ty> {
+        use crate::sqlblock::scan;
+        self.line = line;
+        let block_line = line;
+        let profile = self.sql_profile(dialect)?;
+        if !self.imports.get(&self.cur_mod).map_or(false, |s| s.contains("db")) {
+            return self.err("a `sql` block needs `use db`");
+        }
+        let scanned = match scan(&profile, raw, block_line + 1) {
+            Ok(s) => s,
+            Err(e) => {
+                self.line = e.line;
+                return self.err(e.msg);
+            }
+        };
+        let mk = |kind: ExprKind, line: u32| Expr { kind, line };
+        let db = |name: &str, line: u32| mk(ExprKind::Field { expr: Box::new(mk(ExprKind::Ident("db".to_string()), line)), name: name.to_string(), safe: false }, line);
+        let call = |callee: Expr, args: Vec<Expr>, line: u32| mk(ExprKind::Call { callee: Box::new(callee), args: args.into_iter().map(|value| Arg { name: None, by_ref: false, spread: false, value }).collect(), targs: Vec::new() }, line);
+        let text = |s: &str, line: u32| mk(ExprKind::Text(vec![TextPart::Lit(s.to_string())]), line);
+        let mut args = Vec::new();
+        for h in &scanned.holes {
+            let e = match crate::parser::parse_expr_at(&h.src, h.line) {
+                Ok(e) => e,
+                Err(d) => {
+                    self.line = h.line;
+                    return self.err(format!("in the hole {{{}}}: {}", h.src, d.msg));
+                }
+            };
+            // the type of the value, found by compiling it once and undoing that
+            self.line = h.line;
+            let snap = self.snapshot();
+            let t = self.value(&e, None);
+            self.restore(snap);
+            let t = t?;
+            let arg = match &t {
+                Ty::Int { .. } => call(db("int", h.line), vec![e], h.line),
+                Ty::Float { bits: 64 } => call(db("float", h.line), vec![e], h.line),
+                Ty::Float { .. } => {
+                    let wide = call(mk(ExprKind::Ident("f64".to_string()), h.line), vec![e], h.line);
+                    call(db("float", h.line), vec![wide], h.line)
+                }
+                Ty::Bool => call(db("bool", h.line), vec![e], h.line),
+                // a `text?` is a `text` that may be nil: the helper sends NULL for nil
+                Ty::Text => call(db("opt_str", h.line), vec![e], h.line),
+                Ty::Nil => call(db("null", h.line), Vec::new(), h.line),
+                Ty::List(el) if **el == (Ty::Float { bits: 64 }) => call(db("vector", h.line), vec![e], h.line),
+                Ty::Enum(q) if q == "db.Arg" => e,
+                other => return self.err(format!("a value of type {} cannot be a parameter of a sql block (use int, float, bool, text, []float or db.Arg)", other.show())),
+            };
+            args.push(arg);
+        }
+        self.line = block_line;
+        let call_expr = if args.is_empty() {
+            call(db("sql_const", block_line), vec![text(dialect, block_line), text(&scanned.text, block_line)], block_line)
+        } else {
+            call(db("sql", block_line), vec![text(dialect, block_line), text(&scanned.text, block_line), mk(ExprKind::List(args), block_line)], block_line)
+        };
+        self.expr(&call_expr, want)
     }
 
     fn finish_proc(&mut self, sym: &str, prologue: Vec<String>, naked: bool) -> String {
@@ -4107,6 +4231,7 @@ end
                 Ok(Ty::Rc(Box::new(Ty::Rec(r))))
             }
             ExprKind::Block { name, .. } => self.err(format!("block '{}' was not expanded", name)),
+            ExprKind::Sql { dialect, raw } => self.sql_block(dialect, raw, e.line, want),
             ExprKind::Propagate(inner) => self.try_expr(inner),
             ExprKind::Await(inner) => {
                 if let ExprKind::Call { callee, args, .. } = &inner.kind {

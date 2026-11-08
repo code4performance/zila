@@ -114,6 +114,7 @@ impl Parser {
             Tok::Newline => "end of line".into(),
             Tok::Eof => "end of file".into(),
             Tok::Block { name, .. } => format!("block '{}'", name),
+            Tok::Sql { .. } => "a sql block".into(),
         }
     }
 
@@ -1151,6 +1152,10 @@ impl Parser {
                 self.bump();
                 ExprKind::Block { name, raw }
             }
+            Tok::Sql { dialect, raw } => {
+                self.bump();
+                ExprKind::Sql { dialect, raw }
+            }
             Tok::Kw("true") => {
                 self.bump();
                 ExprKind::Bool(true)
@@ -1434,4 +1439,18 @@ fn is_place(e: &Expr) -> bool {
         ExprKind::Unary { op: "*", .. } => true,
         _ => false,
     }
+}
+
+/// Parses one expression from `src`, whose first character is at `line` of the file (a hole of a
+/// `sql` block).
+pub fn parse_expr_at(src: &str, line: u32) -> R<Expr> {
+    let toks = Lexer::at(src, line, 1).tokenize()?;
+    let mut p = Parser::new(toks);
+    p.skip_nl();
+    let e = p.expr()?;
+    p.skip_nl();
+    if !matches!(p.cur(), Tok::Eof) {
+        return p.err(format!("unexpected {} in a sql hole", p.describe()));
+    }
+    Ok(e)
 }

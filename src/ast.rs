@@ -246,6 +246,9 @@ pub enum ExprKind {
     Await(Box<Expr>),
     /// A block form used as an expression; replaced by the expansion before code generation.
     Block { name: String, raw: String },
+    /// A `sql <dialect>` block (spec `sql-blocks`): the dialect name and the raw lines. The holes
+    /// are read by the code generator, which knows the dialect.
+    Sql { dialect: String, raw: String },
 }
 
 #[derive(Debug, Clone)]

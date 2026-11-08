@@ -242,7 +242,7 @@ Everything in this list is implemented and covered by tests.
 
 **A standard library written in Brasa**
 
-- `task`, `future`, `fs`, `net` (TCP, UDP, DNS), `tls` (an HTTPS client: SChannel on Windows, OpenSSL on Linux), `crypto` (SHA-256, HMAC, PBKDF2, base64, random bytes), `ai` (chat, streaming, typed answers and tools for language models; see docs/ai.html), `mcp` (an MCP server and client over stdio and HTTP), `rag` (chunking, vector stores, retrieval and grounded answers), `db`, `postgres` and `sqlserver` (typed rows, bound parameters, transactions, written in Brasa over `net` and `tls`; see docs/databases.html), `web` (an HTTP/1.1 server with routing and middleware, an HTTP client and HTML templates) and `ui` (windows and controls with one API: native Win32 controls on Windows, controls drawn over the X11 protocol on Linux). On Windows they talk to the operating system through Brasa's own `extern` declarations, on Linux through system calls. No Rust or C glue.
+- `task`, `future`, `fs`, `net` (TCP, UDP, DNS), `tls` (an HTTPS client: SChannel on Windows, OpenSSL on Linux), `crypto` (SHA-256, HMAC, PBKDF2, base64, random bytes), `ai` (chat, streaming, typed answers and tools for language models; see docs/ai.html), `mcp` (an MCP server and client over stdio and HTTP), `rag` (chunking, vector stores, retrieval and grounded answers), `db`, `postgres` and `sqlserver` (typed rows, bound parameters, transactions, and SQL written in `sql postgres` and `sql tsql` blocks, written in Brasa over `net` and `tls`; see docs/databases.html), `web` (an HTTP/1.1 server with routing and middleware, an HTTP client and HTML templates) and `ui` (windows and controls with one API: native Win32 controls on Windows, controls drawn over the X11 protocol on Linux). On Windows they talk to the operating system through Brasa's own `extern` declarations, on Linux through system calls. No Rust or C glue. Of these, `json`, `crypto`, `tls`, `ui`, `web`, `ai`, `mcp`, `rag`, `db`, `postgres` and `sqlserver` are on their way to being packages of their own (their sources are in [`packages/`](packages), a package of your project may take their name, and using them as part of the standard library prints a warning); the rest is the core, whose names are reserved.
 
 **Systems programming**
 
@@ -355,6 +355,7 @@ Every item below is an [OpenSpec](openspec) change that is already written (prop
 | Change | What it does |
 |---|---|
 | `add-web` | `use web`: an HTTP/1.1 server with routing, middleware, JSON helpers and error-to-status mapping, an HTTP client and escaping HTML templates, on top of `net`, `tls` and `json`. |
+| `add-sql-blocks` | **Built.** `sql postgres` and `sql tsql` blocks hold SQL as raw lines, with every `{value}` sent as a bound parameter and the dialect's lexical mistakes found at compile time. A dialect is a declaration in a package, so Oracle, MySQL and SQLite are planned as new packages (a driver and a declaration) with no compiler change. Dialects are lexical profiles, not SQL parsers. |
 
 **Compiler and tooling**
 

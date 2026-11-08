@@ -84,6 +84,7 @@ fn main() {
     if opts.comptime_dump {
         brasa::comptime::set_dump(true);
     }
+    brasa::warn::print_to_stderr(true);
     let path = opts.path.clone().unwrap_or_else(|| usage());
     if mode == Mode::Fmt || mode == Mode::FmtCheck {
         let mut files = vec![path];

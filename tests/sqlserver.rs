@@ -532,3 +532,53 @@ fn instance_and_pipe_urls_are_checked_before_anything_is_sent() {
     assert!(out.contains("std.InvalidInput: bad host or instance in the SQL Server URL"), "{}", out);
     assert!(out.contains("std.Unavailable: cannot open the named pipe"), "{}", out);
 }
+
+// ---------------------------------------------------------------------------
+// `sql tsql` blocks on a real server
+// ---------------------------------------------------------------------------
+
+const SQL_BLOCKS_BODY: &str = r#"    let evil = "x'); drop table #customers; --"
+    let ins = sql tsql
+        insert into #customers (id, name, email, city) values ({7}, {evil}, {nil}, {"Lisboa"});
+    end
+    print(try conn.exec_sql(ins))
+    let q = sql tsql
+        select id, name, email, city from #customers where id = {7} and name = {evil}
+    end
+    let c = try db.one_sql(Customer, conn, q)
+    print(c.id, c.name, c.email ?? "-", c.city ?? "-")
+    let b = sql tsql
+        declare @total int = 0;
+        select @total = count(*) from #customers where id < {5};
+        select [total] = @total, [a{{b}}] = N'it''s {not a hole}'
+    end
+    let total = try db.one_sql(Batch, conn, b)
+    print(total.total)
+    let tx = try conn.begin()
+    let del = sql tsql
+        delete from #customers where id = {7}
+    end
+    print(try tx.conn.exec_sql(del))
+    try tx.rollback()
+    let cnt = sql tsql
+        select count(*) from #customers where id = {7}
+    end
+    print(try db.one_sql(int, conn, cnt))
+    let wrong = sql postgres
+        select 1
+    end
+    match conn.exec_sql(wrong)
+        ok(n) -> print("unexpected")
+        err(e) -> print(e.kind.name, e.message)
+    end
+"#;
+
+#[test]
+fn the_real_server_runs_sql_blocks_with_parameters_variables_and_rollback() {
+    let Some(u) = env_url("BRASA_TEST_SQLSERVER") else { return };
+    let src = real_program(&u, "\ntype Batch = record\n    total: int\nend\n", SQL_BLOCKS_BODY).replace("use crypto", "use crypto\nuse postgres");
+    assert_eq!(
+        run(&src),
+        "1\n7 x'); drop table #customers; -- - Lisboa\n4\n1\n1\nstd.InvalidInput this statement is written for postgres but the connection speaks tsql\n"
+    );
+}

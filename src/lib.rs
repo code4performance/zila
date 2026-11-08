@@ -21,7 +21,9 @@ pub mod prune;
 pub mod refcheck;
 pub mod regalloc;
 pub mod run;
+pub mod sqlblock;
 pub mod testrun;
+pub mod warn;
 
 pub use codegen_x64::compile_to_native;
 pub use float_text::{float_text, float_text_f32};

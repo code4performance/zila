@@ -6,6 +6,7 @@
     { "include": "#comments" },
     { "include": "#attributes" },
     { "include": "#strings" },
+    { "include": "#sql-blocks" },
     { "include": "#asm-blocks" },
     { "include": "#declarations" },
     { "include": "#keywords" },
@@ -108,6 +109,34 @@
         {
           "name": "string.quoted.single.brasa",
           "match": "'(\\\\.|[^'\\\\])'"
+        }
+      ]
+    },
+    "sql-blocks": {
+      "patterns": [
+        {
+          "name": "meta.embedded.block.sql.brasa",
+          "begin": "\\b(sql)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(?=$|//)",
+          "beginCaptures": {
+            "1": { "name": "keyword.control.sql.brasa" },
+            "2": { "name": "entity.name.type.dialect.brasa" }
+          },
+          "end": "^\\s*(end)\\s*(?=$|//)",
+          "endCaptures": {
+            "1": { "name": "keyword.control.end.brasa" }
+          },
+          "patterns": [
+            { "match": "\\{\\{|\\}\\}", "name": "constant.character.escape.brace.brasa" },
+            {
+              "name": "meta.embedded.expression.brasa",
+              "begin": "\\{",
+              "beginCaptures": { "0": { "name": "punctuation.section.embedded.begin.brasa" } },
+              "end": "\\}",
+              "endCaptures": { "0": { "name": "punctuation.section.embedded.end.brasa" } },
+              "patterns": [{ "include": "source.brasa" }]
+            },
+            { "include": "source.sql" }
+          ]
         }
       ]
     },

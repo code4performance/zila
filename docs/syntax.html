@@ -552,6 +552,7 @@ print(char(231).to_text())    <span class="cm">// ç</span></code></pre>
     <span class="kw">end</span>
     <span class="kw">return</span> u64(hi) &lt;&lt; 32 bitor u64(lo)
 <span class="kw">end</span></code></pre>
+      <p>SQL is written the same way, in a <code>sql</code> block: <code>sql postgres</code> or <code>sql tsql</code> on a line, the statement as raw lines, and a line that is just <code>end</code>. The block is a value (<code>db.Sql</code>); a <code>{value}</code> in it becomes a bound parameter and is never pasted into the text. <code>sql</code> opens a block only when a dialect name and the end of the line follow, so a variable or parameter called <code>sql</code> still works. See <a href="databases.html#sql">Databases</a>.</p>
       <p>See the <a href="examples.html#ffi">FFI &amp; low-level example</a> for a fuller walkthrough, and the project's <code>brasa-ffi.md</code> for the full specification (ABIs, <code>#[c_layout]</code>, <code>#[link]</code>/<code>#[link_src]</code>, <code>#[cfg]</code>, and naked functions).</p>
     </section>
 

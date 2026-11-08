@@ -44,6 +44,11 @@ The work is in three phases, each shippable on its own. Phases 2 and 3 start onl
 - Split type checking from code generation: the checker produces a typed intermediate form and code generation only consumes it. Move `src/codegen_x64.rs` into modules (layout, calls, generics, drop, derive). Replace the `unreachable!()` sites reachable from user code with diagnostics.
 - A compiled-object cache keyed by source hash, so unchanged packages are not recompiled.
 
+## Open questions for the later removal change
+
+- After the domain libraries are removed from the compiler, does a program with no `brasa.toml` keep seeing them bundled, or must it have a manifest to `use json`?
+- Where are the official packages hosted? Until that is decided the deprecation warning names `packages/<name>` in this repository and cannot give a `--add` URL.
+
 ## Capabilities
 
 ### New Capabilities

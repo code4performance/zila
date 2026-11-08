@@ -202,7 +202,7 @@ impl Checker {
                 Ok(())
             }
             ExprKind::Deref(x) | ExprKind::Propagate(x) | ExprKind::Await(x) => self.val(x),
-            ExprKind::Block { .. } => Ok(()),
+            ExprKind::Block { .. } | ExprKind::Sql { .. } => Ok(()),
         }
     }
 }

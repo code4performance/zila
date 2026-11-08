@@ -258,9 +258,10 @@ pub fn default_import_name(module: &str) -> String {
 // Names
 // ---------------------------------------------------------------------------
 
-/// Names a package cannot take: the standard library and the built-in `c` and `std`.
+/// Names a package cannot take: the core standard library and the built-in `c` and `std`. The
+/// other standard libraries may be shadowed by a package (with a warning).
 pub fn is_reserved(name: &str) -> bool {
-    crate::codegen_x64::std_source(name).is_some() || matches!(name, "c" | "std")
+    crate::codegen_x64::is_core_std(name) || matches!(name, "c" | "std")
 }
 
 fn is_ident(s: &str) -> bool {
@@ -1014,7 +1015,7 @@ fn check_local_names(p: &Project) -> Result<(), String> {
                 continue;
             }
             if is_reserved(&name) {
-                return Err(format!("the local package '{}' has the name of a standard library package; rename the directory", name));
+                return Err(format!("the local package '{}' has the name of a core standard library package; rename the directory", name));
             }
             if p.manifest.deps.iter().any(|d| d.name == name) {
                 return Err(format!("'{}' is both a dependency in {} and a directory with .br files; a name can exist in one place only", name, MANIFEST));

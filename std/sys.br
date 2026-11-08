@@ -13,6 +13,9 @@ use errors
 extern "system" func FormatMessageA(flags: u32, source: usize, message: u32, language: u32, buffer: *u8, size: u32, args: usize) -> u32
 #[link("kernel32")]
 extern "system" func GetEnvironmentVariableA(name: *u8, buffer: *u8, size: u32) -> u32
+#[link("kernel32")]
+extern "system" func GetStdHandle(which: i32) -> usize
+extern "system" func ReadFile(handle: usize, buffer: *u8, count: u32, done: *long, overlapped: usize) -> i32
 #[link("bcrypt")]
 extern "system" func BCryptGenRandom(algorithm: usize, buffer: *u8, count: u32, flags: u32) -> i32
 #[link("kernel32")]
@@ -141,6 +144,26 @@ pub func env(name: text) -> text?
     var out = ""
     unsafe
         out = c.from_bytes(b.ptr, got)
+    end
+    return out
+end
+
+// Reads up to `max` bytes from standard input, waiting until some arrive; empty text at the end of
+// the input. It blocks the whole program while it waits (the other tasks do not run), which suits a
+// program that does nothing else until its next line of input.
+pub func stdin_read(max: long) -> text
+    let b = buffer(max + 1)
+    let got = Scratch{}
+    var ok: long = 0
+    unsafe
+        ok = long(ReadFile(GetStdHandle(-10), b.ptr, u32(max), &got.a, 0))
+    end
+    if ok == 0 or got.a <= 0
+        return ""
+    end
+    var out = ""
+    unsafe
+        out = c.from_bytes(b.ptr, got.a)
     end
     return out
 end

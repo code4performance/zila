@@ -252,3 +252,29 @@ fn the_ai_library_is_documented() {
         assert!(ai.contains(needed), "docs/ai.html does not mention `{}`", needed);
     }
 }
+
+#[test]
+fn the_mcp_library_is_documented() {
+    let stdlib = page("stdlib.html").html;
+    assert!(stdlib.contains("id=\"mcp-lib\""), "docs/stdlib.html has no mcp section");
+    for needed in ["mcp.server", "serve_stdio", "serve_http", "mcp.connect", "ai_tools", "bearer_token", "sys.stdin_read"] {
+        assert!(stdlib.contains(needed), "docs/stdlib.html does not mention `{}`", needed);
+    }
+    let ai = page("ai.html").html;
+    for needed in ["id=\"mcp\"", "Mcp-Session-Id", "isError", "-32602", "Origin", "examples/mcp_server.br"] {
+        assert!(ai.contains(needed), "docs/ai.html does not mention `{}`", needed);
+    }
+}
+
+#[test]
+fn the_rag_library_is_documented() {
+    let stdlib = page("stdlib.html").html;
+    assert!(stdlib.contains("id=\"rag-lib\""), "docs/stdlib.html has no rag section");
+    for needed in ["rag.chunk", "rag.memory_store", "rag.pg_store", "rag.index", "rag.retrieve", "rag.answer", "rag.search_tool", "rag.load_store"] {
+        assert!(stdlib.contains(needed), "docs/stdlib.html does not mention `{}`", needed);
+    }
+    let ai = page("ai.html").html;
+    for needed in ["id=\"rag\"", "max_context_chars", "pgvector", "not instructions"] {
+        assert!(ai.contains(needed), "docs/ai.html does not mention `{}`", needed);
+    }
+}

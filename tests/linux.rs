@@ -851,7 +851,7 @@ async func tcp_server(l: net.Listener) -> error
         end
         q = q + piece
     end
-    try await conn.write(reply(q.slice(2, q.len), 0x8180, true, true))
+    try await conn.write(reply(q.__raw_slice(2, q.len), 0x8180, true, true))
     return
 end
 
@@ -1273,6 +1273,68 @@ end
     assert_eq!(out.lines().next(), Some("true true"));
     assert!(out.contains("\"description\":\"a name\"") && out.contains("\"required\":[\"name\",\"count\"]") && out.ends_with("std.InvalidInput
 "), "{}", out);
+    assert_eq!(code, 0);
+}
+
+#[test]
+fn mcp_handles_messages_the_same_on_linux() {
+    let src = r#"package main
+
+use mcp
+use ai
+use json
+use text
+
+type Echo = record
+    message: text
+end
+
+func main() -> error
+    let s = mcp.server("demo", "1.0")
+    s.tool(ai.tool(Echo, "echo", "Echoes", func(e)
+        return "echo: " + e.message
+    end))
+    let session = s.new_session()
+    print(s.handle(session, "not json") ?? "-")
+    print(text.contains(s.handle(session, "\{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"\}") ?? "", "-32600"))
+    let init = s.handle(session, "\{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"initialize\",\"params\":\{\"protocolVersion\":\"2025-06-18\"\}\}") ?? ""
+    print(text.contains(init, "\"protocolVersion\":\"2025-06-18\""))
+    let call = s.handle(session, "\{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":\{\"name\":\"echo\",\"arguments\":\{\"message\":\"hi\"\}\}\}") ?? ""
+    print(text.contains(call, "echo: hi"), text.contains(call, "\"isError\":false"))
+    return
+end
+"#;
+    let Some((out, code)) = run_linux(src) else { return };
+    assert_eq!(out.lines().next().map(|l| l.contains("-32700")), Some(true), "{}", out);
+    assert!(out.ends_with("true
+true
+true true
+"), "{}", out);
+    assert_eq!(code, 0);
+}
+
+#[test]
+fn rag_chunks_and_searches_the_same_on_linux() {
+    let src = r#"package main
+
+use rag
+use text
+
+func main() -> error
+    let cs = try rag.chunk("Hello world. This is a test of chunking.\n\nSecond paragraph here with more words in it.", rag.ChunkOptions { by: rag.Size, max_chars: 30, overlap: 5 })
+    for c in cs
+        print(c.index, c.start, c.stop, c.text)
+    end
+    let st = rag.memory_store()
+    var m: Map<text, text> = {}
+    try st.add([rag.Item { id: "a", vector: [1.0, 0.0], text: "ta", meta: m }, rag.Item { id: "b", vector: [0.0, 1.0], text: "tb", meta: m }, rag.Item { id: "c", vector: [0.9, 0.1], text: "tc", meta: m }])
+    let hits = try st.search([1.0, 0.0], 2, m)
+    print(hits[0].id, hits[1].id)
+    return
+end
+"#;
+    let Some((out, code)) = run_linux(src) else { return };
+    assert_eq!(out, "0 0 27 Hello world. This is a test\n1 23 40 test of chunking.\n2 42 68 Second paragraph here with\n3 64 86 with more words in it.\na c\n");
     assert_eq!(code, 0);
 }
 

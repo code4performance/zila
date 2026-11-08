@@ -81,6 +81,43 @@ print(run.reply.text, run.steps)</code></pre>
       <p><code>client.embed(model, inputs)</code> returns one <code>[]float</code> per input, in order, for OpenAI-compatible servers (<code>batch_size</code>, 64 by default, inputs per request). The Anthropic API has no embeddings endpoint, so <code>ai.anthropic</code> gives an error of kind <code>InvalidInput</code> that says so. <code>client.embedder(model)</code> is a value with the method <code>embed(inputs)</code>, which the retrieval code of a later library asks of an embedder.</p>
     </section>
 
+    <section id="mcp">
+      <h2>MCP: servers and clients</h2>
+      <p><code>use mcp</code> speaks the Model Context Protocol, the way hosts such as Claude Desktop, Claude Code and IDEs call tools, read resources and use prompts from another program. A server exposes the same <code>ai.Tool</code> values a local agent uses:</p>
+      <pre><code><span class="kw">use</span> mcp
+<span class="kw">use</span> ai
+
+<span class="kw">let</span> server = mcp.server(<span class="str">"customers"</span>, <span class="str">"1.0"</span>)
+server.tool(ai.tool(Search, <span class="str">"find_customer"</span>, <span class="str">"Find a customer by name"</span>, handler))
+server.resource(<span class="str">"db://schema"</span>, <span class="str">"schema"</span>, <span class="str">"text/plain"</span>, <span class="kw">func</span>() <span class="kw">return</span> <span class="str">"..."</span> <span class="kw">end</span>)
+server.serve_stdio()                              <span class="cm">// a host starts the program</span>
+
+<span class="kw">var</span> app = web.server(port: 8080)
+server.bearer_token = <span class="str">"secret"</span>
+server.serve_http(app, <span class="str">"/mcp"</span>)                    <span class="cm">// Streamable HTTP</span>
+<span class="kw">let</span> client = <span class="kw">try</span> mcp.connect(<span class="str">"http://localhost:8080/mcp"</span>, <span class="str">"secret"</span>)
+<span class="kw">let</span> remote = <span class="kw">try</span> client.ai_tools()                <span class="cm">// for client.run</span></code></pre>
+      <p>Over <strong>stdio</strong> a message is one line of JSON-RPC in each direction and nothing else is written to standard output; requests are handled one at a time. Over <strong>HTTP</strong> a <code>POST</code> carries a message, sessions travel in <code>Mcp-Session-Id</code>, <code>GET</code> is answered 405 and <code>DELETE</code> ends a session. The <code>Origin</code> header must be the same host (or in <code>server.origins</code>), a <code>bearer_token</code> is compared in constant time, and <code>max_message</code> and <code>max_concurrent</code> bound what a client can ask. A tool that fails gives a result with <code>isError</code>; arguments that do not match its input are an invalid-params error (<code>-32602</code>). Lists are paged by <code>cursor</code>, 100 at a time. The client works over HTTP only (starting a child process for stdio needs a process library that does not exist yet).</p>
+      <p>A server is a way to run code for whoever can reach it. Register only what you want exposed, give each tool the least privilege that works (<code>examples/mcp_server.br</code> offers narrow parameterized queries and a read-only <code>run_select</code>, never a writable connection), always set a bearer token when the machine is reachable from elsewhere, and remember that what a tool returns is read by a model as untrusted text. This version does not bind the HTTP server to the loopback address by itself.</p>
+    </section>
+
+    <section id="rag">
+      <h2>RAG: answers from your own documents</h2>
+      <p><code>use rag</code> has the pieces of retrieval-augmented generation as small functions that work with any model client and any store: split documents, embed the pieces, store the vectors, find the closest ones to a question, and ask the model to answer from them.</p>
+      <pre><code><span class="kw">use</span> rag
+
+<span class="kw">let</span> embedder = embeddings.embedder(<span class="str">"text-embedding-3-small"</span>)
+<span class="kw">let</span> store = rag.memory_store()
+<span class="kw">try</span> rag.index(store, embedder, [rag.Document { id: <span class="str">"fees.md"</span>, text: body, meta: {} }], rag.index_options())
+<span class="kw">let</span> answer = <span class="kw">try</span> rag.answer(store, embedder, claude, <span class="str">"claude-sonnet-5-5"</span>, <span class="str">"What is the fee?"</span>, rag.answer_options())
+print(answer.text)                       <span class="cm">// cites the sources as [1], [2]</span>
+<span class="kw">for</span> hit <span class="kw">in</span> answer.sources
+    print(hit.id, hit.score)
+<span class="kw">end</span></code></pre>
+      <p><code>rag.chunk(text, opts)</code> cuts by size (at most <code>max_chars</code> characters, <code>overlap</code> shared with the next, preferring a paragraph, then a sentence, then a word) or by paragraph, never inside a UTF-8 sequence. An <code>Embedder</code> is anything with <code>embed(inputs) -&gt; [][]float or error</code>, such as <code>client.embedder(model)</code>. A <code>VectorStore</code> keeps and searches vectors by cosine similarity: <code>rag.memory_store()</code> (exact scan, <code>save(path)</code> and <code>rag.load_store(path)</code> with a checksum, so a damaged file is an error) or <code>rag.pg_store(conn, table, dims)</code> on PostgreSQL with pgvector (<code>migrate()</code> creates the table and a cosine index; the table name must be a plain identifier). <code>rag.index</code> replaces the earlier chunks of a document and stores nothing of it if the embedder fails; <code>rag.retrieve</code> returns the best hits; <code>rag.search_tool(store, embedder, name, description)</code> offers a store to an agent as a tool.</p>
+      <p><code>rag.answer</code> puts each retrieved chunk in a numbered block between random markers that occur in no chunk, tells the model that the blocks are data and not instructions, asks it to answer only from them, and drops the lowest-ranked chunks whole when they exceed <code>max_context_chars</code>. With no chunk found it says so without calling the model. A stored document can still contain text that tries to steer the model: index content you trust, and give an agent that uses <code>search_tool</code> only tools with the least privilege that works. The size limit counts characters, not tokens.</p>
+    </section>
+
     <section id="safety">
       <h2>Safety notes</h2>
       <ul>

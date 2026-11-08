@@ -242,7 +242,7 @@ Everything in this list is implemented and covered by tests.
 
 **A standard library written in Brasa**
 
-- `task`, `future`, `fs`, `net` (TCP, UDP, DNS), `tls` (an HTTPS client: SChannel on Windows, OpenSSL on Linux), `crypto` (SHA-256, HMAC, PBKDF2, base64, random bytes), `ai` (chat, streaming, typed answers and tools for language models; see docs/ai.html), `db`, `postgres` and `sqlserver` (typed rows, bound parameters, transactions, written in Brasa over `net` and `tls`; see docs/databases.html), `web` (an HTTP/1.1 server with routing and middleware, an HTTP client and HTML templates) and `ui` (windows and controls with one API: native Win32 controls on Windows, controls drawn over the X11 protocol on Linux). On Windows they talk to the operating system through Brasa's own `extern` declarations, on Linux through system calls. No Rust or C glue.
+- `task`, `future`, `fs`, `net` (TCP, UDP, DNS), `tls` (an HTTPS client: SChannel on Windows, OpenSSL on Linux), `crypto` (SHA-256, HMAC, PBKDF2, base64, random bytes), `ai` (chat, streaming, typed answers and tools for language models; see docs/ai.html), `mcp` (an MCP server and client over stdio and HTTP), `rag` (chunking, vector stores, retrieval and grounded answers), `db`, `postgres` and `sqlserver` (typed rows, bound parameters, transactions, written in Brasa over `net` and `tls`; see docs/databases.html), `web` (an HTTP/1.1 server with routing and middleware, an HTTP client and HTML templates) and `ui` (windows and controls with one API: native Win32 controls on Windows, controls drawn over the X11 protocol on Linux). On Windows they talk to the operating system through Brasa's own `extern` declarations, on Linux through system calls. No Rust or C glue.
 
 **Systems programming**
 

@@ -295,3 +295,18 @@ pub func env(name: text) -> text?
     end
     return nil
 end
+
+// Reads up to `max` bytes from standard input, waiting until some arrive; empty text at the end of
+// the input. It blocks the whole program while it waits.
+pub func stdin_read(max: long) -> text
+    let b = buffer(max + 1)
+    let n = syscall(0, 0, long(b.ptr), max, 0, 0, 0)
+    if n <= 0
+        return ""
+    end
+    var out = ""
+    unsafe
+        out = c.from_bytes(b.ptr, n)
+    end
+    return out
+end

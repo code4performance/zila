@@ -1,0 +1,105 @@
+// An MCP server: a customer database offered as tools, a resource and a prompt to any MCP host.
+//
+//   brasa-parse examples/mcp_server.br -o mcp_server.exe
+//
+// Hosts such as Claude Desktop, Claude Code and IDEs start the program and talk to it over standard
+// input and output, one JSON-RPC message per line. In a host's MCP configuration:
+//
+//   { "mcpServers": { "customers": { "command": "C:/path/to/mcp_server.exe" } } }
+//
+// The same program can serve HTTP instead (`serve_http` on a `web` server, with a bearer token).
+//
+// Tools are what the model may call, so they are narrow: `find_customer` runs one parameterized
+// query, and `run_select` accepts a single `select`, runs it in a read-only transaction and limits
+// the rows. It never hands the model a writable connection. Give the database user only the
+// privileges these tools need (a read-only user), and remember that what a tool returns is read
+// by a model as untrusted text.
+
+package main
+
+use ai
+use db
+use errors
+use json
+use mcp
+use postgres
+use text
+
+type FindCustomer = record
+    #[desc("part of the customer's name")] name: text
+end
+
+type RunSelect = record
+    #[desc("one SELECT statement, without a semicolon")] sql: text
+end
+
+type Customer = record
+    id: int
+    name: text
+    email: text?
+end
+
+// Is `sql` a single select with nothing that writes or chains statements?
+func is_single_select(sql: text) -> bool
+    let s = text.lower(text.trim(sql))
+    if not text.starts_with(s, "select ")
+        return false
+    end
+    for banned in [";", " into ", "--", "/*", " insert ", " update ", " delete ", " drop ", " alter ", " create ", " grant ", " copy "]
+        if text.contains(s, banned)
+            return false
+        end
+    end
+    return true
+end
+
+func find_customer(conn: db.Conn, q: FindCustomer) -> text or error
+    let rows = try db.query(Customer, conn, "select id, name, email from customers where name ilike $1 order by id limit 20", db.str("%{q.name}%"))
+    var lines: []text = []
+    for c in rows
+        lines.add("{c.id}: {c.name} <{c.email ?? "no email"}>")
+    end
+    if lines.len == 0
+        return "no customer matches"
+    end
+    return text.join(lines, "\n")
+end
+
+func run_select(conn: db.Conn, q: RunSelect) -> text or error
+    if not is_single_select(q.sql)
+        return error(errors.InvalidInput, "only a single SELECT statement is accepted")
+    end
+    let tx = try conn.begin()
+    try tx.conn.exec("set transaction read only")
+    let rows = try tx.conn.rows("select * from ({q.sql}) as q limit 50")
+    try tx.rollback()
+    var out: []text = [text.join(rows.columns, " | ")]
+    let width = rows.columns.len
+    for r in 0..rows.count()
+        var cells: []text = []
+        for k in 0..width
+            cells.add(rows.cells[r * width + k])
+        end
+        out.add(text.join(cells, " | "))
+    end
+    return text.join(out, "\n")
+end
+
+func main() -> error
+    let conn = try postgres.open("postgres://reader:secret@localhost/shop?sslmode=disable")
+    let server = mcp.server("customers", "1.0")
+    server.tool(ai.tool(FindCustomer, "find_customer", "Finds customers whose name contains the text", func(q)
+        return find_customer(conn, q)
+    end))
+    server.tool(ai.tool(RunSelect, "run_select", "Runs one read-only SELECT (at most 50 rows)", func(q)
+        return run_select(conn, q)
+    end))
+    server.resource("db://schema/customers", "customers table", "text/plain", func()
+        return "customers(id int primary key, name text, email text)"
+    end)
+    server.prompt("customer_report", "A prompt that asks for a report on a customer", [mcp.PromptArg { name: "name", description: "the customer", required: true }], func(args)
+        return [ai.user("Use the find_customer tool to look up {args["name"]} and summarize what you find.")]
+    end)
+    server.serve_stdio()
+    return
+end

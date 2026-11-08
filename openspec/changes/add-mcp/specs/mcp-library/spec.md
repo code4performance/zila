@@ -35,7 +35,7 @@ A server SHALL expose the `ai.Tool` values given to it (`server.tool(t)`) throug
 - **THEN** both call the same handler function with the same decoded input
 
 ### Requirement: Resources and prompts
-A server SHALL expose resources (`server.resource(uri, name, mime_type, reader)`, and templates with `{param}` segments) through `resources/list`, `resources/templates/list` and `resources/read`, returning text content with its URI and MIME type; reading an unknown URI SHALL give error `-32002`. A server SHALL expose prompts (`server.prompt(name, description, Args, builder)`, `Args` a record) through `prompts/list` and `prompts/get`, where `builder` returns the list of messages. Both lists SHALL support the `cursor` parameter with a page size of at most 100.
+A server SHALL expose resources (`server.resource(uri, name, mime_type, reader)`, and templates with `{param}` segments) through `resources/list`, `resources/templates/list` and `resources/read`, returning text content with its URI and MIME type; reading an unknown URI SHALL give error `-32002`. A server SHALL expose prompts (`server.prompt(name, description, args, builder)`, `args` a list of `mcp.PromptArg` with a name, a description and whether it is required) through `prompts/list` and `prompts/get`, where `builder` receives the arguments the host gave (a missing required one is an invalid-params error) and returns the list of messages. Both lists SHALL support the `cursor` parameter with a page size of at most 100.
 
 #### Scenario: Read a resource
 - **WHEN** a client reads `db://schema/customers`, registered with a reader that returns the table's DDL
@@ -46,7 +46,7 @@ A server SHALL expose resources (`server.resource(uri, name, mime_type, reader)`
 - **THEN** the server answers error `-32002`
 
 ### Requirement: stdio transport
-`server.serve_stdio()` SHALL read newline-delimited JSON-RPC messages from standard input and write one per line to standard output until input ends, and SHALL write nothing else to standard output (logs go to standard error). A message SHALL NOT contain a raw newline. A line that is not valid JSON SHALL get a `-32700` answer and the loop SHALL continue. Requests SHALL be handled concurrently as tasks, and a `notifications/cancelled` for a request in progress SHALL make its answer be dropped.
+`server.serve_stdio()` SHALL read newline-delimited JSON-RPC messages from standard input and write one per line to standard output until input ends, and SHALL write nothing else to standard output (logs go to standard error). A message SHALL NOT contain a raw newline. A line that is not valid JSON SHALL get a `-32700` answer and the loop SHALL continue. Requests SHALL be handled one at a time (reading standard input blocks the program), so `notifications/cancelled` is accepted and ignored.
 
 #### Scenario: Round trip over pipes
 - **WHEN** a test writes `initialize`, `initialized` and a `tools/call` to the program's standard input and reads standard output
@@ -57,7 +57,7 @@ A server SHALL expose resources (`server.resource(uri, name, mime_type, reader)`
 - **THEN** the server answers the first request, an error with code `-32700`, and the second request
 
 ### Requirement: Streamable HTTP transport
-`server.serve_http(app, path)` SHALL attach the server to a `use web` application at one endpoint: `POST` of a JSON-RPC message SHALL answer with `application/json` (a notification gets `202` with no body); a `GET` SHALL answer `405` unless server-initiated messages are used, which this version does not do; `DELETE` SHALL end a session. Sessions SHALL be identified by the `Mcp-Session-Id` header assigned at `initialize`, a request carrying an unknown session id SHALL get `404`, and the `MCP-Protocol-Version` header SHALL be checked when present. The server SHALL validate the `Origin` header against an allowed list (default: only same-host origins) and answer `403` otherwise, and when `bearer_token` is set SHALL answer `401` with `WWW-Authenticate: Bearer` to a missing or wrong token (compared in constant time). It SHALL listen on `127.0.0.1` unless the program says otherwise.
+`server.serve_http(app, path)` SHALL attach the server to a `use web` application at one endpoint: `POST` of a JSON-RPC message SHALL answer with `application/json` (a notification gets `202` with no body); a `GET` SHALL answer `405` unless server-initiated messages are used, which this version does not do; `DELETE` SHALL end a session. Sessions SHALL be identified by the `Mcp-Session-Id` header assigned at `initialize`, a request carrying an unknown session id SHALL get `404`, and the `MCP-Protocol-Version` header SHALL be checked when present. The server SHALL validate the `Origin` header against an allowed list (default: only same-host origins) and answer `403` otherwise, and when `bearer_token` is set SHALL answer `401` with `WWW-Authenticate: Bearer` to a missing or wrong token (compared in constant time). It SHALL document that it does not bind the loopback address by itself (the web server's address is not configurable yet), so a bearer token is the protection when the machine is reachable.
 
 #### Scenario: Session
 - **WHEN** a client posts `initialize` without a session and then `tools/list` with the returned `Mcp-Session-Id`
@@ -83,7 +83,7 @@ A server SHALL expose resources (`server.resource(uri, name, mime_type, reader)`
 - **THEN** the client returns the response and ignores the notification
 
 ### Requirement: Limits and safety
-A server SHALL limit message size (default 4 MiB, error `-32600`), concurrent requests per session (default 32) and the time of a tool call (default 60 s, answered as a tool error with kind `Timeout`). Tool output SHALL be returned as given; the library SHALL NOT add or execute anything on its own, and SHALL NOT expose a tool, resource or prompt the program did not register.
+A server SHALL limit message size (default 4 MiB, an error answer) and the number of requests being handled at the same time (`max_concurrent`, default 32, error `-32000` beyond it). A time limit for a tool call is not part of this version. Tool output SHALL be returned as given; the library SHALL NOT add or execute anything on its own, and SHALL NOT expose a tool, resource or prompt the program did not register.
 
 #### Scenario: Oversized message
 - **WHEN** a client posts a message larger than the limit

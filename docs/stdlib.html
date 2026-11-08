@@ -376,6 +376,16 @@ print(conn.protocol())                                <span class="cm">// the pr
       <p><code>use ai</code> (with <code>use json</code> when you call <code>ask</code> or <code>tool</code>): <code>ai.anthropic(key)</code> and <code>ai.openai_compatible(base_url, key)</code> make a <code>Client</code>; <code>ai.key_from_env(name)</code> reads a key; <code>ai.request(model, messages, max_tokens)</code>, <code>ai.user(text)</code> and <code>ai.assistant(text)</code> build the input; <code>client.chat(req)</code>, <code>client.stream(req, on_text)</code>, <code>client.run(req, tools)</code> (the agent loop), <code>client.embed(model, inputs)</code> and <code>client.embedder(model)</code> talk to the model; <code>ai.ask(T, client, req)</code> returns a value of your type, <code>ai.schema(T)</code> its JSON Schema and <code>ai.tool(T, name, description, handler)</code> a tool. See <a href="ai.html">the AI page</a>. Also new: <code>sys.env(name)</code> returns the value of an environment variable or <code>nil</code>, and <code>web.stream(opts, method, url, headers, body, on_piece)</code> hands the body of a successful response to a function piece by piece. Not available in a bare-metal kernel.</p>
     </section>
 
+    <section id="mcp-lib">
+      <h2>mcp</h2>
+      <p><code>use mcp</code> (with <code>use ai</code>): <code>mcp.server(name, version)</code> with <code>server.tool(t)</code>, <code>server.resource(uri, name, mime, read)</code>, <code>server.template(pattern, name, mime, read)</code> and <code>server.prompt(name, description, args, build)</code>; <code>server.serve_stdio()</code> and <code>server.serve_http(app, path)</code> (with <code>server.bearer_token</code> and <code>server.origins</code>); <code>server.handle(session, message)</code> for one JSON-RPC message; <code>mcp.connect(url, token)</code> and a client with <code>tools()</code>, <code>call(name, args)</code>, <code>resources()</code>, <code>read(uri)</code>, <code>prompts()</code>, <code>prompt(name, args)</code>, <code>close()</code> and <code>ai_tools()</code>. See <a href="ai.html#mcp">the AI page</a>. Also new: <code>sys.stdin_read(max)</code> reads standard input (blocking). Not available in a bare-metal kernel.</p>
+    </section>
+
+    <section id="rag-lib">
+      <h2>rag</h2>
+      <p><code>use rag</code> (with <code>use ai</code>): <code>rag.chunk(text, opts)</code>, <code>rag.memory_store()</code> and <code>rag.pg_store(conn, table, dims)</code> (stores with <code>add</code>, <code>search</code>, <code>delete_source</code>, <code>count</code>; the memory store also <code>save</code> and <code>rag.load_store</code>), <code>rag.index(store, embedder, documents, opts)</code>, <code>rag.retrieve(store, embedder, question, opts)</code>, <code>rag.answer(store, embedder, client, model, question, opts)</code> and <code>rag.search_tool(store, embedder, name, description)</code>. See <a href="ai.html#rag">the AI page</a>. Not available in a bare-metal kernel.</p>
+    </section>
+
     <section id="errors">
       <h2>errors</h2>
       <pre><code><span class="kw">use</span> errors

@@ -1,0 +1,43 @@
+// Questions answered from your own documents: chunk, embed, store, retrieve, answer.
+//
+//   set OPENAI_API_KEY=...
+//   set ANTHROPIC_API_KEY=...
+//   brasa-parse examples/rag.br -o rag.exe
+//
+// Documents are split into chunks, each chunk is turned into a vector by an embedding model and
+// stored; a question is embedded the same way, the closest chunks are found, and the model is asked
+// to answer only from them, citing the sources as [1], [2]. The store here is in memory and saved to
+// a file; `rag.pg_store(conn, "chunks", 1536)` keeps the same data in PostgreSQL with pgvector.
+//
+// Anthropic has no embeddings endpoint, so embeddings come from an OpenAI-compatible server
+// (OpenAI, or a local Ollama at http://localhost:11434/v1) and the answer from Claude. Stored
+// documents are data, not instructions: the answer prompt says so, but index only content you trust.
+
+package main
+
+use ai
+use json
+use rag
+
+func main() -> error
+    let embeddings = ai.openai_compatible("https://api.openai.com/v1", try ai.key_from_env("OPENAI_API_KEY"))
+    let embedder = embeddings.embedder("text-embedding-3-small")
+    let claude = ai.anthropic(try ai.key_from_env("ANTHROPIC_API_KEY"))
+
+    let store = rag.memory_store()
+    var meta: Map<text, text> = {}
+    meta["team"] = "billing"
+    let docs = [
+        rag.Document { id: "fees.md", text: "The monthly fee is 5 dollars. It is charged on the first day of each month.", meta: meta },
+        rag.Document { id: "hours.md", text: "Support is open from nine to five, Monday to Friday. On weekends it is closed.", meta: meta }
+    ]
+    try rag.index(store, embedder, docs, rag.index_options())
+    try store.save("target/example_store.json")
+
+    let answer = try rag.answer(store, embedder, claude, "claude-haiku-5-5", "How much is the monthly fee and when is it charged?", rag.answer_options())
+    print(answer.text)
+    for hit in answer.sources
+        print("source:", hit.id, "score", hit.score)
+    end
+    return
+end

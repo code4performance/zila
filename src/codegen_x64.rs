@@ -107,6 +107,8 @@ pub fn std_source(name: &str) -> Option<&'static str> {
         "postgres" => Some(include_str!("../std/postgres.br")),
         "sqlserver" => Some(include_str!("../std/sqlserver.br")),
         "ai" => Some(include_str!("../std/ai.br")),
+        "mcp" => Some(include_str!("../std/mcp.br")),
+        "rag" => Some(include_str!("../std/rag.br")),
         _ => None,
     }
 }
@@ -1295,7 +1297,7 @@ impl Compiler {
                 if m == "ws" && name == main.package {
                     return Err("'ws' is internal to 'net' and cannot be used by programs; use 'net' instead".into());
                 }
-                if self.target == Target::Bare && (matches!(m.as_str(), "ui" | "task" | "future" | "fs" | "net" | "sys" | "ws" | "tls" | "thread" | "sync" | "web" | "crypto" | "db" | "postgres" | "sqlserver" | "ai")) {
+                if self.target == Target::Bare && (matches!(m.as_str(), "ui" | "task" | "future" | "fs" | "net" | "sys" | "ws" | "tls" | "thread" | "sync" | "web" | "crypto" | "db" | "postgres" | "sqlserver" | "ai" | "mcp" | "rag")) {
                     return Err(format!("'{}' needs Windows and cannot be used in a bare-metal kernel", m));
                 }
                 if self.target == Target::Linux

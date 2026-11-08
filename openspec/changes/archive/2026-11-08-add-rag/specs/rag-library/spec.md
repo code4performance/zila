@@ -20,7 +20,7 @@ Provides the parts of retrieval-augmented generation (splitting documents, embed
 - **THEN** `chunk` returns an `InvalidInput` error
 
 ### Requirement: Embedder and store interfaces
-`use rag` SHALL define `rag.Embedder` (`embed(inputs: []text) -> [][]float or error`, plus the vector size it produces once known) and `rag.VectorStore` (`add(items: []Item)`, `search(vector, k, filter) -> []Hit`, `delete(ids)`, `count()`), where an `Item` holds an `id`, the vector, the text and `meta: Map<text, text>`, and a `Hit` holds the item and a `score` where larger means closer. The value returned by `ai`'s `client.embedder(model)` SHALL satisfy `rag.Embedder`, and any user type with those methods SHALL work with every function of the library. A store SHALL reject a vector whose size differs from the store's with an `InvalidInput` error.
+`use rag` SHALL define `rag.Embedder` (`embed(inputs: []text) -> [][]float or error`) and `rag.VectorStore` (`add(items)`, `search(vector, k, filter) -> []Hit or error`, `delete_source(source)`, `count()`), both as interfaces that `index`, `retrieve`, `answer` and `search_tool` accept through generic parameters (an interface can bound a type parameter but cannot be the type of a value), where an `Item` holds an `id`, the vector, the text and `meta: Map<text, text>`, and a `Hit` holds the id, text and metadata of the item and a `score` where larger means closer. The value returned by `ai`'s `client.embedder(model)` SHALL satisfy `rag.Embedder`, and any user type with those methods SHALL work with every function of the library. A store SHALL reject a vector whose size differs from the store's with an `InvalidInput` error.
 
 #### Scenario: Custom embedder
 - **WHEN** a program defines its own type with an `embed` method and passes it to `rag.index`
@@ -57,7 +57,7 @@ Provides the parts of retrieval-augmented generation (splitting documents, embed
 - **THEN** `pg_store` returns an `InvalidInput` error and nothing is sent to the database
 
 ### Requirement: Indexing and retrieval
-`rag.index(store, embedder, documents, opts)` SHALL chunk each document (`id`, `text`, metadata), embed the chunks in batches, and add them with ids `<document id>#<chunk index>` and metadata copied from the document plus `source`. Re-indexing a document SHALL replace its previous chunks and remove chunks that no longer exist. `rag.retrieve(store, embedder, question, opts)` SHALL embed the question and return the top `k` (default 4) hits at or above `min_score` (default none). A failing embedder SHALL make `index` return the error without leaving a half-indexed document.
+`rag.index(store, embedder, documents, opts)` SHALL chunk each document (`id`, `text`, metadata), embed the chunks in batches, and add them with ids `<document id>#<chunk index>` and metadata copied from the document plus `source` (the document's id). Re-indexing a document SHALL replace its previous chunks and remove chunks that no longer exist. `rag.retrieve(store, embedder, question, opts)` SHALL embed the question and return the top `k` (default 4) hits at or above `min_score` (default none). A failing embedder SHALL make `index` return the error without leaving a half-indexed document.
 
 #### Scenario: Reindex shrinks a document
 - **WHEN** a document that had 5 chunks is re-indexed with text that makes 2 chunks
@@ -68,7 +68,7 @@ Provides the parts of retrieval-augmented generation (splitting documents, embed
 - **THEN** `index` returns the error and the store holds no chunks of that document that were not there before
 
 ### Requirement: Grounded answers
-`rag.answer(store, embedder, client, question, opts)` SHALL retrieve chunks, build a prompt that places each chunk in a numbered, delimited source block and instructs the model to answer only from the sources, to cite them as `[n]` and to say it does not know when they do not contain the answer, send it through `ai`, and return an `rag.Answer` with the text, the chunks used (with scores and metadata) and the token usage. Chunk text SHALL be passed as data inside delimiters, never as instructions to the library. When retrieval returns no chunk, the call SHALL return an answer saying no sources were found without calling the model. The total prompt SHALL respect `max_context_chars` (default 12000) by dropping the lowest-ranked chunks, never by cutting one in the middle.
+`rag.answer(store, embedder, client, model, question, opts)` SHALL retrieve chunks, build a prompt that places each chunk in a numbered, delimited source block and instructs the model to answer only from the sources, to cite them as `[n]` and to say it does not know when they do not contain the answer, send it through `ai`, and return an `rag.Answer` with the text, the chunks used (with scores and metadata) and the token usage. Chunk text SHALL be passed as data inside delimiters, never as instructions to the library. When retrieval returns no chunk, the call SHALL return an answer saying no sources were found without calling the model. The total prompt SHALL respect `max_context_chars` (default 12000) by dropping the lowest-ranked chunks, never by cutting one in the middle.
 
 #### Scenario: Sources are returned
 - **WHEN** a fake model answers `The fee is 5 [1]` for a question whose best chunk is a document about fees

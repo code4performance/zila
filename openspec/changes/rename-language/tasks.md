@@ -31,5 +31,5 @@
 - [x] 5.3 Rewrite the story of the name (README, GOVERNANCE, site pages, logo), add the "formerly known as" note and the allow-list entry; verify the leftover test passes
 - [x] 5.4 Update the extension (version `0.3.0`, ids, settings, README) and the repository metadata (`Cargo.toml` repository, links); verify the extension tests and the leftover test
 - [x] 5.5 Full verification: build for Windows and Linux, the whole suite without `tests/async.rs`, the docs check, `--fmt-check`, the boot image, `openspec validate --specs`; verify all pass
-- [ ] 5.6 Outside the repository: the local folder renamed to `zila` and the history pushed to `code4performance/zila`; still open: the Marketplace publisher `zila`, and `docs/Zila.docx` (a Word document that still has the old name inside)
+- [ ] 5.6 Outside the repository: history pushed to `code4performance/zila` (branch `rename-to-zila` as `main`, the old remote kept as `old-origin`) and the Claude Code memory copied to the new project key; still open: renaming the local folder to `zila` (it was in use by another process), the Marketplace publisher `zila`, and `docs/Zila.docx` (a Word document that still has the old name inside)
 - [ ] 5.7 Archive this change; verify `openspec/specs/language-rename/` exists

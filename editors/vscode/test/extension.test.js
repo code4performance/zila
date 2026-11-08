@@ -1,5 +1,5 @@
 // Tests of extension.js with a stand-in for the `vscode` module, against the real
-// `brasa-parse --lsp`. Run with: node --test editors/vscode/test/extension.test.js
+// `zila-parse --lsp`. Run with: node --test editors/vscode/test/extension.test.js
 
 'use strict';
 
@@ -11,10 +11,10 @@ const os = require('os');
 const Module = require('module');
 
 function binary() {
-  if (process.env.BRASA_PARSE) return process.env.BRASA_PARSE;
+  if (process.env.ZILA_PARSE) return process.env.ZILA_PARSE;
   const root = path.join(__dirname, '..', '..', '..');
   for (const dir of ['debug', 'release']) {
-    for (const name of ['brasa-parse.exe', 'brasa-parse']) {
+    for (const name of ['zila-parse.exe', 'zila-parse']) {
       const p = path.join(root, 'target', dir, name);
       if (fs.existsSync(p)) return p;
     }
@@ -23,7 +23,7 @@ function binary() {
 }
 
 const exe = binary();
-const skip = exe ? false : 'brasa-parse is not built (cargo build)';
+const skip = exe ? false : 'zila-parse is not built (cargo build)';
 const GOOD = 'package main\n\nfunc main()\nend\n';
 const BAD = 'package main\n\nfunc main()\n    let = 3\nend\n';
 const UNFORMATTED = 'package main\n\nfunc main()\nprintln(1,2)\nend\n';
@@ -97,7 +97,7 @@ function fakeVscode(config) {
 /** A document the way VS Code hands it to the extension. */
 function doc(uri, text, version) {
   return {
-    languageId: 'brasa',
+    languageId: 'zila',
     uri: { scheme: 'file', toString: () => uri },
     version,
     getText: () => text,
@@ -133,7 +133,7 @@ test('errors appear as you type and clear when fixed; formatting returns edits',
   const { vscode, extension } = load({ 'server.path': exe });
   await extension.activate(context());
   const log = vscode.log;
-  assert.ok(log.commands.has('brasa.restartServer'));
+  assert.ok(log.commands.has('zila.restartServer'));
   assert.ok(log.provider);
 
   const d = doc('file:///t.br', BAD, 1);
@@ -141,7 +141,7 @@ test('errors appear as you type and clear when fixed; formatting returns edits',
   await until(() => (log.diagnostics.get('file:///t.br') || []).length === 1, 'the syntax error');
   const item = log.diagnostics.get('file:///t.br')[0];
   assert.strictEqual(item.range.start.line, 3);
-  assert.strictEqual(item.source, 'brasa');
+  assert.strictEqual(item.source, 'zila');
 
   log.handlers.change({ document: doc('file:///t.br', GOOD, 2) });
   await until(() => (log.diagnostics.get('file:///t.br') || []).length === 0, 'the fix');
@@ -157,7 +157,7 @@ test('errors appear as you type and clear when fixed; formatting returns edits',
 });
 
 test('a missing executable gives one message with an Open Settings button and no crash', async () => {
-  const missing = path.join(os.tmpdir(), 'no such dir', 'brasa-parse');
+  const missing = path.join(os.tmpdir(), 'no such dir', 'zila-parse');
   const { vscode, extension } = load({ 'server.path': missing });
   await extension.activate(context());
   assert.strictEqual(vscode.log.errors.length, 1);
@@ -172,7 +172,7 @@ test('a missing executable gives one message with an Open Settings button and no
 });
 
 test('a disabled server starts nothing', async () => {
-  const missing = path.join(os.tmpdir(), 'no such dir', 'brasa-parse');
+  const missing = path.join(os.tmpdir(), 'no such dir', 'zila-parse');
   const { vscode, extension } = load({ 'server.path': missing, 'server.enabled': false });
   await extension.activate(context());
   assert.strictEqual(vscode.log.errors.length, 0);
@@ -186,7 +186,7 @@ test('the restart command starts the server again with the current settings', { 
   log.handlers.open(doc('file:///r.br', BAD, 1));
   await until(() => (log.diagnostics.get('file:///r.br') || []).length === 1, 'the first error');
   vscode.workspace.textDocuments.push(doc('file:///r.br', BAD, 1));
-  await log.commands.get('brasa.restartServer')();
+  await log.commands.get('zila.restartServer')();
   await until(() => (log.diagnostics.get('file:///r.br') || []).length === 1, 'the error after the restart');
   await extension.deactivate();
 });

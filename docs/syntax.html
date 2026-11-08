@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Syntax Guide — Brasa</title>
-  <meta name="description" content="A tour of Brasa's syntax: packages, types, functions, control flow, error handling, string interpolation, attributes, and FFI/assembly.">
+  <title>Syntax Guide — Zila Lang</title>
+  <meta name="description" content="A tour of Zila Lang's syntax: packages, types, functions, control flow, error handling, string interpolation, attributes, and FFI/assembly.">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <header class="site-header">
-    <a class="brand" href="index.html">brasa<span class="ember-dot">.</span><small>lang docs</small></a>
+    <a class="brand" href="index.html">zila<span class="ember-dot">.</span><small>lang docs</small></a>
     <nav class="site-nav">
       <a href="index.html">Overview</a>
       <a href="syntax.html" aria-current="page">Syntax</a>
@@ -21,14 +21,14 @@
       <a href="databases.html">Databases</a>
       <a href="ai.html">AI</a>
       <a href="packages.html">Packages</a>
-      <a href="os.html">Brasa OS</a>
+      <a href="os.html">Zila Lang OS</a>
       <a href="getting-started.html">Getting Started</a>
     </nav>
   </header>
 
   <main>
     <h1>Syntax Guide</h1>
-    <p>Every construct below follows <code>brasa.ebnf</code>, the project's formal grammar. Blocks end with <code>end</code>; a newline ends a statement (there's no <code>;</code>).</p>
+    <p>Every construct below follows <code>zila.ebnf</code>, the project's formal grammar. Blocks end with <code>end</code>; a newline ends a statement (there's no <code>;</code>).</p>
 
     <nav class="toc">
       <h2>On this page</h2>
@@ -53,7 +53,7 @@
       <pre><code><span class="kw">package</span> main
 
 <span class="kw">use</span> text, list</code></pre>
-      <p>A name after <code>use</code> is a standard library module, a dependency listed in <code>brasa.toml</code> or a directory of <code>.br</code> files next to it; a name that is none of them is a compile error. <a href="packages.html">Packages</a> explains the rest.</p>
+      <p>A name after <code>use</code> is a standard library module, a dependency listed in <code>zila.toml</code> or a directory of <code>.br</code> files next to it; a name that is none of them is a compile error. <a href="packages.html">Packages</a> explains the rest.</p>
     </section>
 
     <section id="types">
@@ -84,7 +84,7 @@
 <span class="kw">end</span></code></pre>
 
       <h3>Interfaces</h3>
-      <p>Interfaces are <strong>structural</strong> (Go-style): a type satisfies an interface simply by having methods with matching signatures — there's no explicit <code>implements</code> clause and no inheritance. In Brasa an interface is used as a <em>bound</em> on a type parameter; see <a href="#generics">Generics</a>.</p>
+      <p>Interfaces are <strong>structural</strong> (Go-style): a type satisfies an interface simply by having methods with matching signatures — there's no explicit <code>implements</code> clause and no inheritance. In Zila Lang an interface is used as a <em>bound</em> on a type parameter; see <a href="#generics">Generics</a>.</p>
       <pre><code><span class="kw">type</span> Printable = <span class="kw">interface</span>
     <span class="kw">func</span> to_text(<span class="kw">self</span>) -&gt; text
 <span class="kw">end</span></code></pre>
@@ -202,7 +202,7 @@
 
     <section id="errors">
       <h2>Error handling</h2>
-      <p>Brasa has no exceptions. A function that can fail ends its signature with <code>or error</code> (<code>-&gt; Config or error</code>), or just <code>-&gt; error</code> when it returns nothing. Inside it, writing <code>try</code> in front of a call hands a failure straight to the caller. <code>error("message")</code> creates an error; <code>match</code> reads a result with <code>ok(value)</code> and <code>err(e)</code>, and <code>call() ?? fallback</code> supplies a default. Integer arithmetic never fails: <code>+</code>, <code>-</code> and <code>*</code> wrap at the width of the type, and <code>MIN / -1</code> is <code>MIN</code>; <code>math.checked_add</code>, <code>checked_sub</code>, <code>checked_mul</code> and <code>checked_div</code> return <code>int or error</code> (kind <code>Overflow</code>, or <code>InvalidInput</code> for a zero divisor) when you need to know. A failure the caller can handle is a value: <code>xs.get(i)</code> gives the element or nothing, <code>m.get(key, default)</code> a default. For a mistake in the program itself (not bad input), <code>abort("message")</code> writes <code>abort: file.br:line: message</code> to standard error and ends the process with exit code 101. An out-of-bounds index, an integer division or remainder by zero, a missing map key with <code>m[key]</code>, <code>take</code> on an empty list, <code>int(x)</code> of a float that does not fit, a failed <code>assert</code> outside <code>--test</code> and running out of memory abort the same way. An abort cannot be caught and runs no <code>defer</code>, no <code>drop</code> and no unwinding, and buffered writers are not flushed. <code>defer</code> schedules an expression to run when the enclosing function returns — commonly used to release a resource right after acquiring it.</p>
+      <p>Zila Lang has no exceptions. A function that can fail ends its signature with <code>or error</code> (<code>-&gt; Config or error</code>), or just <code>-&gt; error</code> when it returns nothing. Inside it, writing <code>try</code> in front of a call hands a failure straight to the caller. <code>error("message")</code> creates an error; <code>match</code> reads a result with <code>ok(value)</code> and <code>err(e)</code>, and <code>call() ?? fallback</code> supplies a default. Integer arithmetic never fails: <code>+</code>, <code>-</code> and <code>*</code> wrap at the width of the type, and <code>MIN / -1</code> is <code>MIN</code>; <code>math.checked_add</code>, <code>checked_sub</code>, <code>checked_mul</code> and <code>checked_div</code> return <code>int or error</code> (kind <code>Overflow</code>, or <code>InvalidInput</code> for a zero divisor) when you need to know. A failure the caller can handle is a value: <code>xs.get(i)</code> gives the element or nothing, <code>m.get(key, default)</code> a default. For a mistake in the program itself (not bad input), <code>abort("message")</code> writes <code>abort: file.br:line: message</code> to standard error and ends the process with exit code 101. An out-of-bounds index, an integer division or remainder by zero, a missing map key with <code>m[key]</code>, <code>take</code> on an empty list, <code>int(x)</code> of a float that does not fit, a failed <code>assert</code> outside <code>--test</code> and running out of memory abort the same way. An abort cannot be caught and runs no <code>defer</code>, no <code>drop</code> and no unwinding, and buffered writers are not flushed. <code>defer</code> schedules an expression to run when the enclosing function returns — commonly used to release a resource right after acquiring it.</p>
       <pre><code><span class="kw">func</span> load(path: text) -&gt; Config or error
     <span class="kw">let</span> raw = <span class="kw">try</span> file.read(path)
     <span class="kw">let</span> f = <span class="kw">try</span> file.open(path)
@@ -480,7 +480,7 @@ print(char(231).to_text())    <span class="cm">// ç</span></code></pre>
 
     <section id="comptime">
       <h2>Compile-time code generation</h2>
-      <p>A <code>comptime func</code> runs while the program is being compiled. It receives a <code>Type</code>, a value that exists only at compile time and describes a declared type, and returns Brasa source text that the compiler compiles as if you had written it. Libraries use this to add per-type code (equality, JSON, printing) and their own block syntax without any change to the compiler.</p>
+      <p>A <code>comptime func</code> runs while the program is being compiled. It receives a <code>Type</code>, a value that exists only at compile time and describes a declared type, and returns Zila Lang source text that the compiler compiles as if you had written it. Libraries use this to add per-type code (equality, JSON, printing) and their own block syntax without any change to the compiler.</p>
       <pre><code><span class="kw">use</span> reflect
 
 #[derive]
@@ -528,7 +528,7 @@ print(char(231).to_text())    <span class="cm">// ç</span></code></pre>
 
 <span class="kw">extern</span> <span class="str">"C"</span> <span class="kw">func</span> printf(fmt: *c.char, ...) -&gt; c.int
 
-#[export(<span class="str">"brasa_add"</span>)]
+#[export(<span class="str">"zila_add"</span>)]
 <span class="kw">func</span> add(a: i32, b: i32) -&gt; i32
     <span class="kw">return</span> a + b
 <span class="kw">end</span>
@@ -538,7 +538,7 @@ print(char(231).to_text())    <span class="cm">// ç</span></code></pre>
         printf(c.cstr(<span class="str">"sqrt(2) = %f\n"</span>), sqrt(2.0))
     <span class="kw">end</span>
 <span class="kw">end</span></code></pre>
-      <p>Inline <code>asm</code> blocks hold assembly written as it is, one instruction per line with no quotes (labels, <code>;</code> comments and memory operands like <code>[rax]</code> work as in any assembler, and so do instructions named like Brasa words, such as <code>in al, dx</code>). A line <code>in</code>/<code>out</code>/<code>inout</code> <em>name</em> <code>=</code> <em>expr</em> binds an operand (to a named register or an allocated one), an optional <code>clobber</code> line lists registers (<code>clobber cc, memory</code>), and the block ends at a line that is just <code>end</code>. Lines written as strings (<code>"cli"</code>) are still accepted.</p>
+      <p>Inline <code>asm</code> blocks hold assembly written as it is, one instruction per line with no quotes (labels, <code>;</code> comments and memory operands like <code>[rax]</code> work as in any assembler, and so do instructions named like Zila Lang words, such as <code>in al, dx</code>). A line <code>in</code>/<code>out</code>/<code>inout</code> <em>name</em> <code>=</code> <em>expr</em> binds an operand (to a named register or an allocated one), an optional <code>clobber</code> line lists registers (<code>clobber cc, memory</code>), and the block ends at a line that is just <code>end</code>. Lines written as strings (<code>"cli"</code>) are still accepted.</p>
       <pre><code>#[cfg(<span class="str">"x86_64"</span>)]
 <span class="kw">func</span> rdtsc() -&gt; u64
     <span class="kw">var</span> lo: u32 = 0
@@ -553,7 +553,7 @@ print(char(231).to_text())    <span class="cm">// ç</span></code></pre>
     <span class="kw">return</span> u64(hi) &lt;&lt; 32 bitor u64(lo)
 <span class="kw">end</span></code></pre>
       <p>SQL is written the same way, in a <code>sql</code> block: <code>sql postgres</code> or <code>sql tsql</code> on a line, the statement as raw lines, and a line that is just <code>end</code>. The block is a value (<code>db.Sql</code>); a <code>{value}</code> in it becomes a bound parameter and is never pasted into the text. <code>sql</code> opens a block only when a dialect name and the end of the line follow, so a variable or parameter called <code>sql</code> still works. See <a href="databases.html#sql">Databases</a>.</p>
-      <p>See the <a href="examples.html#ffi">FFI &amp; low-level example</a> for a fuller walkthrough, and the project's <code>brasa-ffi.md</code> for the full specification (ABIs, <code>#[c_layout]</code>, <code>#[link]</code>/<code>#[link_src]</code>, <code>#[cfg]</code>, and naked functions).</p>
+      <p>See the <a href="examples.html#ffi">FFI &amp; low-level example</a> for a fuller walkthrough, and the project's <code>zila-ffi.md</code> for the full specification (ABIs, <code>#[c_layout]</code>, <code>#[link]</code>/<code>#[link_src]</code>, <code>#[cfg]</code>, and naked functions).</p>
     </section>
 
     <section id="testing">
@@ -565,7 +565,7 @@ print(char(231).to_text())    <span class="cm">// ç</span></code></pre>
     assert(clamp(99, 0, 10) &lt;= 10, <span class="str">"above the range"</span>)
     <span class="kw">return</span>
 <span class="kw">end</span></code></pre>
-      <p>Run them with <code>brasa-parse --test file.br</code> (the file must be in <code>package main</code>). A failed check prints <code>FAIL clamp_keeps_values_inside: line 7: assertion failed: left 3, right 4</code>; a test that crashes the program stops the run of that file. <code>examples/testing.br</code> is a complete example.</p>
+      <p>Run them with <code>zila-parse --test file.br</code> (the file must be in <code>package main</code>). A failed check prints <code>FAIL clamp_keeps_values_inside: line 7: assertion failed: left 3, right 4</code>; a test that crashes the program stops the run of that file. <code>examples/testing.br</code> is a complete example.</p>
     </section>
 
     <div class="note">
@@ -574,7 +574,7 @@ print(char(231).to_text())    <span class="cm">// ç</span></code></pre>
   </main>
 
   <footer class="site-footer">
-    Brasa — a language with a human face. Docs generated from <code>brasa.ebnf</code> and <code>examples/*.br</code>.
+    Zila Lang — a language with a human face. Docs generated from <code>zila.ebnf</code> and <code>examples/*.br</code>.
   </footer>
 </body>
 </html>

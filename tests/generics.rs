@@ -2,7 +2,7 @@
 //! compiled to native executables and run (skipped when the Visual Studio build tools are
 //! missing).
 
-use brasa::{compile_to_native, parse_source};
+use zila::{compile_to_native, parse_source};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -10,7 +10,7 @@ static N: AtomicUsize = AtomicUsize::new(0);
 
 fn run(src: &str) -> Option<(String, i32)> {
     let file = parse_source(src).unwrap_or_else(|d| panic!("parse error: {}", d));
-    let exe = std::env::temp_dir().join(format!("brasa-generics-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let exe = std::env::temp_dir().join(format!("zila-generics-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     match compile_to_native(&file, exe.to_str().unwrap()) {
         Ok(()) => {}
         Err(e) if e.contains("could not find Visual Studio") => {
@@ -28,7 +28,7 @@ fn run(src: &str) -> Option<(String, i32)> {
 /// The compile error of a program that must not compile.
 fn compile_error(src: &str) -> String {
     let file = parse_source(src).unwrap_or_else(|d| panic!("parse error: {}", d));
-    let exe = std::env::temp_dir().join(format!("brasa-generics-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let exe = std::env::temp_dir().join(format!("zila-generics-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     match compile_to_native(&file, exe.to_str().unwrap()) {
         Ok(()) => panic!("expected a compile error"),
         Err(e) => e,

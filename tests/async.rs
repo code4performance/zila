@@ -1,7 +1,7 @@
 //! async/await, futures, timers: programs are compiled to native executables
 //! and run. Skipped when the Visual Studio build tools are not installed.
 
-use brasa::{compile_to_native, parse_source};
+use zila::{compile_to_native, parse_source};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -10,7 +10,7 @@ static N: AtomicUsize = AtomicUsize::new(0);
 /// Compiles and runs a program; `None` when there is no native toolchain.
 fn run(src: &str) -> Option<(String, i32)> {
     let file = parse_source(src).unwrap_or_else(|d| panic!("parse error: {}", d));
-    let exe = std::env::temp_dir().join(format!("brasa-async-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let exe = std::env::temp_dir().join(format!("zila-async-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     match compile_to_native(&file, exe.to_str().unwrap()) {
         Ok(()) => {}
         Err(e) if e.contains("could not find Visual Studio") || e.contains("vcvars64") => {
@@ -160,7 +160,7 @@ func main()
 end
 ";
     let file = parse_source(drop_src).unwrap();
-    let e = brasa::codegen_x64::generate_asm(&file).unwrap_err();
+    let e = zila::codegen_x64::generate_asm(&file).unwrap_err();
     assert!(e.contains("`await` cannot be used in a `drop` method"), "{}", e);
     let cb_src = "package main
 func cb(x: int) -> int
@@ -172,7 +172,7 @@ func main()
 end
 ";
     let file = parse_source(cb_src).unwrap();
-    let e = brasa::codegen_x64::generate_asm(&file).unwrap_err();
+    let e = zila::codegen_x64::generate_asm(&file).unwrap_err();
     assert!(e.contains("`await` cannot be used in a function called from C"), "{}", e);
 }
 
@@ -290,7 +290,7 @@ fn waiting_on_a_timer_is_not_deadlock_but_a_stuck_program_is() {
 fn a_future_is_not_an_int() {
     let src = "package main\nasync func f() -> int\n    return 1\nend\nfunc main()\n    let x: int = f()\nend\n";
     let file = parse_source(src).unwrap();
-    let e = brasa::codegen_x64::generate_asm(&file).unwrap_err();
+    let e = zila::codegen_x64::generate_asm(&file).unwrap_err();
     assert!(e.contains("expected int, found Future<int>"), "{}", e);
 }
 
@@ -380,10 +380,10 @@ end
 #[test]
 fn timeout_needs_a_future_and_all_a_list_of_futures() {
     let file = parse_source("package main\nfunc main()\n    let x = timeout(5, 3)\nend\n").unwrap();
-    let e = brasa::codegen_x64::generate_asm(&file).unwrap_err();
+    let e = zila::codegen_x64::generate_asm(&file).unwrap_err();
     assert!(e.contains("timeout() needs a Future"), "{}", e);
     let file = parse_source("package main\nfunc main()\n    let x = await all([1, 2])\nend\n").unwrap();
-    let e = brasa::codegen_x64::generate_asm(&file).unwrap_err();
+    let e = zila::codegen_x64::generate_asm(&file).unwrap_err();
     assert!(e.contains("all() needs a list of futures"), "{}", e);
 }
 
@@ -461,12 +461,12 @@ end
 #[test]
 fn drop_must_take_nothing_and_return_nothing() {
     let file = parse_source("package main\ntype H = record\n    x: int\nend\nfunc (ref h: H) drop() -> int\n    return 1\nend\nfunc main()\nend\n").unwrap();
-    let e = brasa::codegen_x64::generate_asm(&file).unwrap_err();
+    let e = zila::codegen_x64::generate_asm(&file).unwrap_err();
     assert!(e.contains("`drop` method takes no parameters and returns nothing"), "{}", e);
 }
 
 fn temp_path(name: &str) -> String {
-    let p = std::env::temp_dir().join(format!("brasa-fs-test-{}-{}", std::process::id(), name));
+    let p = std::env::temp_dir().join(format!("zila-fs-test-{}-{}", std::process::id(), name));
     p.to_str().unwrap().replace('\\', "/")
 }
 
@@ -820,7 +820,7 @@ end
 fn the_async_example_builds_and_runs() {
     let src = std::fs::read_to_string("examples/async.br").unwrap();
     let path = temp_path("example.txt");
-    let src = src.replace("brasa-example.txt", &path);
+    let src = src.replace("zila-example.txt", &path);
     let result = run(&src);
     let _ = std::fs::remove_file(&path);
     let Some((out, code)) = result else { return };

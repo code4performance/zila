@@ -2,8 +2,8 @@
 //! Programs are compiled to assembly only (no native toolchain needed). Each test registers its
 //! own library package names, so tests do not interfere.
 
-use brasa::codegen_x64::{generate_asm_for, CompileOptions, Target};
-use brasa::parse_source;
+use zila::codegen_x64::{generate_asm_for, CompileOptions, Target};
+use zila::parse_source;
 
 fn compile(src: &str) -> Result<String, String> {
     let file = parse_source(src).unwrap_or_else(|d| panic!("parse error: {}", d));
@@ -24,7 +24,7 @@ fn err(src: &str) -> String {
 }
 
 fn lib(name: &str, body: &str) {
-    brasa::comptime::register_package(name, &format!("package {}\n{}", name, body));
+    zila::comptime::register_package(name, &format!("package {}\n{}", name, body));
 }
 
 fn main_with(uses: &str, body: &str) -> String {

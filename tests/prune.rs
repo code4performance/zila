@@ -1,8 +1,8 @@
 //! Reachability pruning (spec `static-linking`): a `use` that nothing reaches adds nothing to the
 //! program, what the program calls is kept, and `--no-prune` brings everything back.
 
-use brasa::codegen_x64::{generate_asm, generate_asm_for, Target};
-use brasa::parse_source;
+use zila::codegen_x64::{generate_asm, generate_asm_for, Target};
+use zila::parse_source;
 use std::process::Command;
 
 const HELLO: &str = "package main\n\nfunc main()\n    print(\"hi\")\nend\n";
@@ -79,12 +79,12 @@ fn a_global_initialiser_nothing_reads_and_that_only_computes_is_dropped() {
 
 #[test]
 fn no_prune_keeps_everything() {
-    let dir = std::env::temp_dir().join(format!("brasa-prune-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("zila-prune-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let src = dir.join("a.br");
     std::fs::write(&src, with_use("json")).unwrap();
     let run = |extra: &[&str]| {
-        let out = Command::new(env!("CARGO_BIN_EXE_brasa-parse")).arg(&src).arg("--asm").args(extra).output().unwrap();
+        let out = Command::new(env!("CARGO_BIN_EXE_zila-parse")).arg(&src).arg("--asm").args(extra).output().unwrap();
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
         String::from_utf8_lossy(&out.stdout).to_string()
     };
@@ -97,11 +97,11 @@ fn no_prune_keeps_everything() {
 
 #[test]
 fn explain_link_lists_each_package_and_adds_up() {
-    let dir = std::env::temp_dir().join(format!("brasa-link-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("zila-link-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let src = dir.join("a.br");
     std::fs::write(&src, "package main\n\nuse text\n\nfunc main()\n    print(text.upper(\"a\"))\nend\n").unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_brasa-parse")).arg(&src).arg("--explain-link").current_dir(&dir).output().unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_zila-parse")).arg(&src).arg("--explain-link").current_dir(&dir).output().unwrap();
     let report = String::from_utf8_lossy(&out.stdout).to_string();
     let wrote = dir.join("a.exe").exists();
     let _ = std::fs::remove_dir_all(&dir);

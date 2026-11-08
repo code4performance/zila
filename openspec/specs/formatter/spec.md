@@ -1,11 +1,11 @@
 ## Purpose
 
-Gives Brasa source one standard style, applied by `brasa-parse --fmt` and checked by `--fmt-check`, changing only whitespace and never the program.
+Gives Zila Lang source one standard style, applied by `zila-parse --fmt` and checked by `--fmt-check`, changing only whitespace and never the program.
 
 ## Requirements
 
 ### Requirement: Formatting files
-`brasa-parse --fmt file.br [more.br ...]` SHALL rewrite each file in the standard style and print the names of the files it changed. `brasa-parse --fmt-check file.br ...` SHALL change nothing, print the names of the files that are not in the standard style and exit with status 1 when there are any (0 otherwise). A file that does not parse SHALL be reported with its error and left untouched, and the exit status SHALL be 1.
+`zila-parse --fmt file.br [more.br ...]` SHALL rewrite each file in the standard style and print the names of the files it changed. `zila-parse --fmt-check file.br ...` SHALL change nothing, print the names of the files that are not in the standard style and exit with status 1 when there are any (0 otherwise). A file that does not parse SHALL be reported with its error and left untouched, and the exit status SHALL be 1.
 
 #### Scenario: Rewriting
 - **WHEN** a badly indented file is given to `--fmt`
@@ -76,3 +76,14 @@ The getting-started page SHALL describe `--fmt` and `--fmt-check`.
 #### Scenario: Docs check
 - **WHEN** the documentation test compares the options the tool accepts with the options the docs describe
 - **THEN** both new options are described
+
+### Requirement: SQL blocks are kept as written
+The lines of a `sql` block SHALL be kept as written, including the text of holes: the formatter SHALL move the block as a whole to the indentation of the statement that holds it and SHALL keep the relative indentation of its lines. Formatting SHALL not change the block's tokens, and a second pass SHALL change nothing.
+
+#### Scenario: Relative indentation
+- **WHEN** a `sql` block has a `select` line and a `where` line indented four spaces deeper, inside a function indented eight spaces wrong
+- **THEN** after formatting the block sits one level inside its function and the `where` line is still four spaces deeper than `select`
+
+#### Scenario: Text that looks like Zila Lang
+- **WHEN** a block contains the line `end_date is null` or `-- end`
+- **THEN** it is part of the block, and only a line that is just `end` closes it

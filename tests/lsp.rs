@@ -1,7 +1,7 @@
 //! The language server: JSON, syntax-error diagnostics and formatting, driven message by message
 //! (no process is started).
 
-use brasa::lsp::{handle, parse_json, Json};
+use zila::lsp::{handle, parse_json, Json};
 use std::collections::HashMap;
 
 /// Sends one message and returns the JSON bodies the server wrote back.
@@ -132,14 +132,14 @@ end
 
 func main()
     let s = raw_text
-        {{ this ) is ] not Brasa ((
+        {{ this ) is ] not Zila Lang ((
     end
     print(s)
 end
 ";
     let r = open(&mut docs, "file:///blocks.br", src);
     assert_eq!(r[0].get("params").get("diagnostics"), &Json::Arr(vec![]));
-    assert!(!brasa::comptime::launch_log().iter().any(|l| l.starts_with("lsp_never_runs(")));
+    assert!(!zila::comptime::launch_log().iter().any(|l| l.starts_with("lsp_never_runs(")));
     // an error outside the block is still reported
     let r = open(&mut docs, "file:///bad.br", &src.replace("print(s)", "print(s"));
     let Json::Arr(d) = r[0].get("params").get("diagnostics") else { panic!() };
@@ -186,10 +186,10 @@ fn pub_declarations_have_no_diagnostics_and_a_misplaced_pub_is_reported_on_its_l
 fn packages_of_the_project_are_seen_by_the_editor() {
     // a project with a local package: names resolve, a block of the package is a block, and a
     // name found nowhere is reported with the hint
-    let dir = std::env::temp_dir().join(format!("brasa_lsp_pkg_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("zila_lsp_pkg_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("util")).unwrap();
-    std::fs::write(dir.join("brasa.toml"), "[package]\nname = \"app\"\n").unwrap();
+    std::fs::write(dir.join("zila.toml"), "[package]\nname = \"app\"\n").unwrap();
     std::fs::write(dir.join("util/util.br"), "package util\n\npub func twice(n: int) -> int\n    return n * 2\nend\n\n#[block]\npub comptime func raw_text(raw: text) -> text\n    return raw\nend\n").unwrap();
     let p = dir.to_string_lossy().replace('\\', "/").replace(' ', "%20");
     let uri = |f: &str| if p.starts_with('/') { format!("file://{}/{}", p, f) } else { format!("file:///{}/{}", p, f) };
@@ -197,7 +197,7 @@ fn packages_of_the_project_are_seen_by_the_editor() {
     let good = "package main\n\nuse util\n\nfunc main()\n    print(\"{util.twice(2)}\")\nend\n";
     let r = open(&mut docs, &uri("main.br"), good);
     assert_eq!(r[0].get("params").get("diagnostics"), &Json::Arr(vec![]), "a package of the project resolves");
-    let blocks = "package main\n\nuse util\n\nfunc main()\n    let s = raw_text\n        {{ not ) Brasa ((\n    end\n    print(s)\nend\n";
+    let blocks = "package main\n\nuse util\n\nfunc main()\n    let s = raw_text\n        {{ not ) Zila Lang ((\n    end\n    print(s)\nend\n";
     let r = open(&mut docs, &uri("blocks.br"), blocks);
     assert_eq!(r[0].get("params").get("diagnostics"), &Json::Arr(vec![]), "a block of a package of the project");
     let r = open(&mut docs, &uri("bad.br"), &good.replace("use util", "use nothing"));
@@ -215,7 +215,7 @@ fn a_sql_block_has_no_diagnostics_and_syntax_errors_around_it_are_reported() {
     let r = open(&mut docs, "file:///sql_good.br", good);
     assert_eq!(r[0].get("params").get("diagnostics"), &Json::Arr(vec![]));
     // a syntax error after the block is still reported on its own line, and the SQL text is not
-    // taken for Brasa (the server does not compile files that use `db`, which has generators)
+    // taken for Zila Lang (the server does not compile files that use `db`, which has generators)
     let bad = good.replace("print(q.text)", "print(q.text");
     let r = open(&mut docs, "file:///sql_bad.br", &bad);
     let Json::Arr(d) = r[0].get("params").get("diagnostics") else { panic!() };

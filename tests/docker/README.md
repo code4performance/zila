@@ -22,8 +22,8 @@ docker compose -f tests/docker/compose.yml down -v           # removes container
 Both databases hold `shop` with `customers` (60 rows: accents, an apostrophe, CJK and Cyrillic names,
 `NULL` emails and cities) and `orders` (180 rows). PostgreSQL also has `items(id, label, embedding vector(3))`.
 
-Variables set by `env.ps1` / `env.sh`: `BRASA_TEST_POSTGRES`, `BRASA_TEST_SQLSERVER`,
-`BRASA_TEST_SQLSERVER_STRICT`. The development CA is created on first `up` in `certs/` (git-ignored);
+Variables set by `env.ps1` / `env.sh`: `ZILA_TEST_POSTGRES`, `ZILA_TEST_SQLSERVER`,
+`ZILA_TEST_SQLSERVER_STRICT`. The development CA is created on first `up` in `certs/` (git-ignored);
 `certs/ca.pem` is what the URLs pass as `sslrootcert` / `cafile`.
 
 Credentials are development-only values in `.env` and the seed files; the ports are bound to the

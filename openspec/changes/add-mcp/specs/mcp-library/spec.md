@@ -1,6 +1,6 @@
 ## Purpose
 
-Lets a Brasa program be an MCP server, exposing its functions, data and prompts to any MCP host, and be an MCP client whose remote tools an agent can use.
+Lets a Zila Lang program be an MCP server, exposing its functions, data and prompts to any MCP host, and be an MCP client whose remote tools an agent can use.
 
 ## ADDED Requirements
 
@@ -75,7 +75,7 @@ A server SHALL expose resources (`server.resource(uri, name, mime_type, reader)`
 `mcp.connect(url)` (with an optional bearer token) SHALL perform the handshake against a Streamable HTTP server and return an `mcp.Client` with `tools()`, `call(name, args)`, `resources()`, `read(uri)`, `prompts()`, `prompt(name, args)` and `close()`. It SHALL send the session and protocol version headers, accept both `application/json` and `text/event-stream` replies to a `POST` (collecting events until the response for the request arrives), and map JSON-RPC errors to errors of the standard type. `client.ai_tools()` SHALL return the remote tools as `ai.Tool` values (with the remote schema as given, arguments passed through as JSON) that `client.run` can use alongside local ones.
 
 #### Scenario: Remote tool in an agent
-- **WHEN** a program connects to a Brasa MCP server over HTTP, adds `ai_tools()` to an agent run and the fake model calls one of them
+- **WHEN** a program connects to a Zila Lang MCP server over HTTP, adds `ai_tools()` to an agent run and the fake model calls one of them
 - **THEN** the remote handler runs and its text goes back to the model
 
 #### Scenario: Event-stream reply

@@ -14,7 +14,7 @@
 //! - pointers, functions and channels: raw address comparison, unchanged.
 //! - text, integers, floats: unchanged (floats keep IEEE `==` and `<`).
 
-use brasa::{compile_to_native, parse_source};
+use zila::{compile_to_native, parse_source};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -22,7 +22,7 @@ static N: AtomicUsize = AtomicUsize::new(0);
 
 fn run(src: &str) -> Option<(String, i32)> {
     let file = parse_source(src).unwrap_or_else(|d| panic!("parse error: {}", d));
-    let exe = std::env::temp_dir().join(format!("brasa-derive-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let exe = std::env::temp_dir().join(format!("zila-derive-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     match compile_to_native(&file, exe.to_str().unwrap()) {
         Ok(()) => {}
         Err(e) if e.contains("could not find Visual Studio") || e.contains("vcvars64") => {
@@ -40,7 +40,7 @@ fn run(src: &str) -> Option<(String, i32)> {
 /// The compile error of a program that must not compile.
 fn compile_error(src: &str) -> String {
     let file = parse_source(src).unwrap_or_else(|d| panic!("parse error: {}", d));
-    let exe = std::env::temp_dir().join(format!("brasa-derive-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let exe = std::env::temp_dir().join(format!("zila-derive-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     match compile_to_native(&file, exe.to_str().unwrap()) {
         Ok(()) => panic!("expected a compile error"),
         Err(e) => e,
@@ -586,7 +586,7 @@ end
 // ---- compile-only checks (no program is run: Linux, the operating system and the OS libraries
 // need WSL, QEMU, a window or the network, so they are audited by generating code) ----
 
-use brasa::codegen_x64::{build_os, generate_asm_for, CompileOptions, Target};
+use zila::codegen_x64::{build_os, generate_asm_for, CompileOptions, Target};
 
 #[test]
 fn linux_output_for_general_keys_generates() {

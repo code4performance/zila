@@ -1,7 +1,7 @@
 //! The `format` library: templates, layout, padding and number helpers. Programs are compiled
 //! to native executables and run (skipped when the Visual Studio build tools are missing).
 
-use brasa::{compile_to_native, parse_source};
+use zila::{compile_to_native, parse_source};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -9,7 +9,7 @@ static N: AtomicUsize = AtomicUsize::new(0);
 
 fn native(src: &str) -> Option<String> {
     let file = parse_source(src).unwrap_or_else(|d| panic!("parse error: {}", d));
-    let exe = std::env::temp_dir().join(format!("brasa-format-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let exe = std::env::temp_dir().join(format!("zila-format-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     match compile_to_native(&file, exe.to_str().unwrap()) {
         Ok(()) => {}
         Err(e) if e.contains("could not find Visual Studio") => {
@@ -214,7 +214,7 @@ fn eight_values_are_allowed_and_nine_are_not() {
     expect("print(format.fmt(\"%%%%%%%%%%%%%%%%\", 1, 2, 3, 4, 5, 6, 7, 8) ?? \"?\")\n", "%%%%%%%%\n");
     let nine = main_of("print(format.fmt(\"%\", 1, 2, 3, 4, 5, 6, 7, 8, 9) ?? \"?\")\n");
     let file = parse_source(&nine).unwrap();
-    let e = brasa::codegen_x64::generate_asm(&file).unwrap_err();
+    let e = zila::codegen_x64::generate_asm(&file).unwrap_err();
     assert!(e.contains("format.fmt takes at most eight values"), "{}", e);
 }
 

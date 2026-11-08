@@ -1,9 +1,9 @@
-//! The `postgres` driver (spec `postgres-driver`). A fake PostgreSQL server written in Brasa, in
+//! The `postgres` driver (spec `postgres-driver`). A fake PostgreSQL server written in Zila Lang, in
 //! the same program as the client, covers the failure cases (refused TLS, wrong passwords, forged
 //! signatures, errors in the middle, row limits, a server that goes away). Tests against the real
-//! server of `tests/docker` run when `BRASA_TEST_POSTGRES` is set and print a skip line otherwise.
+//! server of `tests/docker` run when `ZILA_TEST_POSTGRES` is set and print a skip line otherwise.
 
-use brasa::{compile_to_native, parse_source};
+use zila::{compile_to_native, parse_source};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Once;
@@ -13,16 +13,16 @@ static INIT: Once = Once::new();
 
 fn setup() {
     INIT.call_once(|| {
-        let dir = std::env::temp_dir().join(format!("brasa-pg-test-cache-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("zila-pg-test-cache-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        brasa::comptime::set_cache_dir(&dir);
+        zila::comptime::set_cache_dir(&dir);
     });
 }
 
 fn build(src: &str) -> Result<std::path::PathBuf, String> {
     setup();
     let file = parse_source(src).unwrap_or_else(|d| panic!("parse error: {}", d));
-    let exe = std::env::temp_dir().join(format!("brasa-pg-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let exe = std::env::temp_dir().join(format!("zila-pg-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     compile_to_native(&file, exe.to_str().unwrap()).map(|_| exe)
 }
 
@@ -517,19 +517,19 @@ fn a_slow_statement_does_not_stall_other_tasks() {
 }
 
 // ---------------------------------------------------------------------------
-// A real PostgreSQL server (BRASA_TEST_POSTGRES)
+// A real PostgreSQL server (ZILA_TEST_POSTGRES)
 //
 // Any server will do, local or not, as long as the user may create TEMP tables: every test that
 // writes uses a temporary table of its own session, which disappears when the connection closes,
 // so nothing is left in the database. Example:
-//   BRASA_TEST_POSTGRES=postgres://user:password@127.0.0.1:5432/database?sslmode=disable
+//   ZILA_TEST_POSTGRES=postgres://user:password@127.0.0.1:5432/database?sslmode=disable
 // ---------------------------------------------------------------------------
 
 fn real_url() -> Option<String> {
-    match std::env::var("BRASA_TEST_POSTGRES") {
+    match std::env::var("ZILA_TEST_POSTGRES") {
         Ok(u) if !u.is_empty() => Some(u.replace('\\', "/")),
         _ => {
-            eprintln!("skipped: set BRASA_TEST_POSTGRES to the URL of a PostgreSQL server to run this test");
+            eprintln!("skipped: set ZILA_TEST_POSTGRES to the URL of a PostgreSQL server to run this test");
             None
         }
     }

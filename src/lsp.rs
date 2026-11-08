@@ -1,4 +1,4 @@
-//! A small language server (`brasa-parse --lsp`) speaking the Language Server Protocol over
+//! A small language server (`zila-parse --lsp`) speaking the Language Server Protocol over
 //! standard input and output. It reports syntax errors as you type and formats documents with the
 //! standard style (`--fmt`). No dependencies: it carries its own tiny JSON reader and writer.
 
@@ -275,7 +275,7 @@ pub fn diagnostics(text: &str) -> Json {
                 list.push(obj(vec![
                     ("range", obj(vec![("start", position(line, utf16_col(src_line, start))), ("end", position(line, utf16_col(src_line, end.max(start + 1))))])),
                     ("severity", num(1)),
-                    ("source", Json::Str("brasa".into())),
+                    ("source", Json::Str("zila".into())),
                     ("message", Json::Str(e)),
                 ]));
             }
@@ -289,7 +289,7 @@ pub fn diagnostics(text: &str) -> Json {
         list.push(obj(vec![
             ("range", obj(vec![("start", position(line, utf16_col(src_line, start))), ("end", position(line, utf16_col(src_line, end)))])),
             ("severity", num(1)),
-            ("source", Json::Str("brasa".into())),
+            ("source", Json::Str("zila".into())),
             ("message", Json::Str(d.msg)),
         ]));
     }
@@ -359,7 +359,7 @@ pub fn handle(msg: &Json, docs: &mut HashMap<String, String>, out: &mut dyn Writ
             out,
             obj(vec![
                 ("capabilities", obj(vec![("textDocumentSync", num(1)), ("documentFormattingProvider", Json::Bool(true))])),
-                ("serverInfo", obj(vec![("name", Json::Str("brasa-parse".into()))])),
+                ("serverInfo", obj(vec![("name", Json::Str("zila-parse".into()))])),
             ]),
         ),
         "shutdown" => {

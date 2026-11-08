@@ -1,7 +1,7 @@
 // =====================================================================
-// Brasa standard library: futures (`async func`, `await`)
+// Zila Lang standard library: futures (`async func`, `await`)
 //
-// Written in Brasa. The compiler lowers
+// Written in Zila Lang. The compiler lowers
 //
 //     async func f(a) -> T          to      a function returning Future<T>
 //     await e                       to      future.wait(e)

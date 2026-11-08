@@ -1,6 +1,6 @@
 """Records what the real SQL Server container (plain port 51433) answers to the client program
 tests/data/sqlserver-client.br, as hex, into tests/data/sqlserver-exchange.txt. The replay test in
-tests/sqlserver.rs plays the same replies back, one per request message, to the Brasa driver, so the
+tests/sqlserver.rs plays the same replies back, one per request message, to the Zila Lang driver, so the
 real token streams are checked without Docker.
 
     docker compose -f tests/docker/compose.yml up -d --wait
@@ -62,7 +62,7 @@ def main():
     src = open(CLIENT, encoding="utf-8").read().replace("@PORT@", str(PORT))
     br = os.path.join(os.path.dirname(exe), "rec.br")
     open(br, "w", encoding="utf-8").write(src)
-    compiler = os.path.join(ROOT, "target", "debug", "brasa-parse.exe")
+    compiler = os.path.join(ROOT, "target", "debug", "zila-parse.exe")
     subprocess.run([compiler, br, "-o", exe], check=True)
     listener = socket.socket()
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

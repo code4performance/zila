@@ -1,6 +1,6 @@
 ## Why
 
-The Model Context Protocol is how AI hosts (Claude Desktop, Claude Code, IDEs) call tools, read resources and use prompts from other programs. A Brasa program that can be an MCP server can expose a database, a knowledge base or any function to those hosts, and one that can be an MCP client can use remote tools in its own agent. With `add-ai-client`'s `ai.Tool`, one tool definition serves both a local agent and an MCP server.
+The Model Context Protocol is how AI hosts (Claude Desktop, Claude Code, IDEs) call tools, read resources and use prompts from other programs. A Zila Lang program that can be an MCP server can expose a database, a knowledge base or any function to those hosts, and one that can be an MCP client can use remote tools in its own agent. With `add-ai-client`'s `ai.Tool`, one tool definition serves both a local agent and an MCP server.
 
 ## What Changes
 

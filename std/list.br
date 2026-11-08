@@ -1,10 +1,10 @@
 // =====================================================================
-// Brasa standard library: lists
+// Zila Lang standard library: lists
 //
 //     use list
 //     let doubled = list.map([1, 2, 3], func(n) n * 2 end)
 //
-// Generic helpers written in Brasa. None of them changes the list it is given:
+// Generic helpers written in Zila Lang. None of them changes the list it is given:
 // they build and return new lists.
 // =====================================================================
 

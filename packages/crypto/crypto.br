@@ -1,5 +1,5 @@
 // =====================================================================
-// Brasa standard library: hashes, message authentication, encodings and random bytes
+// Zila Lang standard library: hashes, message authentication, encodings and random bytes
 // (`use crypto`)
 //
 //   use crypto
@@ -12,7 +12,7 @@
 //
 // Binary values (digests, keys, random bytes) are carried in a `text` whose bytes are the
 // binary data, like the data a socket returns: it is not necessarily UTF-8, so print it through
-// `hex` or `base64_encode`. Plain Brasa, written from FIPS 180-4 (SHA-256), RFC 1321 (MD5),
+// `hex` or `base64_encode`. Plain Zila Lang, written from FIPS 180-4 (SHA-256), RFC 1321 (MD5),
 // RFC 2104 and RFC 4231 (HMAC), RFC 8018 and RFC 7914 (PBKDF2) and RFC 4648 (base64).
 //
 // This library is for protocol use (logins, tokens, checksums): it offers no ciphers or

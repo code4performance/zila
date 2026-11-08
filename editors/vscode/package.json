@@ -1,13 +1,13 @@
 {
-  "name": "brasa-lang",
-  "displayName": "Brasa Programming Language",
-  "description": "Syntax highlighting, syntax errors and formatting for Brasa (.br), through the brasa-parse language server",
-  "version": "0.2.0",
-  "publisher": "brasa",
+  "name": "zila-lang",
+  "displayName": "Zila Lang Programming Language",
+  "description": "Syntax highlighting, syntax errors and formatting for Zila Lang (.br), through the zila-parse language server",
+  "version": "0.3.0",
+  "publisher": "zila",
   "license": "MIT OR Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/code4performance/brasa-parser"
+    "url": "https://github.com/code4performance/zila"
   },
   "engines": {
     "vscode": "^1.75.0"
@@ -22,17 +22,17 @@
       "supported": "limited",
       "description": "The language server is an executable named by a setting; it is not started from an untrusted workspace's settings.",
       "restrictedConfigurations": [
-        "brasa.server.path"
+        "zila.server.path"
       ]
     }
   },
   "contributes": {
     "languages": [
       {
-        "id": "brasa",
+        "id": "zila",
         "aliases": [
-          "Brasa",
-          "brasa"
+          "Zila Lang",
+          "zila"
         ],
         "extensions": [
           ".br"
@@ -42,37 +42,37 @@
     ],
     "grammars": [
       {
-        "language": "brasa",
-        "scopeName": "source.brasa",
-        "path": "./syntaxes/brasa.tmLanguage.json"
+        "language": "zila",
+        "scopeName": "source.zila",
+        "path": "./syntaxes/zila.tmLanguage.json"
       }
     ],
     "configuration": {
-      "title": "Brasa",
+      "title": "Zila Lang",
       "properties": {
-        "brasa.server.path": {
+        "zila.server.path": {
           "type": "string",
-          "default": "brasa-parse",
+          "default": "zila-parse",
           "scope": "machine-overridable",
-          "markdownDescription": "The `brasa-parse` executable that runs the language server (`brasa-parse --lsp`). A name is looked up on `PATH`."
+          "markdownDescription": "The `zila-parse` executable that runs the language server (`zila-parse --lsp`). A name is looked up on `PATH`."
         },
-        "brasa.server.enabled": {
+        "zila.server.enabled": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "Run the language server for syntax errors and formatting. Highlighting works without it."
         },
-        "brasa.trace": {
+        "zila.trace": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Write the messages exchanged with the language server to the **Brasa Language Server** output channel."
+          "markdownDescription": "Write the messages exchanged with the language server to the **Zila Lang Language Server** output channel."
         }
       }
     },
     "commands": [
       {
-        "command": "brasa.restartServer",
+        "command": "zila.restartServer",
         "title": "Restart Language Server",
-        "category": "Brasa"
+        "category": "Zila Lang"
       }
     ]
   }

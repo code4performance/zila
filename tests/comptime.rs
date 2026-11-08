@@ -2,7 +2,7 @@
 //! the comptime subset, limits, the cache and diagnostics (spec `comptime-reflection`). Programs are
 //! compiled to native executables and run (skipped when the build cannot run them).
 
-use brasa::{compile_to_native, parse_source};
+use zila::{compile_to_native, parse_source};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Once;
@@ -13,16 +13,16 @@ static INIT: Once = Once::new();
 /// A cache directory of this test process, so that runs of the test suite do not see each other.
 fn setup() {
     INIT.call_once(|| {
-        let dir = std::env::temp_dir().join(format!("brasa-comptime-test-cache-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("zila-comptime-test-cache-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        brasa::comptime::set_cache_dir(&dir);
+        zila::comptime::set_cache_dir(&dir);
     });
 }
 
 fn build(src: &str) -> Result<std::path::PathBuf, String> {
     setup();
     let file = parse_source(src).unwrap_or_else(|d| panic!("parse error: {}", d));
-    let exe = std::env::temp_dir().join(format!("brasa-comptime-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let exe = std::env::temp_dir().join(format!("zila-comptime-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     compile_to_native(&file, exe.to_str().unwrap()).map(|_| exe)
 }
 
@@ -48,7 +48,7 @@ fn compile_error(src: &str) -> String {
 /// How many times the generator `name` was run (not served from the cache) in this process.
 fn launches(name: &str) -> usize {
     let prefix = format!("{}(", name);
-    brasa::comptime::launch_log().iter().filter(|l| l.starts_with(&prefix)).count()
+    zila::comptime::launch_log().iter().filter(|l| l.starts_with(&prefix)).count()
 }
 
 const DESCRIBE: &str = r#"
@@ -92,7 +92,7 @@ fn line_of(src: &str, needle: &str) -> usize {
 
 #[test]
 fn reflection_data_round_trips_through_the_wire_format() {
-    use brasa::comptime::reflect::{parse_wire, serialize_call, ModFile, Reflector, Universe, WireCall};
+    use zila::comptime::reflect::{parse_wire, serialize_call, ModFile, Reflector, Universe, WireCall};
     let src = r#"package main
 
 type Address = record
@@ -267,7 +267,7 @@ fn an_unknown_derive_is_reported_at_the_attribute() {
 #[test]
 fn a_derive_name_in_two_packages_is_ambiguous_until_qualified() {
     for (pkg, word) in [("cta_one", "one"), ("cta_two", "two")] {
-        brasa::comptime::register_package(
+        zila::comptime::register_package(
             pkg,
             &format!(
                 "package {}\nuse reflect\n#[derive]\ncomptime func tag(t: Type) -> text\n    return \"func (v: {{t.name()}}) tag() -> text\\n    return \\\"{}\\\"\\nend\\n\"\nend\n",
@@ -460,9 +460,9 @@ fn a_block_is_an_expression_a_template_or_statements() {
 }
 
 #[test]
-fn a_block_content_need_not_be_brasa() {
-    let src = format!("package main\nuse text\n{}\nfunc main()\n    let s = shout\n{}\nend\n    print(s)\nend\n", BLOCKS, "this is ] not <Brasa> at all ((");
-    assert_eq!(run(&src).trim(), "THIS IS ] NOT <BRASA> AT ALL ((");
+fn a_block_content_need_not_be_zila() {
+    let src = format!("package main\nuse text\n{}\nfunc main()\n    let s = shout\n{}\nend\n    print(s)\nend\n", BLOCKS, "this is ] not <Zila> at all ((");
+    assert_eq!(run(&src).trim(), "THIS IS ] NOT <ZILA> AT ALL ((");
 }
 
 #[test]
@@ -691,9 +691,9 @@ func main()
 end
 "##;
     let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    brasa::comptime::set_timeout_secs(1);
+    zila::comptime::set_timeout_secs(1);
     let e = compile_error(src);
-    brasa::comptime::set_timeout_secs(5);
+    zila::comptime::set_timeout_secs(5);
     assert!(e.contains("comptime function `endless_gen` did not finish within 1 seconds"), "{}", e);
     assert!(e.contains(&format!("main.br:{}:", line_of(src, "type X"))), "{}", e);
 }
@@ -805,16 +805,16 @@ fn a_different_compiler_version_and_the_no_cache_flag_run_the_generator_again() 
     let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let src = cached_program("cache_version", "a", "b", "");
     compiles(&src);
-    brasa::comptime::set_version_tag("another compiler");
+    zila::comptime::set_version_tag("another compiler");
     compiles(&src);
-    brasa::comptime::set_version_tag("");
+    zila::comptime::set_version_tag("");
     assert_eq!(launches("cache_version"), 2);
     compiles(&src);
     assert_eq!(launches("cache_version"), 2);
-    brasa::comptime::set_cache_enabled(false);
+    zila::comptime::set_cache_enabled(false);
     compiles(&src);
     compiles(&src);
-    brasa::comptime::set_cache_enabled(true);
+    zila::comptime::set_cache_enabled(true);
     assert_eq!(launches("cache_version"), 4);
 }
 
@@ -841,7 +841,7 @@ end
 
 #[test]
 fn comptime_runs_on_the_host_whatever_the_target() {
-    use brasa::codegen_x64::{compile_to_linux, generate_asm_for, CompileOptions, Target};
+    use zila::codegen_x64::{compile_to_linux, generate_asm_for, CompileOptions, Target};
     setup();
     let file = parse_source(TARGETED).unwrap();
     let opts = CompileOptions::default();
@@ -853,7 +853,7 @@ fn comptime_runs_on_the_host_whatever_the_target() {
     assert!(e.contains("built_for_windows"), "{}", e);
     let linux_src = TARGETED.replace("x.built_for_windows()", "x.built_for_linux()");
     let file = parse_source(&linux_src).unwrap();
-    let out = std::env::temp_dir().join(format!("brasa-comptime-test-linux-{}", std::process::id()));
+    let out = std::env::temp_dir().join(format!("zila-comptime-test-linux-{}", std::process::id()));
     compile_to_linux(&file, out.to_str().unwrap(), &opts).unwrap();
     let bytes = std::fs::read(&out).unwrap();
     let _ = std::fs::remove_file(&out);
@@ -872,7 +872,7 @@ fn the_comptime_example_prints_what_the_docs_say() {
 
 #[test]
 fn a_library_generated_function_works_for_private_types_and_recurses_through_fields() {
-    brasa::comptime::register_package(
+    zila::comptime::register_package(
         "ctl_sizes",
         r##"package ctl_sizes
 use reflect

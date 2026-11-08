@@ -2,7 +2,7 @@
 //! compiled to native executables and run (skipped when the Visual Studio build tools are
 //! missing).
 
-use brasa::{compile_to_native, parse_source};
+use zila::{compile_to_native, parse_source};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -10,7 +10,7 @@ static N: AtomicUsize = AtomicUsize::new(0);
 
 fn run(src: &str) -> Option<(String, i32)> {
     let file = parse_source(src).unwrap_or_else(|d| panic!("parse error: {}", d));
-    let exe = std::env::temp_dir().join(format!("brasa-floats-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let exe = std::env::temp_dir().join(format!("zila-floats-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     match compile_to_native(&file, exe.to_str().unwrap()) {
         Ok(()) => {}
         Err(e) if e.contains("could not find Visual Studio") => {
@@ -28,7 +28,7 @@ fn run(src: &str) -> Option<(String, i32)> {
 /// The compile error of a program that must not compile.
 fn compile_error(src: &str) -> String {
     let file = parse_source(src).unwrap_or_else(|d| panic!("parse error: {}", d));
-    let exe = std::env::temp_dir().join(format!("brasa-floats-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let exe = std::env::temp_dir().join(format!("zila-floats-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     match compile_to_native(&file, exe.to_str().unwrap()) {
         Ok(()) => panic!("expected a compile error"),
         Err(e) => e,
@@ -372,7 +372,7 @@ fn native_printing_matches_the_reference_formatter() {
     for v in &values {
         body.push_str(&format!("println({}{})\n", if v.is_sign_negative() { "-" } else { "" }, bits_to_literal(v.abs())));
     }
-    let expected: String = values.iter().map(|v| format!("{}\n", brasa::float_text(*v))).collect();
+    let expected: String = values.iter().map(|v| format!("{}\n", zila::float_text(*v))).collect();
     let Some((out, code)) = run(&main_of(&body)) else { return };
     assert_eq!(code, 0);
     for (i, (a, b)) in out.lines().zip(expected.lines()).enumerate() {
@@ -398,7 +398,7 @@ fn native_f32_printing_matches_the_reference_formatter() {
     for v in &vals {
         body.push_str(&format!("let v: f32 = {}{:e}\nprintln(v)\n", if v.is_sign_negative() { "-" } else { "" }, v.abs()));
     }
-    let expected: String = vals.iter().map(|v| format!("{}\n", brasa::float_text_f32(*v))).collect();
+    let expected: String = vals.iter().map(|v| format!("{}\n", zila::float_text_f32(*v))).collect();
     let Some((out, code)) = run(&main_of(&body)) else { return };
     assert_eq!(code, 0);
     for (i, (a, b)) in out.lines().zip(expected.lines()).enumerate() {
@@ -412,7 +412,7 @@ fn a_bare_metal_kernel_rejects_floats() {
     let boot = parse_source(&std::fs::read_to_string("os/boot.br").unwrap()).unwrap();
     for body in ["let x = 1.5", "let x: float = 0.0", "let x: f32 = 0.0"] {
         let kernel = parse_source(&format!("package main\nfunc console_write(s: text)\nend\nfunc main()\n    {}\nend\n", body)).unwrap();
-        let e = brasa::codegen_x64::build_os(&boot, &kernel).unwrap_err();
+        let e = zila::codegen_x64::build_os(&boot, &kernel).unwrap_err();
         assert!(e.contains("floating point") && e.contains("bare-metal"), "{}: {}", body, e);
     }
 }

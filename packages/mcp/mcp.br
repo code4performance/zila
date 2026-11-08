@@ -1,5 +1,5 @@
 // =====================================================================
-// Brasa standard library: the Model Context Protocol (`use mcp`)
+// Zila Lang standard library: the Model Context Protocol (`use mcp`)
 //
 //     use mcp
 //     use ai
@@ -19,7 +19,7 @@
 //
 // A server that exposes tools (the same `ai.Tool` values a local agent uses), resources and
 // prompts to any MCP host, over stdio (one JSON-RPC message per line) or Streamable HTTP, and a
-// client for Streamable HTTP servers. Written in Brasa on `json`, `web` and `ai`.
+// client for Streamable HTTP servers. Written in Zila Lang on `json`, `web` and `ai`.
 //
 //   * JSON-RPC 2.0: errors have the standard codes (-32700 parse error, -32600 invalid request,
 //     -32601 method not found, -32602 invalid params, -32603 internal error) and -32002 for a
@@ -919,7 +919,7 @@ end
 pub func connect(url: text, token: text) -> Client or error
     let c = Client { url: url, token: token, session: "", version: "", next_id: 0 }
     var info: Map<text, json.Value> = {}
-    info["name"] = jtext("brasa")
+    info["name"] = jtext("zila")
     info["version"] = jtext("1.0")
     var p: Map<text, json.Value> = {}
     p["protocolVersion"] = jtext(VERSIONS[0])

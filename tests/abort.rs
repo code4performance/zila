@@ -2,8 +2,8 @@
 //! and list `get`. Programs are built for Windows and (through WSL) for Linux, with and without
 //! the optimizer; a machine without the toolchain skips the tests that need it.
 
-use brasa::codegen_x64::{compile_to_linux, compile_to_native_with, generate_asm_for, CompileOptions, Target};
-use brasa::parse_source;
+use zila::codegen_x64::{compile_to_linux, compile_to_native_with, generate_asm_for, CompileOptions, Target};
+use zila::parse_source;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -20,7 +20,7 @@ struct Ran {
 }
 
 fn temp(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("brasa-abort-test-{}-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst), name))
+    std::env::temp_dir().join(format!("zila-abort-test-{}-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst), name))
 }
 
 /// Builds and runs on Windows with the two streams apart; `None` without the toolchain.
@@ -223,7 +223,7 @@ fn test_mode_is_off_by_default() {
 fn run_tests(src: &str) -> Option<(String, String, i32)> {
     let p = temp("tests.br");
     std::fs::write(&p, src).unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_brasa-parse")).arg("--test").arg(&p).output().unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_zila-parse")).arg("--test").arg(&p).output().unwrap();
     let _ = std::fs::remove_file(&p);
     let (stdout, stderr) = (String::from_utf8_lossy(&out.stdout).replace('\r', ""), String::from_utf8_lossy(&out.stderr).replace('\r', ""));
     let code = out.status.code().unwrap();

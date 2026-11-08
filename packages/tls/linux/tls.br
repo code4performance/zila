@@ -1,5 +1,5 @@
 // =====================================================================
-// Brasa standard library: TLS client (`use tls`) (Linux layer)
+// Zila Lang standard library: TLS client (`use tls`) (Linux layer)
 //
 // The Linux counterpart of std/tls.br, with the same functions and behavior. It uses OpenSSL 3
 // (libssl.so.3, which every current distribution ships) through `extern`. OpenSSL works on

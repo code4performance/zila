@@ -2,8 +2,8 @@
 //! type names in errors and the element ceiling. Programs are compiled to native executables and
 //! run where that is needed (skipped when the Visual Studio build tools are missing).
 
-use brasa::codegen_x64::generate_asm;
-use brasa::{compile_to_native, parse_source};
+use zila::codegen_x64::generate_asm;
+use zila::{compile_to_native, parse_source};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -35,7 +35,7 @@ fn fails(src: &str, wanted: &[&str]) {
 
 fn run(src: &str) -> Option<(String, i32)> {
     let file = parse_source(src).unwrap_or_else(|d| panic!("parse error: {}", d));
-    let exe = std::env::temp_dir().join(format!("brasa-int-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let exe = std::env::temp_dir().join(format!("zila-int-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     match compile_to_native(&file, exe.to_str().unwrap()) {
         Ok(()) => {}
         Err(e) if e.contains("could not find Visual Studio") => {

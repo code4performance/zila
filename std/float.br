@@ -1,7 +1,7 @@
 // =====================================================================
-// Brasa standard library: printing floats
+// Zila Lang standard library: printing floats
 //
-// Written in Brasa, with integers only. The compiler calls `to_text`
+// Written in Zila Lang, with integers only. The compiler calls `to_text`
 // whenever a `float`, `f64` or `f32` is printed or interpolated.
 //
 // It gives the shortest decimal digits that read back as exactly the same

@@ -1,7 +1,7 @@
 // =====================================================================
-// Brasa standard library: TLS client (`use tls`)
+// Zila Lang standard library: TLS client (`use tls`)
 //
-// Written in Brasa on the Windows SChannel security package (secur32.dll; Linux uses
+// Written in Zila Lang on the Windows SChannel security package (secur32.dll; Linux uses
 // std/tls.linux.br on OpenSSL),
 // over the TCP connections of `net`. The server certificate is checked
 // against the Windows trust store and the host name. No call blocks the

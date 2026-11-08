@@ -1,5 +1,5 @@
 // =====================================================================
-// Brasa standard library: json
+// Zila Lang standard library: json
 //
 //     use json
 //
@@ -18,7 +18,7 @@
 // JSON as a library: there is no JSON code in the compiler. `parse` and `encode` are #[generated]
 // functions: for each type they are called with, the comptime functions at the end of this file
 // read the type through `reflect` (fields, attributes, enum cases, element types) and write the
-// decoder or encoder for it. Everything else is ordinary Brasa: the scanner, the string and
+// decoder or encoder for it. Everything else is ordinary Zila Lang: the scanner, the string and
 // number rules, the writer.
 //
 // The public surface is `Value`, `Options`, `parse_value`, `stringify`, `stringify_with`, `parse`,
@@ -1096,7 +1096,7 @@ end
 
 // ---- the generators ----
 //
-// Comptime code: it sees types, not values, and returns the Brasa source of a function body.
+// Comptime code: it sees types, not values, and returns the Zila Lang source of a function body.
 
 // What the generated code writes for the kind of `t`; the leaf kinds have an expression that
 // decodes them, the others have a function (a specialization of `__dec`).

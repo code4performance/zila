@@ -1,6 +1,6 @@
-# Brasa Project Charter
+# Zila Lang Project Charter
 
-This charter is the statute of the Brasa project: what it stands for, who decides what, and the rules everyone who takes part agrees to follow. It is short on purpose. For the practical steps of sending a contribution, see [CONTRIBUTING.md](CONTRIBUTING.md). For how people must treat each other, see the [Code of Conduct](CODE_OF_CONDUCT.md).
+This charter is the statute of the Zila Lang project: what it stands for, who decides what, and the rules everyone who takes part agrees to follow. It is short on purpose. For the practical steps of sending a contribution, see [CONTRIBUTING.md](CONTRIBUTING.md). For how people must treat each other, see the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Contents
 
@@ -20,7 +20,7 @@ This charter is the statute of the Brasa project: what it stands for, who decide
 
 ## Purpose
 
-Brasa is a compiled programming language that aims to be readable enough for a beginner and close enough to the machine to write an operating system. The project exists to build that language, its compiler, its standard library and its documentation, in the open, with a community.
+Zila Lang is a compiled programming language that aims to be readable enough for a beginner and close enough to the machine to write an operating system. The project exists to build that language, its compiler, its standard library and its documentation, in the open, with a community.
 
 The project does **not** exist to add every feature that is requested. A small, coherent language is worth more than a large, confusing one.
 
@@ -30,7 +30,7 @@ The project does **not** exist to add every feature that is requested. A small, 
 
 These principles are the tie-breakers. When two reasonable choices compete, the one that fits the principles better wins, and decisions record which principle they relied on.
 
-1. **Readable first.** Code is read far more than it is written. A beginner should be able to read a Brasa program from top to bottom.
+1. **Readable first.** Code is read far more than it is written. A beginner should be able to read a Zila Lang program from top to bottom.
 2. **Explicit over implicit.** If something important happens (a copy, a pointer, a failure, an unsafe operation, a point where a task may give up the processor), it is visible in the code.
 3. **Simple over clever.** Prefer a plain construct to a syntactic trick. If a feature needs a long chapter to explain, it probably does not belong.
 4. **Errors are values.** There are no exceptions. A function that can fail says so in its type, and propagation is visible (`try`).
@@ -38,7 +38,7 @@ These principles are the tie-breakers. When two reasonable choices compete, the 
 6. **Unsafe must be loud.** Anything that can cause undefined behavior sits inside an `unsafe` block, which should be small and explained.
 7. **Honest costs.** No hidden allocation or hidden runtime. Memory management is predictable (reference counting, with `drop` for resources).
 8. **C is a first-class neighbour.** Calling C, being called from C, and running with no operating system are core uses, not afterthoughts.
-9. **A lean, readable toolchain.** The compiler has no external dependencies. The standard library is written in Brasa wherever possible, so it can be read and improved by the people who use it.
+9. **A lean, readable toolchain.** The compiler has no external dependencies. The standard library is written in Zila Lang wherever possible, so it can be read and improved by the people who use it.
 10. **Specified, tested and documented, or it does not exist.** A feature is finished only when its behavior is written as testable scenarios, covered by tests, and described in the documentation.
 
 ---
@@ -63,7 +63,7 @@ Roles describe responsibility, not rank. Everyone is held to the same Code of Co
 
 **Day to day: lazy consensus.** Most changes (fixes, tests, documentation, small improvements) need no ceremony. A pull request with an approval and passing tests can be merged unless someone raises a reasoned objection.
 
-**Language and library design: proposals.** Anything that changes what Brasa programs mean, or the public shape of the standard library, goes through the proposal process in [the next section](#the-life-of-a-proposal). A maintainer decides after the discussion period; the decision is recorded with its reasons.
+**Language and library design: proposals.** Anything that changes what Zila Lang programs mean, or the public shape of the standard library, goes through the proposal process in [the next section](#the-life-of-a-proposal). A maintainer decides after the discussion period; the decision is recorded with its reasons.
 
 **What makes a proposal acceptable.** A proposal is judged on whether it:
 
@@ -101,7 +101,7 @@ Small changes may combine steps, but never skip the principle behind them: *deci
 ## Compatibility and versions
 
 - **Before 1.0**, the language may change in ways that break programs. Every breaking change must be named as such in its proposal, include a migration note, and have the longer discussion period. We will keep such changes few and deliberate.
-- **While the standards are still being set**, all Brasa code lives in this repository, so a breaking change is paid for by rewriting that code (the standard library, `os/`, the examples and the tests) in the same change. There is no automatic migration tool yet. The rewritten code and its tests are the proof that the migration note is correct.
+- **While the standards are still being set**, all Zila Lang code lives in this repository, so a breaking change is paid for by rewriting that code (the standard library, `os/`, the examples and the tests) in the same change. There is no automatic migration tool yet. The rewritten code and its tests are the proof that the migration note is correct.
 - **Before 1.0**, a short list of foundational decisions is frozen (memory model, error model, visibility, concurrency and transfer rules). They cannot change without a new major version, because the package manager depends on them.
 - **From 1.0**, projects declare an `edition` in their manifest, so the compiler can evolve without breaking older libraries. Existing programs keep working across minor versions. Breaking changes need a deprecation period of at least one minor version with a clear warning, and are bundled into a new major version.
 - Versions follow `MAJOR.MINOR.PATCH`. The language specification, the compiler and the standard library are versioned together until there is a reason to split them.
@@ -132,7 +132,7 @@ Nobody is penalized for disagreeing in good faith.
 The project is intended to be released under the **MIT** license or the **Apache License 2.0**, at the user's choice.
 
 - Contributions are accepted under the same terms: by submitting one, you confirm you have the right to do so and that it may be distributed under them.
-- Programs written *in* Brasa belong entirely to their authors. The compiler's license does not apply to the programs it compiles, nor to the small runtime that the compiler links into them.
+- Programs written *in* Zila Lang belong entirely to their authors. The compiler's license does not apply to the programs it compiles, nor to the small runtime that the compiler links into them.
 - Code copied from elsewhere must have a compatible license and be credited. If in doubt, ask before including it.
 
 ---

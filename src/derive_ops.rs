@@ -1,7 +1,7 @@
 //! The standard interfaces `Eq`, `Ord` and `Hash` (spec `standard-interfaces`).
 //!
 //! A type has `eq`, `compare` or `hash` when the program declares the method or the compiler
-//! derives it. Derived methods are ordinary methods written as Brasa source for each type (field
+//! derives it. Derived methods are ordinary methods written as Zila Lang source for each type (field
 //! by field, variant by variant) and compiled on first need, with the type bound to `__T`. They
 //! are built on the intrinsics `__eq`, `__cmp`, `__hash`, `__tag`, `__payload` and `__mix`, which
 //! know the built-in types. Section 2 of the design says the derivation is comptime code on top
@@ -216,7 +216,7 @@ impl Compiler {
         Ok(Some(sig))
     }
 
-    /// The Brasa source of the derived method `cap` for `ty`.
+    /// The Zila Lang source of the derived method `cap` for `ty`.
     fn derive_source(&self, ty: &Ty, cap: Cap) -> String {
         let head = match cap {
             Cap::Eq => "func (a: __T) eq(b: __T) -> bool\n",

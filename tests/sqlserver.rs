@@ -1,10 +1,10 @@
-//! The `sqlserver` driver (spec `sqlserver-driver`). A fake TDS server written in Brasa covers the
+//! The `sqlserver` driver (spec `sqlserver-driver`). A fake TDS server written in Zila Lang covers the
 //! protocol edge cases (results over many packets, server errors, truncated and unknown tokens,
 //! refused encryption modes). Tests against the real SQL Server 2025 containers of `tests/docker`
-//! run when `BRASA_TEST_SQLSERVER`, `BRASA_TEST_SQLSERVER_STRICT` or `BRASA_TEST_SQLSERVER_AI` are
+//! run when `ZILA_TEST_SQLSERVER`, `ZILA_TEST_SQLSERVER_STRICT` or `ZILA_TEST_SQLSERVER_AI` are
 //! set and print a skip line otherwise (source `tests/docker/env.ps1` after starting them).
 
-use brasa::{compile_to_native, parse_source};
+use zila::{compile_to_native, parse_source};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Once;
@@ -14,16 +14,16 @@ static INIT: Once = Once::new();
 
 fn setup() {
     INIT.call_once(|| {
-        let dir = std::env::temp_dir().join(format!("brasa-mssql-test-cache-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("zila-mssql-test-cache-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        brasa::comptime::set_cache_dir(&dir);
+        zila::comptime::set_cache_dir(&dir);
     });
 }
 
 fn build(src: &str) -> Result<std::path::PathBuf, String> {
     setup();
     let file = parse_source(src).unwrap_or_else(|d| panic!("parse error: {}", d));
-    let exe = std::env::temp_dir().join(format!("brasa-mssql-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let exe = std::env::temp_dir().join(format!("zila-mssql-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     compile_to_native(&file, exe.to_str().unwrap()).map(|_| exe)
 }
 
@@ -312,7 +312,7 @@ fn a_cut_or_unknown_token_stream_is_an_error_not_a_crash() {
 
 fn env_url(name: &str) -> Option<String> {
     match std::env::var(name) {
-        // backslashes (`host\INSTANCE`) must be escaped to sit in a Brasa text literal
+        // backslashes (`host\INSTANCE`) must be escaped to sit in a Zila Lang text literal
         Ok(u) if !u.is_empty() => Some(u.replace('\\', "\\\\")),
         _ => {
             eprintln!("skipped: set {} (see tests/docker/README.md) to run this test", name);
@@ -343,21 +343,21 @@ fn typed_program(url: &str) -> String {
 
 #[test]
 fn strict_encryption_tds_8_reads_typed_rows_parameters_and_maps_unique_violations() {
-    let Some(u) = env_url("BRASA_TEST_SQLSERVER_STRICT") else { return };
+    let Some(u) = env_url("ZILA_TEST_SQLSERVER_STRICT") else { return };
     let out = run(&typed_program(&u));
     assert_eq!(out, TYPES_EXPECTED.replace("true\n", "true\n").replace("std.AlreadyExists true", "std.AlreadyExists true"), "{}", out);
 }
 
 #[test]
 fn unencrypted_development_mode_gives_the_same_results() {
-    let Some(u) = env_url("BRASA_TEST_SQLSERVER") else { return };
+    let Some(u) = env_url("ZILA_TEST_SQLSERVER") else { return };
     let out = run(&typed_program(&u));
     assert_eq!(out, TYPES_EXPECTED, "{}", out);
 }
 
 #[test]
 fn a_wrong_login_is_unauthenticated() {
-    let Some(u) = env_url("BRASA_TEST_SQLSERVER") else { return };
+    let Some(u) = env_url("ZILA_TEST_SQLSERVER") else { return };
     // the password is the text between the first `:` after the user and the `@`
     let start = u.find("://").unwrap() + 3;
     let at = u.find('@').unwrap();
@@ -369,8 +369,8 @@ fn a_wrong_login_is_unauthenticated() {
 
 #[test]
 fn a_server_that_forces_encryption_is_refused_in_off_mode() {
-    // needs the server of tests/docker that forces encryption (BRASA_TEST_SQLSERVER_STRICT)
-    let Some(u) = env_url("BRASA_TEST_SQLSERVER_STRICT") else { return };
+    // needs the server of tests/docker that forces encryption (ZILA_TEST_SQLSERVER_STRICT)
+    let Some(u) = env_url("ZILA_TEST_SQLSERVER_STRICT") else { return };
     let off = u.replace("encrypt=strict", "encrypt=off");
     let src = format!("package main\n\nuse sqlserver\n\nfunc main()\n    match sqlserver.open(\"{off}\")\n        ok(c) -> print(\"unexpected\")\n        err(e) -> print(e.kind.name + \": \" + e.message)\n    end\nend\n");
     assert_eq!(run(&src), "std.Unsupported: the server requires encryption: use encrypt=strict\n");
@@ -378,7 +378,7 @@ fn a_server_that_forces_encryption_is_refused_in_off_mode() {
 
 #[test]
 fn transactions_commit_and_roll_back_on_the_real_server() {
-    let Some(u) = env_url("BRASA_TEST_SQLSERVER") else { return };
+    let Some(u) = env_url("ZILA_TEST_SQLSERVER") else { return };
     let body = "    let t = try conn.begin()\n    try t.conn.exec(\"insert into #customers(id, name) values (@p1, @p2)\", db.int(9001), db.str(\"tx\"))\n    let inside = try db.one(int, t.conn, \"select count(*) from #customers where id = 9001\")\n    try t.rollback()\n    let after = try db.one(int, conn, \"select count(*) from #customers where id = 9001\")\n    print(inside, after)\n    let t2 = try conn.begin()\n    try t2.conn.exec(\"insert into #customers(id, name) values (@p1, @p2)\", db.int(9002), db.str(\"kept\"))\n    try t2.commit()\n    print(try db.one(int, conn, \"select count(*) from #customers where id = 9002\"))\n    try conn.exec(\"delete from #customers where id = 9002\")\n    let dropped = try conn.begin()\n    try dropped.conn.exec(\"insert into #customers(id, name) values (@p1, @p2)\", db.int(9003), db.str(\"gone\"))\n";
     let src = real_program(&u, "", body).replace("    let dropped = try conn.begin()", "    try forget(conn)\n    let dropped = try conn.begin()").replace(
         "func main()",
@@ -390,7 +390,7 @@ fn transactions_commit_and_roll_back_on_the_real_server() {
 
 #[test]
 fn a_slow_statement_does_not_stall_other_tasks_on_the_real_server() {
-    let Some(u) = env_url("BRASA_TEST_SQLSERVER") else { return };
+    let Some(u) = env_url("ZILA_TEST_SQLSERVER") else { return };
     let body = "    let ticks = Ticks { n: 0 }\n    spawn tick(ticks)\n    let r = try db.one(int, conn, \"waitfor delay '00:00:00.600'; select 7\")\n    print(r, ticks.n >= 4)\n";
     let src = real_program(&u, "", body).replace(
         "func main()",
@@ -405,21 +405,21 @@ fn a_slow_statement_does_not_stall_other_tasks_on_the_real_server() {
 
 #[test]
 fn crud_on_the_users_table() {
-    let Some(u) = env_url("BRASA_TEST_SQLSERVER_AI") else { return };
+    let Some(u) = env_url("ZILA_TEST_SQLSERVER_AI") else { return };
     let types = "\ntype User = record\n    id: text\n    username: text\n    #[db(\"display_name\")] display: text?\n    email: text?\n    department: text?\n    role: text\n    access_status: text\n    created: text\nend\n";
     let select = "select cast(Id as nvarchar(36)) as id, Username as username, DisplayName as display_name, Email as email, Department as department, Role as role, AccessStatus as access_status, convert(nvarchar(30), CreatedAtUtc, 126) as created from dbo.Users";
     let body = format!(
-        "    try conn.exec(\"delete from dbo.Users where Username like N'brasa-crud-%'\")\n    // Create\n    let n1 = try conn.exec(\"insert into dbo.Users (Id, Username, DisplayName, Email, Department, AuthSource, Role, AccessStatus, CreatedAtUtc) values (newid(), @p1, @p2, @p3, @p4, N'Local', N'User', N'Active', sysutcdatetime())\", db.str(\"brasa-crud-ana\"), db.str(\"Ana Souza\"), db.str(\"ana@example.com\"), db.null())\n    let n2 = try conn.exec(\"insert into dbo.Users (Id, Username, DisplayName, Email, Department, AuthSource, Role, AccessStatus, CreatedAtUtc) values (newid(), @p1, @p2, @p3, @p4, N'Local', N'Admin', N'Active', sysutcdatetime())\", db.str(\"brasa-crud-joão\"), db.str(\"João D'Arc 日本\"), db.null(), db.str(\"Engenharia\"))\n    print(\"created\", n1, n2)\n    // Read\n    let ana = try db.one(User, conn, \"{select} where Username = @p1\", db.str(\"brasa-crud-ana\"))\n    print(ana.username, ana.display ?? \"-\", ana.email ?? \"-\", ana.department ?? \"-\", ana.role, ana.access_status, ana.id.len, ana.created.len > 10)\n    let all = try db.query(User, conn, \"{select} where Username like N'brasa-crud-%' order by Username\")\n    for u in all\n        print(\"user\", u.username, u.display ?? \"-\", u.department ?? \"-\", u.role)\n    end\n    // Update\n    let up = try conn.exec(\"update dbo.Users set DisplayName = @p1, Department = @p2, AccessStatus = @p3 where Username = @p4\", db.str(\"Ana S.\"), db.str(\"Vendas\"), db.str(\"Suspended\"), db.str(\"brasa-crud-ana\"))\n    let after = try db.one(User, conn, \"{select} where Username = @p1\", db.str(\"brasa-crud-ana\"))\n    print(\"updated\", up, after.display ?? \"-\", after.department ?? \"-\", after.access_status)\n    let none = try conn.exec(\"update dbo.Users set Role = @p1 where Username = @p2\", db.str(\"X\"), db.str(\"nobody\"))\n    print(\"updated nobody\", none)\n    // a duplicate username is refused by the unique index\n    match conn.exec(\"insert into dbo.Users (Id, Username, AuthSource, Role, AccessStatus, CreatedAtUtc) values (newid(), @p1, N'Local', N'User', N'Active', sysutcdatetime())\", db.str(\"brasa-crud-ana\"))\n        ok(n) -> print(\"unexpected success\")\n        err(e) -> print(e.kind.name)\n    end\n    // Delete, with a rolled-back attempt first\n    let t = try conn.begin()\n    let gone = try t.conn.exec(\"delete from dbo.Users where Username = @p1\", db.str(\"brasa-crud-ana\"))\n    try t.rollback()\n    print(\"still there\", try db.one(int, conn, \"select count(*) from dbo.Users where Username = N'brasa-crud-ana'\"), gone)\n    let d1 = try conn.exec(\"delete from dbo.Users where Username = @p1\", db.str(\"brasa-crud-ana\"))\n    let d2 = try conn.exec(\"delete from dbo.Users where Username = @p1\", db.str(\"brasa-crud-joão\"))\n    print(\"deleted\", d1, d2)\n    match db.one(User, conn, \"{select} where Username = @p1\", db.str(\"brasa-crud-ana\"))\n        ok(r) -> print(\"unexpected\")\n        err(e) -> print(e.kind.name)\n    end\n    print(\"left\", try db.one(int, conn, \"select count(*) from dbo.Users where Username like N'brasa-crud-%'\"))\n",
+        "    try conn.exec(\"delete from dbo.Users where Username like N'zila-crud-%'\")\n    // Create\n    let n1 = try conn.exec(\"insert into dbo.Users (Id, Username, DisplayName, Email, Department, AuthSource, Role, AccessStatus, CreatedAtUtc) values (newid(), @p1, @p2, @p3, @p4, N'Local', N'User', N'Active', sysutcdatetime())\", db.str(\"zila-crud-ana\"), db.str(\"Ana Souza\"), db.str(\"ana@example.com\"), db.null())\n    let n2 = try conn.exec(\"insert into dbo.Users (Id, Username, DisplayName, Email, Department, AuthSource, Role, AccessStatus, CreatedAtUtc) values (newid(), @p1, @p2, @p3, @p4, N'Local', N'Admin', N'Active', sysutcdatetime())\", db.str(\"zila-crud-joão\"), db.str(\"João D'Arc 日本\"), db.null(), db.str(\"Engenharia\"))\n    print(\"created\", n1, n2)\n    // Read\n    let ana = try db.one(User, conn, \"{select} where Username = @p1\", db.str(\"zila-crud-ana\"))\n    print(ana.username, ana.display ?? \"-\", ana.email ?? \"-\", ana.department ?? \"-\", ana.role, ana.access_status, ana.id.len, ana.created.len > 10)\n    let all = try db.query(User, conn, \"{select} where Username like N'zila-crud-%' order by Username\")\n    for u in all\n        print(\"user\", u.username, u.display ?? \"-\", u.department ?? \"-\", u.role)\n    end\n    // Update\n    let up = try conn.exec(\"update dbo.Users set DisplayName = @p1, Department = @p2, AccessStatus = @p3 where Username = @p4\", db.str(\"Ana S.\"), db.str(\"Vendas\"), db.str(\"Suspended\"), db.str(\"zila-crud-ana\"))\n    let after = try db.one(User, conn, \"{select} where Username = @p1\", db.str(\"zila-crud-ana\"))\n    print(\"updated\", up, after.display ?? \"-\", after.department ?? \"-\", after.access_status)\n    let none = try conn.exec(\"update dbo.Users set Role = @p1 where Username = @p2\", db.str(\"X\"), db.str(\"nobody\"))\n    print(\"updated nobody\", none)\n    // a duplicate username is refused by the unique index\n    match conn.exec(\"insert into dbo.Users (Id, Username, AuthSource, Role, AccessStatus, CreatedAtUtc) values (newid(), @p1, N'Local', N'User', N'Active', sysutcdatetime())\", db.str(\"zila-crud-ana\"))\n        ok(n) -> print(\"unexpected success\")\n        err(e) -> print(e.kind.name)\n    end\n    // Delete, with a rolled-back attempt first\n    let t = try conn.begin()\n    let gone = try t.conn.exec(\"delete from dbo.Users where Username = @p1\", db.str(\"zila-crud-ana\"))\n    try t.rollback()\n    print(\"still there\", try db.one(int, conn, \"select count(*) from dbo.Users where Username = N'zila-crud-ana'\"), gone)\n    let d1 = try conn.exec(\"delete from dbo.Users where Username = @p1\", db.str(\"zila-crud-ana\"))\n    let d2 = try conn.exec(\"delete from dbo.Users where Username = @p1\", db.str(\"zila-crud-joão\"))\n    print(\"deleted\", d1, d2)\n    match db.one(User, conn, \"{select} where Username = @p1\", db.str(\"zila-crud-ana\"))\n        ok(r) -> print(\"unexpected\")\n        err(e) -> print(e.kind.name)\n    end\n    print(\"left\", try db.one(int, conn, \"select count(*) from dbo.Users where Username like N'zila-crud-%'\"))\n",
         select = select
     );
     let src = real_program(&u, types, &body);
-    let expected = "created 1 1\nbrasa-crud-ana Ana Souza ana@example.com - User Active 36 true\nuser brasa-crud-ana Ana Souza - User\nuser brasa-crud-joão João D'Arc 日本 Engenharia Admin\nupdated 1 Ana S. Vendas Suspended\nupdated nobody 0\nstd.AlreadyExists\nstill there 1 1\ndeleted 1 1\nstd.NotFound\nleft 0\n";
+    let expected = "created 1 1\nzila-crud-ana Ana Souza ana@example.com - User Active 36 true\nuser zila-crud-ana Ana Souza - User\nuser zila-crud-joão João D'Arc 日本 Engenharia Admin\nupdated 1 Ana S. Vendas Suspended\nupdated nobody 0\nstd.AlreadyExists\nstill there 1 1\ndeleted 1 1\nstd.NotFound\nleft 0\n";
     assert_eq!(run(&src), expected);
 }
 
 #[test]
 fn a_column_of_an_unsupported_type_is_an_error_naming_the_column_and_the_type() {
-    let Some(u) = env_url("BRASA_TEST_SQLSERVER") else { return };
+    let Some(u) = env_url("ZILA_TEST_SQLSERVER") else { return };
     let body = "    for q in [\"select cast(1 as sql_variant) as v\", \"select cast('x' as text) as t\", \"select 1 as ok, cast(1 as sql_variant) as payload\"]
         match db.query(text, conn, q)
             ok(r) -> print(\"unexpected success\")
@@ -438,7 +438,7 @@ std.Unsupported: column payload: the type sql_variant is not supported by this d
 
 #[test]
 fn xml_and_single_byte_text_in_cyrillic_and_central_european_code_pages_are_converted() {
-    let Some(u) = env_url("BRASA_TEST_SQLSERVER") else { return };
+    let Some(u) = env_url("ZILA_TEST_SQLSERVER") else { return };
     let body = "    print(try db.one(text, conn, \"select cast('<a b=\\\"1\\\">Zoë</a>' as xml)\"))
     let t = try db.one(text, conn, \"select cast(N'Привет, мир' collate Cyrillic_General_CI_AS as varchar(40)) collate Cyrillic_General_CI_AS\")
     print(t)
@@ -493,7 +493,7 @@ std.AlreadyExists: Violation of PRIMARY KEY constraint"), "{}", out);
 
 #[test]
 fn a_statement_that_times_out_is_cancelled_and_the_connection_stays_usable() {
-    let Some(u) = env_url("BRASA_TEST_SQLSERVER") else { return };
+    let Some(u) = env_url("ZILA_TEST_SQLSERVER") else { return };
     let url = format!("{u}{}timeout=400", if u.contains('?') { "&" } else { "?" });
     let body = "    let t0 = task.now()
     match db.one(int, conn, \"waitfor delay '00:00:05'; select 1\")
@@ -575,7 +575,7 @@ const SQL_BLOCKS_BODY: &str = r#"    let evil = "x'); drop table #customers; --"
 
 #[test]
 fn the_real_server_runs_sql_blocks_with_parameters_variables_and_rollback() {
-    let Some(u) = env_url("BRASA_TEST_SQLSERVER") else { return };
+    let Some(u) = env_url("ZILA_TEST_SQLSERVER") else { return };
     let src = real_program(&u, "\ntype Batch = record\n    total: int\nend\n", SQL_BLOCKS_BODY).replace("use crypto", "use crypto\nuse postgres");
     assert_eq!(
         run(&src),

@@ -1,6 +1,6 @@
 ## Purpose
 
-An HTTP/1.1 server with routing, middleware, JSON helpers and error-to-status mapping, an HTTP client and HTML templates that escape every interpolated value, written in Brasa on `net`, `tls`, `task` and `json`, with the same behavior on Windows and Linux.
+An HTTP/1.1 server with routing, middleware, JSON helpers and error-to-status mapping, an HTTP client and HTML templates that escape every interpolated value, written in Zila Lang on `net`, `tls`, `task` and `json`, with the same behavior on Windows and Linux.
 
 ## Requirements
 ### Requirement: HTTP/1.1 request parsing

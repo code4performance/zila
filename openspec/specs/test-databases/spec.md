@@ -28,10 +28,10 @@ Both servers SHALL start with a database `shop` holding the tables `customers` a
 - **THEN** the connection cannot be established
 
 ### Requirement: Test selection through environment variables
-`tests/db.rs` and `tests/rag.rs` SHALL run their real-server tests only when `BRASA_TEST_POSTGRES` (a URL), `BRASA_TEST_SQLSERVER` (a URL for the plain port) or `BRASA_TEST_SQLSERVER_STRICT` (a URL for the strict port) are set, and SHALL print a line saying which test was skipped and which variable enables it otherwise. A script `tests/docker/env.ps1` and `tests/docker/env.sh` SHALL set these variables for the environment above. A skipped test SHALL NOT count as a failure.
+`tests/db.rs` and `tests/rag.rs` SHALL run their real-server tests only when `ZILA_TEST_POSTGRES` (a URL), `ZILA_TEST_SQLSERVER` (a URL for the plain port) or `ZILA_TEST_SQLSERVER_STRICT` (a URL for the strict port) are set, and SHALL print a line saying which test was skipped and which variable enables it otherwise. A script `tests/docker/env.ps1` and `tests/docker/env.sh` SHALL set these variables for the environment above. A skipped test SHALL NOT count as a failure.
 
 #### Scenario: Skipped without variables
-- **WHEN** `cargo test --test db` runs with no `BRASA_TEST_*` variable
+- **WHEN** `cargo test --test db` runs with no `ZILA_TEST_*` variable
 - **THEN** the real-server tests print a skip line each and the run passes
 
 #### Scenario: Run with the environment

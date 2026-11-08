@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Native compilation — Brasa</title>
-  <meta name="description" content="Compile Brasa straight to a native Windows executable: what you can use, how memory is managed with reference counting, and what is not supported yet.">
+  <title>Native compilation — Zila Lang</title>
+  <meta name="description" content="Compile Zila Lang straight to a native Windows executable: what you can use, how memory is managed with reference counting, and what is not supported yet.">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <header class="site-header">
-    <a class="brand" href="index.html">brasa<span class="ember-dot">.</span><small>lang docs</small></a>
+    <a class="brand" href="index.html">zila<span class="ember-dot">.</span><small>lang docs</small></a>
     <nav class="site-nav">
       <a href="index.html">Overview</a>
       <a href="syntax.html">Syntax</a>
@@ -21,20 +21,20 @@
       <a href="databases.html">Databases</a>
       <a href="ai.html">AI</a>
       <a href="packages.html">Packages</a>
-      <a href="os.html">Brasa OS</a>
+      <a href="os.html">Zila Lang OS</a>
       <a href="getting-started.html">Getting Started</a>
     </nav>
   </header>
 
   <main>
     <h1>Native compilation</h1>
-    <p>The Brasa compiler turns a program straight into x86-64 machine code. There is no C, no Rust and no virtual machine in between, and the program needs no runtime installed: a console program is a few kilobytes and imports only the Windows libraries it uses.</p>
+    <p>The Zila Lang compiler turns a program straight into x86-64 machine code. There is no C, no Rust and no virtual machine in between, and the program needs no runtime installed: a console program is a few kilobytes and imports only the Windows libraries it uses.</p>
 
     <section id="build">
       <h2>Build a program</h2>
-      <pre><code>brasa-parse examples/hello.br -o hello.exe
+      <pre><code>zila-parse examples/hello.br -o hello.exe
 ./hello.exe</code></pre>
-      <p>The compiler writes assembly, assembles it with its own assembler and writes the Windows executable (PE) itself: it needs no Visual Studio, <code>ml64</code> or <code>link</code>, and starts no other program. Imports come from each <code>#[link("library")]</code> (<code>#[link_src]</code>, which compiles C files, is an error on Windows). Windows x64 is the only target for programs; <a href="os.html">Brasa OS</a> uses a second, bare-metal target. <code>--asm</code> prints the generated assembly instead of building.</p>
+      <p>The compiler writes assembly, assembles it with its own assembler and writes the Windows executable (PE) itself: it needs no Visual Studio, <code>ml64</code> or <code>link</code>, and starts no other program. Imports come from each <code>#[link("library")]</code> (<code>#[link_src]</code>, which compiles C files, is an error on Windows). Windows x64 is the only target for programs; <a href="os.html">Zila Lang OS</a> uses a second, bare-metal target. <code>--asm</code> prints the generated assembly instead of building.</p>
       <p>The executable holds everything the program uses: the libraries named with <code>use</code> are compiled in, only what the program can reach is kept, and nothing is loaded from source or from a cache when it runs. <code>--explain-link</code> prints how many bytes each package adds. See <a href="packages.html#linking">Packages</a>.</p>
     </section>
 
@@ -84,7 +84,7 @@
     print(<span class="str">"objects left: {left}"</span>)        <span class="cm">// 0</span>
 <span class="kw">end</span></code></pre>
       <h3>Cleaning up: drop</h3>
-      <p>A record can define a <code>drop</code> method. Brasa calls it when the last reference goes away, which is how files and sockets close themselves.</p>
+      <p>A record can define a <code>drop</code> method. Zila Lang calls it when the last reference goes away, which is how files and sockets close themselves.</p>
       <pre><code><span class="kw">type</span> Handle = <span class="kw">record</span>
     id: int
 <span class="kw">end</span>
@@ -131,20 +131,20 @@
         <li>The driver is built for the host with the compiler's own back end (the PE writer on Windows, the ELF writer on Linux, so no Visual Studio or linker) and started with no input, a time limit, an output limit and a memory limit (a job object on Windows, <code>setrlimit</code> on Linux).</li>
         <li>The text is parsed into the program. Errors in it are reported at the use site with the generator's name and the generated line.</li>
       </ol>
-      <p>The generators run on the machine that builds, so <code>--target linux</code> on Windows runs a Windows program to generate code for a Linux executable. The cache lives in <code>brasa-comptime</code> in the system temporary directory (the <code>BRASA_COMPTIME_CACHE</code> environment variable names another place) and holds one file per generator call, named by the SHA-256 of the compiler version, the host and target, the source of every function the generator reaches and the serialized input. Only successful results are stored; a damaged entry counts as a miss. Options: <code>--comptime-timeout seconds</code> (default 5), <code>--no-comptime-cache</code> and <code>--comptime-dump</code>.</p>
+      <p>The generators run on the machine that builds, so <code>--target linux</code> on Windows runs a Windows program to generate code for a Linux executable. The cache lives in <code>zila-comptime</code> in the system temporary directory (the <code>ZILA_COMPTIME_CACHE</code> environment variable names another place) and holds one file per generator call, named by the SHA-256 of the compiler version, the host and target, the source of every function the generator reaches and the serialized input. Only successful results are stored; a damaged entry counts as a miss. Options: <code>--comptime-timeout seconds</code> (default 5), <code>--no-comptime-cache</code> and <code>--comptime-dump</code>.</p>
       <p>There is no interpreter: compile-time code is native code, which is why the limit is a time limit. Programs and packages are found as before (the standard library, and the file itself); the files next to the source file that a <code>use</code> names are read too, so a program can keep its generators in a package of its own.</p>
     </section>
 
     <section id="linux">
       <h2>Linux</h2>
-      <p><code>brasa-parse prog.br --target linux -o prog</code> writes an x86-64 ELF executable. The compiler does everything itself (its own assembler, no linker, no Visual Studio) and the program talks to the kernel with system calls. A program that does not call C needs no library at all (a static executable); one that declares <code>extern</code> functions is dynamically linked and starts through <code>/lib64/ld-linux-x86-64.so.2</code>. <code>--asm --target linux</code> prints the assembly instead. The result was checked under WSL with Ubuntu (glibc).</p>
+      <p><code>zila-parse prog.br --target linux -o prog</code> writes an x86-64 ELF executable. The compiler does everything itself (its own assembler, no linker, no Visual Studio) and the program talks to the kernel with system calls. A program that does not call C needs no library at all (a static executable); one that declares <code>extern</code> functions is dynamically linked and starts through <code>/lib64/ld-linux-x86-64.so.2</code>. <code>--asm --target linux</code> prints the assembly instead. The result was checked under WSL with Ubuntu (glibc).</p>
       <p>The language is the same and so is the output. A program whose <code>main</code> returns an error prints <code>error: ...</code> and exits with status 1, an <code>abort</code> writes <code>abort: file.br:line: ...</code> to standard error and exits with 101, and an integer division by zero is an abort (<code>abort: main.br:7: division by zero</code>) on both targets. Objects are reference counted as on Windows and <code>live_objects()</code> counts them. Small objects come from a 256 MiB region that the executable asks the kernel for, and large ones from <code>mmap</code>, given back when freed (this is the default allocator; <code>#[allocator]</code> replaces it); running out of memory is <code>abort: out of memory</code> (no file and line: the allocator has none).</p>
-      <p>The libraries have the same functions on both targets. Where a library talks to the operating system, a file called <code>std/&lt;name&gt;.linux.br</code> replaces <code>std/&lt;name&gt;.br</code> when you build for Linux (the Linux layers use <code>epoll</code>, <code>pread</code>/<code>pwrite</code>, sockets and a DNS client written in Brasa), so one source builds for both.</p>
+      <p>The libraries have the same functions on both targets. Where a library talks to the operating system, a file called <code>std/&lt;name&gt;.linux.br</code> replaces <code>std/&lt;name&gt;.br</code> when you build for Linux (the Linux layers use <code>epoll</code>, <code>pread</code>/<code>pwrite</code>, sockets and a DNS client written in Zila Lang), so one source builds for both.</p>
       <table class="compat">
         <thead><tr><th>Library or feature</th><th>Windows</th><th>Linux</th><th>Notes</th></tr></thead>
         <tbody>
           <tr><td>The language, <code>print</code>, text, lists, maps, records, enums, generics, interfaces, closures, <code>defer</code>, errors, floats, <code>unsafe</code>, <code>asm</code></td><td>yes</td><td>yes</td><td>same output</td></tr>
-          <tr><td><code>text</code>, <code>list</code>, <code>math</code>, <code>float</code>, <code>format</code>, <code>set</code>, <code>sorted</code>, <code>bufio</code>, <code>errors</code>, <code>derive</code>, <code>reflect</code>, <code>json</code></td><td>yes</td><td>yes</td><td>written in Brasa, no operating system calls</td></tr>
+          <tr><td><code>text</code>, <code>list</code>, <code>math</code>, <code>float</code>, <code>format</code>, <code>set</code>, <code>sorted</code>, <code>bufio</code>, <code>errors</code>, <code>derive</code>, <code>reflect</code>, <code>json</code></td><td>yes</td><td>yes</td><td>written in Zila Lang, no operating system calls</td></tr>
           <tr><td><code>task</code>, <code>future</code>: <code>spawn</code>, <code>sleep</code>, channels, <code>async</code>, <code>await</code></td><td>yes</td><td>yes</td><td>cooperative tasks, one scheduler per thread; each task has a 256 KiB stack with a guard page (Windows fibers there)</td></tr>
           <tr><td><code>thread</code>, <code>sync</code>: <code>spawn_thread</code>, <code>shared</code>, <code>Mutex</code>, <code>Atomic</code></td><td>yes</td><td>not yet</td><td>operating-system threads with atomic reference counts; rejected with a message in a bare-metal kernel</td></tr>
           <tr><td><code>fs</code></td><td>yes</td><td>yes</td><td>on Linux a regular file is read and written in pieces of at most 64 KiB and the other tasks run between the pieces (Windows moves the data in the background); errors read <code>path: reason</code> with the operating system's wording</td></tr>
@@ -153,7 +153,7 @@
           <tr><td><code>extern</code> and <code>#[link]</code></td><td>yes</td><td>yes</td><td>System V calling convention on Linux; <code>#[link("c")]</code> is <code>libc.so.6</code>, <code>"m"</code> is <code>libm.so.6</code>, any other name is <code>lib&lt;name&gt;.so</code>; callbacks take up to six integer, pointer or float arguments; what C printed is flushed before each <code>print</code> and when the program ends, so the output keeps its order</td></tr>
           <tr><td><code>web</code>: HTTP server, router, client, templates</td><td>yes</td><td>yes</td><td>written only on <code>net</code>, <code>tls</code>, <code>task</code> and <code>json</code>, so it behaves the same on both targets; rejected in a bare-metal kernel</td></tr>
           <tr><td><code>tls</code>: HTTPS client, <code>upgrade</code>, ALPN, private CA file</td><td>yes</td><td>yes</td><td>SChannel on Windows; OpenSSL 3 (<code>libssl.so.3</code>, needed at run time) on Linux, which makes the program dynamically linked. Both check the certificate and the host name, offer ALPN protocols and trust the extra authorities of <code>ca_file</code> for one connection</td></tr>
-          <tr><td><code>crypto</code>: hashes, HMAC, PBKDF2, base64, random bytes</td><td>yes</td><td>yes</td><td>plain Brasa; random bytes from <code>BCryptGenRandom</code> on Windows and <code>getrandom</code> on Linux</td></tr>
+          <tr><td><code>crypto</code>: hashes, HMAC, PBKDF2, base64, random bytes</td><td>yes</td><td>yes</td><td>plain Zila Lang; random bytes from <code>BCryptGenRandom</code> on Windows and <code>getrandom</code> on Linux</td></tr>
           <tr><td><code>db</code>, <code>postgres</code>, <code>sqlserver</code>: databases</td><td>yes</td><td>yes</td><td>written only on <code>net</code>, <code>tls</code> and <code>crypto</code>; the same programs behave the same on both targets</td></tr>
           <tr><td><code>ai</code>: language models (chat, streaming, typed answers, tools)</td><td>yes</td><td>yes</td><td>written only on <code>web</code> and <code>json</code>; reads keys with <code>sys.env</code> (<code>GetEnvironmentVariable</code> on Windows, <code>/proc/self/environ</code> on Linux)</td></tr>
           <tr><td><code>mcp</code>: Model Context Protocol server and client</td><td>yes</td><td>yes</td><td>written on <code>web</code>, <code>json</code> and <code>ai</code>; stdio reads with <code>sys.stdin_read</code> (a blocking read)</td></tr>
@@ -166,7 +166,7 @@
       <h3 id="ui">Windows and controls on both systems</h3>
       <p><code>use ui</code> is one library with one way of programming: <code>Window</code>, <code>TextBox</code>, <code>Button</code>, <code>ListView</code>, <code>Label</code>, <code>vstack</code>, <code>hstack</code>, the properties <code>text</code>, <code>count</code> and <code>selected</code>, <code>add</code>, <code>remove</code>, <code>clear</code>, <code>onClick</code>, <code>onChange</code>, <code>onSelect</code>, <code>layout</code>, <code>show</code>, <code>close</code>, <code>run</code> and <code>alert</code> do the same on Windows and on Linux, and <code>examples/ui.br</code> builds for both without a change. Setting <code>text</code> runs <code>onChange</code> once, and only when the text really changed. A control keeps answering with what it held after its window is closed.</p>
       <p>On Linux the library speaks the X11 protocol itself, over the X server's Unix socket: there is no C library, GTK or Xlib, so the program is still a static executable. It works with any X server, including XWayland and WSLg (<code>DISPLAY</code> picks the display; only local displays are supported). X11 has no controls, so the library draws text boxes, buttons, lists and labels with the server's built-in <code>fixed</code> font and handles the keyboard (typing, Backspace, Delete, arrows, Home, End, Tab, Enter) and the mouse (clicks, list selection, the wheel) itself. The layout rules, padding and sizes are the ones Windows uses; only the look differs. When no display can be reached the program stops with <code>error: ui: cannot open a display: ...</code>.</p>
-      <p>For tests, the environment variable <code>BRASA_UI_SCRIPT</code> can name a file of input steps, one per line: <code>click N</code> (the Nth button), <code>type TEXT</code>, <code>key backspace|enter|up|down</code>, <code>select N</code> and <code>close</code>. <code>ui.run()</code> applies them to the first window and then closes it; <code>alert</code> does not wait while a script is active.</p>
+      <p>For tests, the environment variable <code>ZILA_UI_SCRIPT</code> can name a file of input steps, one per line: <code>click N</code> (the Nth button), <code>type TEXT</code>, <code>key backspace|enter|up|down</code>, <code>select N</code> and <code>close</code>. <code>ui.run()</code> applies them to the first window and then closes it; <code>alert</code> does not wait while a script is active.</p>
       <p><strong>Changed in this version:</strong> the handle of a control is now <code>id</code> (it was <code>hwnd</code>, which never was part of the documented API), and <code>use ws</code> is rejected: <code>ws</code> is internal to <code>net</code>, so use <code>net</code>.</p>
       <p>Differences to keep in mind: the wording of an operating-system error (the text after the path) is the platform's own; a program that prints times, ports or addresses prints what the machine gives.</p>
     </section>
@@ -183,7 +183,7 @@
   </main>
 
   <footer class="site-footer">
-    Brasa — a language with a human face. Docs generated from <code>brasa.ebnf</code> and <code>examples/*.br</code>.
+    Zila Lang — a language with a human face. Docs generated from <code>zila.ebnf</code> and <code>examples/*.br</code>.
   </footer>
 </body>
 </html>

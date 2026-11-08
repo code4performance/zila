@@ -1,8 +1,8 @@
 //! A small x86 assembler that produces a flat binary.
 //!
-//! It exists so Brasa can build bare-metal images (boot sector, kernel)
+//! It exists so Zila Lang can build bare-metal images (boot sector, kernel)
 //! without NASM or any other external tool. It understands the MASM-flavoured
-//! text the Brasa compiler emits plus the extra directives a boot sector needs:
+//! text the Zila Lang compiler emits plus the extra directives a boot sector needs:
 //!
 //! - `org N`, `bits 16|32|64`, `times N db V`, `name:` / `name proc` / `name endp`
 //! - `db dw dd dq` (numbers, expressions, symbols, strings), optionally named

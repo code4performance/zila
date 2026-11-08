@@ -1,8 +1,8 @@
 //! The Windows executable writer: the assembler accepts all generated Windows text, imports come
 //! from `#[link]`, and the PE image is complete without any external tool.
 
-use brasa::codegen_x64::{generate_asm_for, CompileOptions, Target};
-use brasa::parse_source;
+use zila::codegen_x64::{generate_asm_for, CompileOptions, Target};
+use zila::parse_source;
 
 /// Programs that together use the whole standard library for Windows.
 fn programs() -> Vec<(String, String)> {
@@ -42,7 +42,7 @@ fn the_assembler_accepts_all_windows_text() {
         let Ok(file) = parse_source(&src) else { continue };
         let Ok(asm) = generate_asm_for(&file, &CompileOptions::default(), Target::Windows) else { continue };
         built += 1;
-        if let Err(e) = brasa::asm_x86::assemble(&asm, 0x140001000, 64) {
+        if let Err(e) = zila::asm_x86::assemble(&asm, 0x140001000, 64) {
             problems.push(format!("{}: {}", name, e));
         }
     }
@@ -52,7 +52,7 @@ fn the_assembler_accepts_all_windows_text() {
 
 // ---- helpers: build an executable and read its headers ----
 
-use brasa::codegen_x64::compile_to_native;
+use zila::codegen_x64::compile_to_native;
 use std::path::PathBuf;
 
 fn u16_at(b: &[u8], o: usize) -> usize {
@@ -112,7 +112,7 @@ fn subsystem(b: &[u8]) -> usize {
 }
 
 fn scratch(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("brasa-pe-test-{}", std::process::id()));
+    let d = std::env::temp_dir().join(format!("zila-pe-test-{}", std::process::id()));
     std::fs::create_dir_all(&d).unwrap();
     d.join(name)
 }
@@ -195,7 +195,7 @@ fn a_bad_asm_block_names_the_file_and_line_and_leaves_nothing() {
         std::fs::read_dir(std::env::temp_dir())
             .unwrap()
             .filter_map(|e| e.ok())
-            .filter(|e| e.file_name().to_string_lossy().starts_with("brasa-build-"))
+            .filter(|e| e.file_name().to_string_lossy().starts_with("zila-build-"))
             .count()
     };
     let before = temp_dirs();
@@ -225,7 +225,7 @@ fn the_compiler_needs_no_visual_studio() {
     let _ = std::fs::remove_file(&exe);
     let src = scratch("clean_env.br");
     std::fs::write(&src, "package main\nfunc main()\n    print(\"hello\")\nend\n").unwrap();
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_brasa-parse"))
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_zila-parse"))
         .env_clear()
         .env("PATH", "")
         .arg(&src)

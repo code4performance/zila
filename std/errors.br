@@ -1,5 +1,5 @@
 // =====================================================================
-// Brasa standard library: error kinds
+// Zila Lang standard library: error kinds
 //
 //     use errors
 //     if e.kind == errors.NotFound

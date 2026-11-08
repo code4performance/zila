@@ -1,6 +1,6 @@
 // Generics and interfaces: write code once, use it with many types.
 //
-//   brasa-parse examples/generics.br -o generics.exe
+//   zila-parse examples/generics.br -o generics.exe
 //
 // <T> is a placeholder for a type. The compiler works out T from the arguments and
 // makes one copy of the code for each type you use. An interface lists methods, and a

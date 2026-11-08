@@ -9,7 +9,7 @@ type Customer = record
 end
 
 func main() -> error
-    let conn = try sqlserver.open("sqlserver://sa:Brasa_dev_Sql_1@127.0.0.1:@PORT@/shop?encrypt=off")
+    let conn = try sqlserver.open("sqlserver://sa:Zila_dev_Sql_1@127.0.0.1:@PORT@/shop?encrypt=off")
     let rows = try db.query(Customer, conn, "select id, name from customers where id <= 3 order by id")
     for r in rows
         print(r.id, r.name)

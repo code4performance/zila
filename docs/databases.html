@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Databases — Brasa</title>
-  <meta name="description" content="Databases in Brasa: db, postgres and sqlserver. Typed rows, bound parameters, transactions, TLS, and a Docker environment with real servers to test against.">
+  <title>Databases — Zila Lang</title>
+  <meta name="description" content="Databases in Zila Lang: db, postgres and sqlserver. Typed rows, bound parameters, transactions, TLS, and a Docker environment with real servers to test against.">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <header class="site-header">
-    <a class="brand" href="index.html">brasa<span class="ember-dot">.</span><small>lang docs</small></a>
+    <a class="brand" href="index.html">zila<span class="ember-dot">.</span><small>lang docs</small></a>
     <nav class="site-nav">
       <a href="index.html">Overview</a>
       <a href="syntax.html">Syntax</a>
@@ -21,15 +21,15 @@
       <a href="databases.html" aria-current="page">Databases</a>
       <a href="ai.html">AI</a>
       <a href="packages.html">Packages</a>
-      <a href="os.html">Brasa OS</a>
+      <a href="os.html">Zila Lang OS</a>
       <a href="getting-started.html">Getting Started</a>
     </nav>
   </header>
 
   <main>
     <h1>Databases</h1>
-    <p class="note"><code>db</code>, <code>postgres</code> and <code>sqlserver</code> are packages of the Brasa repository (<code>packages/</code>) that the compiler embeds, so <code>use db</code> needs no manifest; a package of your project with the same name replaces them (see <a href="packages.html#use">Packages</a>).</p>
-    <p>Three libraries, all written in Brasa on <code>net</code> and <code>tls</code> (no C library is linked): <code>db</code> is what a program uses, <code>postgres</code> and <code>sqlserver</code> are the drivers. A driver's <code>open</code> returns a <code>db.Conn</code>; everything after that is the same on both databases. <a href="stdlib.html#db">The library page</a> lists every function; this page shows how they fit together.</p>
+    <p class="note"><code>db</code>, <code>postgres</code> and <code>sqlserver</code> are packages of the Zila Lang repository (<code>packages/</code>) that the compiler embeds, so <code>use db</code> needs no manifest; a package of your project with the same name replaces them (see <a href="packages.html#use">Packages</a>).</p>
+    <p>Three libraries, all written in Zila Lang on <code>net</code> and <code>tls</code> (no C library is linked): <code>db</code> is what a program uses, <code>postgres</code> and <code>sqlserver</code> are the drivers. A driver's <code>open</code> returns a <code>db.Conn</code>; everything after that is the same on both databases. <a href="stdlib.html#db">The library page</a> lists every function; this page shows how they fit together.</p>
 
     <section id="query">
       <h2>Typed rows and parameters</h2>
@@ -112,7 +112,7 @@
 . tests/docker/env.ps1                                      <span class="cm"># or: source tests/docker/env.sh</span>
 cargo test --test postgres --test sqlserver
 docker compose -f tests/docker/compose.yml down -v</code></pre>
-      <p>You do not need Docker: <code>BRASA_TEST_POSTGRES</code> and <code>BRASA_TEST_SQLSERVER</code> may name any server (a local PostgreSQL, a local SQL Server instance reached through its named pipe, ...). The tests that write use temporary tables, and the CRUD test only touches rows whose username starts with <code>brasa-crud-</code>. Nothing in <code>cargo test</code> starts Docker: the tests that need these servers print a skip line when <code>BRASA_TEST_POSTGRES</code>, <code>BRASA_TEST_SQLSERVER</code>, <code>BRASA_TEST_SQLSERVER_STRICT</code>, <code>BRASA_TEST_SQLSERVER_AI</code> or <code>BRASA_TEST_CA</code> is not set. The credentials in that folder are for development only.</p>
+      <p>You do not need Docker: <code>ZILA_TEST_POSTGRES</code> and <code>ZILA_TEST_SQLSERVER</code> may name any server (a local PostgreSQL, a local SQL Server instance reached through its named pipe, ...). The tests that write use temporary tables, and the CRUD test only touches rows whose username starts with <code>zila-crud-</code>. Nothing in <code>cargo test</code> starts Docker: the tests that need these servers print a skip line when <code>ZILA_TEST_POSTGRES</code>, <code>ZILA_TEST_SQLSERVER</code>, <code>ZILA_TEST_SQLSERVER_STRICT</code>, <code>ZILA_TEST_SQLSERVER_AI</code> or <code>ZILA_TEST_CA</code> is not set. The credentials in that folder are for development only.</p>
     </section>
 
     <section id="security">
@@ -126,7 +126,7 @@ docker compose -f tests/docker/compose.yml down -v</code></pre>
   </main>
 
   <footer class="site-footer">
-    Brasa — a language with a human face. Docs generated from <code>brasa.ebnf</code> and <code>examples/*.br</code>.
+    Zila Lang — a language with a human face. Docs generated from <code>zila.ebnf</code> and <code>examples/*.br</code>.
   </footer>
 </body>
 </html>

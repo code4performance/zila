@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Brasa OS — Brasa</title>
-  <meta name="description" content="A bootable 64-bit operating system with a boot sector and kernel written in Brasa, and how to build and run it.">
+  <title>Zila Lang OS — Zila Lang</title>
+  <meta name="description" content="A bootable 64-bit operating system with a boot sector and kernel written in Zila Lang, and how to build and run it.">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <header class="site-header">
-    <a class="brand" href="index.html">brasa<span class="ember-dot">.</span><small>lang docs</small></a>
+    <a class="brand" href="index.html">zila<span class="ember-dot">.</span><small>lang docs</small></a>
     <nav class="site-nav">
       <a href="index.html">Overview</a>
       <a href="syntax.html">Syntax</a>
@@ -21,18 +21,18 @@
       <a href="databases.html">Databases</a>
       <a href="ai.html">AI</a>
       <a href="packages.html">Packages</a>
-      <a href="os.html" aria-current="page">Brasa OS</a>
+      <a href="os.html" aria-current="page">Zila Lang OS</a>
       <a href="getting-started.html">Getting Started</a>
     </nav>
   </header>
 
   <main>
-    <h1>Brasa OS</h1>
-    <p>Brasa OS is a small operating system written in Brasa: a 512-byte boot sector (<code>os/boot.br</code>) and a 64-bit kernel with a text console and a shell (<code>os/kernel.br</code>). It runs straight on the hardware or in an emulator, with no host operating system and no C. The compiler even assembles the machine code itself.</p>
+    <h1>Zila Lang OS</h1>
+    <p>Zila Lang OS is a small operating system written in Zila Lang: a 512-byte boot sector (<code>os/boot.br</code>) and a 64-bit kernel with a text console and a shell (<code>os/kernel.br</code>). It runs straight on the hardware or in an emulator, with no host operating system and no C. The compiler even assembles the machine code itself.</p>
 
     <section id="build">
       <h2>Build and run</h2>
-      <pre><code>brasa-parse --os os/boot.br os/kernel.br -o brasa-os.img
+      <pre><code>zila-parse --os os/boot.br os/kernel.br -o zila-os.img
 .\os\run.ps1              <span class="cm"># boots it in QEMU, with a window</span>
 .\os\run.ps1 -Serial      <span class="cm"># headless: the shell runs on your terminal</span></code></pre>
       <p>You need <a href="https://www.qemu.org/">QEMU</a> to run the image (<code>winget install SoftwareFreedomConservancy.QEMU</code>, or unpack its installer into <code>%USERPROFILE%\qemu</code>). The kernel itself needs only a PC: the disk image can also be written to a USB stick.</p>
@@ -68,12 +68,12 @@
         <li>It builds page tables that map the first gigabyte one-to-one with 2 MiB pages.</li>
         <li>It turns on PAE, long mode and paging, then jumps into 64-bit code and from there into the kernel.</li>
       </ol>
-      <p>The kernel is ordinary Brasa: text, lists, enums, <code>match</code>, <code>try</code>, closures and reference counting all work, because the kernel supplies the heap itself: <code>heap_alloc</code> and <code>heap_free</code> in <code>os/kernel.br</code> are marked <code>#[allocator(alloc)]</code> and <code>#[allocator(free)]</code>, and the runtime asks them for every object. A kernel that declares no allocator gets the compiler's built-in size-class heap instead (and <code>heap_bytes()</code>). Hardware access uses <code>unsafe</code> raw pointers (the VGA memory) and <code>asm</code> blocks (I/O ports). Everything <code>print</code> writes goes to the <code>console_write(s: text)</code> function the kernel defines.</p>
+      <p>The kernel is ordinary Zila Lang: text, lists, enums, <code>match</code>, <code>try</code>, closures and reference counting all work, because the kernel supplies the heap itself: <code>heap_alloc</code> and <code>heap_free</code> in <code>os/kernel.br</code> are marked <code>#[allocator(alloc)]</code> and <code>#[allocator(free)]</code>, and the runtime asks them for every object. A kernel that declares no allocator gets the compiler's built-in size-class heap instead (and <code>heap_bytes()</code>). Hardware access uses <code>unsafe</code> raw pointers (the VGA memory) and <code>asm</code> blocks (I/O ports). Everything <code>print</code> writes goes to the <code>console_write(s: text)</code> function the kernel defines.</p>
     </section>
 
     <section id="limits">
       <h2>Why the boot sector holds assembly</h2>
-      <p><code>os/boot.br</code> is Brasa source, but its <code>#[naked]</code> function holds <code>asm</code> blocks. The code that runs in 16-bit real mode and switches to long mode needs instructions that the 64-bit code generator cannot produce, so that part is written as assembly lines inside Brasa. Everything after the jump to the kernel is regular Brasa.</p>
+      <p><code>os/boot.br</code> is Zila Lang source, but its <code>#[naked]</code> function holds <code>asm</code> blocks. The code that runs in 16-bit real mode and switches to long mode needs instructions that the 64-bit code generator cannot produce, so that part is written as assembly lines inside Zila Lang. Everything after the jump to the kernel is regular Zila Lang.</p>
       <ul>
         <li>The kernel cannot use <a href="concurrency.html">tasks</a>, <a href="async.html">async</a>, <code>ui</code>, <code>fs</code> or <code>net</code> (they need Windows); the build stops with a message saying so.</li>
         <li>The kernel has to define <code>console_write(s: text)</code>.</li>
@@ -83,7 +83,7 @@
   </main>
 
   <footer class="site-footer">
-    Brasa — a language with a human face. Docs generated from <code>brasa.ebnf</code> and <code>examples/*.br</code>.
+    Zila Lang — a language with a human face. Docs generated from <code>zila.ebnf</code> and <code>examples/*.br</code>.
   </footer>
 </body>
 </html>

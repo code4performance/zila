@@ -67,7 +67,7 @@ impl Compiler {
                 {
                     return Err(format!("'{}' is not available on Linux yet (it uses the Windows API)", m));
                 }
-                // where the package is: the standard library, the project (brasa.toml and its
+                // where the package is: the standard library, the project (zila.toml and its
                 // directories), then the files registered next to the source
                 let found: Option<(String, &'static str)> = if shadowing.is_some() {
                     shadowing
@@ -81,7 +81,7 @@ impl Compiler {
                             _ if segs[0] == "c" => None,
                             _ => {
                                 return Err(format!(
-                                    "unknown package '{}' (not in the standard library, brasa.toml or the project directory); to add one: brasa-parse --add <git-url>",
+                                    "unknown package '{}' (not in the standard library, zila.toml or the project directory); to add one: zila-parse --add <git-url>",
                                     segs.join(".")
                                 ))
                             }

@@ -1,5 +1,5 @@
-# brasa.lock: written by brasa-parse; commit it, do not edit it
+# zila.lock: written by zila-parse; commit it, do not edit it
 
-[package."example.org/brasa/greeter@1.0.0"]
+[package."example.org/zila/greeter@1.0.0"]
 commit = "0123456789012345678901234567890123456789"
 hash = "sha256:cb2be8691cff40a6b77026f27f17f227cad0b27e68fb7d536f9a3604758504db"

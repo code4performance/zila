@@ -2,7 +2,7 @@
 //! builds. Repositories are local `file://` git repositories created here; nothing reaches a
 //! network. Tests that need `git` skip with a message when it cannot be run.
 
-use brasa::package::*;
+use zila::package::*;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 static N: AtomicUsize = AtomicUsize::new(0);
 
 fn scratch(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("brasa_pkg_{}_{}_{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst), name));
+    let d = std::env::temp_dir().join(format!("zila_pkg_{}_{}_{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst), name));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
     d
@@ -76,13 +76,13 @@ struct Out {
     err: String,
 }
 
-fn brasa(cwd: &Path, home: &Path, args: &[&str]) -> Out {
-    brasa_env(cwd, home, args, None)
+fn zila(cwd: &Path, home: &Path, args: &[&str]) -> Out {
+    zila_env(cwd, home, args, None)
 }
 
-fn brasa_env(cwd: &Path, home: &Path, args: &[&str], path: Option<&str>) -> Out {
-    let mut c = Command::new(env!("CARGO_BIN_EXE_brasa-parse"));
-    c.args(args).current_dir(cwd).env("BRASA_HOME", home);
+fn zila_env(cwd: &Path, home: &Path, args: &[&str], path: Option<&str>) -> Out {
+    let mut c = Command::new(env!("CARGO_BIN_EXE_zila-parse"));
+    c.args(args).current_dir(cwd).env("ZILA_HOME", home);
     if let Some(p) = path {
         c.env("PATH", p);
     }
@@ -104,7 +104,7 @@ fn build_and_run(proj: &Path, home: &Path) -> Result<String, String> {
     let target: &[&str] = if cfg!(windows) { &[] } else { &["--target", "linux"] };
     let mut args = vec!["main.br", "-o", exe.to_str().unwrap()];
     args.extend_from_slice(target);
-    let b = brasa(proj, home, &args);
+    let b = zila(proj, home, &args);
     if b.code != 0 {
         return Err(format!("{}{}", b.out, b.err));
     }
@@ -121,7 +121,7 @@ fn project(name: &str, main: &str) -> PathBuf {
 }
 
 fn init(p: &Path, home: &Path) {
-    let r = brasa(p, home, &["--init", "app"]);
+    let r = zila(p, home, &["--init", "app"]);
     assert_eq!(r.code, 0, "{}{}", r.out, r.err);
 }
 
@@ -131,12 +131,12 @@ fn init(p: &Path, home: &Path) {
 fn init_writes_a_manifest_once() {
     let home = scratch("home");
     let p = scratch("init");
-    let r = brasa(&p, &home, &["--init", "demo"]);
+    let r = zila(&p, &home, &["--init", "demo"]);
     assert_eq!(r.code, 0, "{}", r.err);
-    let m = Manifest::parse(&std::fs::read_to_string(p.join("brasa.toml")).unwrap()).unwrap();
+    let m = Manifest::parse(&std::fs::read_to_string(p.join("zila.toml")).unwrap()).unwrap();
     assert_eq!(m.name.as_deref(), Some("demo"));
     assert!(m.edition.is_none(), "edition is omitted before 1.0");
-    let again = brasa(&p, &home, &["--init"]);
+    let again = zila(&p, &home, &["--init"]);
     assert_eq!(again.code, 1);
     assert!(again.err.contains("already exists"), "{}", again.err);
 }
@@ -156,12 +156,12 @@ fn add_fetches_locks_and_the_program_builds() {
     init(&p, &home);
     let url = url_of(&codec);
     // the newest tag when none is given
-    let r = brasa(&p, &home, &["--add", &url]);
+    let r = zila(&p, &home, &["--add", &url]);
     assert_eq!(r.code, 0, "{}{}", r.out, r.err);
-    let m = Manifest::parse(&std::fs::read_to_string(p.join("brasa.toml")).unwrap()).unwrap();
+    let m = Manifest::parse(&std::fs::read_to_string(p.join("zila.toml")).unwrap()).unwrap();
     assert_eq!(m.deps.len(), 1);
     assert_eq!((m.deps[0].name.as_str(), m.deps[0].version.to_string(), m.deps[0].git.as_str()), ("codec", "1.2.0".to_string(), url.as_str()));
-    let lock = Lock::parse(&std::fs::read_to_string(p.join("brasa.lock")).unwrap()).unwrap();
+    let lock = Lock::parse(&std::fs::read_to_string(p.join("zila.lock")).unwrap()).unwrap();
     assert_eq!(lock.entries.len(), 1);
     let e = &lock.entries[0];
     assert_eq!(e.commit, commit_v12);
@@ -187,9 +187,9 @@ fn an_annotated_tag_locks_the_commit_not_the_tag_object() {
     assert_ne!(tag_object, commit_id);
     let p = project("annotated", "package main\nuse lib\n\nfunc main()\n    print(\"{lib.n()}\")\nend\n");
     init(&p, &home);
-    let r = brasa(&p, &home, &["--add", &format!("{}@1.0.0", url_of(&lib))]);
+    let r = zila(&p, &home, &["--add", &format!("{}@1.0.0", url_of(&lib))]);
     assert_eq!(r.code, 0, "{}{}", r.out, r.err);
-    let lock = Lock::parse(&std::fs::read_to_string(p.join("brasa.lock")).unwrap()).unwrap();
+    let lock = Lock::parse(&std::fs::read_to_string(p.join("zila.lock")).unwrap()).unwrap();
     assert_eq!(lock.entries[0].commit, commit_id);
 }
 
@@ -203,18 +203,18 @@ fn a_moved_tag_is_reported_and_the_lock_is_kept() {
     let old = git(&lib, &["rev-parse", "HEAD"]);
     let p = project("moved", "package main\nuse lib\n\nfunc main()\n    print(\"{lib.n()}\")\nend\n");
     init(&p, &home);
-    assert_eq!(brasa(&p, &home, &["--add", &format!("{}@1.0.0", url_of(&lib))]).code, 0);
-    let lock_before = std::fs::read_to_string(p.join("brasa.lock")).unwrap();
+    assert_eq!(zila(&p, &home, &["--add", &format!("{}@1.0.0", url_of(&lib))]).code, 0);
+    let lock_before = std::fs::read_to_string(p.join("zila.lock")).unwrap();
     let new = commit(&lib, &[("lib.br", "package lib\npub func n() -> int\n    return 2\nend\n")], "moved");
     git(&lib, &["tag", "-f", "v1.0.0"]);
-    let r = brasa(&p, &home, &["--fetch"]);
+    let r = zila(&p, &home, &["--fetch"]);
     assert_eq!(r.code, 1);
     assert!(r.err.contains("moved") && r.err.contains(&old) && r.err.contains(&new), "{}", r.err);
-    assert_eq!(std::fs::read_to_string(p.join("brasa.lock")).unwrap(), lock_before);
+    assert_eq!(std::fs::read_to_string(p.join("zila.lock")).unwrap(), lock_before);
     // --update accepts it
-    let u = brasa(&p, &home, &["--update"]);
+    let u = zila(&p, &home, &["--update"]);
     assert_eq!(u.code, 0, "{}{}", u.out, u.err);
-    let lock = Lock::parse(&std::fs::read_to_string(p.join("brasa.lock")).unwrap()).unwrap();
+    let lock = Lock::parse(&std::fs::read_to_string(p.join("zila.lock")).unwrap()).unwrap();
     assert_eq!(lock.entries[0].commit, new);
 }
 
@@ -227,21 +227,21 @@ fn update_raises_the_minimum_to_the_newest_tag_of_the_major() {
     git(&lib, &["tag", "v1.0.0"]);
     let p = project("update", "package main\nuse lib\n\nfunc main()\n    print(\"{lib.n()}\")\nend\n");
     init(&p, &home);
-    assert_eq!(brasa(&p, &home, &["--add", &format!("{}@1.0.0", url_of(&lib))]).code, 0);
+    assert_eq!(zila(&p, &home, &["--add", &format!("{}@1.0.0", url_of(&lib))]).code, 0);
     commit(&lib, &[("lib.br", "package lib\npub func n() -> int\n    return 4\nend\n")], "second");
     git(&lib, &["tag", "v1.3.0"]);
     commit(&lib, &[("lib.br", "package lib\npub func n() -> int\n    return 9\nend\n")], "third");
     git(&lib, &["tag", "v2.0.0"]);
     // without --update the minimum stays: nothing newer is chosen merely because it exists
-    assert_eq!(brasa(&p, &home, &["--fetch"]).code, 0);
-    let lock = Lock::parse(&std::fs::read_to_string(p.join("brasa.lock")).unwrap()).unwrap();
+    assert_eq!(zila(&p, &home, &["--fetch"]).code, 0);
+    let lock = Lock::parse(&std::fs::read_to_string(p.join("zila.lock")).unwrap()).unwrap();
     assert_eq!(lock.entries[0].version.to_string(), "1.0.0");
-    let u = brasa(&p, &home, &["--update", "lib"]);
+    let u = zila(&p, &home, &["--update", "lib"]);
     assert_eq!(u.code, 0, "{}{}", u.out, u.err);
-    let m = Manifest::parse(&std::fs::read_to_string(p.join("brasa.toml")).unwrap()).unwrap();
+    let m = Manifest::parse(&std::fs::read_to_string(p.join("zila.toml")).unwrap()).unwrap();
     assert_eq!(m.deps[0].version.to_string(), "1.3.0", "version 2 is another package");
     assert_eq!(build_and_run(&p, &home).unwrap(), "4\n");
-    assert_eq!(brasa(&p, &home, &["--update", "nothing"]).code, 1);
+    assert_eq!(zila(&p, &home, &["--update", "nothing"]).code, 1);
 }
 
 #[test]
@@ -256,15 +256,15 @@ fn tidy_removes_unused_dependencies_offline() {
     let p = project("tidy", "package main\nuse used\n\nfunc main()\n    print(used.name())\nend\n");
     init(&p, &home);
     for n in ["used", "spare"] {
-        assert_eq!(brasa(&p, &home, &["--add", &format!("{}@1.0.0", url_of(&repos.join(n)))]).code, 0);
+        assert_eq!(zila(&p, &home, &["--add", &format!("{}@1.0.0", url_of(&repos.join(n)))]).code, 0);
     }
-    assert_eq!(Lock::parse(&std::fs::read_to_string(p.join("brasa.lock")).unwrap()).unwrap().entries.len(), 2);
+    assert_eq!(Lock::parse(&std::fs::read_to_string(p.join("zila.lock")).unwrap()).unwrap().entries.len(), 2);
     // tidy needs neither the network nor git
-    let r = brasa_env(&p, &home, &["--tidy"], Some(""));
+    let r = zila_env(&p, &home, &["--tidy"], Some(""));
     assert_eq!(r.code, 0, "{}{}", r.out, r.err);
-    let m = Manifest::parse(&std::fs::read_to_string(p.join("brasa.toml")).unwrap()).unwrap();
+    let m = Manifest::parse(&std::fs::read_to_string(p.join("zila.toml")).unwrap()).unwrap();
     assert_eq!(m.deps.iter().map(|d| d.name.as_str()).collect::<Vec<_>>(), ["used"]);
-    let lock = Lock::parse(&std::fs::read_to_string(p.join("brasa.lock")).unwrap()).unwrap();
+    let lock = Lock::parse(&std::fs::read_to_string(p.join("zila.lock")).unwrap()).unwrap();
     assert_eq!(lock.entries.len(), 1);
     assert!(lock.entries[0].module.ends_with("/used"));
 }
@@ -274,19 +274,19 @@ fn reserved_names_are_refused_and_nothing_changes() {
     let home = scratch("home");
     let p = scratch("reserved");
     init(&p, &home);
-    let before = std::fs::read_to_string(p.join("brasa.toml")).unwrap();
-    let r = brasa(&p, &home, &["--add", "https://example.org/x/text@1.0.0"]);
+    let before = std::fs::read_to_string(p.join("zila.toml")).unwrap();
+    let r = zila(&p, &home, &["--add", "https://example.org/x/text@1.0.0"]);
     assert_eq!(r.code, 1);
     assert!(r.err.contains("standard library"), "{}", r.err);
-    let r = brasa(&p, &home, &["--add", "https://example.org/x/lib@1.0.0", "--as", "format"]);
+    let r = zila(&p, &home, &["--add", "https://example.org/x/lib@1.0.0", "--as", "format"]);
     assert_eq!(r.code, 1);
     assert!(r.err.contains("standard library"), "{}", r.err);
-    assert_eq!(std::fs::read_to_string(p.join("brasa.toml")).unwrap(), before);
-    assert!(!p.join("brasa.lock").exists());
+    assert_eq!(std::fs::read_to_string(p.join("zila.toml")).unwrap(), before);
+    assert!(!p.join("zila.lock").exists());
     // a hand-written manifest is refused too
-    write(&p, "brasa.toml", "[package]\nname = \"a\"\n\n[dependencies.list]\ngit = \"https://example.org/x/list\"\nversion = \"1.0.0\"\n");
+    write(&p, "zila.toml", "[package]\nname = \"a\"\n\n[dependencies.list]\ngit = \"https://example.org/x/list\"\nversion = \"1.0.0\"\n");
     write(&p, "main.br", "package main\nfunc main()\nend\n");
-    let b = brasa(&p, &home, &["main.br", "--ast"]);
+    let b = zila(&p, &home, &["main.br", "--ast"]);
     assert_eq!(b.code, 1);
     assert!(b.err.contains("standard library"), "{}", b.err);
 }
@@ -295,10 +295,10 @@ fn reserved_names_are_refused_and_nothing_changes() {
 fn git_missing_is_explained() {
     let home = scratch("home");
     let p = scratch("nogit");
-    write(&p, "brasa.toml", "[package]\nname = \"a\"\n\n[dependencies.lib]\ngit = \"https://example.org/x/lib\"\nversion = \"1.0.0\"\n");
-    let r = brasa_env(&p, &home, &["--fetch"], Some(""));
+    write(&p, "zila.toml", "[package]\nname = \"a\"\n\n[dependencies.lib]\ngit = \"https://example.org/x/lib\"\nversion = \"1.0.0\"\n");
+    let r = zila_env(&p, &home, &["--fetch"], Some(""));
     assert_eq!(r.code, 1);
-    assert!(r.err.contains("error: git was not found on PATH. It is used only to download dependencies (brasa-parse --fetch); building from an already populated cache does not need it."), "{}", r.err);
+    assert!(r.err.contains("error: git was not found on PATH. It is used only to download dependencies (zila-parse --fetch); building from an already populated cache does not need it."), "{}", r.err);
 }
 
 #[test]
@@ -310,7 +310,7 @@ fn building_from_a_populated_cache_needs_neither_git_nor_network() {
     git(&codec, &["tag", "v1.0.0"]);
     let p = project("offline", "package main\nuse codec\n\nfunc main()\n    print(codec.version())\nend\n");
     init(&p, &home);
-    assert_eq!(brasa(&p, &home, &["--add", &format!("{}@1.0.0", url_of(&codec))]).code, 0);
+    assert_eq!(zila(&p, &home, &["--add", &format!("{}@1.0.0", url_of(&codec))]).code, 0);
     // the repository disappears and git is not on PATH
     std::fs::remove_dir_all(&codec).unwrap();
     let exe = p.join(exe_name("app"));
@@ -318,12 +318,12 @@ fn building_from_a_populated_cache_needs_neither_git_nor_network() {
     if !cfg!(windows) {
         args.extend_from_slice(&["--target", "linux"]);
     }
-    let b = brasa_env(&p, &home, &args, Some(""));
+    let b = zila_env(&p, &home, &args, Some(""));
     assert_eq!(b.code, 0, "{}{}", b.out, b.err);
     // --offline is accepted for builds and for --fetch from the cache
-    let f = brasa_env(&p, &home, &["--fetch", "--offline"], Some(""));
+    let f = zila_env(&p, &home, &["--fetch", "--offline"], Some(""));
     assert_eq!(f.code, 0, "{}{}", f.out, f.err);
-    let b2 = brasa(&p, &home, &["main.br", "--offline", "--ast"]);
+    let b2 = zila(&p, &home, &["main.br", "--offline", "--ast"]);
     assert_eq!(b2.code, 0, "{}{}", b2.out, b2.err);
 }
 
@@ -336,17 +336,17 @@ fn a_missing_cache_entry_and_offline_fetch_name_the_package() {
     git(&codec, &["tag", "v1.0.0"]);
     let p = project("missing", "package main\nuse codec\n\nfunc main()\n    print(codec.version())\nend\n");
     init(&p, &home);
-    assert_eq!(brasa(&p, &home, &["--add", &format!("{}@1.0.0", url_of(&codec))]).code, 0);
+    assert_eq!(zila(&p, &home, &["--add", &format!("{}@1.0.0", url_of(&codec))]).code, 0);
     std::fs::remove_dir_all(home.join("src")).unwrap();
-    let b = brasa(&p, &home, &["main.br", "--ast"]);
+    let b = zila(&p, &home, &["main.br", "--ast"]);
     assert_eq!(b.code, 1);
-    assert!(b.err.contains("package '") && b.err.contains("/codec@1.0.0' is not in the cache; run brasa-parse --fetch"), "{}", b.err);
-    let f = brasa(&p, &home, &["--fetch", "--offline"]);
+    assert!(b.err.contains("package '") && b.err.contains("/codec@1.0.0' is not in the cache; run zila-parse --fetch"), "{}", b.err);
+    let f = zila(&p, &home, &["--fetch", "--offline"]);
     assert_eq!(f.code, 1);
     assert!(f.err.contains("/codec@1.0.0") && f.err.contains("not in the cache"), "{}", f.err);
     // a normal fetch restores it
-    assert_eq!(brasa(&p, &home, &["--fetch"]).code, 0);
-    assert_eq!(brasa(&p, &home, &["main.br", "--ast"]).code, 0);
+    assert_eq!(zila(&p, &home, &["--fetch"]).code, 0);
+    assert_eq!(zila(&p, &home, &["main.br", "--ast"]).code, 0);
 }
 
 #[test]
@@ -358,30 +358,30 @@ fn a_tampered_cache_and_a_stale_lock_are_refused() {
     git(&codec, &["tag", "v1.0.0"]);
     let p = project("tamper", "package main\nuse codec\n\nfunc main()\n    print(codec.version())\nend\n");
     init(&p, &home);
-    assert_eq!(brasa(&p, &home, &["--add", &format!("{}@1.0.0", url_of(&codec))]).code, 0);
-    let lock = Lock::parse(&std::fs::read_to_string(p.join("brasa.lock")).unwrap()).unwrap();
+    assert_eq!(zila(&p, &home, &["--add", &format!("{}@1.0.0", url_of(&codec))]).code, 0);
+    let lock = Lock::parse(&std::fs::read_to_string(p.join("zila.lock")).unwrap()).unwrap();
     let e = &lock.entries[0];
     let dir = cache_dir(&home, &e.module, &e.version, &e.commit);
     let file = dir.join("codec.br");
     let original = std::fs::read_to_string(&file).unwrap();
     std::fs::write(&file, original.replace("codec 1", "codec X")).unwrap();
-    let b = brasa(&p, &home, &["main.br", "--ast"]);
+    let b = zila(&p, &home, &["main.br", "--ast"]);
     assert_eq!(b.code, 1);
-    assert!(b.err.contains("does not match brasa.lock") && b.err.contains(&format!("expected {}", e.hash)) && b.err.contains("found sha256:") && b.err.contains("run brasa-parse --fetch to restore it"), "{}", b.err);
+    assert!(b.err.contains("does not match zila.lock") && b.err.contains(&format!("expected {}", e.hash)) && b.err.contains("found sha256:") && b.err.contains("run zila-parse --fetch to restore it"), "{}", b.err);
     // --fetch puts it back
-    assert_eq!(brasa(&p, &home, &["--fetch"]).code, 0);
+    assert_eq!(zila(&p, &home, &["--fetch"]).code, 0);
     assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
     assert_eq!(build_and_run(&p, &home).unwrap(), "codec 1\n");
     // a dependency added by hand without --fetch
     let other = repos.join("other");
     repo(&other, &[("other.br", "package other\npub func x() -> int\n    return 1\nend\n")]);
     git(&other, &["tag", "v1.0.0"]);
-    let mut m = Manifest::parse(&std::fs::read_to_string(p.join("brasa.toml")).unwrap()).unwrap();
+    let mut m = Manifest::parse(&std::fs::read_to_string(p.join("zila.toml")).unwrap()).unwrap();
     m.deps.push(Dep { name: "other".into(), git: url_of(&other), version: Version::parse("1.0.0").unwrap() });
-    std::fs::write(p.join("brasa.toml"), m.write()).unwrap();
-    let b = brasa(&p, &home, &["main.br", "--ast"]);
+    std::fs::write(p.join("zila.toml"), m.write()).unwrap();
+    let b = zila(&p, &home, &["main.br", "--ast"]);
     assert_eq!(b.code, 1);
-    assert!(b.err.contains("brasa.lock is out of date; run brasa-parse --fetch"), "{}", b.err);
+    assert!(b.err.contains("zila.lock is out of date; run zila-parse --fetch"), "{}", b.err);
 }
 
 #[test]
@@ -400,19 +400,19 @@ fn the_requirement_with_the_highest_minimum_wins_across_packages() {
         &dep,
         &[
             ("dep.br", "package dep\nuse lib\n\npub func v() -> text\n    return \"dep sees lib {lib.v()}\"\nend\n"),
-            ("brasa.toml", &format!("[package]\nname = \"dep\"\n\n[dependencies.lib]\ngit = \"{}\"\nversion = \"1.4.1\"\n", url_of(&lib))),
+            ("zila.toml", &format!("[package]\nname = \"dep\"\n\n[dependencies.lib]\ngit = \"{}\"\nversion = \"1.4.1\"\n", url_of(&lib))),
         ],
     );
     git(&dep, &["tag", "v1.0.0"]);
     let p = project("mvs", "package main\nuse dep\nuse lib\n\nfunc main()\n    print(dep.v())\n    print(lib.v())\nend\n");
     write(
         &p,
-        "brasa.toml",
+        "zila.toml",
         &format!("[package]\nname = \"app\"\n\n[dependencies.dep]\ngit = \"{}\"\nversion = \"1.0.0\"\n\n[dependencies.lib]\ngit = \"{}\"\nversion = \"1.2.0\"\n", url_of(&dep), url_of(&lib)),
     );
-    let r = brasa(&p, &home, &["--fetch"]);
+    let r = zila(&p, &home, &["--fetch"]);
     assert_eq!(r.code, 0, "{}{}", r.out, r.err);
-    let lock = Lock::parse(&std::fs::read_to_string(p.join("brasa.lock")).unwrap()).unwrap();
+    let lock = Lock::parse(&std::fs::read_to_string(p.join("zila.lock")).unwrap()).unwrap();
     let lib_entry = lock.entries.iter().find(|e| e.module.ends_with("/lib")).unwrap();
     assert_eq!(lib_entry.version.to_string(), "1.4.1", "the highest minimum, never 1.9.0");
     let dep_entry = lock.entries.iter().find(|e| e.module.ends_with("/dep")).unwrap();
@@ -439,7 +439,7 @@ fn majors_coexist_with_distinct_types_even_below_the_project() {
         &a,
         &[
             ("a.br", "package a\nuse codec\n\npub func v() -> text\n    return \"a uses {codec.version()} {codec.make().n}\"\nend\n"),
-            ("brasa.toml", &format!("[package]\nname = \"a\"\n\n[dependencies.codec]\ngit = \"{}\"\nversion = \"1.0.0\"\n", u1)),
+            ("zila.toml", &format!("[package]\nname = \"a\"\n\n[dependencies.codec]\ngit = \"{}\"\nversion = \"1.0.0\"\n", u1)),
         ],
     );
     git(&a, &["tag", "v1.0.0"]);
@@ -447,30 +447,30 @@ fn majors_coexist_with_distinct_types_even_below_the_project() {
         &b,
         &[
             ("b.br", "package b\nuse codec\n\npub func v() -> text\n    return \"b uses {codec.version()} {codec.make().n}\"\nend\n"),
-            ("brasa.toml", &format!("[package]\nname = \"b\"\n\n[dependencies.codec]\ngit = \"{}\"\nversion = \"2.0.0\"\n", u2)),
+            ("zila.toml", &format!("[package]\nname = \"b\"\n\n[dependencies.codec]\ngit = \"{}\"\nversion = \"2.0.0\"\n", u2)),
         ],
     );
     git(&b, &["tag", "v1.0.0"]);
     let main = "package main\nuse a, b\n\nfunc main()\n    print(a.v())\n    print(b.v())\nend\n";
     let p = project("majors", main);
-    write(&p, "brasa.toml", &format!("[package]\nname = \"app\"\n\n[dependencies.a]\ngit = \"{}\"\nversion = \"1.0.0\"\n\n[dependencies.b]\ngit = \"{}\"\nversion = \"1.0.0\"\n", url_of(&a), url_of(&b)));
-    let r = brasa(&p, &home, &["--fetch"]);
+    write(&p, "zila.toml", &format!("[package]\nname = \"app\"\n\n[dependencies.a]\ngit = \"{}\"\nversion = \"1.0.0\"\n\n[dependencies.b]\ngit = \"{}\"\nversion = \"1.0.0\"\n", url_of(&a), url_of(&b)));
+    let r = zila(&p, &home, &["--fetch"]);
     assert_eq!(r.code, 0, "{}{}", r.out, r.err);
-    let lock = Lock::parse(&std::fs::read_to_string(p.join("brasa.lock")).unwrap()).unwrap();
+    let lock = Lock::parse(&std::fs::read_to_string(p.join("zila.lock")).unwrap()).unwrap();
     assert_eq!(lock.entries.len(), 4, "a, b and both majors of codec");
     assert_eq!(build_and_run(&p, &home).unwrap(), "a uses one 1\nb uses two 2\n");
 
     // codec and codec_v2 in the project's own manifest: both usable, their types are different types
     let q = project("majors2", "package main\nuse codec\nuse codec_v2\n\nfunc main()\n    print(\"{codec.make().n} {codec_v2.make().n}\")\nend\n");
     init(&q, &home);
-    assert_eq!(brasa(&q, &home, &["--add", &format!("{}@1.0.0", u1)]).code, 0);
-    let add2 = brasa(&q, &home, &["--add", &format!("{}@2.0.0", u2)]);
+    assert_eq!(zila(&q, &home, &["--add", &format!("{}@1.0.0", u1)]).code, 0);
+    let add2 = zila(&q, &home, &["--add", &format!("{}@2.0.0", u2)]);
     assert_eq!(add2.code, 0, "{}{}", add2.out, add2.err);
-    let m = Manifest::parse(&std::fs::read_to_string(q.join("brasa.toml")).unwrap()).unwrap();
+    let m = Manifest::parse(&std::fs::read_to_string(q.join("zila.toml")).unwrap()).unwrap();
     assert_eq!(m.deps.iter().map(|d| d.name.as_str()).collect::<Vec<_>>(), ["codec", "codec_v2"]);
     assert_eq!(build_and_run(&q, &home).unwrap(), "1 2\n");
     write(&q, "main.br", "package main\nuse codec\nuse codec_v2\n\nfunc take(b: codec_v2.Box) -> int\n    return b.n\nend\n\nfunc main()\n    let b = codec.make()\n    print(\"{take(b)}\")\nend\n");
-    let bad = brasa(&q, &home, &["main.br", "-o", q.join(exe_name("bad")).to_str().unwrap()]);
+    let bad = zila(&q, &home, &["main.br", "-o", q.join(exe_name("bad")).to_str().unwrap()]);
     assert_eq!(bad.code, 1, "{}{}", bad.out, bad.err);
 }
 
@@ -479,7 +479,7 @@ fn majors_coexist_with_distinct_types_even_below_the_project() {
 fn local_project(name: &str, main: &str, files: &[(&str, &str)]) -> (PathBuf, PathBuf) {
     let home = scratch("home");
     let p = project(name, main);
-    write(&p, "brasa.toml", "[package]\nname = \"app\"\n");
+    write(&p, "zila.toml", "[package]\nname = \"app\"\n");
     for (f, t) in files {
         write(&p, f, t);
     }
@@ -508,7 +508,7 @@ fn a_duplicate_declaration_names_both_files() {
         "package main\nuse util\n\nfunc main()\n    print(util.one())\nend\n",
         &[("util/a.br", "package util\n\npub func one() -> text\n    return \"a\"\nend\n"), ("util/b.br", "package util\n\npub func one() -> text\n    return \"b\"\nend\n")],
     );
-    let b = brasa(&p, &home, &["main.br", "-o", p.join(exe_name("x")).to_str().unwrap()]);
+    let b = zila(&p, &home, &["main.br", "-o", p.join(exe_name("x")).to_str().unwrap()]);
     assert_eq!(b.code, 1);
     assert!(b.err.contains("'one' is declared twice") && b.err.contains("a.br") && b.err.contains("b.br"), "{}", b.err);
 }
@@ -520,7 +520,7 @@ fn the_package_line_must_match() {
         "package main\nuse util\n\nfunc main()\n    print(util.one())\nend\n",
         &[("util/a.br", "package util\n\npub func one() -> text\n    return \"a\"\nend\n"), ("util/b.br", "package other\n\npub func two() -> text\n    return \"b\"\nend\n")],
     );
-    let b = brasa(&p, &home, &["main.br", "-o", p.join(exe_name("x")).to_str().unwrap()]);
+    let b = zila(&p, &home, &["main.br", "-o", p.join(exe_name("x")).to_str().unwrap()]);
     assert_eq!(b.code, 1);
     assert!(b.err.contains("b.br") && b.err.contains("package other") && b.err.contains("'util'"), "{}", b.err);
 }
@@ -542,7 +542,7 @@ fn a_private_item_of_another_package_is_refused() {
         "package main\nuse util\n\nfunc main()\n    print(util.secret())\nend\n",
         &[("util/util.br", "package util\n\nfunc secret() -> text\n    return \"s\"\nend\n\npub func open() -> text\n    return secret()\nend\n")],
     );
-    let b = brasa(&p, &home, &["main.br", "-o", p.join(exe_name("x")).to_str().unwrap()]);
+    let b = zila(&p, &home, &["main.br", "-o", p.join(exe_name("x")).to_str().unwrap()]);
     assert_eq!(b.code, 1);
     assert!(b.err.contains("secret") && b.err.contains("util") && b.err.contains("private"), "{}", b.err);
 }
@@ -550,7 +550,7 @@ fn a_private_item_of_another_package_is_refused() {
 #[test]
 fn a_local_directory_cannot_take_a_standard_name() {
     let (p, home) = local_project("stdname", "package main\n\nfunc main()\nend\n", &[("text/text.br", "package text\n\npub func x() -> int\n    return 1\nend\n")]);
-    let b = brasa(&p, &home, &["main.br", "--ast"]);
+    let b = zila(&p, &home, &["main.br", "--ast"]);
     assert_eq!(b.code, 1);
     assert!(b.err.contains("'text'") && b.err.contains("standard library"), "{}", b.err);
 }
@@ -559,9 +559,9 @@ fn a_local_directory_cannot_take_a_standard_name() {
 fn an_unknown_name_is_an_error_with_the_hint() {
     let home = scratch("home");
     let p = project("unknown", "package main\nuse nothing\n\nfunc main()\nend\n");
-    let b = brasa(&p, &home, &["main.br", "-o", p.join(exe_name("x")).to_str().unwrap()]);
+    let b = zila(&p, &home, &["main.br", "-o", p.join(exe_name("x")).to_str().unwrap()]);
     assert_eq!(b.code, 1);
-    assert!(b.err.contains("unknown package 'nothing'") && b.err.contains("brasa-parse --add <git-url>"), "{}{}", b.out, b.err);
+    assert!(b.err.contains("unknown package 'nothing'") && b.err.contains("zila-parse --add <git-url>"), "{}{}", b.out, b.err);
 }
 
 #[test]
@@ -572,7 +572,7 @@ fn programs_without_a_manifest_are_unchanged() {
     assert_eq!(build_and_run(&p, &home).unwrap(), "plain\n");
     let hello = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/hello.br");
     let out = p.join(exe_name("hello"));
-    let b = brasa(&p, &home, &[hello.to_str().unwrap(), "-o", out.to_str().unwrap()]);
+    let b = zila(&p, &home, &[hello.to_str().unwrap(), "-o", out.to_str().unwrap()]);
     assert_eq!(b.code, 0, "{}{}", b.out, b.err);
 }
 
@@ -587,7 +587,7 @@ fn the_tests_of_a_package_run_with_its_files() {
             ("util/util_test.br", "package util\n\n#[test]\nfunc t_twice()\n    assert_eq(twice(2), 4)\nend\n\n#[test]\nfunc t_half()\n    assert_eq(half(8), 4)\nend\n"),
         ],
     );
-    let r = brasa(&p, &home, &["--test", "util/util_test.br"]);
+    let r = zila(&p, &home, &["--test", "util/util_test.br"]);
     assert_eq!(r.code, 0, "{}{}", r.out, r.err);
     assert!(r.out.contains("ok t_twice") && r.out.contains("ok t_half") && r.out.contains("2 passed, 0 failed"), "{}", r.out);
 }
@@ -601,8 +601,8 @@ fn tests_of_a_project_with_a_dependency_run() {
     git(&codec, &["tag", "v1.0.0"]);
     let p = project("deptest", "package main\nuse codec\n\n#[test]\nfunc t_version()\n    assert_eq(codec.version(), \"codec 1\")\nend\n\nfunc main()\nend\n");
     init(&p, &home);
-    assert_eq!(brasa(&p, &home, &["--add", &format!("{}@1.0.0", url_of(&codec))]).code, 0);
-    let r = brasa(&p, &home, &["--test", "main.br"]);
+    assert_eq!(zila(&p, &home, &["--add", &format!("{}@1.0.0", url_of(&codec))]).code, 0);
+    let r = zila(&p, &home, &["--test", "main.br"]);
     assert_eq!(r.code, 0, "{}{}", r.out, r.err);
     assert!(r.out.contains("ok t_version"), "{}", r.out);
 }
@@ -625,8 +625,8 @@ fn copy_dir(from: &Path, to: &Path) {
 fn the_sample_project_builds_offline_from_a_prepared_cache() {
     let proj = scratch("sample");
     copy_dir(Path::new("examples/packages"), &proj);
-    let manifest = Manifest::parse(&std::fs::read_to_string(proj.join("brasa.toml")).unwrap()).unwrap();
-    let lock = Lock::parse(&std::fs::read_to_string(proj.join("brasa.lock")).unwrap()).unwrap();
+    let manifest = Manifest::parse(&std::fs::read_to_string(proj.join("zila.toml")).unwrap()).unwrap();
+    let lock = Lock::parse(&std::fs::read_to_string(proj.join("zila.lock")).unwrap()).unwrap();
     // the committed lock covers the committed manifest
     for d in &manifest.deps {
         assert!(lock.for_module(&d.module()).map_or(false, |e| e.version >= d.version), "{} is not locked", d.name);
@@ -642,17 +642,17 @@ fn the_sample_project_builds_offline_from_a_prepared_cache() {
         copy_dir(&fixture, &dir);
         e.hash = tree_hash(&dir).unwrap();
     }
-    std::fs::write(proj.join("brasa.lock"), lock.write()).unwrap();
+    std::fs::write(proj.join("zila.lock"), lock.write()).unwrap();
     // no git, no network
     let out = proj.join(exe_name("sample"));
     let mut args = vec!["main.br", "-o", out.to_str().unwrap()];
     if !cfg!(windows) {
         args.extend_from_slice(&["--target", "linux"]);
     }
-    let b = brasa_env(&proj, &home, &args, Some(""));
+    let b = zila_env(&proj, &home, &args, Some(""));
     assert_eq!(b.code, 0, "{}{}", b.out, b.err);
     let run = Command::new(&out).output().unwrap();
-    assert_eq!(String::from_utf8_lossy(&run.stdout).replace('\r', ""), "Hello, Brasa!\nHello again, Brasa!\n3 times 4 is 12\n");
+    assert_eq!(String::from_utf8_lossy(&run.stdout).replace('\r', ""), "Hello, Zila Lang!\nHello again, Zila Lang!\n3 times 4 is 12\n");
 }
 
 // ---------------------------------------------------------------- structure
@@ -681,7 +681,7 @@ fn the_build_path_never_references_git() {
 fn edition_is_stored_and_changes_nothing() {
     let home = scratch("home");
     let p = project("edition", "package main\n\nfunc main()\n    print(\"e\")\nend\n");
-    write(&p, "brasa.toml", "[package]\nname = \"a\"\nedition = \"2027\"\n");
+    write(&p, "zila.toml", "[package]\nname = \"a\"\nedition = \"2027\"\n");
     assert_eq!(build_and_run(&p, &home).unwrap(), "e\n");
 }
 
@@ -689,20 +689,20 @@ fn edition_is_stored_and_changes_nothing() {
 fn unsupported_toml_stops_the_tool() {
     let home = scratch("home");
     let p = project("badtoml", "package main\n\nfunc main()\nend\n");
-    write(&p, "brasa.toml", "[package]\nname = \"a\"\nnames = [\"a\", \"b\"]\n");
+    write(&p, "zila.toml", "[package]\nname = \"a\"\nnames = [\"a\", \"b\"]\n");
     for args in [&["main.br", "--ast"][..], &["--fetch"][..]] {
-        let r = brasa(&p, &home, args);
+        let r = zila(&p, &home, args);
         assert_eq!(r.code, 1);
         assert!(r.err.contains("line 3") && r.err.contains("arrays are not supported"), "{}", r.err);
     }
-    assert!(!p.join("brasa.lock").exists());
+    assert!(!p.join("zila.lock").exists());
 }
 
 // ---------------------------------------------------------------- repository content
 
 /// The names a file asks for with `use` (the first segment of each).
 fn used_names(text: &str) -> Vec<String> {
-    brasa::comptime::use_names(text)
+    zila::comptime::use_names(text)
 }
 
 #[test]
@@ -714,8 +714,8 @@ fn no_example_uses_a_package_that_exists_nowhere() {
             continue;
         }
         let src = std::fs::read_to_string(&p).unwrap();
-        let file = brasa::parse_source(&src).unwrap_or_else(|d| panic!("{}: {}", p.display(), d.msg));
-        if let Err(e) = brasa::codegen_x64::generate_asm_for(&file, &brasa::codegen_x64::CompileOptions::default(), brasa::codegen_x64::Target::Windows) {
+        let file = zila::parse_source(&src).unwrap_or_else(|d| panic!("{}: {}", p.display(), d.msg));
+        if let Err(e) = zila::codegen_x64::generate_asm_for(&file, &zila::codegen_x64::CompileOptions::default(), zila::codegen_x64::Target::Windows) {
             assert!(!e.contains("unknown package"), "{}: {}", p.display(), e);
         }
         checked += 1;
@@ -739,7 +739,7 @@ fn std_and_os_use_only_standard_names() {
                 continue;
             }
             for n in used_names(&std::fs::read_to_string(&p).unwrap()) {
-                if brasa::codegen_x64::std_source(&n).is_none() && n != "c" {
+                if zila::codegen_x64::std_source(&n).is_none() && n != "c" {
                     problems.push(format!("{}: use {}", p.display(), n));
                 }
             }
@@ -764,15 +764,15 @@ fn fetching_shows_the_effects_of_a_new_package_and_an_update_marks_a_gained_one(
     git(&lib, &["tag", "v1.0.0"]);
     let p = project("effects", USES_LIB);
     init(&p, &home);
-    let a = brasa(&p, &home, &["--add", &format!("{}@1.0.0", url_of(&lib))]);
+    let a = zila(&p, &home, &["--add", &format!("{}@1.0.0", url_of(&lib))]);
     assert_eq!(a.code, 0, "{}{}", a.out, a.err);
     assert!(a.out.contains("lib@1.0.0: effects: none"), "{}", a.out);
     commit(&lib, &[("lib.br", UNSAFE_LIB)], "second");
     git(&lib, &["tag", "v1.1.0"]);
     // nothing changed: nothing is reported
-    let f = brasa(&p, &home, &["--fetch"]);
+    let f = zila(&p, &home, &["--fetch"]);
     assert!(!f.out.contains("effects"), "{}", f.out);
-    let u = brasa(&p, &home, &["--update", "lib"]);
+    let u = zila(&p, &home, &["--update", "lib"]);
     assert_eq!(u.code, 0, "{}{}", u.out, u.err);
     assert!(u.out.contains("lib@1.1.0: effects: unsafe") && u.out.contains("CHANGED: was none, gained unsafe"), "{}", u.out);
 }
@@ -786,14 +786,14 @@ fn a_policy_refuses_a_dependency_with_the_forbidden_effect_and_survives_add() {
     git(&lib, &["tag", "v1.0.0"]);
     let p = project("policy", USES_LIB);
     init(&p, &home);
-    let toml = std::fs::read_to_string(p.join("brasa.toml")).unwrap();
-    std::fs::write(p.join("brasa.toml"), format!("{}\n[policy]\nforbid = \"asm\"\n", toml)).unwrap();
-    let a = brasa(&p, &home, &["--add", &format!("{}@1.0.0", url_of(&lib))]);
+    let toml = std::fs::read_to_string(p.join("zila.toml")).unwrap();
+    std::fs::write(p.join("zila.toml"), format!("{}\n[policy]\nforbid = \"asm\"\n", toml)).unwrap();
+    let a = zila(&p, &home, &["--add", &format!("{}@1.0.0", url_of(&lib))]);
     assert_eq!(a.code, 0, "{}{}", a.out, a.err);
     assert!(a.out.contains("effects: asm"), "{}", a.out);
     // --add rewrote the manifest and kept the policy
-    assert!(std::fs::read_to_string(p.join("brasa.toml")).unwrap().contains("forbid = \"asm\""));
-    let b = brasa(&p, &home, &["main.br", "-o", p.join("app.exe").to_str().unwrap()]);
+    assert!(std::fs::read_to_string(p.join("zila.toml")).unwrap().contains("forbid = \"asm\""));
+    let b = zila(&p, &home, &["main.br", "-o", p.join("app.exe").to_str().unwrap()]);
     assert_eq!(b.code, 1, "{}{}", b.out, b.err);
     assert!(b.err.contains("uses `asm` (in lib.br)") && b.err.contains("forbids"), "{}", b.err);
 }
@@ -807,9 +807,9 @@ fn a_policy_does_not_check_the_projects_own_code_or_allowed_effects() {
     git(&lib, &["tag", "v1.0.0"]);
     let p = project("policy_ok", "package main\nuse lib\n\nfunc main()\n    asm\n        nop\n    end\n    print(\"{lib.n()}\")\nend\n");
     init(&p, &home);
-    let toml = std::fs::read_to_string(p.join("brasa.toml")).unwrap();
-    std::fs::write(p.join("brasa.toml"), format!("{}\n[policy]\nforbid = \"asm\"\n", toml)).unwrap();
-    assert_eq!(brasa(&p, &home, &["--add", &format!("{}@1.0.0", url_of(&lib))]).code, 0);
+    let toml = std::fs::read_to_string(p.join("zila.toml")).unwrap();
+    std::fs::write(p.join("zila.toml"), format!("{}\n[policy]\nforbid = \"asm\"\n", toml)).unwrap();
+    assert_eq!(zila(&p, &home, &["--add", &format!("{}@1.0.0", url_of(&lib))]).code, 0);
     assert_eq!(build_and_run(&p, &home).unwrap(), "1\n");
 }
 

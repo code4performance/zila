@@ -7,8 +7,8 @@ use std::process::{Command, Output};
 
 const NON_CORE: [&str; 11] = ["json", "crypto", "tls", "ui", "web", "ai", "mcp", "rag", "db", "postgres", "sqlserver"];
 
-fn brasa(dir: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_brasa-parse")).args(args).current_dir(dir).output().unwrap()
+fn zila(dir: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_zila-parse")).args(args).current_dir(dir).output().unwrap()
 }
 
 fn text(o: &Output) -> (String, String) {
@@ -16,7 +16,7 @@ fn text(o: &Output) -> (String, String) {
 }
 
 fn scratch(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("brasa-pkgs-{}-{}", std::process::id(), name));
+    let d = std::env::temp_dir().join(format!("zila-pkgs-{}-{}", std::process::id(), name));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
     d
@@ -43,13 +43,13 @@ fn norm(s: String) -> String {
 fn the_non_core_libraries_live_in_packages_and_the_compiler_embeds_them_from_there() {
     for n in NON_CORE {
         assert!(!Path::new(&format!("std/{}.br", n)).exists(), "std/{}.br should not exist: the source is packages/{}/{}.br", n, n, n);
-        let manifest = std::fs::read_to_string(format!("packages/{}/brasa.toml", n)).unwrap();
-        assert!(manifest.contains(&format!("name = \"{}\"", n)) && manifest.contains("version = "), "packages/{}/brasa.toml", n);
+        let manifest = std::fs::read_to_string(format!("packages/{}/zila.toml", n)).unwrap();
+        assert!(manifest.contains(&format!("name = \"{}\"", n)) && manifest.contains("version = "), "packages/{}/zila.toml", n);
         // the compiler's copy is the package's file
-        let embedded = norm(brasa::codegen_x64::std_source(n).unwrap().to_string());
+        let embedded = norm(zila::codegen_x64::std_source(n).unwrap().to_string());
         assert!(embedded == norm(std::fs::read_to_string(format!("packages/{}/{}.br", n, n)).unwrap()), "{}", n);
     }
-    assert!(Path::new("packages/brasa.toml").is_file());
+    assert!(Path::new("packages/zila.toml").is_file());
 }
 
 #[test]
@@ -58,7 +58,7 @@ fn every_package_builds_as_a_local_package_and_says_it_shadows_the_standard_one(
     copy_dir(Path::new("packages"), &dir);
     for n in NON_CORE {
         std::fs::write(dir.join("main.br"), format!("package main\n\nuse {}\n\nfunc main()\n    print(\"hi\")\nend\n", n)).unwrap();
-        let o = brasa(&dir, &["main.br", "--asm"]);
+        let o = zila(&dir, &["main.br", "--asm"]);
         let (_, err) = text(&o);
         assert!(o.status.success(), "package {} does not build: {}", n, err);
         assert!(err.contains(&format!("shadows the standard library's '{}'", n)), "{}: {}", n, err);
@@ -69,17 +69,17 @@ fn every_package_builds_as_a_local_package_and_says_it_shadows_the_standard_one(
 #[test]
 fn a_package_shadows_a_non_core_standard_library_and_the_standard_libraries_keep_their_own() {
     let dir = scratch("shadow");
-    std::fs::write(dir.join("brasa.toml"), "[package]\nname = \"app\"\nversion = \"0.1.0\"\n").unwrap();
+    std::fs::write(dir.join("zila.toml"), "[package]\nname = \"app\"\nversion = \"0.1.0\"\n").unwrap();
     std::fs::create_dir_all(dir.join("json")).unwrap();
     std::fs::write(dir.join("json").join("json.br"), "package json\n\npub func hello() -> text\n    return \"my json\"\nend\n").unwrap();
     std::fs::write(dir.join("main.br"), "package main\n\nuse json\n\nfunc main()\n    print(json.hello())\nend\n").unwrap();
-    let o = brasa(&dir, &["main.br", "--run"]);
+    let o = zila(&dir, &["main.br", "--run"]);
     let (out, err) = text(&o);
     assert_eq!(out, "my json\n", "{}", err);
     assert!(err.contains("the package 'json' shadows the standard library's 'json'"), "{}", err);
     // `rag` uses the standard `json` inside: the local package must not replace it there
     std::fs::write(dir.join("main.br"), "package main\n\nuse rag\n\nfunc main()\n    print(\"ok\")\nend\n").unwrap();
-    let o = brasa(&dir, &["main.br", "--run"]);
+    let o = zila(&dir, &["main.br", "--run"]);
     let (out, err) = text(&o);
     assert_eq!(out, "ok\n", "{}", err);
     assert!(!err.contains("shadows"), "{}", err);
@@ -88,7 +88,7 @@ fn a_package_shadows_a_non_core_standard_library_and_the_standard_libraries_keep
 
 #[test]
 fn core_names_stay_reserved_and_other_names_may_be_dependencies() {
-    use brasa::package::Manifest;
+    use zila::package::Manifest;
     let m = |name: &str| format!("[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies.{}]\ngit = \"https://example.org/x/{}\"\nversion = \"1.0.0\"\n", name, name);
     for core in ["text", "list", "fs", "net", "errors", "thread"] {
         let e = Manifest::parse(&m(core)).unwrap_err();
@@ -98,11 +98,11 @@ fn core_names_stay_reserved_and_other_names_may_be_dependencies() {
         assert!(Manifest::parse(&m(open)).is_ok(), "{} should be allowed", open);
     }
     let dir = scratch("localcore");
-    std::fs::write(dir.join("brasa.toml"), "[package]\nname = \"app\"\nversion = \"0.1.0\"\n").unwrap();
+    std::fs::write(dir.join("zila.toml"), "[package]\nname = \"app\"\nversion = \"0.1.0\"\n").unwrap();
     std::fs::create_dir_all(dir.join("text")).unwrap();
     std::fs::write(dir.join("text").join("text.br"), "package text\n\npub func x() -> int\n    return 1\nend\n").unwrap();
     std::fs::write(dir.join("main.br"), "package main\nfunc main()\nend\n").unwrap();
-    let o = brasa(&dir, &["main.br", "--asm"]);
+    let o = zila(&dir, &["main.br", "--asm"]);
     let (_, err) = text(&o);
     assert!(!o.status.success() && err.contains("core standard library"), "{}", err);
     let _ = std::fs::remove_dir_all(&dir);
@@ -121,7 +121,7 @@ func main()
     print(\"hi\")
 end
 ").unwrap();
-    let o = brasa(&dir, &["main.br", "--run"]);
+    let o = zila(&dir, &["main.br", "--run"]);
     let (out, err) = text(&o);
     assert_eq!(out, "hi
 ", "{}", err);

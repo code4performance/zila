@@ -1,7 +1,7 @@
 # abort Specification
 
 ## Purpose
-Defines how a Brasa program fails. Overflow never fails, failures a caller can handle are values, and programmer bugs abort the process immediately.
+Defines how a Zila Lang program fails. Overflow never fails, failures a caller can handle are values, and programmer bugs abort the process immediately.
 
 ## Requirements
 

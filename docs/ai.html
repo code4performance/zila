@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AI — Brasa</title>
-  <meta name="description" content="Language models from Brasa: chat, streaming, typed answers, tools and embeddings with the ai library, with safety notes.">
+  <title>AI — Zila Lang</title>
+  <meta name="description" content="Language models from Zila Lang: chat, streaming, typed answers, tools and embeddings with the ai library, with safety notes.">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <header class="site-header">
-    <a class="brand" href="index.html">brasa<span class="ember-dot">.</span><small>lang docs</small></a>
+    <a class="brand" href="index.html">zila<span class="ember-dot">.</span><small>lang docs</small></a>
     <nav class="site-nav">
       <a href="index.html">Overview</a>
       <a href="syntax.html">Syntax</a>
@@ -21,15 +21,15 @@
       <a href="databases.html">Databases</a>
       <a href="ai.html" aria-current="page">AI</a>
       <a href="packages.html">Packages</a>
-      <a href="os.html">Brasa OS</a>
+      <a href="os.html">Zila Lang OS</a>
       <a href="getting-started.html">Getting Started</a>
     </nav>
   </header>
 
   <main>
     <h1>AI</h1>
-    <p class="note"><code>ai</code>, <code>mcp</code> and <code>rag</code> are packages of the Brasa repository (<code>packages/</code>) that the compiler embeds, so <code>use ai</code> needs no manifest; a package of your project with the same name replaces them (see <a href="packages.html#use">Packages</a>).</p>
-    <p><code>use ai</code> talks to a language model: the Anthropic Messages API (<code>ai.anthropic</code>) or any OpenAI-compatible server (<code>ai.openai_compatible</code>), including local ones such as Ollama over plain <code>http</code>. It is written in Brasa on <code>web</code> and <code>json</code>; nothing in the compiler knows about models. The program names the model every time; the library has no default.</p>
+    <p class="note"><code>ai</code>, <code>mcp</code> and <code>rag</code> are packages of the Zila Lang repository (<code>packages/</code>) that the compiler embeds, so <code>use ai</code> needs no manifest; a package of your project with the same name replaces them (see <a href="packages.html#use">Packages</a>).</p>
+    <p><code>use ai</code> talks to a language model: the Anthropic Messages API (<code>ai.anthropic</code>) or any OpenAI-compatible server (<code>ai.openai_compatible</code>), including local ones such as Ollama over plain <code>http</code>. It is written in Zila Lang on <code>web</code> and <code>json</code>; nothing in the compiler knows about models. The program names the model every time; the library has no default.</p>
 
     <section id="chat">
       <h2>Chat and streaming</h2>
@@ -131,7 +131,7 @@ print(answer.text)                       <span class="cm">// cites the sources a
   </main>
 
   <footer class="site-footer">
-    Brasa — a language with a human face. Docs generated from <code>brasa.ebnf</code> and <code>examples/*.br</code>.
+    Zila Lang — a language with a human face. Docs generated from <code>zila.ebnf</code> and <code>examples/*.br</code>.
   </footer>
 </body>
 </html>

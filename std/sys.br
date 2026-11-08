@@ -1,5 +1,5 @@
 // =====================================================================
-// Brasa standard library: helpers shared by `fs` and `net`
+// Zila Lang standard library: helpers shared by `fs` and `net`
 //
 // Raw memory that frees itself, and Windows error messages.
 // =====================================================================

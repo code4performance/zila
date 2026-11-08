@@ -1,5 +1,5 @@
 // =====================================================================
-// Brasa standard library: format
+// Zila Lang standard library: format
 //
 //     use format
 //     print(format.text("%(<8)%(>6)", ["apples", format.int(12)]))

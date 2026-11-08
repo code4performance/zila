@@ -76,3 +76,9 @@ Untracked leftovers seen in the working tree (`brasa-example.txt`, `hello_native
 
 - The new name (the only deliberate gap).
 - Whether the file extension should change with it (default: no; `--ext` if yes). This can be answered together with the name.
+
+## Rehearsal result (2026-11-08)
+
+Applied with the dummy name `Zorbo` on a throw-away copy of the working tree (`--apply --yes --force`, since the tree had uncommitted work): 18 file moves, about 1,350 lines in 225 files, none under `openspec/changes/archive/`. A second run found nothing to do. In the copy: `cargo build` and the whole suite passed (57 test files) except the leftover test, which failed only on the 6 lines of the story of the name in `README.md`; after those lines were rewritten it passed together with the docs check. `zorbo-parse --fmt-check` on `std/`, `examples/` and `packages/` passed, the Node tests of the extension and the boot image build ran inside the suite and passed, and `editors/vscode/package.json` showed `zorbo-lang`, publisher `zorbo` and the `zorbo.server.*` and `zorbo.trace` settings. The copy was deleted.
+
+Manual places the tool reports: the 6 story lines of `README.md`, and `docs/Brasa.docx`, a Word document that has the old name inside (90 occurrences) and cannot be rewritten as text.

@@ -26,7 +26,7 @@ end
 
 // ---- being called from C ----
 
-#[export("brasa_add")]
+#[export("zila_add")]
 func add(a: i32, b: i32) -> i32
     return a + b
 end

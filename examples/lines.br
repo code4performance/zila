@@ -1,6 +1,6 @@
 // Buffered files: write lines without a system call each, read them back one at a time.
 //
-//   brasa-parse examples/lines.br -o lines.exe
+//   zila-parse examples/lines.br -o lines.exe
 //
 // `fs.create` gives a writer that collects text and writes it in 64 KiB pieces (call `close()`
 // or `flush()` when you are done); `fs.open` gives a reader with `read_line()`.

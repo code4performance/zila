@@ -1,6 +1,6 @@
 // JSON: read and write your own types, or a free-form tree.
 //
-//   brasa-parse examples/json.br -o json.exe
+//   zila-parse examples/json.br -o json.exe
 //
 // `json.parse(T, text)` turns JSON into a value of any type you declare, and `json.encode(T, x)`
 // does the reverse. There is nothing to register: the library reads the shape of `T` at build

@@ -8,7 +8,7 @@
 
 ## 2. The cache
 
-- [ ] 2.1 Define the cache key and the stored form (versioned, written atomically under `$BRASA_HOME/check/`) and implement reading and writing of the typed form
+- [ ] 2.1 Define the cache key and the stored form (versioned, written atomically under `$ZILA_HOME/check/`) and implement reading and writing of the typed form
 - [ ] 2.2 Use the cache for packages of a project, with `--no-cache`; a missing or damaged entry is a miss
 - [ ] 2.3 Tests: output is byte-identical with and without the cache for every example and for a project with dependencies; a warm build checks nothing again; a changed dependency re-checks it and its users only; other flags and targets are other entries; a deleted or damaged cache gives the same executable
 - [ ] 2.4 Measure on `postgres`, `sqlserver`, `ai` and the examples; keep the cache on only where it wins and record the numbers in design.md

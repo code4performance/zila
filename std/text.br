@@ -1,5 +1,5 @@
 // =====================================================================
-// Brasa standard library: text
+// Zila Lang standard library: text
 //
 //     use text
 //     let words = text.split("a,b,c", ",")

@@ -8,7 +8,7 @@
 
 ## Goals / Non-Goals
 
-**Goals:** a Brasa program is a correct MCP server on stdio and HTTP in a few lines; the same tool is usable locally and over MCP; defaults resist the real risks of a local tool server (cross-origin and DNS-rebinding access, runaway handlers).
+**Goals:** a Zila Lang program is a correct MCP server on stdio and HTTP in a few lines; the same tool is usable locally and over MCP; defaults resist the real risks of a local tool server (cross-origin and DNS-rebinding access, runaway handlers).
 
 **Non-Goals:** the proposal's non-goals.
 

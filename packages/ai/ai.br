@@ -1,5 +1,5 @@
 // =====================================================================
-// Brasa standard library: language models (`use ai`)
+// Zila Lang standard library: language models (`use ai`)
 //
 //     use ai
 //     use json                       // the generated code of `ask` and `tool` names it
@@ -18,7 +18,7 @@
 //     let run = try client.run(req, [weather])
 //
 // A client for the Anthropic Messages API (`ai.anthropic`) and for OpenAI-compatible servers,
-// including local ones over plain http such as Ollama (`ai.openai_compatible`). Written in Brasa
+// including local ones over plain http such as Ollama (`ai.openai_compatible`). Written in Zila Lang
 // on `web` (HTTP client and streaming) and `json`; nothing in the compiler knows about models.
 //
 //   * The key travels only in a request header. No error message, and nothing else the library
@@ -958,7 +958,7 @@ comptime func quote(s: text) -> text
     return out + "\""
 end
 
-// A JSON string literal (the text of the schema, not Brasa source).
+// A JSON string literal (the text of the schema, not Zila Lang source).
 comptime func js(s: text) -> text
     var out = "\""
     for c in s

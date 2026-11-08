@@ -2,12 +2,12 @@
 //! comptime reflection, attributes, text and number rules, errors, limits and pretty printing.
 //! Programs are compiled to native executables and run (the Linux run is skipped without WSL).
 //!
-//! Brasa text literals treat `{` as the start of an interpolation, so JSON inside the test
-//! programs is written between `‹` and `›`; `prep` turns each such span into an escaped Brasa
+//! Zila Lang text literals treat `{` as the start of an interpolation, so JSON inside the test
+//! programs is written between `‹` and `›`; `prep` turns each such span into an escaped Zila Lang
 //! literal.
 
-use brasa::codegen_x64::{compile_to_linux, CompileOptions};
-use brasa::{compile_to_native, parse_source};
+use zila::codegen_x64::{compile_to_linux, CompileOptions};
+use zila::{compile_to_native, parse_source};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Once;
@@ -17,13 +17,13 @@ static INIT: Once = Once::new();
 
 fn setup() {
     INIT.call_once(|| {
-        let dir = std::env::temp_dir().join(format!("brasa-json-test-cache-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("zila-json-test-cache-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        brasa::comptime::set_cache_dir(&dir);
+        zila::comptime::set_cache_dir(&dir);
     });
 }
 
-/// Replaces each `‹...›` with the Brasa text literal that holds the characters in between.
+/// Replaces each `‹...›` with the Zila Lang text literal that holds the characters in between.
 fn prep(src: &str) -> String {
     let mut out = String::new();
     let mut rest = src;
@@ -110,7 +110,7 @@ fn program(uses: &str, body: &str) -> String {
 fn build(src: &str) -> Result<std::path::PathBuf, String> {
     setup();
     let file = parse_source(src).unwrap_or_else(|d| panic!("parse error: {}", d));
-    let exe = std::env::temp_dir().join(format!("brasa-json-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let exe = std::env::temp_dir().join(format!("zila-json-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     match compile_to_native(&file, exe.to_str().unwrap()) {
         Err(e) if e.contains("could not find Visual Studio") => Err("no toolchain".into()),
         r => r.map(|_| exe),
@@ -152,7 +152,7 @@ fn wsl_ok() -> bool {
 fn use_json_compiles_for_both_targets() {
     let src = program("", "print(\"hi\")");
     let file = parse_source(&src).unwrap();
-    let out = std::env::temp_dir().join(format!("brasa-json-elf-{}", std::process::id()));
+    let out = std::env::temp_dir().join(format!("zila-json-elf-{}", std::process::id()));
     setup();
     compile_to_linux(&file, out.to_str().unwrap(), &CompileOptions::default()).unwrap_or_else(|e| panic!("{}", e));
     let _ = std::fs::remove_file(&out);
@@ -461,7 +461,7 @@ fn escapes_unicode_and_surrogates() {
 #[test]
 fn control_characters_and_invalid_utf8_are_errors() {
     // a file with bad bytes is the one way to get a text that is not UTF-8
-    let dir = std::env::temp_dir().join(format!("brasa-json-bytes-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("zila-json-bytes-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let cases: Vec<(&str, Vec<u8>)> = vec![
         ("lone", b"\"a\xffb\"".to_vec()),
@@ -980,7 +980,7 @@ end
         return;
     }
     let file = parse_source(&src).unwrap();
-    let exe = std::env::temp_dir().join(format!("brasa-json-linux-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let exe = std::env::temp_dir().join(format!("zila-json-linux-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     setup();
     compile_to_linux(&file, exe.to_str().unwrap(), &CompileOptions::default()).unwrap_or_else(|e| panic!("compile error: {}", e));
     let p = exe.to_str().unwrap().replace('\\', "/");

@@ -1,4 +1,4 @@
-// The Brasa extension: the language server's syntax errors and formatting in VS Code.
+// The Zila Lang extension: the language server's syntax errors and formatting in VS Code.
 //
 // The protocol work is in client.js (which does not depend on VS Code and is tested with
 // plain Node). This file connects it to the editor: documents, diagnostics, formatting,
@@ -15,11 +15,11 @@ let output = null;
 let warnedMissing = false;
 
 function settings() {
-  return vscode.workspace.getConfiguration('brasa');
+  return vscode.workspace.getConfiguration('zila');
 }
 
-function isBrasa(doc) {
-  return doc.languageId === 'brasa' && (doc.uri.scheme === 'file' || doc.uri.scheme === 'untitled');
+function isZila(doc) {
+  return doc.languageId === 'zila' && (doc.uri.scheme === 'file' || doc.uri.scheme === 'untitled');
 }
 
 function toRange(r) {
@@ -29,7 +29,7 @@ function toRange(r) {
 function showDiagnostics(uri, list) {
   const items = list.map((d) => {
     const item = new vscode.Diagnostic(toRange(d.range), d.message, vscode.DiagnosticSeverity.Error);
-    item.source = d.source || 'brasa';
+    item.source = d.source || 'zila';
     return item;
   });
   diagnostics.set(vscode.Uri.parse(uri), items);
@@ -37,7 +37,7 @@ function showDiagnostics(uri, list) {
 
 async function startServer() {
   if (!settings().get('server.enabled', true)) return;
-  const command = settings().get('server.path', 'brasa-parse') || 'brasa-parse';
+  const command = settings().get('server.path', 'zila-parse') || 'zila-parse';
   const trace = settings().get('trace', false);
   warnedMissing = false;
   client = new Client({
@@ -50,19 +50,19 @@ async function startServer() {
       warnedMissing = true;
       vscode.window
         .showErrorMessage(
-          'Brasa: cannot start the language server "' + command + '" (' + e.message + '). Highlighting still works; set brasa.server.path to the brasa-parse executable.',
+          'Zila Lang: cannot start the language server "' + command + '" (' + e.message + '). Highlighting still works; set zila.server.path to the zila-parse executable.',
           'Open Settings'
         )
         .then((choice) => {
-          if (choice === 'Open Settings') vscode.commands.executeCommand('workbench.action.openSettings', 'brasa.server.path');
+          if (choice === 'Open Settings') vscode.commands.executeCommand('workbench.action.openSettings', 'zila.server.path');
         });
     },
     onStopped: () => {
-      vscode.window.showErrorMessage('Brasa: the language server stopped after exiting several times. Use "Brasa: Restart Language Server" to try again.');
+      vscode.window.showErrorMessage('Zila Lang: the language server stopped after exiting several times. Use "Zila Lang: Restart Language Server" to try again.');
     },
   });
   for (const doc of vscode.workspace.textDocuments) {
-    if (isBrasa(doc)) client.open(doc.uri.toString(), doc.getText(), doc.version);
+    if (isZila(doc)) client.open(doc.uri.toString(), doc.getText(), doc.version);
   }
   await client.start();
 }
@@ -80,25 +80,25 @@ async function restartServer() {
 }
 
 function activate(context) {
-  output = vscode.window.createOutputChannel('Brasa Language Server');
-  diagnostics = vscode.languages.createDiagnosticCollection('brasa');
+  output = vscode.window.createOutputChannel('Zila Lang Language Server');
+  diagnostics = vscode.languages.createDiagnosticCollection('zila');
   context.subscriptions.push(output, diagnostics);
 
   context.subscriptions.push(
     vscode.workspace.onDidOpenTextDocument((doc) => {
-      if (client && isBrasa(doc)) client.open(doc.uri.toString(), doc.getText(), doc.version);
+      if (client && isZila(doc)) client.open(doc.uri.toString(), doc.getText(), doc.version);
     }),
     vscode.workspace.onDidChangeTextDocument((e) => {
-      if (client && isBrasa(e.document)) client.change(e.document.uri.toString(), e.document.getText(), e.document.version);
+      if (client && isZila(e.document)) client.change(e.document.uri.toString(), e.document.getText(), e.document.version);
     }),
     vscode.workspace.onDidCloseTextDocument((doc) => {
-      if (client && isBrasa(doc)) client.close(doc.uri.toString());
+      if (client && isZila(doc)) client.close(doc.uri.toString());
     }),
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('brasa.server') || e.affectsConfiguration('brasa.trace')) restartServer();
+      if (e.affectsConfiguration('zila.server') || e.affectsConfiguration('zila.trace')) restartServer();
     }),
-    vscode.commands.registerCommand('brasa.restartServer', restartServer),
-    vscode.languages.registerDocumentFormattingEditProvider('brasa', {
+    vscode.commands.registerCommand('zila.restartServer', restartServer),
+    vscode.languages.registerDocumentFormattingEditProvider('zila', {
       async provideDocumentFormattingEdits(document) {
         if (!client) return [];
         const uri = document.uri.toString();

@@ -1,12 +1,12 @@
 // =====================================================================
-// Brasa standard library: math on floats
+// Zila Lang standard library: math on floats
 //
 //     use math
 //     println(math.sqrt(2.25))        // 1.5
 //
 // `sqrt`, `floor`, `ceil` and `trunc` use the processor's own instructions
 // (through the compiler intrinsics `__sqrt`, `__floor`, `__ceil` and `__trunc`).
-// The rest is written in Brasa.
+// The rest is written in Zila Lang.
 // =====================================================================
 
 package math

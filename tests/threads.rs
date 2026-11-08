@@ -3,7 +3,7 @@
 //! run with a time limit, so a hang fails the test instead of stalling the run. Linux is not
 //! covered here: its thread layer is not written yet (see the change's tasks).
 
-use brasa::{compile_to_native, parse_source};
+use zila::{compile_to_native, parse_source};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
@@ -19,7 +19,7 @@ struct Ran {
 
 fn build(src: &str) -> Result<std::path::PathBuf, String> {
     let file = parse_source(src).map_err(|d| d.to_string())?;
-    let exe = std::env::temp_dir().join(format!("brasa-threads-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let exe = std::env::temp_dir().join(format!("zila-threads-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     compile_to_native(&file, exe.to_str().unwrap())?;
     Ok(exe)
 }
@@ -494,10 +494,10 @@ end
 #[test]
 fn single_thread_program_has_no_lock_prefixes() {
     let plain = parse_source("package main\n\nfunc main() -> error\n    let xs = [1, 2, 3]\n    print(\"{xs.len}\")\n    return\nend\n").unwrap();
-    let asm = brasa::codegen_x64::generate_asm(&plain).unwrap();
+    let asm = zila::codegen_x64::generate_asm(&plain).unwrap();
     assert!(!asm.contains("lock "), "a program without threads must not use lock prefixes");
     let threaded = parse_source("package main\n\nfunc main() -> error\n    let xs = shared [1, 2, 3]\n    print(\"{xs.len}\")\n    return\nend\n").unwrap();
-    let asm = brasa::codegen_x64::generate_asm(&threaded).unwrap();
+    let asm = zila::codegen_x64::generate_asm(&threaded).unwrap();
     assert!(asm.contains("lock inc"), "a program with `shared` counts atomically");
 }
 
@@ -962,14 +962,14 @@ fn example_mutex_counter() {
 fn kernel_rejects_spawn_thread() {
     let boot = parse_source("package boot\n\nfunc main()\nend\n").unwrap();
     let kernel = parse_source("package kernel\n\nfunc work()\nend\n\nfunc main()\n    let t = spawn_thread work()\nend\n").unwrap();
-    let e = brasa::codegen_x64::build_os(&boot, &kernel).err().expect("the kernel must reject spawn_thread");
+    let e = zila::codegen_x64::build_os(&boot, &kernel).err().expect("the kernel must reject spawn_thread");
     assert!(e.contains("spawn_thread") && e.contains("bare-metal"), "{}", e);
 }
 
 #[test]
 fn linux_target_says_threads_are_not_available_yet() {
     let file = parse_source(&main_with("    let t = spawn_thread f(1)")).unwrap();
-    let e = brasa::codegen_x64::generate_asm_for(&file, &brasa::codegen_x64::CompileOptions::default(), brasa::codegen_x64::Target::Linux)
+    let e = zila::codegen_x64::generate_asm_for(&file, &zila::codegen_x64::CompileOptions::default(), zila::codegen_x64::Target::Linux)
         .err()
         .expect("expected an error");
     assert!(e.contains("not available on Linux"), "{}", e);

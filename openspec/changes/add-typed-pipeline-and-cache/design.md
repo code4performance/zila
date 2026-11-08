@@ -9,13 +9,13 @@
 - A cache of checked packages that never changes the output.
 
 **Non-Goals:**
-- Dynamic loading, a Brasa ABI, per-package machine code, parallel checking, a change of the executables.
+- Dynamic loading, a Zila Lang ABI, per-package machine code, parallel checking, a change of the executables.
 
 ## Decisions
 
 1. **Introduce the typed form beside the existing pass, function by function.** Start with the declarations (records, enums, signatures, globals: `declare` and `layout` already produce tables) as a `TypedProgram` value, then bodies. At each step emission reads the new form for what it covers and the suite plus byte-identical assembly of every example is the check. A flag-day rewrite is rejected: the generator is too large to rewrite without an oracle.
 2. **Cache the checked form, not machine code.** Generic instantiations are decided by the whole program (a package's `List<T>` code depends on which `T` its users ask for), so per-package machine code is not independent. The checked declarations and the bodies of non-generic functions are. Machine code is still produced on every build from the cached typed form; pruning and layout of shared symbols run over it.
-3. **Key** = SHA-256 of the package's source tree (the same hash the lock uses), the keys of the packages it imports, the compiler version (a hash of the compiler's own build, so a change of the checker invalidates everything), the target and the optimisation flag. Entries live under `$BRASA_HOME/check/<key>` and are written atomically like the package cache.
+3. **Key** = SHA-256 of the package's source tree (the same hash the lock uses), the keys of the packages it imports, the compiler version (a hash of the compiler's own build, so a change of the checker invalidates everything), the target and the optimisation flag. Entries live under `$ZILA_HOME/check/<key>` and are written atomically like the package cache.
 4. **A damaged or missing entry is a miss**, never an error. The cache has a format version; an unknown version is a miss.
 5. **Serialisation** is a plain, versioned binary or text form written by the compiler itself (zero external dependencies). The typed form is built so that it can be written and read without pointers into the source tree.
 6. **The cache is off for `--run` of one-off files and for the language server** until measured; the default is on for builds of a project with a manifest. (Revisit once there are numbers.)

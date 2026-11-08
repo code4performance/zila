@@ -2,8 +2,8 @@
 //! through WSL (the tests skip, with a message, when WSL is not usable); the ELF writer and the
 //! option parsing are tested without it.
 
-use brasa::codegen_x64::{compile_to_linux, compile_to_native, elf_image, generate_asm_for, CompileOptions, Target};
-use brasa::parse_source;
+use zila::codegen_x64::{compile_to_linux, compile_to_native, elf_image, generate_asm_for, CompileOptions, Target};
+use zila::parse_source;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 static N: AtomicUsize = AtomicUsize::new(0);
 
 fn temp(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("brasa-linux-test-{}-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst), name))
+    std::env::temp_dir().join(format!("zila-linux-test-{}-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst), name))
 }
 
 /// `C:\Users\x\file` as the path WSL sees.
@@ -103,7 +103,7 @@ fn the_elf_header_describes_one_loadable_segment() {
 fn the_linux_assembly_uses_system_calls_and_no_windows_api() {
     let file = parse_source(&main_of("print(\"hi\")")).unwrap();
     let asm = generate_asm_for(&file, &CompileOptions::default(), Target::Linux).unwrap();
-    assert!(asm.contains("syscall") && asm.contains("brasa_start"), "{}", &asm[..200.min(asm.len())]);
+    assert!(asm.contains("syscall") && asm.contains("zila_start"), "{}", &asm[..200.min(asm.len())]);
     for api in ["kernel32", "ExitProcess", "WriteFile", "HeapAlloc", "SetConsoleOutputCP", "extern "] {
         assert!(!asm.contains(api), "the Linux assembly mentions {}", api);
     }
@@ -111,7 +111,7 @@ fn the_linux_assembly_uses_system_calls_and_no_windows_api() {
 
 #[test]
 fn the_target_option_is_checked() {
-    let run = |args: &[&str]| Command::new(env!("CARGO_BIN_EXE_brasa-parse")).args(args).output().unwrap();
+    let run = |args: &[&str]| Command::new(env!("CARGO_BIN_EXE_zila-parse")).args(args).output().unwrap();
     let out = run(&["x.br", "--target", "solaris"]);
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(!out.status.success() && err.contains("unknown target 'solaris'") && err.contains("windows") && err.contains("linux"), "{}", err);
@@ -232,7 +232,7 @@ fn programs_that_do_not_use_the_windows_api_print_the_same_on_both_targets() {
     }
     assert_eq!(compared, examples.len());
     // the examples that use files leave them in the current directory
-    for leftover in ["brasa-example.txt", "lines-example.txt"] {
+    for leftover in ["zila-example.txt", "lines-example.txt"] {
         let _ = std::fs::remove_file(leftover);
     }
 }
@@ -249,7 +249,7 @@ fn running_out_of_memory_is_an_abort() {
 
 /// `name(params) -> result` for every function, and the name of every type, of a library source.
 fn declarations(src: &str) -> std::collections::BTreeMap<String, String> {
-    use brasa::ast::DeclKind;
+    use zila::ast::DeclKind;
     let file = parse_source(src).unwrap_or_else(|d| panic!("parse error: {}", d));
     let mut out = std::collections::BTreeMap::new();
     for d in &file.decls {
@@ -259,7 +259,7 @@ fn declarations(src: &str) -> std::collections::BTreeMap<String, String> {
                     .receiver
                     .as_ref()
                     .map(|r| match &r.ty {
-                        brasa::ast::Type::Named { path, .. } => format!("{}.", path.join(".")),
+                        zila::ast::Type::Named { path, .. } => format!("{}.", path.join(".")),
                         other => format!("{:?}.", other),
                     })
                     .unwrap_or_default();
@@ -297,7 +297,7 @@ fn the_sys_layers_share_their_api() {
 
 #[test]
 fn a_library_prefers_its_linux_layer_on_linux() {
-    use brasa::codegen_x64::std_source_for;
+    use zila::codegen_x64::std_source_for;
     let win = std_source_for("sys", Target::Windows).unwrap();
     let lin = std_source_for("sys", Target::Linux).unwrap();
     assert!(win.contains("FormatMessageA") && !lin.contains("FormatMessageA"));
@@ -495,7 +495,7 @@ func main() -> error
     return
 end
 "#;
-    let Some((out, code)) = with_local_file("brasa-parity-roundtrip.txt", src) else { return };
+    let Some((out, code)) = with_local_file("zila-parity-roundtrip.txt", src) else { return };
     assert_eq!(out, "hello, files: acentuação ok\nstarts right true\nidentical true 4194304\nticker ran true\n");
     assert_eq!(code, 0);
 }
@@ -535,7 +535,7 @@ func main() -> error
     return
 end
 "#;
-    let Some((out, code)) = with_local_file("brasa-parity-lines.txt", src) else { return };
+    let Some((out, code)) = with_local_file("zila-parity-lines.txt", src) else { return };
     assert_eq!((out.as_str(), code), ("1: alpha\n2: beta\n3: ação\n4: tail\ntrue\n", 0));
 }
 
@@ -562,7 +562,7 @@ func main() -> error
     return
 end
 "#;
-    let Some((out, code)) = with_linux_file("brasa-parity-big.txt", src) else { return };
+    let Some((out, code)) = with_linux_file("zila-parity-big.txt", src) else { return };
     assert_eq!((out.as_str(), code), ("true\n", 0));
 }
 
@@ -1071,7 +1071,7 @@ end
 }
 
 #[test]
-fn what_c_buffered_is_written_in_order_with_what_brasa_prints() {
+fn what_c_buffered_is_written_in_order_with_what_zila_prints() {
     let src = r#"package main
 use c
 
@@ -1082,13 +1082,13 @@ func main()
     unsafe
         puts(c.cstr("written by C"))
     end
-    print("written by Brasa")
+    print("written by Zila Lang")
 end
 "#;
     let Some((out, code)) = run_linux(src) else { return };
-    // C buffers its output when it is not a terminal; it is written before Brasa writes, in order
+    // C buffers its output when it is not a terminal; it is written before Zila Lang writes, in order
     assert_eq!((out.as_str(), code), ("written by C
-written by Brasa
+written by Zila Lang
 ", 0));
 }
 
@@ -1168,9 +1168,9 @@ end
 
 #[test]
 fn tls_upgrade_alpn_and_a_private_ca_work_the_same_on_linux() {
-    // needs the TLS servers of tests/docker (BRASA_TEST_CA names the development CA)
-    let Ok(ca_win) = std::env::var("BRASA_TEST_CA") else {
-        eprintln!("skipped: set BRASA_TEST_CA (see tests/docker/README.md) to run this test");
+    // needs the TLS servers of tests/docker (ZILA_TEST_CA names the development CA)
+    let Ok(ca_win) = std::env::var("ZILA_TEST_CA") else {
+        eprintln!("skipped: set ZILA_TEST_CA (see tests/docker/README.md) to run this test");
         return;
     };
     let p = ca_win.replace('\\', "/");
@@ -1226,26 +1226,26 @@ end
 #[test]
 fn crypto_db_and_the_database_drivers_behave_the_same_on_linux() {
     // crypto and db (with a fake driver) always run; the drivers run when the Docker servers of
-    // tests/docker are up (BRASA_TEST_POSTGRES / BRASA_TEST_SQLSERVER_STRICT, source env.ps1)
+    // tests/docker are up (ZILA_TEST_POSTGRES / ZILA_TEST_SQLSERVER_STRICT, source env.ps1)
     let wsl_path = |p: String| {
         let p = p.replace('\\', "/");
         format!("/mnt/{}{}", p[..1].to_ascii_lowercase(), &p[2..])
     };
-    let ca = std::env::var("BRASA_TEST_CA").ok().map(wsl_path);
+    let ca = std::env::var("ZILA_TEST_CA").ok().map(wsl_path);
     let mut body = String::from(
         "    print(crypto.hex(crypto.sha256(\"abc\")))\n    print(crypto.hex(crypto.md5(\"abc\")))\n    print((try crypto.random(8)).len)\n    let fake = db.connection(\n        func(sql, args)\n            var rs = db.rows([\"n\"], [\"int\"])\n            rs.add(\"41\", false)\n            rs.add(\"1\", false)\n            return rs\n        end,\n        func() return end,\n        func() return end,\n        func() return end,\n        func() end\n    )\n    let rows = try db.query(int, fake, \"select\")\n    print(rows[0] + rows[1])\n",
     );
     let mut expected = String::from("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\n900150983cd24fb0d6963f7d28e17f72\n8\n42\n");
-    if let (Some(ca), Ok(_)) = (&ca, std::env::var("BRASA_TEST_POSTGRES")) {
-        body.push_str(&format!("    let pg = try postgres.open(\"postgres://app:Brasa_app_dev_1@127.0.0.1:55432/shop?sslmode=require&sslrootcert={ca}\")\n    print(try db.one(int, pg, \"select count(*)::int from customers\"))\n"));
+    if let (Some(ca), Ok(_)) = (&ca, std::env::var("ZILA_TEST_POSTGRES")) {
+        body.push_str(&format!("    let pg = try postgres.open(\"postgres://app:Zila_app_dev_1@127.0.0.1:55432/shop?sslmode=require&sslrootcert={ca}\")\n    print(try db.one(int, pg, \"select count(*)::int from customers\"))\n"));
         expected.push_str("60\n");
     }
-    if let (Some(ca), Ok(_)) = (&ca, std::env::var("BRASA_TEST_SQLSERVER_STRICT")) {
-        body.push_str(&format!("    let ms = try sqlserver.open(\"sqlserver://sa:Brasa_dev_Sql_1@127.0.0.1:51434/shop?encrypt=strict&cafile={ca}\")\n    print(try db.one(int, ms, \"select count(*) from customers\"))\n"));
+    if let (Some(ca), Ok(_)) = (&ca, std::env::var("ZILA_TEST_SQLSERVER_STRICT")) {
+        body.push_str(&format!("    let ms = try sqlserver.open(\"sqlserver://sa:Zila_dev_Sql_1@127.0.0.1:51434/shop?encrypt=strict&cafile={ca}\")\n    print(try db.one(int, ms, \"select count(*) from customers\"))\n"));
         expected.push_str("60\n");
     }
     if ca.is_none() {
-        eprintln!("the Linux half of the drivers is skipped: set BRASA_TEST_CA (see tests/docker/README.md)");
+        eprintln!("the Linux half of the drivers is skipped: set ZILA_TEST_CA (see tests/docker/README.md)");
     }
     let src = format!("package main\n\nuse crypto\nuse db\nuse postgres\nuse sqlserver\n\nfunc main() -> error\n{body}    return\nend\n");
     let Some((out, code)) = run_linux(&src) else { return };
@@ -1267,9 +1267,9 @@ type Item = record
 end
 
 func main() -> error
-    print((sys.env("PATH") ?? "").len > 0, sys.env("BRASA_SURELY_UNSET_7") == nil)
+    print((sys.env("PATH") ?? "").len > 0, sys.env("ZILA_SURELY_UNSET_7") == nil)
     print(ai.schema(Item))
-    match ai.key_from_env("BRASA_SURELY_UNSET_7")
+    match ai.key_from_env("ZILA_SURELY_UNSET_7")
         ok(k) -> print("unexpected")
         err(e) -> print(e.kind.name)
     end
@@ -1433,7 +1433,7 @@ fn a_library_and_its_linux_variant_export_the_same_names() {
         let only_win: Vec<_> = win.difference(&lin).collect();
         // a program written against the Windows variant must find every public name on Linux; the
         // Linux variants may export extra names (the resolver of `net` and the X protocol of `ui`
-        // are written in Brasa, and tests reach into them)
+        // are written in Zila Lang, and tests reach into them)
         assert!(only_win.is_empty(), "{}: public in {}.br but missing from {}.linux.br: {:?}", base, base, base, only_win);
         checked += 1;
     }

@@ -1,5 +1,5 @@
 // =====================================================================
-// Brasa standard library: helpers shared by `fs` and `net` (Linux layer)
+// Zila Lang standard library: helpers shared by `fs` and `net` (Linux layer)
 //
 // The Linux counterpart of std/sys.br: raw memory that frees itself, system calls made with
 // `asm` (no C library), and the messages of the operating system's error numbers.

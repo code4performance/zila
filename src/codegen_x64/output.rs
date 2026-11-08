@@ -41,8 +41,8 @@ pub(super) fn boot_source(file: &File) -> Result<String, String> {
 
 /// Builds a bootable disk image: boot sector + kernel.
 ///
-/// The boot file is Brasa whose `#[naked]` functions hold the real-mode and
-/// mode-switching code; the kernel is ordinary Brasa compiled for long mode
+/// The boot file is Zila Lang whose `#[naked]` functions hold the real-mode and
+/// mode-switching code; the kernel is ordinary Zila Lang compiled for long mode
 /// and linked at `KERNEL_BASE`. It must define `func console_write(s: text)`,
 /// which receives everything `print` writes.
 pub fn build_os(boot: &File, kernel: &File) -> Result<Vec<u8>, String> {
@@ -152,8 +152,8 @@ pub fn generate_asm_for(file: &File, options: &CompileOptions, target: Target) -
     c.generate().map_err(crate::comptime::map_error)
 }
 
-/// The entry C uses to call Brasa function `name`: its System V arguments (integers in rdi, rsi,
-/// rdx, rcx, r8, r9 and floats in xmm0-7, in order of their kind) are moved to where Brasa
+/// The entry C uses to call Zila Lang function `name`: its System V arguments (integers in rdi, rsi,
+/// rdx, rcx, r8, r9 and floats in xmm0-7, in order of their kind) are moved to where Zila Lang
 /// functions expect them (position i in rcx, rdx, r8, r9, then the stack; floats as bits in the
 /// integer registers), and a float result goes to xmm0. `kinds`: 0 integer, 1 f32, 2 f64.
 pub(super) fn callback_thunk(name: &str, kinds: &[u8], ret: u8) -> String {
@@ -357,7 +357,7 @@ pub fn compile_to_linux(file: &File, output: &str, options: &CompileOptions) -> 
     let imports = linux_imports(&asm);
     let image = if imports.is_empty() {
         let assembled = crate::asm_x86::assemble(&asm, LINUX_BASE + ELF_HEADERS, 64)?;
-        let Some(&entry) = assembled.symbols.get("brasa_start") else {
+        let Some(&entry) = assembled.symbols.get("zila_start") else {
             return Err("internal error: no entry point".into());
         };
         elf_image(&assembled.bytes, entry)
@@ -365,7 +365,7 @@ pub fn compile_to_linux(file: &File, output: &str, options: &CompileOptions) -> 
         let needed = linux_needed(&asm);
         let head_len = elf_dynamic_head(&imports, &needed, &vec![0; imports.len()], 0, 0).len() as u64;
         let assembled = crate::asm_x86::assemble(&asm, LINUX_BASE + head_len, 64)?;
-        let Some(&entry) = assembled.symbols.get("brasa_start") else {
+        let Some(&entry) = assembled.symbols.get("zila_start") else {
             return Err("internal error: no entry point".into());
         };
         let mut slots = Vec::new();
@@ -416,7 +416,7 @@ pub(super) fn symbol_owner(sym: &str, modules: &[(String, String)]) -> Option<(S
     if sym.starts_with("rt_msg_") || sym == "rt_heap" || sym == "rt_image_end" {
         return Some(("(runtime)".into(), false));
     }
-    if sym.starts_with("rt_") || sym.starts_with("CB_") || sym == "brasa_start" {
+    if sym.starts_with("rt_") || sym.starts_with("CB_") || sym == "zila_start" {
         return Some(("(runtime)".into(), true));
     }
     None

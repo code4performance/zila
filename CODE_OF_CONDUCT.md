@@ -1,10 +1,10 @@
 # Code of Conduct
 
-Brasa is a project about making programming clearer and more welcoming. The community around it should be the same. This code applies to everyone who takes part: contributors, maintainers, people who only open an issue, and anyone who speaks for the project in public.
+Zila Lang is a project about making programming clearer and more welcoming. The community around it should be the same. This code applies to everyone who takes part: contributors, maintainers, people who only open an issue, and anyone who speaks for the project in public.
 
 ## Our standard
 
-We want Brasa to be a place where people of any background feel able to contribute and learn. That includes every level of experience, nationality, language, gender, identity, age, ability and belief.
+We want Zila Lang to be a place where people of any background feel able to contribute and learn. That includes every level of experience, nationality, language, gender, identity, age, ability and belief.
 
 **What we ask of everyone**
 

@@ -1,5 +1,5 @@
 // =====================================================================
-// Brasa OS boot sector (512 bytes), written in Brasa.
+// Zila Lang OS boot sector (512 bytes), written in Zila Lang.
 //
 // The BIOS loads this sector at 0x7C00 in 16-bit real mode. It then:
 //   1. prints a banner and enables the A20 line,
@@ -9,7 +9,7 @@
 //   5. turns on PAE, long mode and paging,
 //   6. far-jumps into 64-bit code and from there into the kernel.
 //
-// Build:  brasa-parse --os os/boot.br os/kernel.br -o brasa-os.img
+// Build:  zila-parse --os os/boot.br os/kernel.br -o zila-os.img
 //
 // The compiler assembles the `asm` lines below itself (no NASM). The builder
 // stores the kernel size, in sectors, in `kernel_sectors`.
@@ -150,7 +150,7 @@ func boot()
         dap_seg: dw 0x1000
         dap_lba: dd 1
             dd 0
-        msg_boot: db "Brasa OS: loading kernel...", 13, 10, 0
+        msg_boot: db "Zila Lang OS: loading kernel...", 13, 10, 0
         msg_ok: db "Kernel loaded. Entering long mode.", 13, 10, 0
         msg_disk: db "Disk read error.", 13, 10, 0
         // flat GDT: null, 32-bit code, 32-bit data, 64-bit code

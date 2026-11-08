@@ -1,7 +1,7 @@
 // =====================================================================
-// Brasa standard library: TCP networking (`use net`)
+// Zila Lang standard library: TCP networking (`use net`)
 //
-// Written in Brasa on Winsock with overlapped sockets and the scheduler's
+// Written in Zila Lang on Winsock with overlapped sockets and the scheduler's
 // completion port (std/task.br). No call blocks the other tasks.
 //
 //   let listener = try await net.listen(8080)

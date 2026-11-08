@@ -1,5 +1,5 @@
-use brasa::ast::*;
-use brasa::parse_source;
+use zila::ast::*;
+use zila::parse_source;
 use std::fs;
 
 #[test]
@@ -287,7 +287,7 @@ fn error_asm_bad_clobber() {
 
 #[test]
 fn asm_lines_are_written_without_quotes() {
-    let src = "package t\nfunc f()\n    asm\n        // a Brasa comment\n        start:\n            in al, dx\n            out dx, al\n            or al, 2\n            mov ax, [bx] ; load\n\n            msg: db \"http://x\", 13, 0   // trailing\n        end:\n            \"quoted\"\n            in rdx = port\n            out rax = v\n            clobber cc, memory\n    end\nend\n";
+    let src = "package t\nfunc f()\n    asm\n        // a Zila Lang comment\n        start:\n            in al, dx\n            out dx, al\n            or al, 2\n            mov ax, [bx] ; load\n\n            msg: db \"http://x\", 13, 0   // trailing\n        end:\n            \"quoted\"\n            in rdx = port\n            out rax = v\n            clobber cc, memory\n    end\nend\n";
     let file = parse_source(src).unwrap();
     let DeclKind::Func(f) = &file.decls[0].kind else { panic!() };
     let StmtKind::Asm(a) = &f.body[0].kind else { panic!() };
@@ -321,8 +321,8 @@ fn error_asm_interpolated_line() {
     assert!(msg.contains("plain text"), "{}", msg);
 }
 
-fn parses(src: &str) -> Result<brasa::ast::File, String> {
-    brasa::parse_source(src).map_err(|d| d.msg)
+fn parses(src: &str) -> Result<zila::ast::File, String> {
+    zila::parse_source(src).map_err(|d| d.msg)
 }
 
 #[test]
@@ -337,12 +337,12 @@ type C = enum
     Red, Green
 end
 ").unwrap();
-    let brasa::ast::DeclKind::Type(t) = &f.decls[0].kind else { panic!() };
-    let brasa::ast::TypeBody::Enum(v) = &t.body else { panic!() };
+    let zila::ast::DeclKind::Type(t) = &f.decls[0].kind else { panic!() };
+    let zila::ast::TypeBody::Enum(v) = &t.body else { panic!() };
     assert_eq!(v.len(), 3);
     assert_eq!(v[1].fields.len(), 2);
-    let brasa::ast::DeclKind::Type(t) = &f.decls[1].kind else { panic!() };
-    let brasa::ast::TypeBody::Enum(v) = &t.body else { panic!() };
+    let zila::ast::DeclKind::Type(t) = &f.decls[1].kind else { panic!() };
+    let zila::ast::TypeBody::Enum(v) = &t.body else { panic!() };
     assert_eq!(v.iter().map(|x| x.name.as_str()).collect::<Vec<_>>(), ["Red", "Green"]);
 }
 
@@ -365,10 +365,10 @@ func b() -> error
     return
 end
 ").unwrap();
-    let brasa::ast::DeclKind::Func(a) = &f.decls[0].kind else { panic!() };
+    let zila::ast::DeclKind::Func(a) = &f.decls[0].kind else { panic!() };
     let r = a.ret.as_ref().unwrap();
     assert!(r.fallible && r.ty.is_some());
-    let brasa::ast::DeclKind::Func(b) = &f.decls[1].kind else { panic!() };
+    let zila::ast::DeclKind::Func(b) = &f.decls[1].kind else { panic!() };
     let r = b.ret.as_ref().unwrap();
     assert!(r.fallible && r.ty.is_none());
 }
@@ -410,9 +410,9 @@ func main() -> error
     return
 end
 ").unwrap();
-    let brasa::ast::DeclKind::Func(a) = &f.decls[0].kind else { panic!() };
+    let zila::ast::DeclKind::Func(a) = &f.decls[0].kind else { panic!() };
     assert!(a.is_async);
-    let brasa::ast::DeclKind::Func(m) = &f.decls[1].kind else { panic!() };
+    let zila::ast::DeclKind::Func(m) = &f.decls[1].kind else { panic!() };
     assert!(!m.is_async);
 }
 
@@ -440,8 +440,8 @@ async type X = int
 
 #[test]
 fn async_and_await_are_reserved_words() {
-    assert!(brasa::lexer::KEYWORDS.contains(&"async"));
-    assert!(brasa::lexer::KEYWORDS.contains(&"await"));
+    assert!(zila::lexer::KEYWORDS.contains(&"async"));
+    assert!(zila::lexer::KEYWORDS.contains(&"await"));
     assert!(parses("package t
 func f()
     let async = 1
@@ -468,7 +468,7 @@ fn comptime_func_and_comptime_parameters_parse() {
     assert!(f.comptime && !f.params[0].comptime);
     let g = func_of("package t\n#[generated(gen)]\nfunc parse(comptime t: Type, raw: text) -> t\n", "parse");
     assert!(!g.comptime && g.params[0].comptime && !g.params[1].comptime && g.body.is_empty());
-    assert!(brasa::lexer::KEYWORDS.contains(&"comptime"));
+    assert!(zila::lexer::KEYWORDS.contains(&"comptime"));
 }
 
 #[test]
@@ -504,7 +504,7 @@ fn blocks(names: &[&str]) -> std::collections::HashSet<String> {
 #[test]
 fn a_block_form_is_an_expression_or_a_statement() {
     let src = "package t\nfunc f()\n    let s = shout\n        hello { not code\n    end\n    shout\n  more\n    end\nend\n";
-    let file = brasa::parser::parse_source_with(src, blocks(&["shout"])).unwrap();
+    let file = zila::parser::parse_source_with(src, blocks(&["shout"])).unwrap();
     let DeclKind::Func(f) = &file.decls[0].kind else { panic!() };
     let StmtKind::Var(v) = &f.body[0].kind else { panic!("{:?}", f.body[0]) };
     match &v.value.as_ref().unwrap().kind {
@@ -530,7 +530,7 @@ fn an_unknown_name_alone_on_a_line_is_an_ordinary_identifier() {
 
 #[test]
 fn block_names_come_from_the_file_and_registered_packages() {
-    brasa::comptime::register_package("blockpkg_parse", "package blockpkg_parse\n#[block]\ncomptime func twice(raw: text) -> text\n    return raw\nend\n");
+    zila::comptime::register_package("blockpkg_parse", "package blockpkg_parse\n#[block]\ncomptime func twice(raw: text) -> text\n    return raw\nend\n");
     let src = "package t\nuse blockpkg_parse\nfunc f()\n    let s = twice\n        a < b ? {\n    end\nend\n";
     let file = parse_source(src).unwrap();
     let DeclKind::Func(f) = &file.decls[0].kind else { panic!() };
@@ -543,13 +543,13 @@ fn block_names_come_from_the_file_and_registered_packages() {
 
 #[test]
 fn an_unclosed_block_is_an_error() {
-    let e = brasa::parser::parse_source_with("package t\nfunc f()\n    let s = shout\n        hi\n", blocks(&["shout"])).unwrap_err().to_string();
+    let e = zila::parser::parse_source_with("package t\nfunc f()\n    let s = shout\n        hi\n", blocks(&["shout"])).unwrap_err().to_string();
     assert!(e.contains("not closed with 'end'"), "{}", e);
 }
 
 #[test]
 fn the_grammar_has_no_html_expression() {
-    let g = std::fs::read_to_string("brasa.ebnf").unwrap();
+    let g = std::fs::read_to_string("zila.ebnf").unwrap();
     assert!(!g.contains("html_expr"));
     assert!(g.contains("block_expr") && g.contains("comptime"));
 }

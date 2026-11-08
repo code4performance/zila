@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Library — Brasa</title>
-  <meta name="description" content="The Brasa standard library for text, lists, formatting and sets: searching, splitting, parsing numbers, map, filter, sort, padding, templates and set operations.">
+  <title>Library — Zila Lang</title>
+  <meta name="description" content="The Zila Lang standard library for text, lists, formatting and sets: searching, splitting, parsing numbers, map, filter, sort, padding, templates and set operations.">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <header class="site-header">
-    <a class="brand" href="index.html">brasa<span class="ember-dot">.</span><small>lang docs</small></a>
+    <a class="brand" href="index.html">zila<span class="ember-dot">.</span><small>lang docs</small></a>
     <nav class="site-nav">
       <a href="index.html">Overview</a>
       <a href="syntax.html">Syntax</a>
@@ -21,15 +21,15 @@
       <a href="databases.html">Databases</a>
       <a href="ai.html">AI</a>
       <a href="packages.html">Packages</a>
-      <a href="os.html">Brasa OS</a>
+      <a href="os.html">Zila Lang OS</a>
       <a href="getting-started.html">Getting Started</a>
     </nav>
   </header>
 
   <main>
     <h1>Library</h1>
-    <p>The everyday operations live in four modules: <code>text</code>, <code>list</code>, <code>format</code> and <code>set</code>; <code>json</code> reads and writes JSON; <code>web</code> is an HTTP server and client. They are written in Brasa itself (see the files in <code>std/</code>), and you use them by name: <code>use text</code> once at the top of the file, then <code>text.trim(s)</code>. Nothing is added to the types themselves, so the names never clash with your own functions.</p>
-    <p>Not all of it is the core. <code>text</code>, <code>list</code>, <code>set</code>, <code>sorted</code>, <code>format</code>, <code>bufio</code>, <code>errors</code>, <code>math</code>, <code>float</code>, <code>fs</code>, <code>net</code>, <code>sync</code>, <code>task</code>, <code>future</code>, <code>thread</code>, <code>sys</code>, <code>reflect</code> and <code>derive</code> are the core of the standard library: the compiler and the runtime rest on them, and their names are reserved. <code>json</code>, <code>crypto</code>, <code>tls</code>, <code>ui</code>, <code>web</code>, <code>ai</code>, <code>mcp</code>, <code>rag</code>, <code>db</code>, <code>postgres</code> and <code>sqlserver</code> follow external formats and services and change faster than the compiler, so they are packages of the Brasa repository (<code>packages/</code>) that the compiler embeds: a package of your project may take their name and then replaces them, with a warning. See <a href="packages.html#use">Packages</a>.</p>
+    <p>The everyday operations live in four modules: <code>text</code>, <code>list</code>, <code>format</code> and <code>set</code>; <code>json</code> reads and writes JSON; <code>web</code> is an HTTP server and client. They are written in Zila Lang itself (see the files in <code>std/</code>), and you use them by name: <code>use text</code> once at the top of the file, then <code>text.trim(s)</code>. Nothing is added to the types themselves, so the names never clash with your own functions.</p>
+    <p>Not all of it is the core. <code>text</code>, <code>list</code>, <code>set</code>, <code>sorted</code>, <code>format</code>, <code>bufio</code>, <code>errors</code>, <code>math</code>, <code>float</code>, <code>fs</code>, <code>net</code>, <code>sync</code>, <code>task</code>, <code>future</code>, <code>thread</code>, <code>sys</code>, <code>reflect</code> and <code>derive</code> are the core of the standard library: the compiler and the runtime rest on them, and their names are reserved. <code>json</code>, <code>crypto</code>, <code>tls</code>, <code>ui</code>, <code>web</code>, <code>ai</code>, <code>mcp</code>, <code>rag</code>, <code>db</code>, <code>postgres</code> and <code>sqlserver</code> follow external formats and services and change faster than the compiler, so they are packages of the Zila Lang repository (<code>packages/</code>) that the compiler embeds: a package of your project may take their name and then replaces them, with a warning. See <a href="packages.html#use">Packages</a>.</p>
 
     <section id="text">
       <h2>text</h2>
@@ -252,7 +252,7 @@ scores.put(<span class="str">"ana"</span>, 90)
       </table>
       <p>How types map to JSON, in both directions:</p>
       <table>
-        <thead><tr><th>Brasa</th><th>JSON</th></tr></thead>
+        <thead><tr><th>Zila Lang</th><th>JSON</th></tr></thead>
         <tbody>
           <tr><td>record</td><td>An object whose keys are the field names, in declaration order. Unknown keys are ignored; a missing key is an error unless the field is optional.</td></tr>
           <tr><td>enum without payloads</td><td>A text holding the case name: <code>"Red"</code>.</td></tr>
@@ -282,7 +282,7 @@ app.get(<span class="str">"/hello/:name"</span>, <span class="kw">func</span>(re
 <span class="kw">try</span> app.run()                                  <span class="cm">// or: let running = try app.start()</span>
 
 <span class="kw">let</span> reply = <span class="kw">try</span> web.get(<span class="str">"http://127.0.0.1:8080/hello/ana"</span>)   <span class="cm">// reply.status, reply.body</span></code></pre>
-      <p><code>use web</code> is an HTTP/1.1 server, a router, a middleware chain, JSON helpers, an HTTP client and HTML templates, all written in Brasa on <code>net</code>, <code>tls</code>, <code>task</code> and <code>json</code>; the compiler only knows the name. It works on Windows and Linux alike and is not available in a bare-metal kernel. See <a href="examples.html#rest-api">the REST API example</a> and <a href="examples.html#web-example">the web example</a>.</p>
+      <p><code>use web</code> is an HTTP/1.1 server, a router, a middleware chain, JSON helpers, an HTTP client and HTML templates, all written in Zila Lang on <code>net</code>, <code>tls</code>, <code>task</code> and <code>json</code>; the compiler only knows the name. It works on Windows and Linux alike and is not available in a bare-metal kernel. See <a href="examples.html#rest-api">the REST API example</a> and <a href="examples.html#web-example">the web example</a>.</p>
       <h3>Server</h3>
       <p>The server runs one task per connection on the scheduler, so a slow client never delays the others. <code>web.server(port: 8080)</code> makes a <code>Server</code> (port 0 picks a free one). Its limits are fields you can set before starting: <code>max_head</code> (16 KiB of header lines; <code>431</code>), <code>max_line</code> (8 KiB request line; <code>414</code>), <code>max_body</code> (1 MiB; <code>413</code>, answered without reading the body), <code>read_timeout</code> (10 s for a request that has started; <code>408</code>), <code>idle_timeout</code> (5 s between requests on a kept-alive connection; closed silently), <code>write_timeout</code> (10 s) and <code>max_connections</code> (1024; a connection beyond that gets <code>503</code> and is closed). Times are in milliseconds, sizes in bytes. A malformed request gets <code>400</code>, an unsupported method <code>501</code>. Bodies are read with <code>Content-Length</code> or <code>Transfer-Encoding: chunked</code> (both at once is <code>400</code>); HTTP/1.1 connections are kept alive unless either side says <code>Connection: close</code>, HTTP/1.0 ones close unless they ask to keep alive; requests on one connection are answered in order. <code>app.run()</code> serves until the program ends; <code>app.start()</code> serves in the background and returns a <code>Running</code> with <code>.port</code> and <code>.stop()</code>.</p>
       <table>
@@ -352,7 +352,7 @@ print(crypto.base64_encode(nonce))</code></pre>
       <pre><code><span class="kw">use</span> postgres
 
 <span class="kw">let</span> conn = <span class="kw">try</span> postgres.open(<span class="str">"postgres://app:secret@localhost:5432/shop?sslmode=require&amp;sslrootcert=ca.pem"</span>)</code></pre>
-      <p>The PostgreSQL wire protocol (version 3) in Brasa. <code>open(url)</code> returns a <code>db.Conn</code>. The URL takes <code>sslmode</code> (<code>require</code>, the default, or <code>disable</code>), <code>sslrootcert</code> (extra authorities for this connection) and <code>max_rows</code>. Login by SCRAM-SHA-256 (server signature verified), <code>md5</code>, or cleartext over TLS. Parameters are bound (extended query protocol, text format); <code>db.vector</code> and <code>vector</code> columns work with pgvector. <code>postgres.on_notice</code> receives the text of server notices (ignored by default).</p>
+      <p>The PostgreSQL wire protocol (version 3) in Zila Lang. <code>open(url)</code> returns a <code>db.Conn</code>. The URL takes <code>sslmode</code> (<code>require</code>, the default, or <code>disable</code>), <code>sslrootcert</code> (extra authorities for this connection) and <code>max_rows</code>. Login by SCRAM-SHA-256 (server signature verified), <code>md5</code>, or cleartext over TLS. Parameters are bound (extended query protocol, text format); <code>db.vector</code> and <code>vector</code> columns work with pgvector. <code>postgres.on_notice</code> receives the text of server notices (ignored by default).</p>
     </section>
 
     <section id="sqlserver">
@@ -360,7 +360,7 @@ print(crypto.base64_encode(nonce))</code></pre>
       <pre><code><span class="kw">use</span> sqlserver
 
 <span class="kw">let</span> conn = <span class="kw">try</span> sqlserver.open(<span class="str">"sqlserver://app:secret@localhost:1433/shop?encrypt=strict&amp;cafile=ca.pem"</span>)</code></pre>
-      <p>The TDS protocol in Brasa. <code>open(url)</code> returns a <code>db.Conn</code>. <code>encrypt=strict</code> (the default) is TDS 8.0, with ALPN <code>tds/8.0</code>; <code>encrypt=off</code> is for local development (nothing encrypted); <code>encrypt=on</code> is refused. <code>cafile</code> adds authorities for this connection, <code>max_rows</code> limits a result, <code>timeout</code> (milliseconds) cancels a slow statement. The host may be <code>host\INSTANCE</code>: on this machine the instance's named pipe is used (<code>fs.pipe</code>, Windows only), elsewhere the SQL Server Browser gives the TCP port. SQL login only. Parameters go through <code>sp_executesql</code> as <code>@p1</code>, <code>@p2</code>, ...; the supported column types are listed on <a href="databases.html#sqlserver">the Databases page</a>, and any other type is an error that names the column.</p>
+      <p>The TDS protocol in Zila Lang. <code>open(url)</code> returns a <code>db.Conn</code>. <code>encrypt=strict</code> (the default) is TDS 8.0, with ALPN <code>tds/8.0</code>; <code>encrypt=off</code> is for local development (nothing encrypted); <code>encrypt=on</code> is refused. <code>cafile</code> adds authorities for this connection, <code>max_rows</code> limits a result, <code>timeout</code> (milliseconds) cancels a slow statement. The host may be <code>host\INSTANCE</code>: on this machine the instance's named pipe is used (<code>fs.pipe</code>, Windows only), elsewhere the SQL Server Browser gives the TCP port. SQL login only. Parameters go through <code>sp_executesql</code> as <code>@p1</code>, <code>@p2</code>, ...; the supported column types are listed on <a href="databases.html#sqlserver">the Databases page</a>, and any other type is an error that names the column.</p>
     </section>
 
     <section id="tls-extras">
@@ -435,7 +435,7 @@ print(conn.protocol())                                <span class="cm">// the pr
   </main>
 
   <footer class="site-footer">
-    Brasa — a language with a human face. Docs generated from <code>brasa.ebnf</code> and <code>examples/*.br</code>.
+    Zila Lang — a language with a human face. Docs generated from <code>zila.ebnf</code> and <code>examples/*.br</code>.
   </footer>
 </body>
 </html>

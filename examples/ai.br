@@ -1,7 +1,7 @@
-// A language model from Brasa: chat, streaming, a value of your own type, and tools.
+// A language model from Zila Lang: chat, streaming, a value of your own type, and tools.
 //
 //   set ANTHROPIC_API_KEY=...
-//   brasa-parse examples/ai.br -o ai.exe
+//   zila-parse examples/ai.br -o ai.exe
 //
 // `ai.anthropic` talks to the Anthropic Messages API; `ai.openai_compatible(base_url, key)` to any
 // OpenAI-style server, such as a local Ollama. The key is read from the environment and travels

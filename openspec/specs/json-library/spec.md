@@ -160,7 +160,7 @@ Decoding into a record or `Map<text, V>` SHALL fail when an object holds the sam
 - **THEN** the result has no whitespace outside strings
 
 ### Requirement: Targets
-`json` SHALL behave identically on the Windows and Linux targets and SHALL NOT depend on the operating system. Memory SHALL be released as for any other Brasa values: decoding and encoding in a loop SHALL keep the number of live objects flat.
+`json` SHALL behave identically on the Windows and Linux targets and SHALL NOT depend on the operating system. Memory SHALL be released as for any other Zila Lang values: decoding and encoding in a loop SHALL keep the number of live objects flat.
 
 #### Scenario: Same output on both targets
 - **WHEN** the same program encodes and decodes a record on both targets

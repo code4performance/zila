@@ -3,7 +3,7 @@
 //! HTTP transport and the client over loopback. The same `ai.Tool` value is served and called
 //! directly. JSON inside the test programs is written between `‹` and `›`.
 
-use brasa::{compile_to_native, parse_source};
+use zila::{compile_to_native, parse_source};
 use std::io::Write;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -14,9 +14,9 @@ static INIT: Once = Once::new();
 
 fn setup() {
     INIT.call_once(|| {
-        let dir = std::env::temp_dir().join(format!("brasa-mcp-test-cache-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("zila-mcp-test-cache-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        brasa::comptime::set_cache_dir(&dir);
+        zila::comptime::set_cache_dir(&dir);
     });
 }
 
@@ -48,7 +48,7 @@ fn prep(src: &str) -> String {
 fn build(src: &str) -> Result<std::path::PathBuf, String> {
     setup();
     let file = parse_source(src).unwrap_or_else(|d| panic!("parse error: {}", d));
-    let exe = std::env::temp_dir().join(format!("brasa-mcp-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let exe = std::env::temp_dir().join(format!("zila-mcp-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     compile_to_native(&file, exe.to_str().unwrap()).map(|_| exe)
 }
 

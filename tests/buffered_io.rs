@@ -3,7 +3,7 @@
 //! compiled to native executables and run (skipped when the Visual Studio build tools are
 //! missing).
 
-use brasa::{compile_to_native, parse_source};
+use zila::{compile_to_native, parse_source};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -11,7 +11,7 @@ static N: AtomicUsize = AtomicUsize::new(0);
 
 fn native(src: &str) -> Option<String> {
     let file = parse_source(src).unwrap_or_else(|d| panic!("parse error: {}", d));
-    let exe = std::env::temp_dir().join(format!("brasa-bio-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let exe = std::env::temp_dir().join(format!("zila-bio-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     match compile_to_native(&file, exe.to_str().unwrap()) {
         Ok(()) => {}
         Err(e) if e.contains("could not find Visual Studio") => {
@@ -27,7 +27,7 @@ fn native(src: &str) -> Option<String> {
 }
 
 fn temp_path(name: &str) -> String {
-    let p = std::env::temp_dir().join(format!("brasa-bio-test-{}-{}", std::process::id(), name));
+    let p = std::env::temp_dir().join(format!("zila-bio-test-{}-{}", std::process::id(), name));
     p.to_str().unwrap().replace('\\', "/")
 }
 

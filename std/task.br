@@ -1,9 +1,9 @@
 // =====================================================================
-// Brasa standard library: tasks, channels and the scheduler
+// Zila Lang standard library: tasks, channels and the scheduler
 //
-// Written in Brasa. A task is a Windows fiber (a user-mode stack that is
+// Written in Zila Lang. A task is a Windows fiber (a user-mode stack that is
 // switched without entering the kernel scheduler); the run queue, the
-// timers, the blocking rules and the channels below are plain Brasa code.
+// timers, the blocking rules and the channels below are plain Zila Lang code.
 //
 //   let ch = channel(int)
 //   spawn worker(ch)

@@ -1,12 +1,12 @@
 ## Purpose
 
-A Language Server Protocol server (`brasa-parser --lsp`) that reports syntax errors and formats documents for any editor with an LSP client.
+A Language Server Protocol server (`zila --lsp`) that reports syntax errors and formats documents for any editor with an LSP client.
 
 ## Requirements
 
 
 ### Requirement: Starting the server
-`brasa-parse --lsp` SHALL run a Language Server Protocol server on standard input and output, reading messages framed with `Content-Length` and answering the same way, until `exit` or the end of the input. It SHALL need no file argument. After `shutdown` followed by `exit` it SHALL exit with status 0; `exit` without `shutdown` SHALL give status 1.
+`zila-parse --lsp` SHALL run a Language Server Protocol server on standard input and output, reading messages framed with `Content-Length` and answering the same way, until `exit` or the end of the input. It SHALL need no file argument. After `shutdown` followed by `exit` it SHALL exit with status 0; `exit` without `shutdown` SHALL give status 1.
 
 #### Scenario: Handshake
 - **WHEN** the client sends `initialize`
@@ -17,7 +17,7 @@ A Language Server Protocol server (`brasa-parser --lsp`) that reports syntax err
 - **THEN** the server answers `shutdown` with a null result and stops with status 0
 
 ### Requirement: Syntax diagnostics
-When a document is opened or changed, the server SHALL publish diagnostics for it: none when it parses, and one error (severity 1, source `brasa`) with the parser's message when it does not, located at the line and column of the error and extending to the end of that line. Columns SHALL count UTF-16 code units. Closing a document SHALL clear its diagnostics.
+When a document is opened or changed, the server SHALL publish diagnostics for it: none when it parses, and one error (severity 1, source `zila`) with the parser's message when it does not, located at the line and column of the error and extending to the end of that line. Columns SHALL count UTF-16 code units. Closing a document SHALL clear its diagnostics.
 
 #### Scenario: A good file
 - **WHEN** a file without errors is opened

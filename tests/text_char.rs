@@ -4,7 +4,7 @@
 //! Visual Studio build tools); the Linux build shares the same runtime and is exercised by
 //! `tests/linux.rs`.
 
-use brasa::{compile_to_native, parse_source};
+use zila::{compile_to_native, parse_source};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -18,7 +18,7 @@ struct Ran {
 
 fn build_run(src: &str) -> Option<Ran> {
     let file = parse_source(src).unwrap_or_else(|d| panic!("parse error: {}", d));
-    let exe = std::env::temp_dir().join(format!("brasa-textchar-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let exe = std::env::temp_dir().join(format!("zila-textchar-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     match compile_to_native(&file, exe.to_str().unwrap()) {
         Ok(()) => {}
         Err(e) if e.contains("could not find Visual Studio") || e.contains("vcvars64") => {
@@ -59,7 +59,7 @@ fn aborts(uses: &str, body: &str, message: &str) {
 /// The compile error of a program that must not compile.
 fn compile_err(uses: &str, body: &str) -> String {
     let file = parse_source(&main_of(uses, body)).unwrap_or_else(|d| panic!("parse error: {}", d));
-    let exe = std::env::temp_dir().join(format!("brasa-textchar-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let exe = std::env::temp_dir().join(format!("zila-textchar-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     match compile_to_native(&file, exe.to_str().unwrap()) {
         Ok(()) => panic!("expected a compile error for\n{}", body),
         Err(e) => e,
@@ -430,9 +430,9 @@ fn text_building_compiles_for_linux_too() {
         "let s = \"ação\"\nvar n = 0\nfor c in s\n    n += c.code\nend\nprintln(n, s.bytes().len, s.char_count(), s.slice(0, 3), char(231).to_text(), text.reverse(s), s.byte(0))\n",
     );
     let file = parse_source(&src).unwrap();
-    let out = std::env::temp_dir().join(format!("brasa-textchar-linux-{}", std::process::id()));
-    let opts = brasa::codegen_x64::CompileOptions { optimize: true, test_mode: false };
-    brasa::codegen_x64::compile_to_linux(&file, out.to_str().unwrap(), &opts).unwrap_or_else(|e| panic!("linux build failed: {}", e));
+    let out = std::env::temp_dir().join(format!("zila-textchar-linux-{}", std::process::id()));
+    let opts = zila::codegen_x64::CompileOptions { optimize: true, test_mode: false };
+    zila::codegen_x64::compile_to_linux(&file, out.to_str().unwrap(), &opts).unwrap_or_else(|e| panic!("linux build failed: {}", e));
     let _ = std::fs::remove_file(&out);
 }
 

@@ -34,8 +34,8 @@ SELECT (c.n - 1) * 3 + k.n, c.n, c.n * 10 + k.n * 1.25, DATEADD(day, c.n + k.n, 
 FROM (SELECT TOP (60) ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS n FROM sys.all_objects) c
 CROSS JOIN (VALUES (1), (2), (3)) k(n);
 GO
-IF SUSER_ID('app') IS NULL CREATE LOGIN app WITH PASSWORD = 'Brasa_app_dev_1', CHECK_POLICY = OFF;
-IF SUSER_ID('reader') IS NULL CREATE LOGIN reader WITH PASSWORD = 'Brasa_reader_dev_1', CHECK_POLICY = OFF;
+IF SUSER_ID('app') IS NULL CREATE LOGIN app WITH PASSWORD = 'Zila_app_dev_1', CHECK_POLICY = OFF;
+IF SUSER_ID('reader') IS NULL CREATE LOGIN reader WITH PASSWORD = 'Zila_reader_dev_1', CHECK_POLICY = OFF;
 IF USER_ID('app') IS NULL CREATE USER app FOR LOGIN app;
 IF USER_ID('reader') IS NULL CREATE USER reader FOR LOGIN reader;
 ALTER ROLE db_owner ADD MEMBER app;

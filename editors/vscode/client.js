@@ -1,7 +1,7 @@
-// A small Language Server Protocol client for `brasa-parse --lsp`.
+// A small Language Server Protocol client for `zila-parse --lsp`.
 //
 // It has no dependencies and does not import `vscode`, so it can be tested with plain Node
-// (see test/client.test.js). It speaks the part of the protocol the Brasa server offers:
+// (see test/client.test.js). It speaks the part of the protocol the Zila Lang server offers:
 // initialize, full-text document sync, publishDiagnostics, formatting, shutdown and exit.
 
 'use strict';
@@ -15,7 +15,7 @@ const FORMAT_TIMEOUT_MS = 5000;
 class Client {
   /**
    * options:
-   *   command      executable to start (default "brasa-parse")
+   *   command      executable to start (default "zila-parse")
    *   args         its arguments (default ["--lsp"])
    *   spawn        function like child_process.spawn (for tests)
    *   debounce     ms to wait before sending a burst of changes (default 150)
@@ -25,7 +25,7 @@ class Client {
    *   log(line)        protocol trace
    */
   constructor(options) {
-    this.command = options.command || 'brasa-parse';
+    this.command = options.command || 'zila-parse';
     this.args = options.args || ['--lsp'];
     this.spawn = options.spawn || childProcess.spawn;
     this.debounce = options.debounce === undefined ? 150 : options.debounce;
@@ -231,7 +231,7 @@ class Client {
 
   sendOpen(uri, d) {
     d.sent = d.version;
-    this.notify('textDocument/didOpen', { textDocument: { uri, languageId: 'brasa', version: d.version, text: d.text } });
+    this.notify('textDocument/didOpen', { textDocument: { uri, languageId: 'zila', version: d.version, text: d.text } });
   }
 
   open(uri, text, version) {

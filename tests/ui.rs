@@ -1,10 +1,10 @@
 //! The `ui` library on both targets. The same programs are built for Windows and for Linux and
-//! driven with scripted input (`BRASA_UI_SCRIPT`), and must print the same text. Windows runs
+//! driven with scripted input (`ZILA_UI_SCRIPT`), and must print the same text. Windows runs
 //! need the Visual Studio build tools; Linux runs need WSL with an X display (WSLg). Each part is
 //! skipped when its environment is missing.
 
-use brasa::codegen_x64::{compile_to_linux, compile_to_native, CompileOptions};
-use brasa::parse_source;
+use zila::codegen_x64::{compile_to_linux, compile_to_native, CompileOptions};
+use zila::parse_source;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 static N: AtomicUsize = AtomicUsize::new(0);
 
 fn temp(ext: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("brasa-ui-test-{}-{}.{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst), ext))
+    std::env::temp_dir().join(format!("zila-ui-test-{}-{}.{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst), ext))
 }
 
 fn run_windows(src: &str, script: &str) -> Option<String> {
@@ -28,7 +28,7 @@ fn run_windows(src: &str, script: &str) -> Option<String> {
     }
     let steps = temp("txt");
     std::fs::write(&steps, script).unwrap();
-    let out = Command::new(&exe).env("BRASA_UI_SCRIPT", &steps).output().unwrap();
+    let out = Command::new(&exe).env("ZILA_UI_SCRIPT", &steps).output().unwrap();
     let _ = std::fs::remove_file(&exe);
     let _ = std::fs::remove_file(&steps);
     Some(String::from_utf8_lossy(&out.stdout).replace('\r', "") + &String::from_utf8_lossy(&out.stderr).replace('\r', ""))
@@ -61,7 +61,7 @@ fn run_linux(src: &str, script: &str, display: &str) -> Option<String> {
     std::fs::write(&steps, script).unwrap();
     let name = exe.file_name().unwrap().to_str().unwrap().to_string();
     let cmd = format!(
-        "cp '{}' /tmp/{n} && chmod +x /tmp/{n} && cp '{}' /tmp/{n}.txt && {} BRASA_UI_SCRIPT=/tmp/{n}.txt /tmp/{n} 2>&1; echo \"__EXIT:$?\"; rm -f /tmp/{n} /tmp/{n}.txt",
+        "cp '{}' /tmp/{n} && chmod +x /tmp/{n} && cp '{}' /tmp/{n}.txt && {} ZILA_UI_SCRIPT=/tmp/{n}.txt /tmp/{n} 2>&1; echo \"__EXIT:$?\"; rm -f /tmp/{n} /tmp/{n}.txt",
         wsl_path(&exe),
         wsl_path(&steps),
         display,
@@ -241,7 +241,7 @@ fn both_layers_implement_the_same_backend_functions() {
 
 // ---------------------------------------------------------------- the X11 layer on a real server
 
-/// Brasa helpers shared by the X-level test programs below.
+/// Zila Lang helpers shared by the X-level test programs below.
 const X_HELPERS: &str = r#"
 func send(window: long, ev: sys.Buf)
     let r = ui.req(25, 0, 11)

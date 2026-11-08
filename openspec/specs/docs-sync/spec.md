@@ -1,6 +1,6 @@
 ## Purpose
 
-Keeps the Brasa documentation site accurate: changes to the language cannot be finished without updating the docs, and automated checks fail when the site and the source disagree.
+Keeps the Zila Lang documentation site accurate: changes to the language cannot be finished without updating the docs, and automated checks fail when the site and the source disagree.
 
 ## Requirements
 
@@ -60,10 +60,10 @@ Every page of the documentation SHALL share the same navigation, every internal 
 - **THEN** the test run fails and names the link and the page that contains it
 
 ### Requirement: Documentation covers the implemented language
-The site SHALL document the features that are implemented, each with at least one short code sample: native compilation and its supported subset, the memory model, error handling with `or error` and `try`, enums with data and exhaustive `match`, tasks and channels, the `ui` library, and Brasa OS including how to build and run it. It SHALL state which documented features are not yet supported by the native compiler.
+The site SHALL document the features that are implemented, each with at least one short code sample: native compilation and its supported subset, the memory model, error handling with `or error` and `try`, enums with data and exhaustive `match`, tasks and channels, the `ui` library, and Zila Lang OS including how to build and run it. It SHALL state which documented features are not yet supported by the native compiler.
 
 #### Scenario: Visitor looks for a feature
-- **WHEN** a visitor opens the page for native compilation, concurrency or Brasa OS
+- **WHEN** a visitor opens the page for native compilation, concurrency or Zila Lang OS
 - **THEN** the page explains the feature, shows a working sample or command, and lists its current limitations
 
 #### Scenario: A feature is parsed but not compiled

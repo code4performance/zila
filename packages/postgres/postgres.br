@@ -1,5 +1,5 @@
 // =====================================================================
-// Brasa standard library: PostgreSQL driver (`use postgres`)
+// Zila Lang standard library: PostgreSQL driver (`use postgres`)
 //
 //     use db
 //     use postgres
@@ -7,7 +7,7 @@
 //     let conn = try postgres.open("postgres://app:secret@localhost:5432/shop?sslmode=require")
 //     let rows = try db.query(Customer, conn, "select id, name from customers where id > $1", db.int(10))
 //
-// The wire protocol (version 3) written in Brasa over `net` and `tls`; there is no C library.
+// The wire protocol (version 3) written in Zila Lang over `net` and `tls`; there is no C library.
 // `postgres.open(url)` returns a `db.Conn`, so the code of `use db` (typed rows, parameters,
 // transactions, errors) works unchanged.
 //
@@ -314,7 +314,7 @@ end
 // ---------------------------------------------------------------------------
 
 func startup(s: Session, user: text, password: text, database: text) -> error
-    var params = cstr("user") + cstr(user) + cstr("database") + cstr(database) + cstr("client_encoding") + cstr("UTF8") + cstr("application_name") + cstr("brasa") + zero()
+    var params = cstr("user") + cstr(user) + cstr("database") + cstr(database) + cstr("client_encoding") + cstr("UTF8") + cstr("application_name") + cstr("zila") + zero()
     let body = be32(196608) + params
     try send(s, be32(long(body.len) + 4) + body)
     var scram_state = ""

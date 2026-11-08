@@ -1,10 +1,10 @@
-# Contributing to Brasa
+# Contributing to Zila Lang
 
-Thank you for wanting to help. Brasa is a young language and every kind of contribution matters: code, tests, documentation, examples, bug reports and ideas. This guide explains how to take part and what we expect, so your time goes into things that can be merged.
+Thank you for wanting to help. Zila Lang is a young language and every kind of contribution matters: code, tests, documentation, examples, bug reports and ideas. This guide explains how to take part and what we expect, so your time goes into things that can be merged.
 
 Before you start, please read:
 
-- the [README](README.md) for what Brasa is and where it is going,
+- the [README](README.md) for what Zila Lang is and where it is going,
 - the [Code of Conduct](CODE_OF_CONDUCT.md), which applies everywhere in the project,
 - the [Project Charter](GOVERNANCE.md), which sets the design principles, the roles and how decisions are made.
 
@@ -21,8 +21,8 @@ You do not have to write compiler code.
 | Write an example program | Add a `.br` file under `examples/` and a short explanation |
 | Improve the documentation | Edit `docs/*.html` (see [Keep the documentation in step](#2-keep-the-documentation-in-step)) |
 | Write tests | Add cases under `tests/` |
-| Write library code in Brasa | Add or extend a module under `std/` |
-| Work on the compiler | Pick an item from the [roadmap](README.md#how-brasa-will-evolve) and talk to us first |
+| Write library code in Zila Lang | Add or extend a module under `std/` |
+| Work on the compiler | Pick an item from the [roadmap](README.md#how-zila-will-evolve) and talk to us first |
 
 Not sure where to begin? Look for issues labelled `good first issue`, or open an issue and say what you are interested in.
 
@@ -30,11 +30,11 @@ Not sure where to begin? Look for issues labelled `good first issue`, or open an
 
 ## Setting up
 
-You need a recent stable **Rust** toolchain. Compiling Brasa programs needs nothing else (the compiler writes the executable itself); on Windows, Rust's default MSVC toolchain needs the Visual Studio C++ linker to build the compiler. **QEMU** is optional and only needed to boot Brasa OS.
+You need a recent stable **Rust** toolchain. Compiling Zila Lang programs needs nothing else (the compiler writes the executable itself); on Windows, Rust's default MSVC toolchain needs the Visual Studio C++ linker to build the compiler. **QEMU** is optional and only needed to boot Zila Lang OS.
 
 ```sh
-git clone https://github.com/code4performance/brasa-parser
-cd brasa-parser
+git clone https://github.com/code4performance/zila
+cd zila
 cargo build
 cargo test
 ```
@@ -49,8 +49,8 @@ A quick tour of the code is in the [README](README.md#what-is-in-the-repository)
 
 A good bug report lets someone else see the problem in a minute. Please include:
 
-1. **The smallest Brasa program** that shows it (a few lines, not your whole project).
-2. **What you ran**, for example `brasa-parse bug.br -o bug.exe`.
+1. **The smallest Zila Lang program** that shows it (a few lines, not your whole project).
+2. **What you ran**, for example `zila-parse bug.br -o bug.exe`.
 3. **What you expected** and **what happened** (paste the exact message or output).
 4. Your **Windows version** if the problem is in compiling.
 
@@ -109,7 +109,7 @@ These rules are what reviewers will check.
 
 The documentation site (`docs/`) is checked by tests, and some of it is generated.
 
-- If you change a program in `examples/`, run `brasa-parse --docs` to refresh the copies on the site. `cargo test` fails if they differ.
+- If you change a program in `examples/`, run `zila-parse --docs` to refresh the copies on the site. `cargo test` fails if they differ.
 - If you add or remove a command-line option, document it in `docs/getting-started.html`.
 - If you add or remove a keyword, mention it on `docs/syntax.html`.
 - If you add a page, link it from the navigation of **every** page.
@@ -129,7 +129,7 @@ No `.exe`, no `.img` disk images, no `target/` output, no editor folders. `.giti
 
 ### 6. Keep `unsafe` small and explained
 
-In Brasa code, an `unsafe` block should be as short as possible and have a comment saying why it is sound. In the Rust code of the compiler, prefer safe Rust.
+In Zila Lang code, an `unsafe` block should be as short as possible and have a comment saying why it is sound. In the Rust code of the compiler, prefer safe Rust.
 
 ### 7. Care about error messages
 
@@ -142,7 +142,7 @@ One pull request, one purpose. A bug fix should not also reformat unrelated file
 ### Style
 
 - Rust: format with `cargo fmt`, and keep the code simple and readable over clever.
-- Brasa: follow the style of the files under `examples/` and `std/` (four-space indent, `end`-closed blocks, comments that explain *why*).
+- Zila Lang: follow the style of the files under `examples/` and `std/` (four-space indent, `end`-closed blocks, comments that explain *why*).
 - Commit messages: `component: short description`, in the imperative. For example `parser: reject async lambdas with a clear message` or `std: add fs.read`. Add a few lines of explanation when the reason is not obvious.
 
 ---
@@ -156,7 +156,7 @@ Copy this into your pull request description.
 - [ ] If it changes the language: it links an accepted proposal
 - [ ] `cargo test` passes
 - [ ] New or changed behavior has tests
-- [ ] Documentation is updated (`brasa-parse --docs` run if examples changed)
+- [ ] Documentation is updated (`zila-parse --docs` run if examples changed)
 - [ ] No new dependencies in the compiler
 - [ ] No generated files committed
 - [ ] I can explain every line of this change
@@ -188,3 +188,17 @@ The project is intended to be dual-licensed under **MIT** or **Apache-2.0** (see
 ## Getting help
 
 Open an issue with the label `question`, or comment on the proposal or pull request you are working on. There is no chat server yet: keeping conversations on GitHub means the answers stay searchable for the next person.
+
+## Renaming the language
+
+The language can be renamed in one step with `tools/rename-language.py`; see `openspec/specs/language-rename` for what it guarantees. Before using it, check that:
+
+- the crate name is free on crates.io (or the crate is not published)
+- the GitHub organization and repository name are free
+- the extension publisher id is free on the VS Code Marketplace and on Open VSX
+- a domain for the site is available
+- no existing language, tool or command has the same name
+- the command (name + '-parse') is short and easy to type
+- the source file extension (.br) still fits, or --ext gives the new one
+
+Then run it as a dry run first (`python tools/rename-language.py <Name> --display "<Display Name>"`), review every changed line, and apply it with `--apply --yes` on a clean tree. The lines that tell the story of the old name are listed and have to be written again by a person. `tools/rename-allow.txt` lists the lines that may keep the old name (a "formerly known as" note).

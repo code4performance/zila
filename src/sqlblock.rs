@@ -359,7 +359,7 @@ pub fn scan(p: &Profile, raw: &str, first_line: u32) -> Result<Scanned, SqlError
                     i += 2;
                     continue;
                 }
-                // a hole: up to the matching `}` on this line, skipping Brasa text and char literals
+                // a hole: up to the matching `}` on this line, skipping Zila Lang text and char literals
                 let start_line = line;
                 let mut depth = 1;
                 let mut j = i + 1;

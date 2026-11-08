@@ -1,6 +1,6 @@
-// Tests of the language client against the real `brasa-parse --lsp` (no VS Code needed).
+// Tests of the language client against the real `zila-parse --lsp` (no VS Code needed).
 // Run with: node --test editors/vscode/test
-// The binary is found in $BRASA_PARSE, or target/debug, or target/release.
+// The binary is found in $ZILA_PARSE, or target/debug, or target/release.
 
 'use strict';
 
@@ -12,10 +12,10 @@ const os = require('os');
 const { Client } = require('../client');
 
 function binary() {
-  if (process.env.BRASA_PARSE) return process.env.BRASA_PARSE;
+  if (process.env.ZILA_PARSE) return process.env.ZILA_PARSE;
   const root = path.join(__dirname, '..', '..', '..');
   for (const dir of ['debug', 'release']) {
-    for (const name of ['brasa-parse.exe', 'brasa-parse']) {
+    for (const name of ['zila-parse.exe', 'zila-parse']) {
       const p = path.join(root, 'target', dir, name);
       if (fs.existsSync(p)) return p;
     }
@@ -51,7 +51,7 @@ function make(options) {
   return client;
 }
 
-const skip = exe ? false : 'brasa-parse is not built (cargo build)';
+const skip = exe ? false : 'zila-parse is not built (cargo build)';
 
 test('the handshake completes and the server stops cleanly', { skip }, async () => {
   const c = make();
@@ -69,7 +69,7 @@ test('a good file has no diagnostics, a bad one has one, and fixing it clears it
   assert.strictEqual(bad.list.length, 1);
   assert.strictEqual(bad.list[0].range.start.line, 3);
   assert.strictEqual(bad.list[0].severity, 1);
-  assert.strictEqual(bad.list[0].source, 'brasa');
+  assert.strictEqual(bad.list[0].source, 'zila');
   assert.strictEqual(bad.version, 2);
   c.change('file:///a.br', GOOD, 3);
   assert.deepStrictEqual((await c.next()).list, []);
@@ -132,7 +132,7 @@ test('formatting flushes a pending change first', { skip }, async () => {
 
 test('a missing executable is reported once and start resolves false', async () => {
   const errors = [];
-  const c = new Client({ command: path.join(os.tmpdir(), 'no such dir', 'brasa-parse'), onError: (e) => errors.push(e) });
+  const c = new Client({ command: path.join(os.tmpdir(), 'no such dir', 'zila-parse'), onError: (e) => errors.push(e) });
   assert.strictEqual(await c.start(), false);
   assert.strictEqual(errors.length, 1);
   assert.strictEqual(errors[0].code, 'ENOENT');
@@ -171,7 +171,7 @@ process.stdin.on('data', (d) => {
 }
 
 test('a crashing server is restarted three times with the open documents, then reported', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'brasa-fake-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zila-fake-'));
   const { file, log } = fakeServer(dir, true);
   let stopped = false;
   const c = new Client({ command: process.execPath, args: [file], onStopped: () => (stopped = true) });

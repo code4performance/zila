@@ -1,6 +1,6 @@
 // tree: shared objects with `new`, and weak parent links that do not leak.
 //
-//   brasa-parse examples/tree.br -o tree.exe
+//   zila-parse examples/tree.br -o tree.exe
 //
 // `new Node{ ... }` makes one shared, reference-counted object of type Rc<Node>:
 // copying an Rc shares the object. A child that points back at its parent with an

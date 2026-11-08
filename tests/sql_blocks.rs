@@ -1,9 +1,9 @@
 //! `sql <dialect>` blocks (spec `sql-blocks`): the value a block makes, holes as bound parameters,
 //! the checks done at compile time, and running a `db.Sql` through a connection. The connections
-//! here are fakes written in Brasa; the real servers are in `tests/postgres.rs` and
+//! here are fakes written in Zila Lang; the real servers are in `tests/postgres.rs` and
 //! `tests/sqlserver.rs`.
 
-use brasa::{compile_to_native, parse_source};
+use zila::{compile_to_native, parse_source};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Once;
@@ -13,16 +13,16 @@ static INIT: Once = Once::new();
 
 fn setup() {
     INIT.call_once(|| {
-        let dir = std::env::temp_dir().join(format!("brasa-sql-test-cache-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("zila-sql-test-cache-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        brasa::comptime::set_cache_dir(&dir);
+        zila::comptime::set_cache_dir(&dir);
     });
 }
 
 fn build(src: &str) -> Result<std::path::PathBuf, String> {
     setup();
     let file = parse_source(src).map_err(|d| format!("parse error: {}", d.msg))?;
-    let exe = std::env::temp_dir().join(format!("brasa-sql-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let exe = std::env::temp_dir().join(format!("zila-sql-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     compile_to_native(&file, exe.to_str().unwrap()).map(|_| exe)
 }
 
@@ -89,7 +89,7 @@ fn a_block_without_holes_is_a_constant_statement() {
     let out = run(&src);
     assert_eq!(out, "[postgres] select 1; -- the answer\n");
     // no argument list is built: the constant constructor is used, not the one with holes
-    let asm = brasa::codegen_x64::generate_asm(&parse_source(&src).unwrap()).unwrap();
+    let asm = zila::codegen_x64::generate_asm(&parse_source(&src).unwrap()).unwrap();
     assert!(asm.contains("B_db_sql_const proc") && !asm.contains("B_db_sql proc"));
 }
 
@@ -265,10 +265,10 @@ fn a_block_runs_inside_a_transaction() {
 
 #[test]
 fn a_package_can_declare_a_new_dialect_without_any_change_to_the_compiler() {
-    let dir = std::env::temp_dir().join(format!("brasa-sql-dialect-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("zila-sql-dialect-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("lite")).unwrap();
-    std::fs::write(dir.join("brasa.toml"), "[package]\nname = \"app\"\nversion = \"0.1.0\"\n").unwrap();
+    std::fs::write(dir.join("zila.toml"), "[package]\nname = \"app\"\nversion = \"0.1.0\"\n").unwrap();
     std::fs::write(
         dir.join("lite").join("lite.br"),
         "package lite\n\n#[sql_dialect(\"sqlite\")]\n#[sql_placeholder(\"?\")]\n#[sql_string(\"'\")]\n#[sql_ident(\"[\", \"]\")]\n#[sql_ident(\"`\")]\n#[sql_line_comment(\"--\")]\npub type Dialect = record\nend\n",
@@ -276,11 +276,11 @@ fn a_package_can_declare_a_new_dialect_without_any_change_to_the_compiler() {
     .unwrap();
     let main = "package main\n\nuse db\nuse lite\n\nfunc main()\n    let id = 7\n    let q = sql sqlite\n        select * from [t] where a = {id} and `b` = {id + 1} -- {not a hole}\n    end\n    print(\"{q.dialect}|{q.text}|{q.args.len}\")\nend\n";
     std::fs::write(dir.join("main.br"), main).unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_brasa-parse")).arg("main.br").arg("--run").current_dir(&dir).output().unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_zila-parse")).arg("main.br").arg("--run").current_dir(&dir).output().unwrap();
     let text = String::from_utf8_lossy(&out.stdout).replace('\r', "") + &String::from_utf8_lossy(&out.stderr).replace('\r', "");
     // a hand-written `?` is refused by the profile
     std::fs::write(dir.join("main.br"), main.replace("{id + 1}", "?")).unwrap();
-    let bad = Command::new(env!("CARGO_BIN_EXE_brasa-parse")).arg("main.br").arg("--asm").current_dir(&dir).output().unwrap();
+    let bad = Command::new(env!("CARGO_BIN_EXE_zila-parse")).arg("main.br").arg("--asm").current_dir(&dir).output().unwrap();
     let bad_text = String::from_utf8_lossy(&bad.stderr).to_string();
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(text, "sqlite|select * from [t] where a = ? and `b` = ? -- {not a hole}|2\n");

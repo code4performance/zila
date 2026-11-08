@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Examples — Brasa</title>
-  <meta name="description" content="Annotated walkthroughs of real Brasa programs: hello world, a REST API, a type system tour, and FFI/low-level code.">
+  <title>Examples — Zila Lang</title>
+  <meta name="description" content="Annotated walkthroughs of real Zila Lang programs: hello world, a REST API, a type system tour, and FFI/low-level code.">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <header class="site-header">
-    <a class="brand" href="index.html">brasa<span class="ember-dot">.</span><small>lang docs</small></a>
+    <a class="brand" href="index.html">zila<span class="ember-dot">.</span><small>lang docs</small></a>
     <nav class="site-nav">
       <a href="index.html">Overview</a>
       <a href="syntax.html">Syntax</a>
@@ -21,14 +21,14 @@
       <a href="databases.html">Databases</a>
       <a href="ai.html">AI</a>
       <a href="packages.html">Packages</a>
-      <a href="os.html">Brasa OS</a>
+      <a href="os.html">Zila Lang OS</a>
       <a href="getting-started.html">Getting Started</a>
     </nav>
   </header>
 
   <main>
     <h1>Examples</h1>
-    <p>These are the same programs shipped in <code>examples/</code> in the repository. Run any of them yourself with <code>brasa-parse examples/&lt;name&gt;.br --run</code> — see <a href="getting-started.html">Getting Started</a>.</p>
+    <p>These are the same programs shipped in <code>examples/</code> in the repository. Run any of them yourself with <code>zila-parse examples/&lt;name&gt;.br --run</code> — see <a href="getting-started.html">Getting Started</a>.</p>
 
     <nav class="toc">
       <h2>On this page</h2>
@@ -65,7 +65,7 @@
         <span class="kw">end</span>
     <span class="kw">end</span>
 <span class="kw">end</span></code></pre>
-      <p>This is the smallest complete Brasa program that still shows most of the language's flavor: a <code>record</code> type with an optional field (<code>email: text?</code>), a free function (<code>greet</code>) that builds a string with interpolation, a <code>record</code> literal (<code>Customer{ id: 1, name: "Ana" }</code>), and a <code>for ... in</code> loop over a range (<code>1..5</code>) with an <code>if</code> inside it. Running it with <code>--run</code> prints <code>Hello, Ana!</code> followed by the even numbers from 1 to 5.</p>
+      <p>This is the smallest complete Zila Lang program that still shows most of the language's flavor: a <code>record</code> type with an optional field (<code>email: text?</code>), a free function (<code>greet</code>) that builds a string with interpolation, a <code>record</code> literal (<code>Customer{ id: 1, name: "Ana" }</code>), and a <code>for ... in</code> loop over a range (<code>1..5</code>) with an <code>if</code> inside it. Running it with <code>--run</code> prints <code>Hello, Ana!</code> followed by the even numbers from 1 to 5.</p>
     </section>
 
     <section id="rest-api">
@@ -73,7 +73,7 @@
       <div class="file-label">examples/rest_api.br</div>
       <pre><code><span class="cm">// A small REST service on `use web`: routes with path parameters, JSON in and out, a middleware.</span>
 <span class="cm">//</span>
-<span class="cm">//   brasa-parse examples/rest_api.br -o rest_api.exe</span>
+<span class="cm">//   zila-parse examples/rest_api.br -o rest_api.exe</span>
 <span class="cm">//   rest_api.exe                      (then: curl http://localhost:8080/customers)</span>
 <span class="cm">//</span>
 <span class="cm">// The customers live in memory. Handlers are closures that capture by value, so state that</span>
@@ -223,7 +223,7 @@
     <span class="kw">let</span> xs = [1, 2, 3]
     log(<span class="str">"x"</span>, ...xs)
 <span class="kw">end</span></code></pre>
-      <p>This file is a tour of Brasa's type declarations in one place: a structural <code>interface</code> (<code>Printable</code>), an <code>enum</code> with data (<code>Shape</code>) consumed exhaustively by <code>match</code> in <code>area</code>, an <code>enum</code> (<code>Color</code>), a generic <code>record</code> (<code>Stack&lt;T&gt;</code>), function-type aliases (<code>Handler</code>, <code>Middleware</code>), and a record with field attributes controlling JSON (de)serialization (<code>User</code>). It also demonstrates generic functions with an interface bound (<code>show&lt;T: Printable&gt;</code>), a method with a <code>ref</code> receiver (<code>(ref s: Server) use(...)</code>), multi-way <code>match</code> patterns (<code>1 | 2 | 3</code>), a default parameter (<code>n: i32 = 4</code>), and a variadic parameter spread at the call site (<code>log("x", ...xs)</code>).</p>
+      <p>This file is a tour of Zila Lang's type declarations in one place: a structural <code>interface</code> (<code>Printable</code>), an <code>enum</code> with data (<code>Shape</code>) consumed exhaustively by <code>match</code> in <code>area</code>, an <code>enum</code> (<code>Color</code>), a generic <code>record</code> (<code>Stack&lt;T&gt;</code>), function-type aliases (<code>Handler</code>, <code>Middleware</code>), and a record with field attributes controlling JSON (de)serialization (<code>User</code>). It also demonstrates generic functions with an interface bound (<code>show&lt;T: Printable&gt;</code>), a method with a <code>ref</code> receiver (<code>(ref s: Server) use(...)</code>), multi-way <code>match</code> patterns (<code>1 | 2 | 3</code>), a default parameter (<code>n: i32 = 4</code>), and a variadic parameter spread at the call site (<code>log("x", ...xs)</code>).</p>
     </section>
 
     <section id="defer-example">
@@ -231,7 +231,7 @@
       <div class="file-label">examples/defer.br</div>
       <pre><code><span class="cm">// defer: run a call when the function ends, however it ends.</span>
 <span class="cm">//</span>
-<span class="cm">//   brasa-parse examples/defer.br -o defer.exe</span>
+<span class="cm">//   zila-parse examples/defer.br -o defer.exe</span>
 <span class="cm">//</span>
 <span class="cm">// Deferred calls run last in, first out, on `return`, at the end of the</span>
 <span class="cm">// function, and when a `try` fails.</span>
@@ -274,7 +274,7 @@
       <div class="file-label">examples/maps.br</div>
       <pre><code><span class="cm">// Maps: look values up by key.</span>
 <span class="cm">//</span>
-<span class="cm">//   brasa-parse examples/maps.br -o maps.exe</span>
+<span class="cm">//   zila-parse examples/maps.br -o maps.exe</span>
 <span class="cm">//</span>
 <span class="cm">// A Map&lt;K, V&gt; keeps values under keys (any type that is Hash: text, integers, records,</span>
 <span class="cm">// enums, lists...) and remembers the order</span>
@@ -319,9 +319,9 @@
       <div class="file-label">examples/words.br</div>
       <pre><code><span class="cm">// Text and list helpers: count the words in a sentence.</span>
 <span class="cm">//</span>
-<span class="cm">//   brasa-parse examples/words.br -o words.exe</span>
+<span class="cm">//   zila-parse examples/words.br -o words.exe</span>
 <span class="cm">//</span>
-<span class="cm">// `use text` and `use list` are libraries written in Brasa. Their functions are called with</span>
+<span class="cm">// `use text` and `use list` are libraries written in Zila Lang. Their functions are called with</span>
 <span class="cm">// the module name in front, like text.split(...) and list.sort_by(...).</span>
 
 <span class="kw">package</span> main
@@ -381,7 +381,7 @@
       <pre><code><span class="cm">// Text is UTF-8: `len` counts bytes, `char_count()` counts characters, `for c in s` visits the</span>
 <span class="cm">// characters and `slice` cuts by byte positions (it aborts inside a character).</span>
 <span class="cm">//</span>
-<span class="cm">//   brasa-parse examples/unicode.br -o unicode.exe</span>
+<span class="cm">//   zila-parse examples/unicode.br -o unicode.exe</span>
 
 <span class="kw">package</span> main
 
@@ -413,7 +413,7 @@
       <div class="file-label">examples/generics.br</div>
       <pre><code><span class="cm">// Generics and interfaces: write code once, use it with many types.</span>
 <span class="cm">//</span>
-<span class="cm">//   brasa-parse examples/generics.br -o generics.exe</span>
+<span class="cm">//   zila-parse examples/generics.br -o generics.exe</span>
 <span class="cm">//</span>
 <span class="cm">// &lt;T&gt; is a placeholder for a type. The compiler works out T from the arguments and</span>
 <span class="cm">// makes one copy of the code for each type you use. An interface lists methods, and a</span>
@@ -490,10 +490,10 @@
       <div class="file-label">examples/comptime.br</div>
       <pre><code><span class="cm">// Compile-time code generation: a function that writes code for your types.</span>
 <span class="cm">//</span>
-<span class="cm">//   brasa-parse examples/comptime.br -o comptime.exe</span>
+<span class="cm">//   zila-parse examples/comptime.br -o comptime.exe</span>
 <span class="cm">//</span>
 <span class="cm">// A `comptime func` receives a `Type` (what the compiler knows about a type: its name, kind,</span>
-<span class="cm">// fields, variants and attributes) and returns Brasa source text. The compiler builds the</span>
+<span class="cm">// fields, variants and attributes) and returns Zila Lang source text. The compiler builds the</span>
 <span class="cm">// generators into a program for this machine, runs it while compiling, and compiles what it</span>
 <span class="cm">// returned as if you had written it:</span>
 <span class="cm">//</span>
@@ -583,7 +583,7 @@
       <div class="file-label">examples/floats.br</div>
       <pre><code><span class="cm">// Floating point: fractional numbers.</span>
 <span class="cm">//</span>
-<span class="cm">//   brasa-parse examples/floats.br -o floats.exe</span>
+<span class="cm">//   zila-parse examples/floats.br -o floats.exe</span>
 <span class="cm">//</span>
 <span class="cm">// `float` is a 64-bit number with a fractional part. It never mixes with `int`</span>
 <span class="cm">// by accident: convert with float(n) and int(x).</span>
@@ -610,7 +610,7 @@
     <span class="kw">let</span> temps = [21.5, 19.0, 23.25, 18.75]
     print(<span class="str">"average {average(temps)}"</span>)
 
-    <span class="cm">// 0.1 has no exact binary form, and Brasa shows the shortest text that reads back exactly</span>
+    <span class="cm">// 0.1 has no exact binary form, and Zila Lang shows the shortest text that reads back exactly</span>
     print(<span class="str">"0.1 + 0.2 = {0.1 + 0.2}"</span>)
     print(<span class="str">"1 / 3 = {1.0 / 3.0}"</span>)
 
@@ -654,7 +654,7 @@
     win.show()
     ui.run()
 <span class="kw">end</span></code></pre>
-      <p>The <code>ui</code> library is written in Brasa on top of the Win32 API. <code>ui.Window</code>, <code>ui.TextBox</code>, <code>ui.Button</code> and <code>ui.ListView</code> are real native controls; <code>vstack</code> lays them out; the lambda passed to <code>onClick</code> runs when the button is pressed (or Enter is pressed in the text box). Build it with <code>brasa-parse examples/ui.br -o ui.exe</code>.</p>
+      <p>The <code>ui</code> library is written in Zila Lang on top of the Win32 API. <code>ui.Window</code>, <code>ui.TextBox</code>, <code>ui.Button</code> and <code>ui.ListView</code> are real native controls; <code>vstack</code> lays them out; the lambda passed to <code>onClick</code> runs when the button is pressed (or Enter is pressed in the text box). Build it with <code>zila-parse examples/ui.br -o ui.exe</code>.</p>
     </section>
 
     <section id="async-example">
@@ -662,7 +662,7 @@
       <div class="file-label">examples/async.br</div>
       <pre><code><span class="cm">// async/await: waiting, files and TCP in one program.</span>
 <span class="cm">//</span>
-<span class="cm">//   brasa-parse examples/async.br -o async.exe</span>
+<span class="cm">//   zila-parse examples/async.br -o async.exe</span>
 <span class="cm">//</span>
 <span class="cm">// An `async func` starts running when it is called and returns a Future.</span>
 <span class="cm">// `await` waits for a future without blocking the other tasks.</span>
@@ -701,8 +701,8 @@
     print(<span class="str">"titles {ids[0].len} {ids[1].len} {ids[2].len}"</span>)
 
     <span class="cm">// files</span>
-    <span class="kw">try</span> <span class="kw">await</span> fs.write(<span class="str">"brasa-example.txt"</span>, <span class="str">"written by an async function"</span>)
-    print(<span class="kw">try</span> <span class="kw">await</span> fs.read(<span class="str">"brasa-example.txt"</span>))
+    <span class="kw">try</span> <span class="kw">await</span> fs.write(<span class="str">"zila-example.txt"</span>, <span class="str">"written by an async function"</span>)
+    print(<span class="kw">try</span> <span class="kw">await</span> fs.read(<span class="str">"zila-example.txt"</span>))
 
     <span class="cm">// a TCP server and a client in the same program</span>
     <span class="kw">let</span> listener = <span class="kw">try</span> <span class="kw">await</span> net.listen(0)
@@ -718,7 +718,7 @@
 
     <section id="ffi">
       <h2>FFI &amp; low-level</h2>
-      <p class="note">The whole of <code>examples/ffi.br</code>. See <code>brasa-ffi.md</code> for the full FFI and inline-assembly specification.</p>
+      <p class="note">The whole of <code>examples/ffi.br</code>. See <code>zila-ffi.md</code> for the full FFI and inline-assembly specification.</p>
       <div class="file-label">examples/ffi.br</div>
       <pre><code><span class="kw">package</span> main
 
@@ -748,7 +748,7 @@
 
 <span class="cm">// ---- being called from C ----</span>
 
-#[export(<span class="str">"brasa_add"</span>)]
+#[export(<span class="str">"zila_add"</span>)]
 <span class="kw">func</span> add(a: i32, b: i32) -&gt; i32
     <span class="kw">return</span> a + b
 <span class="kw">end</span>
@@ -798,14 +798,14 @@
     <span class="kw">end</span>
     print(<span class="str">"tsc: {rdtsc()}"</span>)
 <span class="kw">end</span></code></pre>
-      <p>This program exercises Brasa on both sides of the C boundary. <code>extern "C" func sqrt(...)</code> and <code>printf</code> declare foreign functions pulled in via <code>#[link("m")]</code> (link against <code>libm</code>); <code>printf</code>'s trailing <code>...</code> marks it as C-variadic. <code>qsort</code>'s <code>cmp</code> parameter shows an <code>extern "C" func(...)</code> type used as a C-compatible function-pointer callback. <code>#[c_layout]</code> on <code>Point</code> pins field order and alignment to match a C <code>struct</code> exactly, so it can be passed across the FFI boundary safely. <code>#[export("brasa_add")]</code> does the reverse — it exposes a Brasa function to C callers under a fixed, unmangled symbol name. <code>rdtsc</code> reads the CPU timestamp counter with a short inline <code>asm</code> block, using <code>out eax = lo</code> / <code>out edx = hi</code> to bind two hardware registers to Brasa variables. Every one of these operations — calling <code>extern</code> functions and running <code>asm</code> — is wrapped in <code>unsafe</code>, since the compiler can't verify what happens on the other side of the boundary. See the <a href="syntax.html#ffi">FFI section of the syntax guide</a> and the project's <code>brasa-ffi.md</code> for the full specification.</p>
+      <p>This program exercises Zila Lang on both sides of the C boundary. <code>extern "C" func sqrt(...)</code> and <code>printf</code> declare foreign functions pulled in via <code>#[link("m")]</code> (link against <code>libm</code>); <code>printf</code>'s trailing <code>...</code> marks it as C-variadic. <code>qsort</code>'s <code>cmp</code> parameter shows an <code>extern "C" func(...)</code> type used as a C-compatible function-pointer callback. <code>#[c_layout]</code> on <code>Point</code> pins field order and alignment to match a C <code>struct</code> exactly, so it can be passed across the FFI boundary safely. <code>#[export("zila_add")]</code> does the reverse — it exposes a Zila Lang function to C callers under a fixed, unmangled symbol name. <code>rdtsc</code> reads the CPU timestamp counter with a short inline <code>asm</code> block, using <code>out eax = lo</code> / <code>out edx = hi</code> to bind two hardware registers to Zila Lang variables. Every one of these operations — calling <code>extern</code> functions and running <code>asm</code> — is wrapped in <code>unsafe</code>, since the compiler can't verify what happens on the other side of the boundary. See the <a href="syntax.html#ffi">FFI section of the syntax guide</a> and the project's <code>zila-ffi.md</code> for the full specification.</p>
     </section>
     <section id="tree-example">
       <h2>tree: shared objects and weak references</h2>
       <div class="file-label">examples/tree.br</div>
       <pre><code><span class="cm">// tree: shared objects with `new`, and weak parent links that do not leak.</span>
 <span class="cm">//</span>
-<span class="cm">//   brasa-parse examples/tree.br -o tree.exe</span>
+<span class="cm">//   zila-parse examples/tree.br -o tree.exe</span>
 <span class="cm">//</span>
 <span class="cm">// `new Node{ ... }` makes one shared, reference-counted object of type Rc&lt;Node&gt;:</span>
 <span class="cm">// copying an Rc shares the object. A child that points back at its parent with an</span>
@@ -857,7 +857,7 @@
       <div class="file-label">examples/json.br</div>
       <pre><code><span class="cm">// JSON: read and write your own types, or a free-form tree.</span>
 <span class="cm">//</span>
-<span class="cm">//   brasa-parse examples/json.br -o json.exe</span>
+<span class="cm">//   zila-parse examples/json.br -o json.exe</span>
 <span class="cm">//</span>
 <span class="cm">// `json.parse(T, text)` turns JSON into a value of any type you declare, and `json.encode(T, x)`</span>
 <span class="cm">// does the reverse. There is nothing to register: the library reads the shape of `T` at build</span>
@@ -908,7 +908,7 @@
       <div class="file-label">examples/web.br</div>
       <pre><code><span class="cm">// The web library: a server, an HTML template and the client in one program.</span>
 <span class="cm">//</span>
-<span class="cm">//   brasa-parse examples/web.br -o web.exe</span>
+<span class="cm">//   zila-parse examples/web.br -o web.exe</span>
 <span class="cm">//</span>
 <span class="cm">// The server listens on a free port (0) in the background; the client asks it for a page. An</span>
 <span class="cm">// `html` block is markup with `{expression}` holes: every value is escaped, so the user name below</span>
@@ -963,7 +963,7 @@
   </main>
 
   <footer class="site-footer">
-    Brasa — a language with a human face. Docs generated from <code>brasa.ebnf</code> and <code>examples/*.br</code>.
+    Zila Lang — a language with a human face. Docs generated from <code>zila.ebnf</code> and <code>examples/*.br</code>.
   </footer>
 </body>
 </html>

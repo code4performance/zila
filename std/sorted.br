@@ -1,5 +1,5 @@
 // =====================================================================
-// Brasa standard library: sorted maps and sets
+// Zila Lang standard library: sorted maps and sets
 //
 //     use sorted
 //     let scores: sorted.SortedMap<text, int> = sorted.map()

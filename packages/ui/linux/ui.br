@@ -1,5 +1,5 @@
 // =====================================================================
-// Brasa standard library: `use ui` (Linux layer)
+// Zila Lang standard library: `use ui` (Linux layer)
 //
 // The Linux counterpart of std/ui.br, with the same functions and behavior: the shared region
 // below is the same text in both files. Windows and controls are drawn by this library on an
@@ -16,7 +16,7 @@
 //   win.show()
 //   ui.run()
 //
-// With the environment variable BRASA_UI_SCRIPT naming a file, `run` applies its steps
+// With the environment variable ZILA_UI_SCRIPT naming a file, `run` applies its steps
 // (click N, type TEXT, key NAME, select N, close) to the first window instead of waiting
 // for a person; this is how the tests drive programs.
 // =====================================================================
@@ -208,7 +208,7 @@ pub func run()
     be_run()
 end
 
-pub func alert(message: text, title: text = "Brasa")
+pub func alert(message: text, title: text = "Zila Lang")
     // a scripted run has nobody to dismiss it
     if be_script().len > 0
         return
@@ -424,7 +424,7 @@ func no_display(reason: text)
     be_exit(1)
 end
 
-// ---------- scripted input (BRASA_UI_SCRIPT, for tests) ----------
+// ---------- scripted input (ZILA_UI_SCRIPT, for tests) ----------
 // Setting a text box's text runs its onChange handlers, as typing does, so the script only sets it.
 
 // The buttons under a node, in order.
@@ -1296,9 +1296,9 @@ func be_exit(code: i32)
     sys.syscall(231, long(code), 0, 0, 0, 0, 0)
 end
 
-// The contents of the file named by BRASA_UI_SCRIPT, or empty text.
+// The contents of the file named by ZILA_UI_SCRIPT, or empty text.
 func be_script() -> text
-    let path = env("BRASA_UI_SCRIPT")
+    let path = env("ZILA_UI_SCRIPT")
     if path.len == 0
         return ""
     end

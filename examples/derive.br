@@ -1,6 +1,6 @@
 // Equality, order and hashing come with the types.
 //
-//   brasa-parse examples/derive.br -o derive.exe
+//   zila-parse examples/derive.br -o derive.exe
 //
 // Records and enums get `eq`, `compare` and `hash` from their fields (the interfaces Eq, Ord and
 // Hash need no `use`), so they work as map keys, set elements and sorted keys, and `==` and `<`

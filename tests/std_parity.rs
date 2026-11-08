@@ -2,8 +2,8 @@
 //! surface as the Windows one (`std/<name>.br`): a program that compiles on one target must
 //! compile on the other (spec `static-linking`).
 
-use brasa::ast::*;
-use brasa::parse_source;
+use zila::ast::*;
+use zila::parse_source;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// The public declarations of a library: `"func name"` or `"type name"` to the full signature

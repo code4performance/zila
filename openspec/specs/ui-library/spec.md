@@ -49,7 +49,7 @@ A `TextBox` SHALL hold editable single-line text; typing, Backspace, Delete, Lef
 - **THEN** `run()` returns and the program continues after it
 
 ### Requirement: Alert
-`alert(message, title)` SHALL show a box with the message, the title (default `Brasa`) and an OK button, and SHALL return after the user dismisses it with the button, Enter or (on Linux) Escape. While `BRASA_UI_SCRIPT` is set, `alert` SHALL return at once without showing anything, on both targets.
+`alert(message, title)` SHALL show a box with the message, the title (default `Zila Lang`) and an OK button, and SHALL return after the user dismisses it with the button, Enter or (on Linux) Escape. While `ZILA_UI_SCRIPT` is set, `alert` SHALL return at once without showing anything, on both targets.
 
 #### Scenario: Dismissing
 - **WHEN** `alert("saved")` is called and the user presses Enter
@@ -63,7 +63,7 @@ When no window system can be reached (on Linux: no usable local X display; on Wi
 - **THEN** it exits with status 1 and prints `error: ui: cannot open a display: ...`
 
 ### Requirement: Synthetic input for tests
-A program built for either target SHALL be drivable without a person: when the environment variable `BRASA_UI_SCRIPT` names a file, the library SHALL read it as a list of input steps (`click <index>`, `type <text>`, `key <name>`, `select <index>`, `close`), one per line (`key` takes `backspace`, `enter`, `up` or `down`; typed text is appended at the end of the first text box), and apply them in order to the first window as if the user had done them, then close the window. A step that has no target (no text box, no list, no such button) SHALL be ignored. Programs and their output SHALL otherwise be unaffected.
+A program built for either target SHALL be drivable without a person: when the environment variable `ZILA_UI_SCRIPT` names a file, the library SHALL read it as a list of input steps (`click <index>`, `type <text>`, `key <name>`, `select <index>`, `close`), one per line (`key` takes `backspace`, `enter`, `up` or `down`; typed text is appended at the end of the first text box), and apply them in order to the first window as if the user had done them, then close the window. A step that has no target (no text box, no list, no such button) SHALL be ignored. Programs and their output SHALL otherwise be unaffected.
 
 #### Scenario: Scripted run
 - **WHEN** `examples/ui.br` runs with a script that types `Ana`, clicks the Add button and closes the window

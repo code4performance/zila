@@ -1,6 +1,6 @@
 ## Purpose
 
-Provides awaitable timers, file access and TCP networking so a Brasa program can wait on time, disks and sockets without blocking its other tasks.
+Provides awaitable timers, file access and TCP networking so a Zila Lang program can wait on time, disks and sockets without blocking its other tasks.
 
 ## Requirements
 

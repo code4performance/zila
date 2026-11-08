@@ -2,7 +2,7 @@
 //! compiled to native executables and run (skipped when the Visual Studio build tools are
 //! missing).
 
-use brasa::{compile_to_native, parse_source};
+use zila::{compile_to_native, parse_source};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -10,7 +10,7 @@ static N: AtomicUsize = AtomicUsize::new(0);
 
 fn run(src: &str) -> Option<(String, i32)> {
     let file = parse_source(src).unwrap_or_else(|d| panic!("parse error: {}", d));
-    let exe = std::env::temp_dir().join(format!("brasa-stdlib-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let exe = std::env::temp_dir().join(format!("zila-stdlib-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     match compile_to_native(&file, exe.to_str().unwrap()) {
         Ok(()) => {}
         Err(e) if e.contains("could not find Visual Studio") => {
@@ -75,7 +75,7 @@ ab
 
 fn compile_err(uses: &str, body: &str) -> String {
     let file = parse_source(&main_of(uses, body)).unwrap();
-    let exe = std::env::temp_dir().join("brasa-stdlib-err.exe");
+    let exe = std::env::temp_dir().join("zila-stdlib-err.exe");
     match compile_to_native(&file, exe.to_str().unwrap()) {
         Ok(()) => panic!("expected a compile error"),
         Err(e) => e,
@@ -339,7 +339,7 @@ fn parse_float_matches_the_reference_parser() {
     inputs.extend(["0.1", "9007199254740993", "9007199254740992.5", "2.2250738585072011e-308", "4.9406564584124654e-324", "2.4703282292062327e-324", "2.4703282292062328e-324", "1.7976931348623158e308", "1.7976931348623159e308", "123456789012345678901234567890"].iter().map(|s| s.to_string()));
     let list: String = inputs.iter().map(|s| format!("\"{}\"", s)).collect::<Vec<_>>().join(", ");
     let body = format!("let inputs = [{}]\nfor s in inputs\n    println(text.parse_float(s) ?? 0.0 - 1.0)\nend", list);
-    let expected: String = inputs.iter().map(|s| format!("{}\n", brasa::float_text(s.parse::<f64>().unwrap()))).collect();
+    let expected: String = inputs.iter().map(|s| format!("{}\n", zila::float_text(s.parse::<f64>().unwrap()))).collect();
     let Some((out, code)) = run(&main_of("use text", &body)) else { return };
     assert_eq!(code, 0);
     for (i, (a, b)) in out.lines().zip(expected.lines()).enumerate() {

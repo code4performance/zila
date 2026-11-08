@@ -1,5 +1,5 @@
 // =====================================================================
-// Brasa standard library: web (`use web`)
+// Zila Lang standard library: web (`use web`)
 //
 //     use web
 //     use json            // only for the typed JSON helpers
@@ -11,7 +11,7 @@
 //     app.run()
 //
 // An HTTP/1.1 server, a router, middleware, JSON helpers, an HTTP client and HTML templates,
-// written in Brasa on `net`, `tls`, `task` and `json`. Nothing in the compiler knows about HTTP.
+// written in Zila Lang on `net`, `tls`, `task` and `json`. Nothing in the compiler knows about HTTP.
 //
 //   * the server runs one task per connection on the scheduler; limits and timeouts are fields of
 //     the `Server` (milliseconds for times, bytes for sizes) and a timeout never blocks other
@@ -1546,7 +1546,7 @@ func exchange(src: Source, opts: ClientOptions, method: Method, u: Url, headers:
         end
     end
     if not have.has("user-agent")
-        parts.add("User-Agent: brasa-web\r\n")
+        parts.add("User-Agent: zila-web\r\n")
     end
     if not have.has("accept")
         parts.add("Accept: */*\r\n")
@@ -1965,7 +1965,7 @@ func send_and_read_head(src: Source, method: Method, u: Url, headers: Map<text, 
         end
     end
     if not have.has("user-agent")
-        parts.add("User-Agent: brasa-web\r\n")
+        parts.add("User-Agent: zila-web\r\n")
     end
     parts.add("Connection: close\r\n")
     for k, v in headers

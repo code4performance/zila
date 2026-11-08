@@ -1,9 +1,9 @@
 // Compile-time code generation: a function that writes code for your types.
 //
-//   brasa-parse examples/comptime.br -o comptime.exe
+//   zila-parse examples/comptime.br -o comptime.exe
 //
 // A `comptime func` receives a `Type` (what the compiler knows about a type: its name, kind,
-// fields, variants and attributes) and returns Brasa source text. The compiler builds the
+// fields, variants and attributes) and returns Zila Lang source text. The compiler builds the
 // generators into a program for this machine, runs it while compiling, and compiles what it
 // returned as if you had written it:
 //

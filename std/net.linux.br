@@ -1,9 +1,9 @@
 // =====================================================================
-// Brasa standard library: TCP and UDP networking (`use net`) (Linux layer)
+// Zila Lang standard library: TCP and UDP networking (`use net`) (Linux layer)
 //
 // The Linux counterpart of std/net.br, with the same functions and behavior. Sockets are
 // non-blocking: a call that would wait parks the task on `epoll` (std/task.linux.br) and the
-// other tasks run. Names are looked up by a DNS client written in Brasa (there is no C library):
+// other tasks run. Names are looked up by a DNS client written in Zila Lang (there is no C library):
 // `/etc/hosts` first, then the servers of `/etc/resolv.conf` over UDP, and TCP when an answer
 // is cut short. Like on Windows, only IPv4 addresses are used.
 //

@@ -1,7 +1,7 @@
 // =====================================================================
-// Brasa standard library: `use ui`
+// Zila Lang standard library: `use ui`
 //
-// Windows and controls, written in Brasa. The compiler embeds this file and compiles it
+// Windows and controls, written in Zila Lang. The compiler embeds this file and compiles it
 // together with the program; nothing here is implemented in Rust or C. This is the Windows
 // layer (native Win32 controls); std/ui.linux.br is the Linux layer (controls drawn on X11).
 // Both have the same public API: the shared region is the same text in both files.
@@ -18,7 +18,7 @@
 // refers to the same control. Controls are created immediately, parked inside a hidden
 // window, and moved into their real window by `layout`.
 //
-// With the environment variable BRASA_UI_SCRIPT naming a file, `run` applies its steps
+// With the environment variable ZILA_UI_SCRIPT naming a file, `run` applies its steps
 // (click N, type TEXT, key NAME, select N, close) to the first window instead of waiting
 // for a person; this is how the tests drive programs.
 // =====================================================================
@@ -321,7 +321,7 @@ pub func run()
     be_run()
 end
 
-pub func alert(message: text, title: text = "Brasa")
+pub func alert(message: text, title: text = "Zila Lang")
     // a scripted run has nobody to dismiss it
     if be_script().len > 0
         return
@@ -537,7 +537,7 @@ func no_display(reason: text)
     be_exit(1)
 end
 
-// ---------- scripted input (BRASA_UI_SCRIPT, for tests) ----------
+// ---------- scripted input (ZILA_UI_SCRIPT, for tests) ----------
 // Setting a text box's text runs its onChange handlers, as typing does, so the script only sets it.
 
 // The buttons under a node, in order.
@@ -657,7 +657,7 @@ end
 
 // ---------- backend: Win32 ----------
 
-let CLASS = "BrasaWindow"
+let CLASS = "ZilaWindow"
 
 type Font = record
     pub window: usize
@@ -889,11 +889,11 @@ func be_alert(message: text, title: text)
     end
 end
 
-// The contents of the file named by BRASA_UI_SCRIPT, or empty text.
+// The contents of the file named by ZILA_UI_SCRIPT, or empty text.
 func be_script() -> text
     unsafe
         let name = c.alloc(usize(520))
-        let n = GetEnvironmentVariableA(c.cstr("BRASA_UI_SCRIPT"), name, 512)
+        let n = GetEnvironmentVariableA(c.cstr("ZILA_UI_SCRIPT"), name, 512)
         if n == 0 or n > 512
             c.free(name)
             return ""
@@ -914,7 +914,7 @@ func be_script() -> text
     end
 end
 
-// Window procedure for every Brasa window; called by Windows.
+// Window procedure for every Zila Lang window; called by Windows.
 func wndproc(hwnd: usize, msg: u32, wp: usize, lp: isize) -> isize
     if msg == WM_COMMAND
         let id = wp bitand 0xFFFF

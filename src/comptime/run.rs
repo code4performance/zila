@@ -6,7 +6,7 @@
 //! everything they depend on.
 
 use super::check::closure_text;
-use super::reflect::{brasa_lit, serialize_call, table_statements, WireCall};
+use super::reflect::{zila_lit, serialize_call, table_statements, WireCall};
 use super::state::*;
 use super::walk::*;
 use crate::ast::*;
@@ -120,12 +120,12 @@ fn cache_dir() -> PathBuf {
     if let Some(d) = s.cache_dir {
         return d;
     }
-    if let Ok(d) = std::env::var("BRASA_COMPTIME_CACHE") {
+    if let Ok(d) = std::env::var("ZILA_COMPTIME_CACHE") {
         if !d.is_empty() {
             return PathBuf::from(d);
         }
     }
-    std::env::temp_dir().join("brasa-comptime")
+    std::env::temp_dir().join("zila-comptime")
 }
 
 /// The cache key of a call: the compiler version and host, the canonical text of what the
@@ -135,7 +135,7 @@ fn cache_key(uni: &super::reflect::Universe, spec: &CallSpec, target_name: &str)
     let mut w = spec.wire.clone();
     w.id = 0;
     let text = format!(
-        "brasa {} {}\nhost {} {} target {}\ngen {} {}\n{}\n--\n{}",
+        "zila {} {}\nhost {} {} target {}\ngen {} {}\n{}\n--\n{}",
         env!("CARGO_PKG_VERSION"),
         s.version_tag,
         std::env::consts::OS,
@@ -153,7 +153,7 @@ fn cache_read(key: &str) -> Option<String> {
     let data = std::fs::read(cache_dir().join(format!("{}.out", key))).ok()?;
     let nl = data.iter().position(|b| *b == b'\n')?;
     let head = std::str::from_utf8(&data[..nl]).ok()?;
-    let len: usize = head.strip_prefix("brasa-comptime 1 ")?.parse().ok()?;
+    let len: usize = head.strip_prefix("zila-comptime 1 ")?.parse().ok()?;
     let body = &data[nl + 1..];
     if body.len() != len {
         return None;
@@ -166,7 +166,7 @@ fn cache_write(key: &str, text: &str) {
     if std::fs::create_dir_all(&dir).is_err() {
         return;
     }
-    let mut data = format!("brasa-comptime 1 {}\n", text.len()).into_bytes();
+    let mut data = format!("zila-comptime 1 {}\n", text.len()).into_bytes();
     data.extend_from_slice(text.as_bytes());
     let tmp = dir.join(format!("{}.tmp{}", key, std::process::id()));
     if std::fs::write(&tmp, &data).is_ok() && std::fs::rename(&tmp, dir.join(format!("{}.out", key))).is_err() {
@@ -271,11 +271,11 @@ fn driver_file(uni: &super::reflect::Universe, main_module: &str, specs: &[&Call
         }
     }
     let mut body = String::from("package comptime_run\nfunc main()\n");
-    body.push_str(&format!("    reflect.set_target({})\n", brasa_lit(target_name)));
+    body.push_str(&format!("    reflect.set_target({})\n", zila_lit(target_name)));
     for s in specs {
         let w = &s.wire;
         let tag = s.tag.clone();
-        body.push_str(&format!("    reflect.begin({}, {})\n", w.id, brasa_lit(&tag)));
+        body.push_str(&format!("    reflect.begin({}, {})\n", w.id, zila_lit(&tag)));
         for st in table_statements(&w.table) {
             body.push_str("    ");
             body.push_str(&st);
@@ -283,7 +283,7 @@ fn driver_file(uni: &super::reflect::Universe, main_module: &str, specs: &[&Call
         }
         let call = if s.gen_module == main_module { s.gen_name.clone() } else { format!("{}.{}", s.gen_module, s.gen_name) };
         let arg = match &w.raw {
-            Some(r) => brasa_lit(r),
+            Some(r) => zila_lit(r),
             None => format!("reflect.type_at({})", w.root),
         };
         body.push_str(&format!("    reflect.emit({}, {}({}))\n", w.id, call, arg));
@@ -578,7 +578,7 @@ pub fn run_calls(uni: &super::reflect::Universe, main_module: &str, specs: &[Cal
         static BUILD: AtomicUsize = AtomicUsize::new(0);
         let n = BUILD.fetch_add(1, Ordering::SeqCst);
         let ext = if host == Target::Windows { ".exe" } else { "" };
-        let exe = std::env::temp_dir().join(format!("brasa-comptime-{}-{}{}", std::process::id(), n, ext));
+        let exe = std::env::temp_dir().join(format!("zila-comptime-{}-{}{}", std::process::id(), n, ext));
         struct Cleanup(PathBuf);
         impl Drop for Cleanup {
             fn drop(&mut self) {

@@ -1,7 +1,7 @@
 //! `new`, `Rc<T>`, `Weak<T>`, `weak(x)` and `upgrade()`. Programs are compiled to native
 //! executables and run (skipped when the Visual Studio build tools are missing).
 
-use brasa::{compile_to_native, parse_source};
+use zila::{compile_to_native, parse_source};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -9,7 +9,7 @@ static N: AtomicUsize = AtomicUsize::new(0);
 
 fn run(src: &str) -> Option<(String, i32)> {
     let file = parse_source(src).unwrap_or_else(|d| panic!("parse error: {}", d));
-    let exe = std::env::temp_dir().join(format!("brasa-weak-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let exe = std::env::temp_dir().join(format!("zila-weak-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     match compile_to_native(&file, exe.to_str().unwrap()) {
         Ok(()) => {}
         Err(e) if e.contains("could not find Visual Studio") || e.contains("vcvars64") => {
@@ -29,7 +29,7 @@ fn rejected(src: &str) -> String {
         Ok(f) => f,
         Err(d) => return d.to_string(),
     };
-    let exe = std::env::temp_dir().join(format!("brasa-weak-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let exe = std::env::temp_dir().join(format!("zila-weak-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     match compile_to_native(&file, exe.to_str().unwrap()) {
         Ok(()) => {
             let _ = std::fs::remove_file(&exe);

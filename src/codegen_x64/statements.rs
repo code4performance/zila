@@ -900,7 +900,7 @@ impl Compiler {
         if self.fs.unsafe_depth == 0 && !self.fs.code.is_empty() {
             self.require_unsafe("inline 'asm'")?;
         }
-        // lets an assembler error be reported at the Brasa line of the block
+        // lets an assembler error be reported at the Zila Lang line of the block
         self.e(format!("; asm {}.br:{}", self.cur_mod, self.line));
         const POOL: [&str; 4] = ["r10", "r11", "r8", "r9"];
         let mut regs: HashMap<String, String> = HashMap::new();

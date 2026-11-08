@@ -1,6 +1,6 @@
 // A small REST service on `use web`: routes with path parameters, JSON in and out, a middleware.
 //
-//   brasa-parse examples/rest_api.br -o rest_api.exe
+//   zila-parse examples/rest_api.br -o rest_api.exe
 //   rest_api.exe                      (then: curl http://localhost:8080/customers)
 //
 // The customers live in memory. Handlers are closures that capture by value, so state that

@@ -1,5 +1,5 @@
 // =====================================================================
-// Brasa standard library: Winsock declarations (used by `net`)
+// Zila Lang standard library: Winsock declarations (used by `net`)
 // =====================================================================
 
 package ws

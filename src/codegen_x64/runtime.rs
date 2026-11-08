@@ -5,7 +5,7 @@
 // ---------------------------------------------------------------------------
 
 pub(super) const RUNTIME_COMMON: &str = r#"
-; ---- Brasa runtime ----
+; ---- Zila Lang runtime ----
 
 ; +1 reference on the object at rcx (null is fine). Preserves all registers.
 rt_retain proc

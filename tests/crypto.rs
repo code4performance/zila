@@ -2,8 +2,8 @@
 //! vectors, PBKDF2, encodings, constant-time comparison and random bytes. Programs are compiled
 //! to native executables and run; the Linux half (under WSL) is skipped without WSL.
 
-use brasa::codegen_x64::{compile_to_linux, CompileOptions};
-use brasa::{compile_to_native, parse_source};
+use zila::codegen_x64::{compile_to_linux, CompileOptions};
+use zila::{compile_to_native, parse_source};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Once;
@@ -13,9 +13,9 @@ static INIT: Once = Once::new();
 
 fn setup() {
     INIT.call_once(|| {
-        let dir = std::env::temp_dir().join(format!("brasa-crypto-test-cache-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("zila-crypto-test-cache-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        brasa::comptime::set_cache_dir(&dir);
+        zila::comptime::set_cache_dir(&dir);
     });
 }
 
@@ -26,7 +26,7 @@ fn program(body: &str) -> String {
 fn build(src: &str) -> Result<std::path::PathBuf, String> {
     setup();
     let file = parse_source(src).unwrap_or_else(|d| panic!("parse error: {}", d));
-    let exe = std::env::temp_dir().join(format!("brasa-crypto-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let exe = std::env::temp_dir().join(format!("zila-crypto-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     compile_to_native(&file, exe.to_str().unwrap()).map(|_| exe)
 }
 
@@ -40,7 +40,7 @@ fn run(src: &str) -> String {
 fn kernel_error(src: &str) -> String {
     setup();
     let file = parse_source(src).unwrap_or_else(|d| panic!("parse error: {}", d));
-    brasa::codegen_x64::generate_asm_for(&file, &brasa::codegen_x64::CompileOptions::default(), brasa::codegen_x64::Target::Bare)
+    zila::codegen_x64::generate_asm_for(&file, &zila::codegen_x64::CompileOptions::default(), zila::codegen_x64::Target::Bare)
         .expect_err("expected the kernel build to fail")
 }
 
@@ -55,7 +55,7 @@ fn run_linux(src: &str) -> Option<String> {
         return None;
     }
     let file = parse_source(src).unwrap();
-    let exe = std::env::temp_dir().join(format!("brasa-crypto-linux-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let exe = std::env::temp_dir().join(format!("zila-crypto-linux-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     setup();
     compile_to_linux(&file, exe.to_str().unwrap(), &CompileOptions::default()).unwrap_or_else(|e| panic!("compile error: {}", e));
     let p = exe.to_str().unwrap().replace('\\', "/");

@@ -2,9 +2,9 @@
 //! runtime is inspected on every target, and programs with counting allocators are built and run
 //! on Windows and (through WSL) on Linux; a machine without the toolchain skips the runs.
 
-use brasa::codegen_x64::{compile_to_linux, compile_to_native_with, generate_asm, generate_asm_for, CompileOptions, Target};
-use brasa::noalloc::check_program;
-use brasa::parse_source;
+use zila::codegen_x64::{compile_to_linux, compile_to_native_with, generate_asm, generate_asm_for, CompileOptions, Target};
+use zila::noalloc::check_program;
+use zila::parse_source;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::process::Command;
@@ -19,7 +19,7 @@ struct Ran {
 }
 
 fn temp(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("brasa-allocator-test-{}-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst), name))
+    std::env::temp_dir().join(format!("zila-allocator-test-{}-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst), name))
 }
 
 fn windows(src: &str) -> Option<Ran> {
@@ -311,7 +311,7 @@ fn linux_leaves_out_free_lists_and_mmap() {
 fn bare_metal_keeps_the_built_in_heap_without_an_allocator() {
     let boot = parse_source(&std::fs::read_to_string("os/boot.br").unwrap()).unwrap();
     let kernel = "package main\nfunc console_write(s: text)\nend\nfunc main()\n    let n = heap_bytes()\nend\n";
-    brasa::codegen_x64::build_os(&boot, &parse_source(kernel).unwrap()).unwrap();
+    zila::codegen_x64::build_os(&boot, &parse_source(kernel).unwrap()).unwrap();
 }
 
 // ---- running ----

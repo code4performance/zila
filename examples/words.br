@@ -1,8 +1,8 @@
 // Text and list helpers: count the words in a sentence.
 //
-//   brasa-parse examples/words.br -o words.exe
+//   zila-parse examples/words.br -o words.exe
 //
-// `use text` and `use list` are libraries written in Brasa. Their functions are called with
+// `use text` and `use list` are libraries written in Zila Lang. Their functions are called with
 // the module name in front, like text.split(...) and list.sort_by(...).
 
 package main

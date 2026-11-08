@@ -1,12 +1,12 @@
-//! The `ai` library (spec `ai-client`) against a fake model server written in Brasa, in the same
+//! The `ai` library (spec `ai-client`) against a fake model server written in Zila Lang, in the same
 //! program as the client: scripted answers, server-sent events with pauses, errors, retries, tool
 //! calls, typed output and embeddings. Real APIs are not called here; the tests at the end run
-//! only when `BRASA_TEST_ANTHROPIC_KEY` or `BRASA_TEST_OPENAI_URL` is set.
+//! only when `ZILA_TEST_ANTHROPIC_KEY` or `ZILA_TEST_OPENAI_URL` is set.
 //!
-//! Brasa text literals treat `{` as the start of an interpolation, so JSON inside the test
+//! Zila Lang text literals treat `{` as the start of an interpolation, so JSON inside the test
 //! programs is written between `‹` and `›`; `prep` turns each such span into an escaped literal.
 
-use brasa::{compile_to_native, parse_source};
+use zila::{compile_to_native, parse_source};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Once;
@@ -16,9 +16,9 @@ static INIT: Once = Once::new();
 
 fn setup() {
     INIT.call_once(|| {
-        let dir = std::env::temp_dir().join(format!("brasa-ai-test-cache-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("zila-ai-test-cache-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        brasa::comptime::set_cache_dir(&dir);
+        zila::comptime::set_cache_dir(&dir);
     });
 }
 
@@ -50,7 +50,7 @@ fn prep(src: &str) -> String {
 fn build(src: &str) -> Result<std::path::PathBuf, String> {
     setup();
     let file = parse_source(src).unwrap_or_else(|d| panic!("parse error: {}", d));
-    let exe = std::env::temp_dir().join(format!("brasa-ai-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let exe = std::env::temp_dir().join(format!("zila-ai-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     compile_to_native(&file, exe.to_str().unwrap()).map(|_| exe)
 }
 
@@ -214,8 +214,8 @@ fn error_statuses_map_to_kinds_and_the_key_never_appears_in_a_message() {
 
 #[test]
 fn a_missing_environment_variable_is_named_in_the_error() {
-    let body = "    match ai.key_from_env(\"BRASA_SURELY_NOT_SET_9\")\n        ok(k) -> print(\"unexpected\")\n        err(e) -> print(e.kind.name, e.message)\n    end\n";
-    assert_eq!(run(&program("", body)), "std.InvalidInput the environment variable BRASA_SURELY_NOT_SET_9 is not set or is empty\n");
+    let body = "    match ai.key_from_env(\"ZILA_SURELY_NOT_SET_9\")\n        ok(k) -> print(\"unexpected\")\n        err(e) -> print(e.kind.name, e.message)\n    end\n";
+    assert_eq!(run(&program("", body)), "std.InvalidInput the environment variable ZILA_SURELY_NOT_SET_9 is not set or is empty\n");
 }
 
 #[test]
@@ -354,11 +354,11 @@ fn a_value_that_is_not_a_message_list_is_a_compile_error() {
 
 #[test]
 fn a_real_chat_when_a_key_is_given() {
-    let Ok(key) = std::env::var("BRASA_TEST_ANTHROPIC_KEY") else {
-        eprintln!("skipped: set BRASA_TEST_ANTHROPIC_KEY (and BRASA_TEST_ANTHROPIC_MODEL) to call the real API");
+    let Ok(key) = std::env::var("ZILA_TEST_ANTHROPIC_KEY") else {
+        eprintln!("skipped: set ZILA_TEST_ANTHROPIC_KEY (and ZILA_TEST_ANTHROPIC_MODEL) to call the real API");
         return;
     };
-    let model = std::env::var("BRASA_TEST_ANTHROPIC_MODEL").unwrap_or_else(|_| "claude-haiku-5-5".to_string());
+    let model = std::env::var("ZILA_TEST_ANTHROPIC_MODEL").unwrap_or_else(|_| "claude-haiku-5-5".to_string());
     let src = format!("package main\n\nuse ai\n\nfunc main() -> error\n    let c = ai.anthropic(\"{key}\")\n    let r = try c.chat(ai.request(\"{model}\", [ai.user(\"Reply with the single word: pong\")], 20))\n    print(r.text.len > 0)\n    return\nend\n");
     assert_eq!(run(&src), "true\n");
 }
@@ -377,6 +377,6 @@ func main()
     print(ai.user(\"x\").content)
 end
 ").unwrap();
-    let e = brasa::codegen_x64::generate_asm_for(&file, &brasa::codegen_x64::CompileOptions::default(), brasa::codegen_x64::Target::Bare).expect_err("expected the kernel build to fail");
+    let e = zila::codegen_x64::generate_asm_for(&file, &zila::codegen_x64::CompileOptions::default(), zila::codegen_x64::Target::Bare).expect_err("expected the kernel build to fail");
     assert!(e.contains("bare-metal") || e.contains("Windows"), "{}", e);
 }

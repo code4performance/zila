@@ -3,8 +3,8 @@
 //! Programs are compiled to native executables and run (skipped when the Visual Studio build
 //! tools are missing).
 
-use brasa::codegen_x64::{compile_to_native_with, generate_asm_with, CompileOptions};
-use brasa::parse_source;
+use zila::codegen_x64::{compile_to_native_with, generate_asm_with, CompileOptions};
+use zila::parse_source;
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
@@ -17,7 +17,7 @@ const OFF: CompileOptions = CompileOptions { optimize: false, test_mode: false }
 /// Compiles and runs `src`; `None` when there is no native toolchain.
 fn run_with(src: &str, options: &CompileOptions) -> Option<(String, i32, Duration)> {
     let file = parse_source(src).unwrap_or_else(|d| panic!("parse error: {}", d));
-    let exe = std::env::temp_dir().join(format!("brasa-opt-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let exe = std::env::temp_dir().join(format!("zila-opt-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     match compile_to_native_with(&file, exe.to_str().unwrap(), options) {
         Ok(()) => {}
         Err(e) if e.contains("could not find Visual Studio") => {
@@ -40,14 +40,14 @@ fn same(src: &str) -> Option<String> {
     let (b, cb, _) = run_with(src, &ON)?;
     if a != b {
         let dir = std::env::temp_dir();
-        let _ = std::fs::write(dir.join("brasa-opt-diff.br"), src);
+        let _ = std::fs::write(dir.join("zila-opt-diff.br"), src);
         let first = a.lines().zip(b.lines()).position(|(x, y)| x != y).unwrap_or(0);
         panic!(
             "optimized output differs from unoptimized output at line {}: {:?} (unoptimized) vs {:?} (optimized); program saved to {}",
             first + 1,
             a.lines().nth(first),
             b.lines().nth(first),
-            dir.join("brasa-opt-diff.br").display()
+            dir.join("zila-opt-diff.br").display()
         );
     }
     assert_eq!(ca, cb, "exit codes differ");
@@ -143,7 +143,7 @@ end
 /// new executable, then the best of three.
 fn bench(src: &str, options: &CompileOptions) -> Option<Duration> {
     let file = parse_source(src).unwrap();
-    let exe = std::env::temp_dir().join(format!("brasa-bench-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let exe = std::env::temp_dir().join(format!("zila-bench-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     match compile_to_native_with(&file, exe.to_str().unwrap(), options) {
         Ok(()) => {}
         Err(e) if e.contains("could not find Visual Studio") => return None,

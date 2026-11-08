@@ -1,5 +1,5 @@
-use brasa::codegen_x64::{generate_asm, generate_asm_for, CompileOptions, Target};
-use brasa::parse_source;
+use zila::codegen_x64::{generate_asm, generate_asm_for, CompileOptions, Target};
+use zila::parse_source;
 
 fn check_err(src: &str, want: &str) {
     let file = parse_source(src).unwrap_or_else(|d| panic!("parse error: {}", d));
@@ -348,7 +348,7 @@ end
 
 #[test]
 fn interface_bounded_calls_are_static_and_analysed() {
-    // interfaces only bound type parameters in Brasa, so a call on `T: Shape` is resolved to the
+    // interfaces only bound type parameters in Zila Lang, so a call on `T: Shape` is resolved to the
     // methods of that name (static dispatch) and analysed like a direct call
     let src = "package main
 
@@ -508,7 +508,7 @@ fn a_std_function_marked_no_alloc_that_allocates_fails_the_library() {
     let main = parse_source("package main\n\nfunc main()\nend\n").unwrap();
     let lib = parse_source("package lib\n\n#[no_alloc]\nfunc broken(n: int) -> []int\n    return [n]\nend\n").unwrap();
     let modules = vec![("main".to_string(), main), ("lib".to_string(), lib)];
-    let e = brasa::noalloc::check_program(&modules, &std::collections::HashSet::new()).unwrap_err();
+    let e = zila::noalloc::check_program(&modules, &std::collections::HashSet::new()).unwrap_err();
     assert!(e.contains("lib.br:4") && e.contains("broken -> list literal"), "{}", e);
 }
 
@@ -516,8 +516,8 @@ fn a_std_function_marked_no_alloc_that_allocates_fails_the_library() {
 fn the_no_alloc_example_runs() {
     let src = std::fs::read_to_string("examples/no_alloc.br").unwrap();
     let file = parse_source(&src).unwrap();
-    let exe = std::env::temp_dir().join(format!("brasa-noalloc-example-{}.exe", std::process::id()));
-    match brasa::codegen_x64::compile_to_native(&file, exe.to_str().unwrap()) {
+    let exe = std::env::temp_dir().join(format!("zila-noalloc-example-{}.exe", std::process::id()));
+    match zila::codegen_x64::compile_to_native(&file, exe.to_str().unwrap()) {
         Ok(()) => {}
         Err(e) if e.contains("could not find Visual Studio") || e.contains("vcvars64") => return,
         Err(e) => panic!("{}", e),

@@ -1,10 +1,10 @@
-//! Command-line parsing for `brasa-parse`.
+//! Command-line parsing for `zila-parse`.
 //!
 //! `FLAGS` is the single list of options the tool accepts. The argument parser is
 //! driven by it, and `tests/docs.rs` checks that the documentation describes every
 //! entry and nothing else.
 
-/// Every option `brasa-parse` accepts.
+/// Every option `zila-parse` accepts.
 pub const FLAGS: &[&str] = &["--ast", "--tokens", "--asm", "--run", "--build", "-o", "--os", "--docs", "--no-opt", "--no-prune", "--explain-link", "--fmt", "--fmt-check", "--test", "--target", "--lsp", "--comptime-timeout", "--no-comptime-cache", "--comptime-dump", "--init", "--add", "--as", "--fetch", "--tidy", "--update", "--offline"];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -28,11 +28,11 @@ pub enum Mode {
     Test,
     /// Run the language server on standard input and output.
     Lsp,
-    /// Write `brasa.toml`.
+    /// Write `zila.toml`.
     Init,
     /// Add a dependency to the manifest and fetch it.
     Add,
-    /// Resolve the dependencies, fill the cache and write `brasa.lock`.
+    /// Resolve the dependencies, fill the cache and write `zila.lock`.
     Fetch,
     /// Remove unused dependencies and rewrite the lock.
     Tidy,

@@ -1,5 +1,5 @@
 // =====================================================================
-// Brasa standard library: set
+// Zila Lang standard library: set
 //
 //     use set
 //     let seen: set.Set<text> = set.empty()

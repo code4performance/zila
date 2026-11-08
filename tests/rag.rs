@@ -1,12 +1,12 @@
 //! The `rag` library (spec `rag-library`): chunking, the in-memory and pgvector stores, indexing,
 //! retrieval, grounded answers and the search tool, with a deterministic embedder written in the
 //! test programs, a fake model server (as in `tests/ai.rs`) and a fake database driver. A real
-//! pgvector table is used only when `BRASA_TEST_POSTGRES` names a server that already has the
+//! pgvector table is used only when `ZILA_TEST_POSTGRES` names a server that already has the
 //! `vector` extension; the table it makes is dropped at the end.
 //!
 //! JSON inside the test programs is written between `‹` and `›`.
 
-use brasa::{compile_to_native, parse_source};
+use zila::{compile_to_native, parse_source};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Once;
@@ -16,9 +16,9 @@ static INIT: Once = Once::new();
 
 fn setup() {
     INIT.call_once(|| {
-        let dir = std::env::temp_dir().join(format!("brasa-rag-test-cache-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("zila-rag-test-cache-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        brasa::comptime::set_cache_dir(&dir);
+        zila::comptime::set_cache_dir(&dir);
     });
 }
 
@@ -51,7 +51,7 @@ fn prep(src: &str) -> String {
 fn build(src: &str) -> Result<std::path::PathBuf, String> {
     setup();
     let file = parse_source(src).unwrap_or_else(|d| panic!("parse error: {}", d));
-    let exe = std::env::temp_dir().join(format!("brasa-rag-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let exe = std::env::temp_dir().join(format!("zila-rag-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     compile_to_native(&file, exe.to_str().unwrap()).map(|_| exe)
 }
 
@@ -349,12 +349,12 @@ fn the_pgvector_store_validates_the_table_name_and_builds_the_documented_sql() {
 
 #[test]
 fn a_real_pgvector_table_orders_hits_like_the_memory_store() {
-    let Ok(url) = std::env::var("BRASA_TEST_POSTGRES") else {
-        eprintln!("skipped: set BRASA_TEST_POSTGRES to a server that has the vector extension to run this test");
+    let Ok(url) = std::env::var("ZILA_TEST_POSTGRES") else {
+        eprintln!("skipped: set ZILA_TEST_POSTGRES to a server that has the vector extension to run this test");
         return;
     };
     let url = url.replace('\\', "/");
-    let table = format!("brasa_rag_test_{}", std::process::id());
+    let table = format!("zila_rag_test_{}", std::process::id());
     let src = prep(&format!(
         "package main\n\nuse rag\nuse db\nuse postgres\nuse json\nuse errors\nuse text\n\nfunc item(id: text, v: []float) -> rag.Item\n    var m: Map<text, text> = {{}}\n    m[‹source›] = ‹s›\n    return rag.Item {{ id: id, vector: v, text: ‹text of › + id, meta: m }}\nend\n\nfunc main() -> error\n    let conn = try postgres.open(‹{url}›)\n    let has = try db.one(int, conn, ‹select count(*)::int from pg_extension where extname = 'vector'›)\n    if has == 0\n        print(‹no pgvector›)\n        return\n    end\n    let pg = try rag.pg_store(conn, ‹{table}›, 3)\n    try pg.migrate()\n    let mem = rag.memory_store()\n    let items = [item(‹a›, [1.0, 0.0, 0.0]), item(‹b›, [0.0, 1.0, 0.0]), item(‹c›, [0.9, 0.1, 0.0]), item(‹d›, [0.5, 0.5, 0.5])]\n    try pg.add(items)\n    try mem.add(items)\n    var none: Map<text, text> = {{}}\n    let p = try pg.search([1.0, 0.2, 0.0], 4, none)\n    let m = try mem.search([1.0, 0.2, 0.0], 4, none)\n    var same = p.len == m.len\n    for i in 0..p.len\n        if p[i].id != m[i].id\n            same = false\n        end\n    end\n    print(same, p.len, try pg.count())\n    try pg.delete_source(‹s›)\n    print(try pg.count())\n    try conn.exec(‹drop table {table}›)\n    return\nend\n"
     ));

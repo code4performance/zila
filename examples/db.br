@@ -1,6 +1,6 @@
 // Databases: the same function on PostgreSQL and on SQL Server.
 //
-//   brasa-parse examples/db.br -o db.exe
+//   zila-parse examples/db.br -o db.exe
 //
 // `postgres.open` and `sqlserver.open` both return a `db.Conn`, so everything after opening is
 // written once: typed rows (`db.query_sql` builds `[]Customer` from the columns by name) and
@@ -83,10 +83,10 @@ func show(conn: db.Conn, list: db.Sql, add: db.Sql, count: db.Sql) -> error
 end
 
 func main() -> error
-    let pg = try postgres.open("postgres://app:Brasa_app_dev_1@127.0.0.1:55432/shop?sslmode=require&sslrootcert=tests/docker/certs/ca.pem")
+    let pg = try postgres.open("postgres://app:Zila_app_dev_1@127.0.0.1:55432/shop?sslmode=require&sslrootcert=tests/docker/certs/ca.pem")
     print("PostgreSQL")
     try show(pg, below_postgres(5), add_postgres(9001, "Temporary"), count_postgres(9001))
-    let ms = try sqlserver.open("sqlserver://sa:Brasa_dev_Sql_1@127.0.0.1:51434/shop?encrypt=strict&cafile=tests/docker/certs/ca.pem")
+    let ms = try sqlserver.open("sqlserver://sa:Zila_dev_Sql_1@127.0.0.1:51434/shop?encrypt=strict&cafile=tests/docker/certs/ca.pem")
     print("SQL Server")
     try show(ms, below_tsql(5), add_tsql(9001, "Temporary"), count_tsql(9001))
     return

@@ -39,7 +39,7 @@ create table items (
 );
 insert into items values (1, 'a', '[1,0,0]'), (2, 'b', '[0,1,0]'), (3, 'c', '[0,0,1]');
 
-create role app login password 'Brasa_app_dev_1';
-create role reader login password 'Brasa_reader_dev_1';
+create role app login password 'Zila_app_dev_1';
+create role reader login password 'Zila_reader_dev_1';
 grant all on all tables in schema public to app;
 grant select on all tables in schema public to reader;

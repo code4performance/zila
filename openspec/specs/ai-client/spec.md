@@ -1,7 +1,7 @@
 # ai-client Specification
 
 ## Purpose
-Lets a Brasa program use a language model as a typed function: send messages, stream the answer, get values of its own types back and let the model call Brasa functions as tools.
+Lets a Zila Lang program use a language model as a typed function: send messages, stream the answer, get values of its own types back and let the model call Zila Lang functions as tools.
 
 ## Requirements
 

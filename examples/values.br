@@ -1,6 +1,6 @@
 // Formatting values of any type: numbers go straight into the template.
 //
-//   brasa-parse examples/values.br -o values.exe
+//   zila-parse examples/values.br -o values.exe
 //
 // `format.fmt(template, a, b, ...)` takes up to eight values (integers, floats, booleans, text)
 // and the placeholder says how to show each one: `%(08x)` is hexadecimal padded with zeros to

@@ -1,4 +1,4 @@
-//! AST for Brasa. Every node that can be reported in an error carries a line.
+//! AST for Zila Lang. Every node that can be reported in an error carries a line.
 
 #[derive(Debug, Clone)]
 pub struct File {

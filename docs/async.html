@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Async — Brasa</title>
-  <meta name="description" content="async/await in Brasa: futures, timers, files and TCP networking that never block the other tasks.">
+  <title>Async — Zila Lang</title>
+  <meta name="description" content="async/await in Zila Lang: futures, timers, files and TCP networking that never block the other tasks.">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <header class="site-header">
-    <a class="brand" href="index.html">brasa<span class="ember-dot">.</span><small>lang docs</small></a>
+    <a class="brand" href="index.html">zila<span class="ember-dot">.</span><small>lang docs</small></a>
     <nav class="site-nav">
       <a href="index.html">Overview</a>
       <a href="syntax.html">Syntax</a>
@@ -21,14 +21,14 @@
       <a href="databases.html">Databases</a>
       <a href="ai.html">AI</a>
       <a href="packages.html">Packages</a>
-      <a href="os.html">Brasa OS</a>
+      <a href="os.html">Zila Lang OS</a>
       <a href="getting-started.html">Getting Started</a>
     </nav>
   </header>
 
   <main>
     <h1>Async</h1>
-    <p>Programs that wait — for time, a file, a network peer — should not freeze while they wait. In Brasa <code>await</code> is the one place where a task gives up the processor so another can run. Everything here is compiled natively and needs the Windows target.</p>
+    <p>Programs that wait — for time, a file, a network peer — should not freeze while they wait. In Zila Lang <code>await</code> is the one place where a task gives up the processor so another can run. Everything here is compiled natively and needs the Windows target.</p>
 
     <section id="basics">
       <h2>async and await</h2>
@@ -103,7 +103,7 @@
 
     <section id="files">
       <h2>Files</h2>
-      <p>With <code>use fs</code>, reading and writing happen while other tasks keep running: the operating system moves the data and Brasa runs something else meanwhile. Big files are transferred in 64 KiB pieces.</p>
+      <p>With <code>use fs</code>, reading and writing happen while other tasks keep running: the operating system moves the data and Zila Lang runs something else meanwhile. Big files are transferred in 64 KiB pieces.</p>
       <pre><code><span class="kw">use</span> fs
 
 <span class="kw">try</span> <span class="kw">await</span> fs.write(<span class="str">"notes.txt"</span>, <span class="str">"hello"</span>)       <span class="cm">// creates or replaces the file</span>
@@ -205,7 +205,7 @@ Connection: close
     print(<span class="kw">try</span> <span class="kw">await</span> conn.read(4096))
     <span class="kw">return</span>
 <span class="kw">end</span></code></pre>
-      <p>It is written in Brasa on the Windows SChannel package, and on Linux on OpenSSL 3 (<code>libssl.so.3</code> must be installed, as it is on current distributions; the program is then dynamically linked). The functions and the errors are the same on both. Client side only, no client certificates, no renegotiation.</p>
+      <p>It is written in Zila Lang on the Windows SChannel package, and on Linux on OpenSSL 3 (<code>libssl.so.3</code> must be installed, as it is on current distributions; the program is then dynamically linked). The functions and the errors are the same on both. Client side only, no client certificates, no renegotiation.</p>
     </section>
 
     <section id="limits">
@@ -220,7 +220,7 @@ Connection: close
   </main>
 
   <footer class="site-footer">
-    Brasa — a language with a human face. Docs generated from <code>brasa.ebnf</code> and <code>examples/*.br</code>.
+    Zila Lang — a language with a human face. Docs generated from <code>zila.ebnf</code> and <code>examples/*.br</code>.
   </footer>
 </body>
 </html>

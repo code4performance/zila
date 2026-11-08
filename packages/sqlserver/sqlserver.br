@@ -1,5 +1,5 @@
 // =====================================================================
-// Brasa standard library: SQL Server driver (`use sqlserver`)
+// Zila Lang standard library: SQL Server driver (`use sqlserver`)
 //
 //     use db
 //     use sqlserver
@@ -7,7 +7,7 @@
 //     let conn = try sqlserver.open("sqlserver://app:secret@localhost:1433/shop?encrypt=strict")
 //     let rows = try db.query(Customer, conn, "select id, name from customers where id > @p1", db.int(10))
 //
-// The TDS protocol written in Brasa over `net` and `tls`; there is no C library.
+// The TDS protocol written in Zila Lang over `net` and `tls`; there is no C library.
 // `sqlserver.open(url)` returns a `db.Conn`, so the code of `use db` (typed rows, parameters,
 // transactions, errors) works unchanged.
 //
@@ -1348,7 +1348,7 @@ end
 // The LOGIN7 message for an SQL login (the password is obfuscated, not encrypted).
 func login7(host: text, user: text, password: text, database: text, packet: int) -> text
     // host, user, password, application, server, extension, library, language, database
-    let fields: []text = [utf16(host), utf16(user), obfuscate(utf16(password)), utf16("brasa"), utf16(host), "", utf16("brasa"), "", utf16(database)]
+    let fields: []text = [utf16(host), utf16(user), obfuscate(utf16(password)), utf16("zila"), utf16(host), "", utf16("zila"), "", utf16(database)]
     var table = ""
     var data = ""
     var at = 94

@@ -1,4 +1,4 @@
-//! `brasa-parse --test`: finds the `#[test]` functions of a file, builds the file with a
+//! `zila-parse --test`: finds the `#[test]` functions of a file, builds the file with a
 //! generated entry point that runs them in order, runs it and reports.
 
 use crate::ast::*;
@@ -101,7 +101,7 @@ fn run_file(path: &str, optimize: bool) -> Result<Outcome, String> {
     file.decls.extend(generated.decls);
 
     println!("running {} test(s) in {}", tests.len(), path);
-    let exe = std::env::temp_dir().join(format!("brasa-test-{}-{}.exe", std::process::id(), BUILD.fetch_add(1, Ordering::SeqCst)));
+    let exe = std::env::temp_dir().join(format!("zila-test-{}-{}.exe", std::process::id(), BUILD.fetch_add(1, Ordering::SeqCst)));
     match compile_to_native_with(&file, exe.to_str().unwrap(), &CompileOptions { optimize, test_mode: true }) {
         Ok(()) => {}
         Err(e) => return Err(format!("{}: {}", path, e)),

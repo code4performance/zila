@@ -1,21 +1,21 @@
-# Brasa FFI & Inline Assembly Specification
+# Zila Lang FFI & Inline Assembly Specification
 
-This document defines the Foreign Function Interface (FFI) and Inline Assembly specifications for the Brasa programming language.
+This document defines the Foreign Function Interface (FFI) and Inline Assembly specifications for the Zila Lang programming language.
 
-Brasa is designed to combine modern expressiveness and safety with seamless, zero-cost systems-level interoperability. It can call into C libraries, be called from C runtimes, and execute target-specific inline assembly without runtime glue or foreign bridges.
+Zila Lang is designed to combine modern expressiveness and safety with seamless, zero-cost systems-level interoperability. It can call into C libraries, be called from C runtimes, and execute target-specific inline assembly without runtime glue or foreign bridges.
 
 ---
 
 ## 1. Safety and Unsafe Boundaries
 
-Brasa divides operations into safe code and explicitly audited operations:
+Zila Lang divides operations into safe code and explicitly audited operations:
 - Calling external foreign functions declared via `extern` is considered potentially unsafe.
 - Dereferencing raw pointers (`ptr^`) is unsafe.
 - Executing inline assembly (`asm ... end`) is unsafe.
 
 All such operations require an enclosing `unsafe` block:
 
-```brasa
+```zila
 unsafe
     printf(c.cstr("Result: %d\n"), calculate())
 end
@@ -25,13 +25,13 @@ The `unsafe` block signals to both the programmer and compiler that memory safet
 
 ---
 
-## 2. Calling C from Brasa (`extern`)
+## 2. Calling C from Zila Lang (`extern`)
 
 ### 2.1 Foreign Function Declarations
 
 External functions are declared using the `extern` keyword. The calling convention (ABI) is optional and defaults to `"C"`:
 
-```brasa
+```zila
 // Defaults to ABI "C"
 extern func abs(x: c.int) -> c.int
 
@@ -49,7 +49,7 @@ Supported ABIs:
 
 C variadic functions (like `printf`) are declared with trailing `...` in the parameter list:
 
-```brasa
+```zila
 extern "C" func printf(fmt: *c.char, ...) -> c.int
 ```
 
@@ -59,11 +59,11 @@ When calling a variadic function, arguments corresponding to `...` are converted
 
 ## 3. The `c` Package & Type Mappings
 
-Brasa provides a standard library package `use c` with definitions matching the host platform's C toolchain.
+Zila Lang provides a standard library package `use c` with definitions matching the host platform's C toolchain.
 
 ### 3.1 Primitive Types
 
-| Brasa Type | C Equivalent | Notes |
+| Zila Lang Type | C Equivalent | Notes |
 |---|---|---|
 | `c.char` | `char` | Target-dependent sign (usually `i8`) |
 | `c.schar` | `signed char` | Signed 8-bit integer |
@@ -91,10 +91,10 @@ Brasa provides a standard library package `use c` with definitions matching the 
 
 ### 3.3 Text & String Interoperability
 
-Brasa `text` is a slice of UTF-8 bytes (pointer + length) without a trailing null terminator. C expects null-terminated pointers (`*c.char`). The `c` module provides conversion utilities:
+Zila Lang `text` is a slice of UTF-8 bytes (pointer + length) without a trailing null terminator. C expects null-terminated pointers (`*c.char`). The `c` module provides conversion utilities:
 
 - `c.cstr(str: text) -> *c.char`: Produces a temporary null-terminated C string valid for the lifetime of the surrounding expression or function call.
-- `c.from_cstr(ptr: *c.char) -> text`: Computes the string length via `strlen` and returns an immutable Brasa `text` view.
+- `c.from_cstr(ptr: *c.char) -> text`: Computes the string length via `strlen` and returns an immutable Zila Lang `text` view.
 
 ---
 
@@ -102,10 +102,10 @@ Brasa `text` is a slice of UTF-8 bytes (pointer + length) without a trailing nul
 
 ### 4.1 Exporting Functions
 
-Functions defined in Brasa can be exported to C using the `#[export]` attribute:
+Functions defined in Zila Lang can be exported to C using the `#[export]` attribute:
 
-```brasa
-#[export("brasa_add")]
+```zila
+#[export("zila_add")]
 func add(a: i32, b: i32) -> i32
     return a + b
 end
@@ -115,9 +115,9 @@ The compiler exports the symbol with the specified unmangled name and standard C
 
 ### 4.2 Function Pointers and Callbacks
 
-C APIs frequently require function pointers as callbacks (e.g., comparator functions in `qsort`). Brasa supports `extern [abi] func(...)` as a first-class type:
+C APIs frequently require function pointers as callbacks (e.g., comparator functions in `qsort`). Zila Lang supports `extern [abi] func(...)` as a first-class type:
 
-```brasa
+```zila
 extern "C" func qsort(
     base: *c.void,
     n: c.size_t,
@@ -126,15 +126,15 @@ extern "C" func qsort(
 )
 ```
 
-A top-level Brasa function matching the signature and declared with `extern "C"` or `#[export]` can be passed directly as this parameter.
+A top-level Zila Lang function matching the signature and declared with `extern "C"` or `#[export]` can be passed directly as this parameter.
 
 ---
 
 ## 5. Struct Layout & Data Alignment
 
-By default, Brasa may reorder record fields to minimize padding and memory footprint. When interfacing with C, field order and alignment must match C compiler rules precisely:
+By default, Zila Lang may reorder record fields to minimize padding and memory footprint. When interfacing with C, field order and alignment must match C compiler rules precisely:
 
-```brasa
+```zila
 #[c_layout]
 type Point = record
     x: f64
@@ -151,21 +151,21 @@ The `#[c_layout]` attribute guarantees:
 
 ## 6. Linking Directives
 
-Brasa source files can specify dependencies directly via top-level attributes:
+Zila Lang source files can specify dependencies directly via top-level attributes:
 
 - `#[link("libname")]`: Instructs the linker to link against a system or installed library (e.g., `#[link("m")]` links `libm`, `#[link("user32")]` links `user32.lib`).
-- `#[link_src("path/to/file.c")]`: Instructs the compiler to compile and link a local C source file directly alongside the Brasa package. Useful for vendored C dependencies.
+- `#[link_src("path/to/file.c")]`: Instructs the compiler to compile and link a local C source file directly alongside the Zila Lang package. Useful for vendored C dependencies.
 - `#[cfg("predicate")]`: Conditional compilation directive. Restricts declarations to matching architectures or operating systems (e.g., `#[cfg("x86_64")]`, `#[cfg("windows")]`, `#[cfg("linux")]`).
 
 ---
 
 ## 7. Inline Assembly (`asm ... end`)
 
-Brasa supports inline assembly for architecture-specific instructions, hardware access, performance-critical routines, and OS kernels.
+Zila Lang supports inline assembly for architecture-specific instructions, hardware access, performance-critical routines, and OS kernels.
 
 ### 7.1 Syntax
 
-```brasa
+```zila
 unsafe
     asm
         <instruction template 1>
@@ -180,7 +180,7 @@ end
 
 ### 7.2 Instructions and Operand Substitution
 
-- Each instruction line is target assembly code written as it is, without quotes (everything up to a `//` comment is passed to the assembler; `;` comments, labels such as `start:` and quoted data such as `db "text", 0` work as in any assembler, and instructions named like Brasa words, e.g. `in al, dx`, are fine). A line starting with `in`/`out`/`inout`, a name and `=` is an operand instead, and the block ends at a line that is just `end`.
+- Each instruction line is target assembly code written as it is, without quotes (everything up to a `//` comment is passed to the assembler; `;` comments, labels such as `start:` and quoted data such as `db "text", 0` work as in any assembler, and instructions named like Zila Lang words, e.g. `in al, dx`, are fine). A line starting with `in`/`out`/`inout`, a name and `=` is an operand instead, and the block ends at a line that is just `end`.
 - Lines written as string literals (`"cli"`) are still accepted.
 - Operands are referenced using the `@name` syntax within instruction templates.
 - When an operand name matches a known hardware register (e.g., `eax`, `edx`, `rax`), the compiler binds that operand to the specified physical register.
@@ -203,7 +203,7 @@ The `clobber` clause lists registers and state flags mutated by the assembly cod
 
 For interrupt service routines, context-switching routines, and boot code, the `#[naked]` attribute omits compiler-generated function prologues and epilogues (no stack frame setup or return instructions generated):
 
-```brasa
+```zila
 #[naked]
 #[cfg("x86_64")]
 func halt()
@@ -218,7 +218,7 @@ end
 
 ## 8. Comprehensive Example
 
-```brasa
+```zila
 package main
 
 use c

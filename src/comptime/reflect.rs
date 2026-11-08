@@ -563,8 +563,8 @@ pub fn parse_wire(text: &str) -> Result<Vec<WireCall>, String> {
     Ok(calls)
 }
 
-/// A Brasa text literal for `s`.
-pub fn brasa_lit(s: &str) -> String {
+/// A Zila Lang text literal for `s`.
+pub fn zila_lit(s: &str) -> String {
     let mut o = String::from("\"");
     for c in s.chars() {
         match c {
@@ -587,9 +587,9 @@ fn attrs_lit(attrs: &[AttrData]) -> String {
     let items: Vec<String> = attrs
         .iter()
         .map(|a| {
-            let args: Vec<String> = a.args.iter().map(|x| brasa_lit(x)).collect();
+            let args: Vec<String> = a.args.iter().map(|x| zila_lit(x)).collect();
             let quoted: Vec<String> = a.quoted.iter().map(|q| q.to_string()).collect();
-            format!("reflect.Attribute {{ name: {}, args: [{}], quoted: [{}] }}", brasa_lit(&a.name), args.join(", "), quoted.join(", "))
+            format!("reflect.Attribute {{ name: {}, args: [{}], quoted: [{}] }}", zila_lit(&a.name), args.join(", "), quoted.join(", "))
         })
         .collect();
     format!("[{}]", items.join(", "))
@@ -601,7 +601,7 @@ fn fields_lit(fs: &[FieldData]) -> String {
         .map(|f| {
             format!(
                 "reflect.Field {{ name: {}, ty: reflect.type_at({}), attrs: {}, line: {} }}",
-                brasa_lit(&f.name),
+                zila_lit(&f.name),
                 f.ty,
                 attrs_lit(&f.attrs),
                 f.line
@@ -621,7 +621,7 @@ pub fn table_statements(table: &TypeTable) -> Vec<String> {
             .map(|x| {
                 format!(
                     "reflect.Variant {{ name: {}, fields: {}, attrs: {}, line: {} }}",
-                    brasa_lit(&x.name),
+                    zila_lit(&x.name),
                     fields_lit(&x.fields),
                     attrs_lit(&x.attrs),
                     x.line
@@ -630,8 +630,8 @@ pub fn table_statements(table: &TypeTable) -> Vec<String> {
             .collect();
         v.push(format!(
             "reflect.add_type({}, {}, {}, {}, {}, {}, {}, {}, {}, [{}])",
-            brasa_lit(&t.name),
-            brasa_lit(&t.kind),
+            zila_lit(&t.name),
+            zila_lit(&t.kind),
             t.line,
             t.elem,
             t.key,

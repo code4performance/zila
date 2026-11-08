@@ -3,5 +3,5 @@ name = "packages-example"
 version = "0.1.0"
 
 [dependencies.greeter]
-git = "https://example.org/brasa/greeter"
+git = "https://example.org/zila/greeter"
 version = "1.0.0"

@@ -1,5 +1,5 @@
 // =====================================================================
-// Brasa standard library: reflect
+// Zila Lang standard library: reflect
 //
 //     use reflect
 //
@@ -10,7 +10,7 @@
 //     end
 //
 // The API of compile-time reflection. A `comptime func` receives a `Type`, a value that exists
-// only while the compiler runs, and returns Brasa source text. Everything here is plain Brasa
+// only while the compiler runs, and returns Zila Lang source text. Everything here is plain Zila Lang
 // code; the compiler fills the tables below before a generator runs (the functions `begin`,
 // `add_type`, `set_target` and `emit` belong to the program the compiler builds around the
 // generators, not to user code).

@@ -1,4 +1,4 @@
-//! `brasa-parse --run`: builds the program for this machine into a temporary executable,
+//! `zila-parse --run`: builds the program for this machine into a temporary executable,
 //! runs it with the terminal's input and output, deletes it and returns its exit status.
 
 use crate::ast::File;
@@ -34,7 +34,7 @@ impl Drop for Cleanup {
 pub fn run_file(file: &File, optimize: bool, target: &str) -> i32 {
     let n = BUILD.fetch_add(1, Ordering::SeqCst);
     let ext = if target == "windows" { ".exe" } else { "" };
-    let exe = std::env::temp_dir().join(format!("brasa-run-{}-{}{}", std::process::id(), n, ext));
+    let exe = std::env::temp_dir().join(format!("zila-run-{}-{}{}", std::process::id(), n, ext));
     let _guard = Cleanup(exe.clone());
     let options = CompileOptions { optimize, test_mode: false };
     let path = exe.to_string_lossy().to_string();

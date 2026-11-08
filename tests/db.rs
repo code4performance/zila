@@ -1,9 +1,9 @@
 //! The `db` library (spec `db-library`): parameters, typed rows decoded by comptime reflection,
-//! transactions, errors and URLs, against an in-memory fake driver written in Brasa. The real
+//! transactions, errors and URLs, against an in-memory fake driver written in Zila Lang. The real
 //! drivers (`postgres`, `sqlserver`) have their own sections below and, when the Docker
 //! environment of `tests/docker` is running, tests against real servers.
 
-use brasa::{compile_to_native, parse_source};
+use zila::{compile_to_native, parse_source};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Once;
@@ -13,16 +13,16 @@ static INIT: Once = Once::new();
 
 fn setup() {
     INIT.call_once(|| {
-        let dir = std::env::temp_dir().join(format!("brasa-db-test-cache-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("zila-db-test-cache-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        brasa::comptime::set_cache_dir(&dir);
+        zila::comptime::set_cache_dir(&dir);
     });
 }
 
 fn build(src: &str) -> Result<std::path::PathBuf, String> {
     setup();
     let file = parse_source(src).unwrap_or_else(|d| panic!("parse error: {}", d));
-    let exe = std::env::temp_dir().join(format!("brasa-db-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let exe = std::env::temp_dir().join(format!("zila-db-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     compile_to_native(&file, exe.to_str().unwrap()).map(|_| exe)
 }
 
@@ -423,7 +423,7 @@ fn the_database_examples_build_and_run_against_the_docker_servers_when_they_are_
         let src = std::fs::read_to_string(name).unwrap();
         let exe = build(&src).unwrap_or_else(|e| panic!("{}: {}", name, e));
         // db.br needs both servers, users_crud.br the SQL Server one with the njai database
-        let wanted: &[&str] = if name.ends_with("db.br") { &["BRASA_TEST_POSTGRES", "BRASA_TEST_SQLSERVER_STRICT"] } else { &["BRASA_TEST_SQLSERVER_AI"] };
+        let wanted: &[&str] = if name.ends_with("db.br") { &["ZILA_TEST_POSTGRES", "ZILA_TEST_SQLSERVER_STRICT"] } else { &["ZILA_TEST_SQLSERVER_AI"] };
         if wanted.iter().any(|v| std::env::var(v).map_or(true, |x| x.is_empty())) {
             eprintln!("skipped running {}: set {} (see tests/docker/README.md)", name, wanted.join(" and "));
             let _ = std::fs::remove_file(exe);

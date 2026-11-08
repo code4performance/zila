@@ -1,5 +1,5 @@
 // =====================================================================
-// Brasa standard library: buffers for input and output (`use bufio`)
+// Zila Lang standard library: buffers for input and output (`use bufio`)
 //
 //     use bufio
 //     let b = bufio.input()

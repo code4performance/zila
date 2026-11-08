@@ -1,5 +1,5 @@
 // =====================================================================
-// Brasa standard library: databases (`use db`)
+// Zila Lang standard library: databases (`use db`)
 //
 //     use db
 //     use postgres            // or: use sqlserver

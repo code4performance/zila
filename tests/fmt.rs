@@ -1,8 +1,8 @@
 //! The formatter (`--fmt`, `--fmt-check`) and the block layout the parser records for it.
 
-use brasa::fmt::format_source;
-use brasa::lexer::Tok;
-use brasa::parser::parse_with_layout;
+use zila::fmt::format_source;
+use zila::lexer::Tok;
+use zila::parser::parse_with_layout;
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -262,11 +262,11 @@ fn scrambled_indentation_formats_back_to_the_same_text() {
     for f in repo_files() {
         let src = std::fs::read_to_string(&f).unwrap();
         // asm lines and block forms (raw text) depend on their own indentation
-        if src.contains("asm\n") || src.contains("asm\r\n") || src.contains("/*") || !brasa::comptime::block_names(&src).is_empty() {
+        if src.contains("asm\n") || src.contains("asm\r\n") || src.contains("/*") || !zila::comptime::block_names(&src).is_empty() {
             continue;
         }
         // so do the lines of a `sql` block
-        if brasa::lexer::Lexer::new(&src).tokenize().map_or(false, |t| t.iter().any(|t| matches!(t.tok, brasa::lexer::Tok::Sql { .. }))) {
+        if zila::lexer::Lexer::new(&src).tokenize().map_or(false, |t| t.iter().any(|t| matches!(t.tok, zila::lexer::Tok::Sql { .. }))) {
             continue;
         }
         let formatted = format_source(&src).unwrap();
@@ -276,9 +276,9 @@ fn scrambled_indentation_formats_back_to_the_same_text() {
             .map(|(i, l)| format!("{}{}\n", " ".repeat((i * 5) % 9), l.trim_start()))
             .collect();
         // only files whose text has no line that a changed indentation could alter
-        let toks = |s: &str| brasa::lexer::Lexer::new(s).tokenize().unwrap().into_iter().map(|t| t.tok).collect::<Vec<_>>();
+        let toks = |s: &str| zila::lexer::Lexer::new(s).tokenize().unwrap().into_iter().map(|t| t.tok).collect::<Vec<_>>();
         let (a, b) = (toks(&scrambled), toks(&formatted));
-        assert!(a.len() == b.len() && a.iter().zip(&b).all(|(x, y)| brasa::fmt::tok_eq(x, y)), "scrambling changed the tokens of {}", f);
+        assert!(a.len() == b.len() && a.iter().zip(&b).all(|(x, y)| zila::fmt::tok_eq(x, y)), "scrambling changed the tokens of {}", f);
         assert_eq!(format_source(&scrambled).unwrap().replace("\r\n", "\n"), formatted.replace("\r\n", "\n"), "{}", f);
         tested += 1;
     }
@@ -289,19 +289,19 @@ fn scrambled_indentation_formats_back_to_the_same_text() {
 fn the_repository_is_formatted() {
     let unformatted: Vec<String> =
         repo_files().into_iter().filter(|f| format_source(&std::fs::read_to_string(f).unwrap()).unwrap() != std::fs::read_to_string(f).unwrap()).collect();
-    assert!(unformatted.is_empty(), "not formatted: {:?} (run `brasa-parse --fmt std/*.br examples/*.br os/*.br`)", unformatted);
+    assert!(unformatted.is_empty(), "not formatted: {:?} (run `zila-parse --fmt std/*.br examples/*.br os/*.br`)", unformatted);
 }
 
 // ---- the command line ----
 
 fn temp_file(name: &str, text: &str) -> std::path::PathBuf {
-    let p = std::env::temp_dir().join(format!("brasa-fmt-test-{}-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst), name));
+    let p = std::env::temp_dir().join(format!("zila-fmt-test-{}-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst), name));
     std::fs::write(&p, text).unwrap();
     p
 }
 
 fn run(args: &[&std::path::Path], flag: &str) -> (String, String, i32) {
-    let out = Command::new(env!("CARGO_BIN_EXE_brasa-parse")).arg(flag).args(args).output().unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_zila-parse")).arg(flag).args(args).output().unwrap();
     (String::from_utf8_lossy(&out.stdout).replace('\r', ""), String::from_utf8_lossy(&out.stderr).replace('\r', ""), out.status.code().unwrap())
 }
 
@@ -340,12 +340,12 @@ const BLOCK_PKG: &str = "package fmtblocks_pkg\n#[block]\ncomptime func raw_text
 
 #[test]
 fn block_content_stays_byte_for_byte_and_only_the_name_and_end_are_aligned() {
-    brasa::comptime::register_package("fmtblocks_pkg", BLOCK_PKG);
-    let src = "package t\nuse fmtblocks_pkg\n\nfunc f()\nlet s = raw_text   // note\n   <p>  {not brasa ((  \n\t odd   indentation\n      end\n  print(s)\nend\n";
+    zila::comptime::register_package("fmtblocks_pkg", BLOCK_PKG);
+    let src = "package t\nuse fmtblocks_pkg\n\nfunc f()\nlet s = raw_text   // note\n   <p>  {not zila ((  \n\t odd   indentation\n      end\n  print(s)\nend\n";
     let out = fmt(src);
     assert_eq!(
         out,
-        "package t\nuse fmtblocks_pkg\n\nfunc f()\n    let s = raw_text   // note\n   <p>  {not brasa ((  \n\t odd   indentation\n    end\n    print(s)\nend\n"
+        "package t\nuse fmtblocks_pkg\n\nfunc f()\n    let s = raw_text   // note\n   <p>  {not zila ((  \n\t odd   indentation\n    end\n    print(s)\nend\n"
     );
     // idempotent
     assert_eq!(fmt(&out), out);
@@ -383,7 +383,7 @@ fn a_sql_block_moves_as_a_unit_and_keeps_its_relative_indentation() {
 }
 
 #[test]
-fn text_in_a_sql_block_that_looks_like_brasa_stays_in_the_block() {
+fn text_in_a_sql_block_that_looks_like_zila_stays_in_the_block() {
     let src = "package t\nuse db\nuse postgres\nfunc f() -> db.Sql\n    let q = sql postgres\n        select 1 where end_date is null -- end\n    end\n    return q\nend\n";
     assert_eq!(fmt(src), src);
 }

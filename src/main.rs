@@ -1,16 +1,16 @@
-use brasa::ast::*;
-use brasa::cli::Mode;
-use brasa::lexer::Lexer;
-use brasa::{parse_source, Diag};
+use zila::ast::*;
+use zila::cli::Mode;
+use zila::lexer::Lexer;
+use zila::{parse_source, Diag};
 use std::process::exit;
 
 fn usage() -> ! {
-    eprintln!("usage: brasa-parse <file.br> [-o output.exe] [--build] [--ast | --tokens | --asm | --run]");
-    eprintln!("       brasa-parse --os <boot.br> <kernel.br> -o <disk.img>");
-    eprintln!("       brasa-parse --docs");
-    eprintln!("       brasa-parse --fmt | --fmt-check <file.br>...");
-    eprintln!("       brasa-parse --test <file.br>... [--no-opt]");
-    eprintln!("       brasa-parse <file.br> --target linux -o <program>");
+    eprintln!("usage: zila-parse <file.br> [-o output.exe] [--build] [--ast | --tokens | --asm | --run]");
+    eprintln!("       zila-parse --os <boot.br> <kernel.br> -o <disk.img>");
+    eprintln!("       zila-parse --docs");
+    eprintln!("       zila-parse --fmt | --fmt-check <file.br>...");
+    eprintln!("       zila-parse --test <file.br>... [--no-opt]");
+    eprintln!("       zila-parse <file.br> --target linux -o <program>");
     eprintln!("       packages: --init [name] | --add <git-url>[@version] [--as <name>] | --fetch | --tidy | --update [name] [--offline]");
     eprintln!("       comptime: [--comptime-timeout <seconds>] [--no-comptime-cache] [--comptime-dump]");
     eprintln!("       link: <file.br> --explain-link [-o output]   (bytes of code and data per package)");
@@ -53,7 +53,7 @@ fn summarize(f: &File) -> String {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let opts = match brasa::cli::parse(&args) {
+    let opts = match zila::cli::parse(&args) {
         Ok(o) => o,
         Err(e) => {
             eprintln!("error: {}", e);
@@ -67,24 +67,24 @@ fn main() {
         return;
     }
     if mode == Mode::Lsp {
-        exit(brasa::lsp::run());
+        exit(zila::lsp::run());
     }
     if matches!(mode, Mode::Init | Mode::Add | Mode::Fetch | Mode::Tidy | Mode::Update) {
-        exit(brasa::fetch::run(&opts));
+        exit(zila::fetch::run(&opts));
     }
     if let Some(secs) = opts.comptime_timeout {
-        brasa::comptime::set_timeout_secs(secs);
+        zila::comptime::set_timeout_secs(secs);
     }
     if opts.no_prune {
-        brasa::prune::set_enabled(false);
+        zila::prune::set_enabled(false);
     }
     if opts.no_comptime_cache {
-        brasa::comptime::set_cache_enabled(false);
+        zila::comptime::set_cache_enabled(false);
     }
     if opts.comptime_dump {
-        brasa::comptime::set_dump(true);
+        zila::comptime::set_dump(true);
     }
-    brasa::warn::print_to_stderr(true);
+    zila::warn::print_to_stderr(true);
     let path = opts.path.clone().unwrap_or_else(|| usage());
     if mode == Mode::Fmt || mode == Mode::FmtCheck {
         let mut files = vec![path];
@@ -94,14 +94,14 @@ fn main() {
     if mode == Mode::Test {
         let mut files = vec![path];
         files.extend(opts.extra.iter().cloned());
-        exit(brasa::testrun::run(&files, opts.optimize));
+        exit(zila::testrun::run(&files, opts.optimize));
     }
     if mode == Mode::Os {
         build_os_image(&path, &opts.extra, out_exe);
         return;
     }
     if mode == Mode::Run && opts.target_explicit {
-        match brasa::run::host_target() {
+        match zila::run::host_target() {
             Some(host) if host == opts.target => {}
             Some(host) => {
                 eprintln!("error: --run can only run programs built for this machine ({}); use --build --target {}", host, opts.target);
@@ -120,11 +120,11 @@ fn main() {
             exit(2);
         }
     };
-    if let Err(e) = brasa::package::install_for(std::path::Path::new(&path)) {
+    if let Err(e) = zila::package::install_for(std::path::Path::new(&path)) {
         eprintln!("error: {}", e);
         exit(1);
     }
-    brasa::comptime::register_siblings(std::path::Path::new(&path), &src);
+    zila::comptime::register_siblings(std::path::Path::new(&path), &src);
 
     if mode == Mode::Tokens {
         match Lexer::new(&src).tokenize() {
@@ -144,8 +144,8 @@ fn main() {
     match parse_source(&src) {
         Ok(file) => {
             if opts.explain_link {
-                let target = if opts.target == "linux" { brasa::codegen_x64::Target::Linux } else { brasa::codegen_x64::Target::Windows };
-                match brasa::codegen_x64::link_report(&file, &brasa::codegen_x64::CompileOptions { optimize: opts.optimize, test_mode: false }, target) {
+                let target = if opts.target == "linux" { zila::codegen_x64::Target::Linux } else { zila::codegen_x64::Target::Windows };
+                match zila::codegen_x64::link_report(&file, &zila::codegen_x64::CompileOptions { optimize: opts.optimize, test_mode: false }, target) {
                     Ok(r) => print!("{}", r),
                     Err(e) => {
                         eprintln!("error: {}", e);
@@ -159,8 +159,8 @@ fn main() {
             if mode == Mode::Ast {
                 println!("{:#?}", file);
             } else if mode == Mode::Asm {
-                let target = if opts.target == "linux" { brasa::codegen_x64::Target::Linux } else { brasa::codegen_x64::Target::Windows };
-                match brasa::codegen_x64::generate_asm_for(&file, &brasa::codegen_x64::CompileOptions { optimize: opts.optimize, test_mode: false }, target) {
+                let target = if opts.target == "linux" { zila::codegen_x64::Target::Linux } else { zila::codegen_x64::Target::Windows };
+                match zila::codegen_x64::generate_asm_for(&file, &zila::codegen_x64::CompileOptions { optimize: opts.optimize, test_mode: false }, target) {
                     Ok(asm) => println!("{}", asm),
                     Err(e) => {
                         eprintln!("error: {}", e);
@@ -181,12 +181,12 @@ fn main() {
                     }
                 };
                 let target_exe = out_exe.unwrap_or(default_out);
-                let options = brasa::codegen_x64::CompileOptions { optimize: opts.optimize, test_mode: false };
+                let options = zila::codegen_x64::CompileOptions { optimize: opts.optimize, test_mode: false };
                 println!("Compiling {} to native x86-64 binary: {}...", path, target_exe);
                 let built = if linux {
-                    brasa::codegen_x64::compile_to_linux(&file, &target_exe, &options)
+                    zila::codegen_x64::compile_to_linux(&file, &target_exe, &options)
                 } else {
-                    brasa::codegen_x64::compile_to_native_with(&file, &target_exe, &options)
+                    zila::codegen_x64::compile_to_native_with(&file, &target_exe, &options)
                 };
                 match built {
                     Ok(()) => {
@@ -202,14 +202,14 @@ fn main() {
                     }
                 }
             } else if mode == Mode::Run {
-                let host = match brasa::run::host_target() {
+                let host = match zila::run::host_target() {
                     Some(h) => h,
                     None => {
                         eprintln!("error: --run is not supported on this platform");
                         exit(1);
                     }
                 };
-                exit(brasa::run::run_file(&file, opts.optimize, host));
+                exit(zila::run::run_file(&file, opts.optimize, host));
             } else {
                 println!("OK {}: {}", path, summarize(&file));
             }
@@ -226,7 +226,7 @@ fn build_os_image(boot_path: &str, extra: &[String], out: Option<String>) {
         usage();
     }
     let kernel_path = &extra[0];
-    let load = |p: &str| -> brasa::ast::File {
+    let load = |p: &str| -> zila::ast::File {
         let src = match std::fs::read_to_string(p) {
             Ok(s) => s,
             Err(e) => {
@@ -243,8 +243,8 @@ fn build_os_image(boot_path: &str, extra: &[String], out: Option<String>) {
         }
     };
     let (boot, kernel) = (load(boot_path), load(kernel_path));
-    let out = out.unwrap_or_else(|| "brasa-os.img".to_string());
-    match brasa::codegen_x64::build_os(&boot, &kernel) {
+    let out = out.unwrap_or_else(|| "zila-os.img".to_string());
+    match zila::codegen_x64::build_os(&boot, &kernel) {
         Ok(image) => {
             if let Err(e) = std::fs::write(&out, &image) {
                 eprintln!("cannot write {}: {}", out, e);
@@ -271,9 +271,9 @@ fn run_fmt(files: &[String], check: bool) -> ! {
                 continue;
             }
         };
-        let _ = brasa::package::install_for(std::path::Path::new(path));
-        brasa::comptime::register_siblings(std::path::Path::new(path), &src);
-        match brasa::fmt::format_source(&src) {
+        let _ = zila::package::install_for(std::path::Path::new(path));
+        zila::comptime::register_siblings(std::path::Path::new(path), &src);
+        match zila::fmt::format_source(&src) {
             Err(e) => {
                 eprintln!("{}:{}", path, e);
                 failed = true;
@@ -297,7 +297,7 @@ fn run_fmt(files: &[String], check: bool) -> ! {
 
 /// `--docs`: rewrites the example blocks of the documentation from `examples/`.
 fn sync_docs() {
-    match brasa::docs::sync(std::path::Path::new(".")) {
+    match zila::docs::sync(std::path::Path::new(".")) {
         Ok(report) => {
             for line in &report.changes {
                 println!("{}", line);

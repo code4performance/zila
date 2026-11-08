@@ -46,7 +46,7 @@ fn align_up(n: u64, a: u64) -> u64 {
     (n + a - 1) / a * a
 }
 
-/// The text of an assembler error: at the Brasa line of an inline `asm` block when the failing
+/// The text of an assembler error: at the Zila Lang line of an inline `asm` block when the failing
 /// line belongs to one (the code generator leaves a `; asm file.br:line` marker before each block).
 fn asm_error(asm: &str, e: &str) -> String {
     let Some(rest) = e.strip_prefix("asm line ") else { return e.to_string() };
@@ -87,7 +87,7 @@ pub fn pe_image(asm: &str, imports: &[(String, Vec<String>)], gui: bool) -> Resu
         asm_error(asm, &shifted)
     })?;
     let sym = |n: &str| assembled.symbols.get(n).copied().ok_or_else(|| format!("internal error: no symbol {}", n));
-    let entry = sym("brasa_start")? - PE_BASE;
+    let entry = sym("zila_start")? - PE_BASE;
     let text_len = sym("rt_text_end")? - (PE_BASE + text_va);
     let data_start = (sym("rt_data_start")? - (PE_BASE + text_va)) as usize;
     let data_va = sym("rt_data_start")? - PE_BASE;

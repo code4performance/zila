@@ -2,11 +2,11 @@
 //! example blocks differ from `examples/`, flags or keywords are undocumented (or
 //! documented but gone), or the site's pages and links are inconsistent.
 //!
-//! After changing an example, run `brasa-parse --docs` to refresh the blocks.
+//! After changing an example, run `zila-parse --docs` to refresh the blocks.
 
-use brasa::cli::FLAGS;
-use brasa::docs::{blocks, normalize, plain};
-use brasa::lexer::KEYWORDS;
+use zila::cli::FLAGS;
+use zila::docs::{blocks, normalize, plain};
+use zila::lexer::KEYWORDS;
 use std::fs;
 use std::path::Path;
 
@@ -92,7 +92,7 @@ fn embedded_examples_match_the_example_files() {
                 }
             } else if shown != source {
                 let line = shown.lines().zip(source.lines()).position(|(a, b)| a != b).map_or(shown.lines().count().min(source.lines().count()) + 1, |i| i + 1);
-                problems.push(format!("docs/{}: the block for {} differs from the file (first difference at line {}); run `brasa-parse --docs`", p.name, example, line));
+                problems.push(format!("docs/{}: the block for {} differs from the file (first difference at line {}); run `zila-parse --docs`", p.name, example, line));
             }
         }
     }
@@ -228,7 +228,7 @@ fn the_database_libraries_are_documented() {
         assert!(stdlib.contains(needed), "docs/stdlib.html does not mention `{}`", needed);
     }
     let databases = page("databases.html").html;
-    for needed in ["db.query", "postgres.open", "sqlserver.open", "encrypt=on", "tests/docker", "BRASA_TEST_POSTGRES", "examples/users_crud.br", "examples/db.br", "#[db("] {
+    for needed in ["db.query", "postgres.open", "sqlserver.open", "encrypt=on", "tests/docker", "ZILA_TEST_POSTGRES", "examples/users_crud.br", "examples/db.br", "#[db("] {
         assert!(databases.contains(needed), "docs/databases.html does not mention `{}`", needed);
     }
     let native = page("native.html").html;

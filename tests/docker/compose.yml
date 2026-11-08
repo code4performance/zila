@@ -1,7 +1,7 @@
-# Local test databases for the Brasa drivers. Development only; nothing here is used by cargo.
+# Local test databases for the Zila Lang drivers. Development only; nothing here is used by cargo.
 #   docker compose -f tests/docker/compose.yml up -d --wait
 #   docker compose -f tests/docker/compose.yml down -v
-name: brasa-test-db
+name: zila-test-db
 
 services:
   certs:
@@ -14,7 +14,7 @@ services:
 
   postgres:
     build: ./postgres
-    image: brasa-postgres19:dev
+    image: zila-postgres19:dev
     depends_on:
       certs: { condition: service_completed_successfully }
     environment:

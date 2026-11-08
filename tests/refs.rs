@@ -1,7 +1,7 @@
 //! The `ref` escape rule (spec `ref-parameters`): compile-error style, no linker needed.
 
-use brasa::codegen_x64::generate_asm;
-use brasa::parse_source;
+use zila::codegen_x64::generate_asm;
+use zila::parse_source;
 
 fn asm(src: &str) -> Result<String, String> {
     let f = parse_source(src).map_err(|d| d.msg)?;

@@ -1,15 +1,15 @@
 [package]
-name = "brasa"
+name = "zila"
 version = "0.1.0"
 edition = "2021"
-description = "Lexer and parser for the Brasa programming language"
+description = "Lexer and parser for the Zila Lang programming language"
 
 [lib]
-name = "brasa"
+name = "zila"
 path = "src/lib.rs"
 
 [[bin]]
-name = "brasa-parse"
+name = "zila-parse"
 path = "src/main.rs"
 
 [dependencies]

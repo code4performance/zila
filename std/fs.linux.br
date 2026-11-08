@@ -1,5 +1,5 @@
 // =====================================================================
-// Brasa standard library: files (`use fs`) (Linux layer)
+// Zila Lang standard library: files (`use fs`) (Linux layer)
 //
 // The Linux counterpart of std/fs.br, with the same functions and behavior. Regular files cannot
 // be waited for with `epoll` and their reads do not return "try again", so each piece of at most

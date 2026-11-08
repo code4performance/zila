@@ -1,6 +1,6 @@
 ## Purpose
 
-Lets libraries extend the language without compiler changes: a compile-time function receives a description of a type and generates source code for it, and a library can define its own block syntax. Comptime code is a small, checked, deterministic subset of Brasa, compiled and run on the host at build time.
+Lets libraries extend the language without compiler changes: a compile-time function receives a description of a type and generates source code for it, and a library can define its own block syntax. Comptime code is a small, checked, deterministic subset of Zila Lang, compiled and run on the host at build time.
 
 ## Requirements
 
@@ -24,7 +24,7 @@ The built-in type `Type` SHALL exist only at compile time. A `Type` value SHALL 
 - **THEN** compilation fails with an error that `Type` exists only at compile time
 
 ### Requirement: Comptime functions generate source text
-A function declared `comptime func` SHALL take `Type` and text parameters and return `text` containing Brasa source. It SHALL NOT be callable from runtime code. The compiler SHALL compile it for the host, run it at build time and parse the returned text; a parse or check error in the text SHALL be reported as described under diagnostics.
+A function declared `comptime func` SHALL take `Type` and text parameters and return `text` containing Zila Lang source. It SHALL NOT be callable from runtime code. The compiler SHALL compile it for the host, run it at build time and parse the returned text; a parse or check error in the text SHALL be reported as described under diagnostics.
 
 #### Scenario: A derive generates a method
 - **WHEN** `#[derive(describe)] type Point = record x: int, y: int end` is built, and `describe` is a `#[derive] comptime func` returning the source of `func (p: Point) describe() -> text`
@@ -91,7 +91,7 @@ A line that consists of one identifier naming a `#[block] comptime func` of an i
 - **THEN** it is parsed as an ordinary expression, giving the usual error if it is undefined
 
 #### Scenario: Opaque to tools
-- **WHEN** the formatter or the language server reads a file containing a block whose content is not valid Brasa
+- **WHEN** the formatter or the language server reads a file containing a block whose content is not valid Zila Lang
 - **THEN** the formatter leaves the content line for line as it was (re-indenting only the opening name and `end`) and the server reports no diagnostics for those lines
 
 ### Requirement: Hygiene

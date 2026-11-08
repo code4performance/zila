@@ -2,7 +2,7 @@
 //! compiled to native executables and run (skipped when the Visual Studio build tools are
 //! missing). Every test binds port 0, so tests cannot collide.
 
-use brasa::{compile_to_native, parse_source};
+use zila::{compile_to_native, parse_source};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -11,7 +11,7 @@ static N: AtomicUsize = AtomicUsize::new(0);
 /// Runs a program and returns its output; `None` when there is no native toolchain.
 fn run(src: &str) -> Option<String> {
     let file = parse_source(src).unwrap_or_else(|d| panic!("parse error: {}", d));
-    let exe = std::env::temp_dir().join(format!("brasa-udp-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let exe = std::env::temp_dir().join(format!("zila-udp-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     match compile_to_native(&file, exe.to_str().unwrap()) {
         Ok(()) => {}
         Err(e) if e.contains("could not find Visual Studio") || e.contains("vcvars64") => {

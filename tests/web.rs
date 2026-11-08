@@ -3,11 +3,11 @@
 //! 127.0.0.1 (port 0: a free one); nothing reaches the network. Programs are built to native
 //! executables and run with a time limit; the Linux half runs through WSL and is skipped without it.
 //!
-//! Brasa text literals treat `{` as an interpolation: JSON inside the programs is written between
+//! Zila Lang text literals treat `{` as an interpolation: JSON inside the programs is written between
 //! `‹` and `›` (see `prep`).
 
-use brasa::codegen_x64::{build_os, compile_to_linux, CompileOptions};
-use brasa::{compile_to_native, parse_source};
+use zila::codegen_x64::{build_os, compile_to_linux, CompileOptions};
+use zila::{compile_to_native, parse_source};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Once;
@@ -18,13 +18,13 @@ static INIT: Once = Once::new();
 
 fn setup() {
     INIT.call_once(|| {
-        let dir = std::env::temp_dir().join(format!("brasa-web-test-cache-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("zila-web-test-cache-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        brasa::comptime::set_cache_dir(&dir);
+        zila::comptime::set_cache_dir(&dir);
     });
 }
 
-/// Replaces each `‹...›` with the Brasa text literal that holds the characters in between.
+/// Replaces each `‹...›` with the Zila Lang text literal that holds the characters in between.
 fn prep(src: &str) -> String {
     let mut out = String::new();
     let mut rest = src;
@@ -122,12 +122,12 @@ fn program(globals: &str, body: &str) -> String {
 }
 
 fn exe_path(tag: &str, ext: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!("brasa-web-test-{}-{}-{}{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst), tag, ext))
+    std::env::temp_dir().join(format!("zila-web-test-{}-{}-{}{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst), tag, ext))
 }
 
 fn build(src: &str) -> Result<std::path::PathBuf, String> {
     setup();
-    if let Ok(dir) = std::env::var("BRASA_WEB_DUMP") {
+    if let Ok(dir) = std::env::var("ZILA_WEB_DUMP") {
         let _ = std::fs::write(std::path::Path::new(&dir).join(format!("web-test-{}.br", N.load(Ordering::SeqCst))), src);
     }
     let file = parse_source(src).unwrap_or_else(|d| panic!("parse error: {}", d));
@@ -218,7 +218,7 @@ fn web_compiles_for_both_targets() {
     setup();
     let src = program("", "print(\"hi\")");
     let file = parse_source(&src).unwrap();
-    let out = std::env::temp_dir().join(format!("brasa-web-elf-{}", std::process::id()));
+    let out = std::env::temp_dir().join(format!("zila-web-elf-{}", std::process::id()));
     compile_to_linux(&file, out.to_str().unwrap(), &CompileOptions::default()).unwrap_or_else(|e| panic!("{}", e));
     let _ = std::fs::remove_file(&out);
     if let Ok(exe) = build(&src) {
@@ -1077,9 +1077,9 @@ print(web.redirect_allowed("http://a/", "ftp://b/"))
 
 #[test]
 fn an_https_request_works_when_online_tests_are_enabled() {
-    // Reaches a public host: run only with BRASA_ONLINE_TESTS=1.
-    if std::env::var("BRASA_ONLINE_TESTS").ok().as_deref() != Some("1") {
-        eprintln!("BRASA_ONLINE_TESTS is not set: skipping the real HTTPS request");
+    // Reaches a public host: run only with ZILA_ONLINE_TESTS=1.
+    if std::env::var("ZILA_ONLINE_TESTS").ok().as_deref() != Some("1") {
+        eprintln!("ZILA_ONLINE_TESTS is not set: skipping the real HTTPS request");
         return;
     }
     let out = run(&program(

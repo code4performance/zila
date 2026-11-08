@@ -1,4 +1,4 @@
-//! `brasa-parse --test`, `#[test]`, `assert` and `assert_eq`. The runner builds native
+//! `zila-parse --test`, `#[test]`, `assert` and `assert_eq`. The runner builds native
 //! executables (a toolchain-less machine is detected by the exit status 2 and the tests skip).
 
 use std::path::PathBuf;
@@ -8,14 +8,14 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 static N: AtomicUsize = AtomicUsize::new(0);
 
 fn temp_file(text: &str) -> PathBuf {
-    let p = std::env::temp_dir().join(format!("brasa-testrun-{}-{}.br", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let p = std::env::temp_dir().join(format!("zila-testrun-{}-{}.br", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     std::fs::write(&p, text).unwrap();
     p
 }
 
 /// Runs `--test` on the files; `None` when there is no native toolchain.
 fn run_tests(files: &[&PathBuf], extra: &[&str]) -> Option<(String, String, i32)> {
-    let out = Command::new(env!("CARGO_BIN_EXE_brasa-parse")).arg("--test").args(files).args(extra).output().unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_zila-parse")).arg("--test").args(files).args(extra).output().unwrap();
     let (stdout, stderr) = (String::from_utf8_lossy(&out.stdout).replace('\r', ""), String::from_utf8_lossy(&out.stderr).replace('\r', ""));
     let code = out.status.code().unwrap();
     if code == 2 && stderr.contains("could not find Visual Studio") {
@@ -141,7 +141,7 @@ func main()
     f()
 end
 ";
-    assert!(brasa::codegen_x64::generate_asm(&brasa::parse_source(src).unwrap()).is_ok());
+    assert!(zila::codegen_x64::generate_asm(&zila::parse_source(src).unwrap()).is_ok());
     let src = "package main
 
 func g() -> int
@@ -153,19 +153,19 @@ func main()
     print(g())
 end
 ";
-    assert!(brasa::codegen_x64::generate_asm(&brasa::parse_source(src).unwrap()).is_ok());
+    assert!(zila::codegen_x64::generate_asm(&zila::parse_source(src).unwrap()).is_ok());
 }
 
 #[test]
 fn assert_in_a_function_that_returns_a_value_or_an_error_works() {
     let src = "package main\n\nfunc g(n: int) -> int or error\n    assert(n > 0)\n    return n\nend\n\nfunc main()\n    print(g(1) ?? 0)\nend\n";
-    assert!(brasa::codegen_x64::generate_asm(&brasa::parse_source(src).unwrap()).is_ok());
+    assert!(zila::codegen_x64::generate_asm(&zila::parse_source(src).unwrap()).is_ok());
 }
 
 #[test]
 fn a_function_named_assert_takes_precedence() {
     let src = "package main\n\nfunc assert(c: bool)\n    print(c)\nend\n\nfunc f()\n    assert(true)\nend\n\nfunc main()\n    f()\nend\n";
-    assert!(brasa::codegen_x64::generate_asm(&brasa::parse_source(src).unwrap()).is_ok());
+    assert!(zila::codegen_x64::generate_asm(&zila::parse_source(src).unwrap()).is_ok());
 }
 
 #[test]

@@ -1,6 +1,6 @@
 // Threads: a counter shared by eight threads, once with a Mutex and once with an Atomic.
 //
-//   brasa-parse examples/threads_mutex.br -o threads_mutex.exe
+//   zila-parse examples/threads_mutex.br -o threads_mutex.exe
 
 package main
 

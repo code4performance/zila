@@ -1,6 +1,6 @@
-// Tests written in Brasa.
+// Tests written in Zila Lang.
 //
-//   brasa-parse --test examples/testing.br
+//   zila-parse --test examples/testing.br
 //
 // A test is a function marked #[test] that takes nothing and returns `error`. `assert` and
 // `assert_eq` end the test with an error that names the line when a check fails, the same way

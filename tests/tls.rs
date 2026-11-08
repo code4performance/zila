@@ -1,7 +1,7 @@
 //! TLS client (`use tls`). A real HTTPS request is made to a public host; the test is skipped when
 //! there is no network or no native toolchain. Bad certificates are checked against badssl.com.
 
-use brasa::{compile_to_native, parse_source};
+use zila::{compile_to_native, parse_source};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -9,7 +9,7 @@ static N: AtomicUsize = AtomicUsize::new(0);
 
 fn run(src: &str) -> Option<String> {
     let file = parse_source(src).unwrap_or_else(|d| panic!("parse error: {}", d));
-    let exe = std::env::temp_dir().join(format!("brasa-tls-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let exe = std::env::temp_dir().join(format!("zila-tls-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     match compile_to_native(&file, exe.to_str().unwrap()) {
         Ok(()) => {}
         Err(e) if e.contains("could not find Visual Studio") || e.contains("vcvars64") => {
@@ -83,14 +83,14 @@ end
 // ---------------------------------------------------------------------------
 // Upgrading an open connection, ALPN and a private CA. They need the TLS servers of
 // `tests/docker` (`docker compose -f tests/docker/compose.yml up -d --wait`, then source
-// `tests/docker/env.ps1`); without `BRASA_TEST_CA` they print a skip line.
+// `tests/docker/env.ps1`); without `ZILA_TEST_CA` they print a skip line.
 // ---------------------------------------------------------------------------
 
 fn ca_path() -> Option<String> {
-    match std::env::var("BRASA_TEST_CA") {
+    match std::env::var("ZILA_TEST_CA") {
         Ok(p) if !p.is_empty() => Some(p.replace('\\', "/")),
         _ => {
-            eprintln!("skipped: set BRASA_TEST_CA (see tests/docker/README.md) to run this test");
+            eprintln!("skipped: set ZILA_TEST_CA (see tests/docker/README.md) to run this test");
             None
         }
     }

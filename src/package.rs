@@ -1,5 +1,5 @@
-//! The package manager (spec `package-manager`): the manifest `brasa.toml`, the lock file
-//! `brasa.lock`, semantic versions with minimal version selection, the tree hash, the cache, and
+//! The package manager (spec `package-manager`): the manifest `zila.toml`, the lock file
+//! `zila.lock`, semantic versions with minimal version selection, the tree hash, the cache, and
 //! the resolver that tells the compiler where the packages named by `use` are.
 //!
 //! Nothing in this file runs a program or touches the network. Fetching (the one place that runs
@@ -10,8 +10,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-pub const MANIFEST: &str = "brasa.toml";
-pub const LOCK: &str = "brasa.lock";
+pub const MANIFEST: &str = "zila.toml";
+pub const LOCK: &str = "zila.lock";
 
 // ---------------------------------------------------------------------------
 // The TOML subset
@@ -446,7 +446,7 @@ impl Lock {
     pub fn write(&self) -> String {
         let mut entries = self.entries.clone();
         entries.sort_by(|a, b| (a.module.as_str(), a.version).cmp(&(b.module.as_str(), b.version)));
-        let mut s = String::from("# brasa.lock: written by brasa-parse; commit it, do not edit it\n");
+        let mut s = String::from("# zila.lock: written by zila-parse; commit it, do not edit it\n");
         for e in &entries {
             let mut needs = e.needs.clone();
             needs.sort();
@@ -640,17 +640,17 @@ pub fn tree_hash(dir: &Path) -> Result<String, String> {
 // The cache
 // ---------------------------------------------------------------------------
 
-/// `$BRASA_HOME`, else `%USERPROFILE%\.brasa` on Windows and `$HOME/.brasa` elsewhere.
+/// `$ZILA_HOME`, else `%USERPROFILE%\.zila` on Windows and `$HOME/.zila` elsewhere.
 pub fn cache_root() -> PathBuf {
-    if let Some(h) = std::env::var_os("BRASA_HOME") {
+    if let Some(h) = std::env::var_os("ZILA_HOME") {
         if !h.is_empty() {
             return PathBuf::from(h);
         }
     }
     let var = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
     match std::env::var_os(var) {
-        Some(h) => PathBuf::from(h).join(".brasa"),
-        None => PathBuf::from(".brasa"),
+        Some(h) => PathBuf::from(h).join(".zila"),
+        None => PathBuf::from(".zila"),
     }
 }
 
@@ -710,7 +710,7 @@ fn clean_path(p: PathBuf) -> PathBuf {
     }
 }
 
-/// The directory that holds `brasa.toml`, searching upward from `start`.
+/// The directory that holds `zila.toml`, searching upward from `start`.
 pub fn find_manifest_dir(start: &Path) -> Option<PathBuf> {
     let abs = if start.is_absolute() { start.to_path_buf() } else { std::env::current_dir().ok()?.join(start) };
     let mut dir = clean_path(abs.canonicalize().unwrap_or(abs));
@@ -749,7 +749,7 @@ pub struct Project {
     pub packages: BTreeMap<String, (PathBuf, Manifest)>,
 }
 
-const OUT_OF_DATE: &str = "brasa.lock is out of date; run brasa-parse --fetch";
+const OUT_OF_DATE: &str = "zila.lock is out of date; run zila-parse --fetch";
 
 fn covers(lock: &Lock, dep_module: &str, min: &Version) -> bool {
     lock.for_module(dep_module).map_or(false, |e| e.version >= *min)
@@ -783,14 +783,14 @@ pub fn load_project(root: &Path, home: &Path) -> Result<Project, String> {
     let mut packages = BTreeMap::new();
     for e in &lock.entries {
         let id = e.id();
-        let dir = cache_lookup(home, &e.module, &e.version, &e.commit).ok_or_else(|| format!("package '{}' is not in the cache; run brasa-parse --fetch", id))?;
+        let dir = cache_lookup(home, &e.module, &e.version, &e.commit).ok_or_else(|| format!("package '{}' is not in the cache; run zila-parse --fetch", id))?;
         let found = tree_hash(&dir)?;
         if found != e.hash {
-            return Err(format!("package '{}' in the cache does not match brasa.lock (expected {}, found {}); run brasa-parse --fetch to restore it", id, e.hash, found));
+            return Err(format!("package '{}' in the cache does not match zila.lock (expected {}, found {}); run zila-parse --fetch to restore it", id, e.hash, found));
         }
         if let Some(kind) = &manifest.forbid {
             if let Some(file) = crate::effects::first_with(&dir, kind) {
-                return Err(format!("package '{}' uses `{}` (in {}), which brasa.toml forbids with [policy] forbid = \"{}\"", id, kind, file, kind));
+                return Err(format!("package '{}' uses `{}` (in {}), which zila.toml forbids with [policy] forbid = \"{}\"", id, kind, file, kind));
             }
         }
         let m = if dir.join(MANIFEST).is_file() { read_manifest(&dir)? } else { Manifest::default() };
@@ -1036,7 +1036,7 @@ pub struct Resolved {
 }
 
 fn unknown(name: &str) -> String {
-    format!("unknown package '{}' (not in the standard library, {} or the project directory); to add one: brasa-parse --add <git-url>", name, MANIFEST)
+    format!("unknown package '{}' (not in the standard library, {} or the project directory); to add one: zila-parse --add <git-url>", name, MANIFEST)
 }
 
 impl Registry {
@@ -1047,7 +1047,7 @@ impl Registry {
             None => match self.project.manifest.deps.iter().find(|d| d.name == *first) {
                 Some(d) => {
                     let m = d.module();
-                    let (dir, _) = self.project.packages.get(&m).ok_or_else(|| format!("package '{}' is not in the cache; run brasa-parse --fetch", m))?;
+                    let (dir, _) = self.project.packages.get(&m).ok_or_else(|| format!("package '{}' is not in the cache; run zila-parse --fetch", m))?;
                     (dir.clone(), Some(m), true)
                 }
                 None => {
@@ -1066,7 +1066,7 @@ impl Registry {
                         let m2 = d.module();
                         let lock_ver = self.project.lock.for_module(&m2).ok_or_else(|| OUT_OF_DATE.to_string())?;
                         let _ = lock_ver;
-                        let (dir, _) = self.project.packages.get(&m2).ok_or_else(|| format!("package '{}' is not in the cache; run brasa-parse --fetch", m2))?;
+                        let (dir, _) = self.project.packages.get(&m2).ok_or_else(|| format!("package '{}' is not in the cache; run zila-parse --fetch", m2))?;
                         (dir.clone(), Some(m2), true)
                     }
                     None => {
@@ -1359,7 +1359,7 @@ mod tests {
     fn scratch(name: &str) -> PathBuf {
         use std::sync::atomic::{AtomicUsize, Ordering};
         static N: AtomicUsize = AtomicUsize::new(0);
-        let d = std::env::temp_dir().join(format!("brasa_pkg_unit_{}_{}_{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst), name));
+        let d = std::env::temp_dir().join(format!("zila_pkg_unit_{}_{}_{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst), name));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d

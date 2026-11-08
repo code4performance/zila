@@ -1,6 +1,6 @@
 // UDP: an echo server and a client in one program.
 //
-//   brasa-parse examples/udp.br -o udp.exe
+//   zila-parse examples/udp.br -o udp.exe
 //
 // `net.udp(0)` binds a socket on a free port. `send_to` sends one datagram, `recv` waits for the
 // next one and says who sent it, so a server can answer whoever asked. Each datagram stands

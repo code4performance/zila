@@ -1,5 +1,5 @@
 //! The VS Code extension (`editors/vscode`): its Node tests run against the freshly built
-//! `brasa-parse --lsp`. Skipped when `node` is not installed.
+//! `zila-parse --lsp`. Skipped when `node` is not installed.
 
 use std::process::Command;
 
@@ -15,7 +15,7 @@ fn the_extension_client_and_layer_pass_their_tests_against_the_real_server() {
     }
     let out = Command::new("node")
         .args(["--test", "editors/vscode/test/client.test.js", "editors/vscode/test/extension.test.js"])
-        .env("BRASA_PARSE", env!("CARGO_BIN_EXE_brasa-parse"))
+        .env("ZILA_PARSE", env!("CARGO_BIN_EXE_zila-parse"))
         .output()
         .unwrap();
     let text = String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);
@@ -26,7 +26,7 @@ fn the_extension_client_and_layer_pass_their_tests_against_the_real_server() {
 #[test]
 fn the_package_manifest_declares_the_settings_command_and_entry_point() {
     let text = std::fs::read_to_string("editors/vscode/package.json").unwrap();
-    for needle in ["\"main\": \"./extension.js\"", "brasa.server.path", "brasa.server.enabled", "brasa.trace", "brasa.restartServer", "restrictedConfigurations"] {
+    for needle in ["\"main\": \"./extension.js\"", "zila.server.path", "zila.server.enabled", "zila.trace", "zila.restartServer", "restrictedConfigurations"] {
         assert!(text.contains(needle), "package.json lacks {}", needle);
     }
     for file in ["editors/vscode/extension.js", "editors/vscode/client.js", "editors/vscode/.vscodeignore", "editors/vscode/README.md"] {
@@ -38,24 +38,24 @@ fn the_package_manifest_declares_the_settings_command_and_entry_point() {
 
 #[test]
 fn the_grammar_highlights_every_lexer_keyword_including_pub() {
-    let g = std::fs::read_to_string("editors/vscode/syntaxes/brasa.tmLanguage.json").unwrap();
+    let g = std::fs::read_to_string("editors/vscode/syntaxes/zila.tmLanguage.json").unwrap();
     assert!(g.contains("let|var|embed|extern|pub"), "pub is not a declaration keyword in the grammar");
-    for kw in brasa::lexer::KEYWORDS {
+    for kw in zila::lexer::KEYWORDS {
         assert!(g.split(|c: char| !c.is_alphanumeric() && c != '_').any(|w| w == *kw), "the grammar does not mention the keyword {}", kw);
     }
 }
 
 #[test]
 fn the_grammar_opens_a_sql_region_only_for_a_sql_block() {
-    let g = std::fs::read_to_string("editors/vscode/syntaxes/brasa.tmLanguage.json").unwrap();
-    assert!(g.contains("\"sql-blocks\"") && g.contains("\"include\": \"source.sql\"") && g.contains("\"include\": \"source.brasa\""), "the SQL region and its embedded languages are missing");
+    let g = std::fs::read_to_string("editors/vscode/syntaxes/zila.tmLanguage.json").unwrap();
+    assert!(g.contains("\"sql-blocks\"") && g.contains("\"include\": \"source.sql\"") && g.contains("\"include\": \"source.zila\""), "the SQL region and its embedded languages are missing");
     if !node_available() {
         eprintln!("node is not installed: skipping the pattern check");
         return;
     }
     // the begin and end patterns are plain regular expressions: try them on lines
     let script = r#"
-const g = JSON.parse(require('fs').readFileSync('editors/vscode/syntaxes/brasa.tmLanguage.json', 'utf8'));
+const g = JSON.parse(require('fs').readFileSync('editors/vscode/syntaxes/zila.tmLanguage.json', 'utf8'));
 const r = g.repository['sql-blocks'].patterns[0];
 const begin = new RegExp(r.begin), end = new RegExp(r.end);
 const check = (ok, what) => { if (!ok) { console.error('FAIL ' + what); process.exit(1); } };

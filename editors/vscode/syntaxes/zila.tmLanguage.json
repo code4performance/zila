@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
-  "name": "Brasa",
-  "scopeName": "source.brasa",
+  "name": "Zila Lang",
+  "scopeName": "source.zila",
   "patterns": [
     { "include": "#comments" },
     { "include": "#attributes" },
@@ -21,11 +21,11 @@
     "comments": {
       "patterns": [
         {
-          "name": "comment.line.double-slash.brasa",
+          "name": "comment.line.double-slash.zila",
           "match": "//.*$"
         },
         {
-          "name": "comment.block.brasa",
+          "name": "comment.block.zila",
           "begin": "/\\*",
           "end": "\\*/"
         }
@@ -34,39 +34,39 @@
     "attributes": {
       "patterns": [
         {
-          "name": "meta.attribute.allocation.brasa",
+          "name": "meta.attribute.allocation.zila",
           "begin": "(#\\[)\\s*(no_alloc|allocates|allocator)\\b",
           "beginCaptures": {
-            "1": { "name": "punctuation.definition.attribute.brasa" },
-            "2": { "name": "entity.name.tag.attribute.allocation.brasa" }
+            "1": { "name": "punctuation.definition.attribute.zila" },
+            "2": { "name": "entity.name.tag.attribute.allocation.zila" }
           },
           "end": "\\]",
           "endCaptures": {
-            "0": { "name": "punctuation.definition.attribute.brasa" }
+            "0": { "name": "punctuation.definition.attribute.zila" }
           },
           "patterns": [
             {
-              "name": "constant.language.allocator-role.brasa",
+              "name": "constant.language.allocator-role.zila",
               "match": "\\b(alloc|free|realloc)\\b"
             }
           ]
         },
         {
-          "name": "meta.attribute.brasa",
+          "name": "meta.attribute.zila",
           "begin": "(#\\[)\\s*([a-zA-Z_][a-zA-Z0-9_]*)",
           "beginCaptures": {
-            "1": { "name": "punctuation.definition.attribute.brasa" },
-            "2": { "name": "entity.name.tag.attribute.brasa" }
+            "1": { "name": "punctuation.definition.attribute.zila" },
+            "2": { "name": "entity.name.tag.attribute.zila" }
           },
           "end": "\\]",
           "endCaptures": {
-            "0": { "name": "punctuation.definition.attribute.brasa" }
+            "0": { "name": "punctuation.definition.attribute.zila" }
           },
           "patterns": [
             { "include": "#strings" },
             { "include": "#numbers" },
             {
-              "name": "variable.parameter.attribute.brasa",
+              "name": "variable.parameter.attribute.zila",
               "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\b"
             }
           ]
@@ -76,29 +76,29 @@
     "strings": {
       "patterns": [
         {
-          "name": "string.quoted.double.brasa",
+          "name": "string.quoted.double.zila",
           "begin": "\"",
           "beginCaptures": {
-            "0": { "name": "punctuation.definition.string.begin.brasa" }
+            "0": { "name": "punctuation.definition.string.begin.zila" }
           },
           "end": "\"",
           "endCaptures": {
-            "0": { "name": "punctuation.definition.string.end.brasa" }
+            "0": { "name": "punctuation.definition.string.end.zila" }
           },
           "patterns": [
             {
-              "name": "constant.character.escape.brasa",
+              "name": "constant.character.escape.zila",
               "match": "\\\\[nrt\\\\\"0{]"
             },
             {
-              "name": "meta.interpolation.brasa",
+              "name": "meta.interpolation.zila",
               "begin": "(?<!\\\\)\\{",
               "beginCaptures": {
-                "0": { "name": "punctuation.definition.template-expression.begin.brasa" }
+                "0": { "name": "punctuation.definition.template-expression.begin.zila" }
               },
               "end": "\\}",
               "endCaptures": {
-                "0": { "name": "punctuation.definition.template-expression.end.brasa" }
+                "0": { "name": "punctuation.definition.template-expression.end.zila" }
               },
               "patterns": [
                 { "include": "$self" }
@@ -107,7 +107,7 @@
           ]
         },
         {
-          "name": "string.quoted.single.brasa",
+          "name": "string.quoted.single.zila",
           "match": "'(\\\\.|[^'\\\\])'"
         }
       ]
@@ -115,25 +115,25 @@
     "sql-blocks": {
       "patterns": [
         {
-          "name": "meta.embedded.block.sql.brasa",
+          "name": "meta.embedded.block.sql.zila",
           "begin": "\\b(sql)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(?=$|//)",
           "beginCaptures": {
-            "1": { "name": "keyword.control.sql.brasa" },
-            "2": { "name": "entity.name.type.dialect.brasa" }
+            "1": { "name": "keyword.control.sql.zila" },
+            "2": { "name": "entity.name.type.dialect.zila" }
           },
           "end": "^\\s*(end)\\s*(?=$|//)",
           "endCaptures": {
-            "1": { "name": "keyword.control.end.brasa" }
+            "1": { "name": "keyword.control.end.zila" }
           },
           "patterns": [
-            { "match": "\\{\\{|\\}\\}", "name": "constant.character.escape.brace.brasa" },
+            { "match": "\\{\\{|\\}\\}", "name": "constant.character.escape.brace.zila" },
             {
-              "name": "meta.embedded.expression.brasa",
+              "name": "meta.embedded.expression.zila",
               "begin": "\\{",
-              "beginCaptures": { "0": { "name": "punctuation.section.embedded.begin.brasa" } },
+              "beginCaptures": { "0": { "name": "punctuation.section.embedded.begin.zila" } },
               "end": "\\}",
-              "endCaptures": { "0": { "name": "punctuation.section.embedded.end.brasa" } },
-              "patterns": [{ "include": "source.brasa" }]
+              "endCaptures": { "0": { "name": "punctuation.section.embedded.end.zila" } },
+              "patterns": [{ "include": "source.zila" }]
             },
             { "include": "source.sql" }
           ]
@@ -143,60 +143,60 @@
     "asm-blocks": {
       "patterns": [
         {
-          "name": "meta.asm.brasa",
+          "name": "meta.asm.zila",
           "begin": "\\b(asm)\\b",
           "beginCaptures": {
-            "1": { "name": "keyword.control.asm.brasa" }
+            "1": { "name": "keyword.control.asm.zila" }
           },
           "end": "^\\s*(end)\\b(?!:)",
           "endCaptures": {
-            "1": { "name": "keyword.control.end.brasa" }
+            "1": { "name": "keyword.control.end.zila" }
           },
           "patterns": [
             { "include": "#comments" },
             {
-              "name": "comment.line.semicolon.asm.brasa",
+              "name": "comment.line.semicolon.asm.zila",
               "match": ";.*$"
             },
             {
               "match": "^\\s*([A-Za-z_.][A-Za-z0-9_.]*):",
-              "captures": { "1": { "name": "entity.name.label.asm.brasa" } }
+              "captures": { "1": { "name": "entity.name.label.asm.zila" } }
             },
             {
-              "name": "variable.parameter.asm.brasa",
+              "name": "variable.parameter.asm.zila",
               "match": "@[a-zA-Z_][a-zA-Z0-9_]*"
             },
             {
               "match": "^\\s*(?!(?:inout|in|out|clobber)\\s+\\w+\\s*=)([a-z][a-z0-9]*)\\b",
-              "captures": { "1": { "name": "support.function.mnemonic.asm.brasa" } }
+              "captures": { "1": { "name": "support.function.mnemonic.asm.zila" } }
             },
             {
-              "name": "string.quoted.double.asm.brasa",
+              "name": "string.quoted.double.asm.zila",
               "begin": "\"",
               "beginCaptures": {
-                "0": { "name": "punctuation.definition.string.begin.brasa" }
+                "0": { "name": "punctuation.definition.string.begin.zila" }
               },
               "end": "\"",
               "endCaptures": {
-                "0": { "name": "punctuation.definition.string.end.brasa" }
+                "0": { "name": "punctuation.definition.string.end.zila" }
               },
               "patterns": [
                 {
-                  "name": "variable.parameter.asm.brasa",
+                  "name": "variable.parameter.asm.zila",
                   "match": "@[a-zA-Z_][a-zA-Z0-9_]*"
                 },
                 {
-                  "name": "constant.character.escape.brasa",
+                  "name": "constant.character.escape.zila",
                   "match": "\\\\[nrt\\\\\"0]"
                 }
               ]
             },
             {
-              "name": "keyword.other.asm.brasa",
+              "name": "keyword.other.asm.zila",
               "match": "\\b(inout|in|out|clobber)\\b"
             },
             {
-              "name": "variable.language.register.brasa",
+              "name": "variable.language.register.zila",
               "match": "\\b(rax|rbx|rcx|rdx|rsi|rdi|rbp|rsp|r8|r9|r10|r11|r12|r13|r14|r15|eax|ebx|ecx|edx|esi|edi|ebp|esp|ax|bx|cx|dx|al|bl|cl|dl|ah|bh|ch|dh|cc|memory)\\b"
             },
             { "include": "#strings" },
@@ -213,34 +213,34 @@
         {
           "match": "\\b(func)\\s*(\\()\\s*(ref\\s+)?([a-zA-Z_][a-zA-Z0-9_]*)\\s*:\\s*([a-zA-Z_][a-zA-Z0-9_<>*?]*)\\s*(\\))\\s*([a-zA-Z_][a-zA-Z0-9_]*)",
           "captures": {
-            "1": { "name": "keyword.declaration.func.brasa" },
-            "2": { "name": "punctuation.bracket.brasa" },
-            "3": { "name": "storage.modifier.ref.brasa" },
-            "4": { "name": "variable.parameter.receiver.brasa" },
-            "5": { "name": "entity.name.type.brasa" },
-            "6": { "name": "punctuation.bracket.brasa" },
-            "7": { "name": "entity.name.function.brasa" }
+            "1": { "name": "keyword.declaration.func.zila" },
+            "2": { "name": "punctuation.bracket.zila" },
+            "3": { "name": "storage.modifier.ref.zila" },
+            "4": { "name": "variable.parameter.receiver.zila" },
+            "5": { "name": "entity.name.type.zila" },
+            "6": { "name": "punctuation.bracket.zila" },
+            "7": { "name": "entity.name.function.zila" }
           }
         },
         {
           "match": "\\b(func)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
           "captures": {
-            "1": { "name": "keyword.declaration.func.brasa" },
-            "2": { "name": "entity.name.function.brasa" }
+            "1": { "name": "keyword.declaration.func.zila" },
+            "2": { "name": "entity.name.function.zila" }
           }
         },
         {
           "match": "\\b(type)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
           "captures": {
-            "1": { "name": "keyword.declaration.type.brasa" },
-            "2": { "name": "entity.name.type.brasa" }
+            "1": { "name": "keyword.declaration.type.zila" },
+            "2": { "name": "entity.name.type.zila" }
           }
         },
         {
           "match": "\\b(package|use)\\s+([a-zA-Z_][a-zA-Z0-9_.]*)",
           "captures": {
-            "1": { "name": "keyword.control.import.brasa" },
-            "2": { "name": "entity.name.namespace.brasa" }
+            "1": { "name": "keyword.control.import.zila" },
+            "2": { "name": "entity.name.namespace.zila" }
           }
         }
       ]
@@ -248,39 +248,39 @@
     "keywords": {
       "patterns": [
         {
-          "name": "keyword.control.import.brasa",
+          "name": "keyword.control.import.zila",
           "match": "\\b(package|use)\\b"
         },
         {
-          "name": "storage.type.brasa",
+          "name": "storage.type.zila",
           "match": "\\b(record|enum|interface)\\b"
         },
         {
-          "name": "keyword.declaration.brasa",
+          "name": "keyword.declaration.zila",
           "match": "\\b(let|var|embed|extern|pub)\\b"
         },
         {
-          "name": "keyword.control.brasa",
+          "name": "keyword.control.zila",
           "match": "\\b(if|else|match|for|in|while|break|continue|return|defer|spawn|spawn_thread|shared|try|async|await)\\b"
         },
         {
-          "name": "keyword.control.end.brasa",
+          "name": "keyword.control.end.zila",
           "match": "\\b(end)\\b"
         },
         {
-          "name": "storage.modifier.brasa",
+          "name": "storage.modifier.zila",
           "match": "\\b(unsafe|ref|self|comptime)\\b"
         },
         {
-          "name": "keyword.operator.logical.brasa",
+          "name": "keyword.operator.logical.zila",
           "match": "\\b(and|or|not)\\b"
         },
         {
-          "name": "keyword.operator.bitwise.brasa",
+          "name": "keyword.operator.bitwise.zila",
           "match": "\\b(bitand|bitor|bitxor|bitnot)\\b"
         },
         {
-          "name": "keyword.operator.new.brasa",
+          "name": "keyword.operator.new.zila",
           "match": "\\b(new)\\b"
         }
       ]
@@ -288,11 +288,11 @@
     "constants": {
       "patterns": [
         {
-          "name": "constant.language.boolean.brasa",
+          "name": "constant.language.boolean.zila",
           "match": "\\b(true|false)\\b"
         },
         {
-          "name": "constant.language.nil.brasa",
+          "name": "constant.language.nil.zila",
           "match": "\\b(nil)\\b"
         }
       ]
@@ -300,23 +300,23 @@
     "numbers": {
       "patterns": [
         {
-          "name": "constant.numeric.hex.brasa",
+          "name": "constant.numeric.hex.zila",
           "match": "\\b0x[0-9a-fA-F][0-9a-fA-F_]*\\b"
         },
         {
-          "name": "constant.numeric.binary.brasa",
+          "name": "constant.numeric.binary.zila",
           "match": "\\b0b[01][01_]*\\b"
         },
         {
-          "name": "constant.numeric.float.brasa",
+          "name": "constant.numeric.float.zila",
           "match": "\\b[0-9][0-9_]*\\.[0-9][0-9_]*([eE][+-]?[0-9_]+)?\\b"
         },
         {
-          "name": "constant.numeric.float.brasa",
+          "name": "constant.numeric.float.zila",
           "match": "\\b[0-9][0-9_]*[eE][+-]?[0-9_]+\\b"
         },
         {
-          "name": "constant.numeric.integer.brasa",
+          "name": "constant.numeric.integer.zila",
           "match": "\\b[0-9][0-9_]*\\b"
         }
       ]
@@ -324,19 +324,19 @@
     "types": {
       "patterns": [
         {
-          "name": "support.type.primitive.brasa",
+          "name": "support.type.primitive.zila",
           "match": "\\b(i8|i16|i32|i64|u8|u16|u32|u64|isize|usize|f32|f64|bool|char|text|void)\\b"
         },
         {
-          "name": "support.type.c.brasa",
+          "name": "support.type.c.zila",
           "match": "\\bc\\.(char|schar|uchar|short|ushort|int|uint|long|ulong|longlong|ulonglong|size_t|ssize_t|float|double|void)\\b"
         },
         {
-          "name": "support.type.brasa",
+          "name": "support.type.zila",
           "match": "\\b(List|Map|Set|Option|Result|String)\\b"
         },
         {
-          "name": "entity.name.type.brasa",
+          "name": "entity.name.type.zila",
           "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
         }
       ]
@@ -344,7 +344,7 @@
     "functions": {
       "patterns": [
         {
-          "name": "entity.name.function.call.brasa",
+          "name": "entity.name.function.call.zila",
           "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\()"
         }
       ]
@@ -352,59 +352,59 @@
     "operators": {
       "patterns": [
         {
-          "name": "keyword.operator.optional-chaining.brasa",
+          "name": "keyword.operator.optional-chaining.zila",
           "match": "\\?\\.(?=[a-zA-Z_])"
         },
         {
-          "name": "keyword.operator.null-coalescing.brasa",
+          "name": "keyword.operator.null-coalescing.zila",
           "match": "\\?\\?"
         },
         {
-          "name": "keyword.operator.optional.brasa",
+          "name": "keyword.operator.optional.zila",
           "match": "\\?"
         },
         {
-          "name": "keyword.operator.error.brasa",
+          "name": "keyword.operator.error.zila",
           "match": "!"
         },
         {
-          "name": "keyword.operator.dereference.brasa",
+          "name": "keyword.operator.dereference.zila",
           "match": "\\^"
         },
         {
-          "name": "punctuation.separator.arrow.brasa",
+          "name": "punctuation.separator.arrow.zila",
           "match": "->"
         },
         {
-          "name": "keyword.operator.spread.brasa",
+          "name": "keyword.operator.spread.zila",
           "match": "\\.\\.\\."
         },
         {
-          "name": "keyword.operator.range.brasa",
+          "name": "keyword.operator.range.zila",
           "match": "\\.\\."
         },
         {
-          "name": "keyword.operator.comparison.brasa",
+          "name": "keyword.operator.comparison.zila",
           "match": "(==|!=|<=|>=|<|>)"
         },
         {
-          "name": "keyword.operator.assignment.brasa",
+          "name": "keyword.operator.assignment.zila",
           "match": "(=|\\+=|-=|\\*=|/=|%=)"
         },
         {
-          "name": "keyword.operator.arithmetic.brasa",
+          "name": "keyword.operator.arithmetic.zila",
           "match": "(\\+|-|\\*|/|%)"
         },
         {
-          "name": "keyword.operator.bitwise.shift.brasa",
+          "name": "keyword.operator.bitwise.shift.zila",
           "match": "(<<|>>)"
         },
         {
-          "name": "keyword.operator.address.brasa",
+          "name": "keyword.operator.address.zila",
           "match": "&"
         },
         {
-          "name": "punctuation.separator.pipe.brasa",
+          "name": "punctuation.separator.pipe.zila",
           "match": "\\|"
         }
       ]
@@ -412,15 +412,15 @@
     "punctuation": {
       "patterns": [
         {
-          "name": "punctuation.bracket.brasa",
+          "name": "punctuation.bracket.zila",
           "match": "[\\(\\)\\[\\]\\{\\}]"
         },
         {
-          "name": "punctuation.separator.brasa",
+          "name": "punctuation.separator.zila",
           "match": "[,;:]"
         },
         {
-          "name": "punctuation.accessor.dot.brasa",
+          "name": "punctuation.accessor.dot.zila",
           "match": "\\."
         }
       ]

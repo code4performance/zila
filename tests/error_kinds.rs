@@ -3,8 +3,8 @@
 //! Windows and run; the ones that touch the operating system also run on Linux under WSL (those
 //! checks are skipped, with a message, when it is not usable).
 
-use brasa::codegen_x64::{compile_to_linux, compile_to_native, CompileOptions};
-use brasa::parse_source;
+use zila::codegen_x64::{compile_to_linux, compile_to_native, CompileOptions};
+use zila::parse_source;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 static N: AtomicUsize = AtomicUsize::new(0);
 
 fn temp(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("brasa-kinds-test-{}-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst), name))
+    std::env::temp_dir().join(format!("zila-kinds-test-{}-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst), name))
 }
 
 /// The program built for Windows and run: (output, exit status). `None` without the toolchain.

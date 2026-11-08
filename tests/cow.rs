@@ -3,8 +3,8 @@
 //! compiled and run both optimized and unoptimized, and both must print the same (skipped when the
 //! Visual Studio build tools are missing).
 
-use brasa::codegen_x64::{compile_to_native_with, CompileOptions};
-use brasa::parse_source;
+use zila::codegen_x64::{compile_to_native_with, CompileOptions};
+use zila::parse_source;
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -15,7 +15,7 @@ const OFF: CompileOptions = CompileOptions { optimize: false, test_mode: false }
 
 fn run_with(src: &str, options: &CompileOptions) -> Option<(String, i32)> {
     let file = parse_source(src).unwrap_or_else(|d| panic!("parse error: {}", d));
-    let exe = std::env::temp_dir().join(format!("brasa-cow-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let exe = std::env::temp_dir().join(format!("zila-cow-test-{}-{}.exe", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     match compile_to_native_with(&file, exe.to_str().unwrap(), options) {
         Ok(()) => {}
         Err(e) if e.contains("could not find Visual Studio") || e.contains("vcvars64") => {
@@ -370,7 +370,7 @@ fn hot_loops_that_write_lists_held_in_locals_agree_with_and_without_optimization
 fn a_helper_that_receives_a_list_is_still_a_call() {
     let src = prog_with("func first(xs: []int) -> int\n    return xs[0]\nend\n", "let xs = [4]\nprint(first(xs))");
     let file = parse_source(&src).unwrap();
-    let asm = brasa::codegen_x64::generate_asm_with(&file, &ON).unwrap();
+    let asm = zila::codegen_x64::generate_asm_with(&file, &ON).unwrap();
     let main_start = asm.find("B_main_main proc").unwrap();
     let main_body = &asm[main_start..asm[main_start..].find("B_main_main endp").map(|i| i + main_start).unwrap()];
     assert!(main_body.contains("call B_main_first"), "{}", main_body);

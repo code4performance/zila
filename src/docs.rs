@@ -2,7 +2,7 @@
 //!
 //! A code block preceded by `<div class="file-label">examples/NAME.br</div>` shows that file in
 //! full; one labelled `examples/NAME.br (excerpt)` shows a contiguous part of it. `sync` (the
-//! `brasa-parse --docs` command) rewrites the full blocks from the files, and `tests/docs.rs`
+//! `zila-parse --docs` command) rewrites the full blocks from the files, and `tests/docs.rs`
 //! fails when a block no longer matches.
 
 use crate::lexer::KEYWORDS;
@@ -87,7 +87,7 @@ fn escape(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
 }
 
-/// Brasa source as HTML with the site's classes: `kw` keywords, `str` text and
+/// Zila Lang source as HTML with the site's classes: `kw` keywords, `str` text and
 /// character literals, `cm` comments.
 pub fn highlight(src: &str) -> String {
     let chars: Vec<char> = src.replace("\r\n", "\n").trim_end().chars().collect();

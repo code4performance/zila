@@ -1,5 +1,5 @@
 (* ===========================================================
-   Brasa - formal grammar (EBNF)
+   Zila Lang - formal grammar (EBNF)
    Notation: | alternative   [ ] optional   { } zero or more
              ( ) grouping    'x' literal    (* *) comment
    Blocks end with 'end'. A newline terminates a statement (no ';').
@@ -251,7 +251,7 @@ spawn_thread_expr = 'spawn_thread' call ;      (* statement or expression; the r
      require an enclosing `unsafe` block.
    - `...` at the end of an `extern` parameter list denotes C variadic functions.
    - `extern [abi] func(...) -> T` is a function pointer type compatible with C callbacks.
-   - `#[export("name")]` exports a Brasa function with C ABI and unmangled symbol name.
+   - `#[export("name")]` exports a Zila Lang function with C ABI and unmangled symbol name.
    - `#[c_layout]` on a record enforces standard C ABI struct alignment and padding.
    - `#[link("lib")]` links external libraries; `#[link_src("path.c")]` compiles C files.
    - `asm` blocks use plain string instruction templates with `@name` operand substitutions.

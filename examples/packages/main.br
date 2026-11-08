@@ -4,7 +4,7 @@ use greeter
 use util
 
 func main()
-    print(greeter.hello("Brasa"))
-    print(greeter.again("Brasa"))
+    print(greeter.hello("Zila Lang"))
+    print(greeter.again("Zila Lang"))
     print("3 times 4 is {util.times(3, 4)}")
 end

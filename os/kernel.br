@@ -1,5 +1,5 @@
 // =====================================================================
-// Brasa OS kernel, written in Brasa.
+// Zila Lang OS kernel, written in Zila Lang.
 //
 // A 64-bit long-mode kernel with a text console and a small shell. It
 // runs straight on the hardware (or an emulator): no host operating
@@ -12,7 +12,7 @@
 // `unsafe` raw pointers (VGA memory) and `asm` (I/O ports).
 //
 // Output goes to the VGA screen and to the serial port COM1, so it also
-// works headless:   qemu-system-x86_64 -drive format=raw,file=brasa-os.img
+// works headless:   qemu-system-x86_64 -drive format=raw,file=zila-os.img
 //                                      -serial stdio -display none
 // =====================================================================
 
@@ -489,11 +489,11 @@ func main()
     serial_init()
     clear_screen()
     install_idt()
-    print("Brasa OS 0.1  (64-bit long mode, written in Brasa)")
+    print("Zila Lang OS 0.1  (64-bit long mode, written in Zila Lang)")
     print("Type 'help' for a list of commands.")
     print("")
     while true
-        console_write("brasa> ")
+        console_write("zila> ")
         let line = read_line()
         if line.len > 0
             match parse(line)

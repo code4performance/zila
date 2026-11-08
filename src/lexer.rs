@@ -1,4 +1,4 @@
-//! Lexer for Brasa.
+//! Lexer for Zila Lang.
 //!
 //! Newlines are significant (they end statements). Consecutive newlines are
 //! collapsed into one `Tok::Newline`. Text literals are split into literal

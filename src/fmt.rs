@@ -1,4 +1,4 @@
-//! `brasa-parse --fmt`: rewrites source in the standard style.
+//! `zila-parse --fmt`: rewrites source in the standard style.
 //!
 //! The formatter works on the token stream and the original text of each token, and changes
 //! only whitespace: indentation (from the block structure the parser records), the spaces
@@ -289,7 +289,7 @@ fn render(text: &str, toks: &[Token], comments: &[Comment], layout: &Layout) -> 
                 s.push_str(gap);
             }
             match e.kind {
-                // a block form: its lines are not Brasa and stay byte for byte; only the closing
+                // a block form: its lines are not Zila Lang and stay byte for byte; only the closing
                 // `end` is aligned with the line that opens the block
                 Kind::Tok(ti) if matches!(toks[ti].tok, Tok::Block { .. } | Tok::Sql { .. }) => {
                     let whole: String = cs[e.start..e.end].iter().collect();

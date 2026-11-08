@@ -1,4 +1,4 @@
-//! Recursive-descent parser for Brasa (see `brasa.ebnf`).
+//! Recursive-descent parser for Zila Lang (see `zila.ebnf`).
 //!
 //! Newline handling:
 //! - A newline ends a statement or declaration.

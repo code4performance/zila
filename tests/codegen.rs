@@ -1,7 +1,7 @@
 //! Native backend: assembly generation (does not need ml64/link).
 
-use brasa::codegen_x64::generate_asm;
-use brasa::parse_source;
+use zila::codegen_x64::generate_asm;
+use zila::parse_source;
 
 fn asm(src: &str) -> Result<String, String> {
     let f = parse_source(src).map_err(|d| d.msg)?;
@@ -13,14 +13,14 @@ fn examples_compile() {
     for p in ["examples/hello.br", "examples/ui.br", "examples/unicode.br"] {
         let src = std::fs::read_to_string(p).unwrap();
         let a = asm(&src).unwrap_or_else(|e| panic!("{}: {}", p, e));
-        assert!(a.contains("brasa_start proc"), "{}", p);
+        assert!(a.contains("zila_start proc"), "{}", p);
     }
 }
 
 #[test]
-fn ui_is_compiled_from_brasa_source() {
+fn ui_is_compiled_from_zila_source() {
     let a = asm("package main\nuse ui\nfunc main()\n    var win = ui.Window(\"t\", 64, 48)\n    win.layout(ui.vstack(ui.TextBox()))\n    win.show()\n    ui.run()\nend\n").unwrap();
-    // The std library's functions the program reaches are emitted as Brasa procedures...
+    // The std library's functions the program reaches are emitted as Zila Lang procedures...
     assert!(a.contains("B_ui_wndproc proc"));
     assert!(a.contains("B_ui_Control_layout proc"));
     // ...and call Win32 directly.

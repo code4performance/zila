@@ -1,6 +1,6 @@
 """Records what the real PostgreSQL server of tests/docker answers to two statements, as hex, into
 tests/data/postgres-exchange.txt. The replay test in tests/postgres.rs plays these bytes back to
-the Brasa driver, so the real message framing and type OIDs are checked without Docker.
+the Zila Lang driver, so the real message framing and type OIDs are checked without Docker.
 
     docker compose -f tests/docker/compose.yml up -d --wait
     python tests/docker/record_postgres.py
@@ -11,7 +11,7 @@ import base64, hashlib, hmac, os, socket, ssl, struct, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "..", "data", "postgres-exchange.txt")
-USER, PASSWORD, DB = "app", "Brasa_app_dev_1", "shop"
+USER, PASSWORD, DB = "app", "Zila_app_dev_1", "shop"
 
 
 def frame(kind, body):

@@ -1,8 +1,8 @@
 // Sets: which words appear in one text but not in the other.
 //
-//   brasa-parse examples/sets.br -o sets.exe
+//   zila-parse examples/sets.br -o sets.exe
 //
-// `use set` is a library written in Brasa. A set holds values of any type that is Hash (text,
+// `use set` is a library written in Zila Lang. A set holds values of any type that is Hash (text,
 // integers, records, enums...), each at most once,
 // and remembers the order in which they were first added.
 

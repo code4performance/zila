@@ -1,9 +1,9 @@
-//! Brasa OS: the boot sector and kernel are Brasa programs. Building the
+//! Zila Lang OS: the boot sector and kernel are Zila Lang programs. Building the
 //! image needs no external tool; booting it needs QEMU (the test is skipped
 //! when QEMU is not installed).
 
-use brasa::codegen_x64::build_os;
-use brasa::parse_source;
+use zila::codegen_x64::build_os;
+use zila::parse_source;
 use std::io::Write;
 use std::process::{Command, Stdio};
 use std::time::Duration;
@@ -57,7 +57,7 @@ fn boots_in_qemu_and_runs_shell_commands() {
         eprintln!("QEMU not found: skipping the boot test");
         return;
     };
-    let path = std::env::temp_dir().join(format!("brasa-os-test-{}.img", std::process::id()));
+    let path = std::env::temp_dir().join(format!("zila-os-test-{}.img", std::process::id()));
     std::fs::write(&path, image()).unwrap();
     let mut child = Command::new(qemu)
         .args(["-drive", &format!("format=raw,file={}", path.display()), "-serial", "stdio", "-display", "none", "-no-reboot", "-m", "128", "-monitor", "none"])
@@ -90,7 +90,7 @@ fn boots_in_qemu_and_runs_shell_commands() {
     let _ = std::fs::remove_file(&path);
     let text = String::from_utf8_lossy(&out.stdout).replace('\r', "");
     for want in [
-        "Brasa OS 0.1",
+        "Zila Lang OS 0.1",
         "6 * 7 = 42",
         "division by zero",
         "error: 'abc' is not a number",
@@ -124,7 +124,7 @@ fn kernels_cannot_use_async_or_the_windows_libraries() {
 fn the_kernel_supplies_its_own_heap() {
     // the heap is `#[allocator]` code in os/kernel.br, so the runtime's built-in size-class heap is gone
     let kernel = parse_source(&std::fs::read_to_string("os/kernel.br").unwrap()).unwrap();
-    let asm = brasa::codegen_x64::generate_asm_for(&kernel, &brasa::codegen_x64::CompileOptions::default(), brasa::codegen_x64::Target::Bare).unwrap();
+    let asm = zila::codegen_x64::generate_asm_for(&kernel, &zila::codegen_x64::CompileOptions::default(), zila::codegen_x64::Target::Bare).unwrap();
     assert!(asm.contains("call B_main_heap_alloc") && asm.contains("call B_main_heap_free"));
     assert!(!asm.contains("rt_freelists") && !asm.contains("rt_brk"));
 }

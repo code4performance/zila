@@ -1,7 +1,7 @@
 // =====================================================================
-// Brasa standard library: operating-system threads
+// Zila Lang standard library: operating-system threads
 //
-// Written in Brasa. The compiler lowers `spawn_thread f(x)` to
+// Written in Zila Lang. The compiler lowers `spawn_thread f(x)` to
 // `thread.start(func() f(x) end)` after checking that everything the call
 // uses is transferable (see docs/concurrency.html).
 //

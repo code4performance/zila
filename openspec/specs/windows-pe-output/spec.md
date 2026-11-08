@@ -1,12 +1,12 @@
 # windows-pe-output Specification
 
 ## Purpose
-Defines how Brasa builds Windows executables using only the compiler, so that building on Windows needs no Visual Studio, `ml64`, `link` or other external tool, just as the Linux target needs none.
+Defines how Zila Lang builds Windows executables using only the compiler, so that building on Windows needs no Visual Studio, `ml64`, `link` or other external tool, just as the Linux target needs none.
 
 ## Requirements
 
 ### Requirement: Building a Windows executable needs only the compiler
-`brasa-parse prog.br -o prog.exe` (and `--target windows`) SHALL write a 64-bit Windows executable without running any other program and without reading any Visual Studio, Windows SDK or other toolchain file. It SHALL succeed on a machine where none of `ml64`, `link`, `vcvars64.bat` and `vswhere` exist.
+`zila-parse prog.br -o prog.exe` (and `--target windows`) SHALL write a 64-bit Windows executable without running any other program and without reading any Visual Studio, Windows SDK or other toolchain file. It SHALL succeed on a machine where none of `ml64`, `link`, `vcvars64.bat` and `vswhere` exist.
 
 #### Scenario: A machine with no Visual Studio
 - **WHEN** a hello-world program is built on Windows with no Visual Studio installed and no `ml64` or `link` on the path
@@ -61,7 +61,7 @@ A hello-world executable SHALL be no larger than 8 KB, and the window example (`
 - **THEN** the sizes are within the limits
 
 ### Requirement: Failures are reported by the compiler
-Anything that stops a build SHALL be reported by the compiler in its own words, with the Brasa file and line where it can. A build SHALL NOT fail with text from `ml64` or `link`, and SHALL NOT leave intermediate files behind.
+Anything that stops a build SHALL be reported by the compiler in its own words, with the Zila Lang file and line where it can. A build SHALL NOT fail with text from `ml64` or `link`, and SHALL NOT leave intermediate files behind.
 
 #### Scenario: A bad program
 - **WHEN** a program that cannot be assembled (for example inline `asm` with an unknown instruction) is built

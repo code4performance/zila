@@ -144,6 +144,9 @@ pub type Reader = record
     pub offset: long
     pub buf: bufio.InBuf
     pub reads: long
+    // True for the reader of standard input (see `stdin`): it reads file descriptor 0 and
+    // waits for the whole program, and closing it leaves standard input open.
+    pub std: bool
 end
 
 // Collects writes and gives them to the system in large pieces.
@@ -159,7 +162,31 @@ end
 // Opens an existing file for reading by lines or bytes.
 pub async func open(path: text) -> Reader or error
     let f = try open_file_mode(path, 0)
-    return Reader{ file: f, path: path, offset: 0, buf: bufio.input(), reads: 0 }
+    return Reader{ file: f, path: path, offset: 0, buf: bufio.input(), reads: 0, std: false }
+end
+
+// A reader over standard input: a pipe, a redirected file or the terminal. It has the methods of
+// a file reader. Unlike files it waits for the whole program (other tasks do not run while it
+// waits for data), and closing it does not close standard input.
+pub func stdin() -> Reader
+    let f = File{ handle: 0, open: false }
+    return Reader{ file: f, path: "standard input", offset: 0, buf: bufio.input(), reads: 0, std: true }
+end
+
+// One synchronous read from file descriptor 0: the bytes read, 0 at the end of the input.
+func stdin_read(ptr: *u8, count: long) -> long or error
+    var got: long = 0
+    while true
+        got = sys.syscall(0, 0, long(ptr), count, 0, 0, 0)
+        // -4: interrupted by a signal, try again
+        if got != -4
+            break
+        end
+    end
+    if sys.failed(got)
+        return sys.error_for(got, "standard input")
+    end
+    return got
 end
 
 // Creates the file (or replaces it) for buffered writing.
@@ -181,7 +208,12 @@ pub async func (r: Reader) fill() -> error
         return
     end
     let b = sys.buffer(CHUNK)
-    let got = try transfer(r.file, b.ptr, CHUNK, r.offset, false, r.path)
+    var got: long = 0
+    if r.std
+        got = try stdin_read(b.ptr, CHUNK)
+    else
+        got = try transfer(r.file, b.ptr, CHUNK, r.offset, false, r.path)
+    end
     r.reads += 1
     if got == 0
         r.buf.finish()

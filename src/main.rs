@@ -6,6 +6,8 @@ use std::process::exit;
 
 fn usage() -> ! {
     eprintln!("usage: zila <file.zila> [-o output.exe] [--build] [--ast | --tokens | --asm | --run]");
+    eprintln!("       zila run <file.zila | -> [--no-opt]      (build, run and delete; - reads the program from standard input)");
+    eprintln!("       zila eval <code | -> | zila -e <code>    (run statements given inline or on standard input)");
     eprintln!("       zila --os <boot.zila> <kernel.zila> -o <disk.img>");
     eprintln!("       zila --docs");
     eprintln!("       zila --fmt | --fmt-check <file.zila>...");
@@ -100,7 +102,7 @@ fn main() {
         build_os_image(&path, &opts.extra, out_exe);
         return;
     }
-    if mode == Mode::Run && opts.target_explicit {
+    if matches!(mode, Mode::Run | Mode::Eval) && opts.target_explicit {
         match zila::run::host_target() {
             Some(host) if host == opts.target => {}
             Some(host) => {
@@ -113,18 +115,46 @@ fn main() {
             }
         }
     }
-    let src = match std::fs::read_to_string(&path) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("cannot read {}: {}", path, e);
+    // Where the program comes from: a file, standard input (`-`), or an inline snippet (`eval`).
+    let from_stdin = path == "-";
+    if from_stdin && !matches!(mode, Mode::Run | Mode::Eval) {
+        eprintln!("error: only `run` and `eval` read the program from standard input");
+        exit(2);
+    }
+    let read_stdin = || {
+        let mut s = String::new();
+        if let Err(e) = std::io::Read::read_to_string(&mut std::io::stdin(), &mut s) {
+            eprintln!("cannot read standard input: {}", e);
             exit(2);
         }
+        s
     };
-    if let Err(e) = zila::package::install_for(std::path::Path::new(&path)) {
+    let (label, shown, wrapped, base) = if mode == Mode::Eval {
+        let code = if from_stdin { read_stdin() } else { path.clone() };
+        let w = zila::eval::wrap(&code);
+        let label = if from_stdin { "<stdin>" } else { "<eval>" };
+        (label.to_string(), code, Some(w), "eval.zila".to_string())
+    } else if from_stdin {
+        ("<stdin>".to_string(), read_stdin(), None, "stdin.zila".to_string())
+    } else {
+        match std::fs::read_to_string(&path) {
+            Ok(s) => (path.clone(), s, None, path.clone()),
+            Err(e) => {
+                eprintln!("cannot read {}: {}", path, e);
+                exit(2);
+            }
+        }
+    };
+    let src = match &wrapped {
+        Some(w) => w.source.clone(),
+        None => shown.clone(),
+    };
+    let mode = if mode == Mode::Eval { Mode::Run } else { mode };
+    if let Err(e) = zila::package::install_for(std::path::Path::new(&base)) {
         eprintln!("error: {}", e);
         exit(1);
     }
-    zila::comptime::register_siblings(std::path::Path::new(&path), &src);
+    zila::comptime::register_siblings(std::path::Path::new(&base), &src);
 
     if mode == Mode::Tokens {
         match Lexer::new(&src).tokenize() {
@@ -209,13 +239,24 @@ fn main() {
                         exit(1);
                     }
                 };
-                exit(zila::run::run_file(&file, opts.optimize, host));
+                let rewrite = |e: String| match &wrapped {
+                    Some(w) => w.map_message(&e, &label),
+                    None => e,
+                };
+                exit(zila::run::run_file_with(&file, opts.optimize, host, &rewrite));
             } else {
                 println!("OK {}: {}", path, summarize(&file));
             }
         }
         Err(d) => {
-            report(&path, &src, &d);
+            match &wrapped {
+                Some(w) => {
+                    // Name the snippet's own line and column, and show the snippet's text.
+                    let (line, col) = w.locate(d.line as usize, d.col as usize).unwrap_or((1, 1));
+                    report(&label, &shown, &Diag { msg: d.msg.clone(), line: line as _, col: col as _ });
+                }
+                None => report(&label, &src, &d),
+            }
             exit(1);
         }
     }

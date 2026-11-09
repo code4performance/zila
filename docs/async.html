@@ -176,6 +176,9 @@
     print(<span class="kw">try</span> <span class="kw">await</span> r.read_line())          <span class="cm">// without \n or \r\n</span>
 <span class="kw">end</span></code></pre>
       <p>A reader has <code>read_line()</code>, <code>read(max)</code> (up to <code>max</code> bytes), <code>read_all()</code>, <code>at_end()</code> and <code>close()</code>; at the end of the data <code>read_line()</code> gives the error <code>end of file</code> and the others give empty text. A writer has <code>write(text)</code>, <code>write_line(text)</code>, <code>flush()</code> and <code>close()</code>. The counters <code>reads</code> and <code>writes</code> say how many times the system was asked. <strong>Close writers</strong> (or <code>flush</code> them): text still in the buffer when a writer is dropped is lost.</p>
+      <p><strong>Standard input.</strong> <code>fs.stdin()</code> returns a reader over what is piped or typed into the program, with the same methods (<code>printf 'a
+b
+' | zila run examples/stdin_lines.zila</code>). It works from a pipe, a redirected file or the terminal, on Windows and Linux, and closing it never closes standard input. Unlike files and sockets it <em>waits for the whole program</em>: while it waits for data no other task runs, no timer fires. With <code>zila run -</code> and <code>zila eval -</code> the program's source came from standard input, so the program finds its own input empty.</p>
       <p>Connections have the same two types: <code>conn.reader()</code> and <code>conn.writer()</code>. <code>read_line()</code> waits for a whole line even when it arrives in several packets, and the data ends when the other side closes the connection. A connection writer's <code>flush()</code> (and <code>close()</code>, which does not close the connection) sends what is buffered; close the connection itself with <code>conn.close()</code>.</p>
     </section>
 

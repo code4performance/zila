@@ -48,6 +48,8 @@ cargo test</code></pre>
 ./target/release/zila examples/hello.zila --ast          <span class="cm"># dump the AST</span>
 ./target/release/zila examples/hello.zila --tokens       <span class="cm"># dump tokens</span>
 ./target/release/zila examples/hello.zila --run          <span class="cm"># compile, run, delete the executable</span>
+./target/release/zila run examples/hello.zila            <span class="cm"># the same as --run, as a subcommand</span>
+./target/release/zila -e 'print(1 + 2)'                  <span class="cm"># run code given right here, no file</span>
 ./target/release/zila examples/async.zila -o async.exe   <span class="cm"># compile to a native executable</span></code></pre>
 
       <dl class="cli">
@@ -62,6 +64,19 @@ cargo test</code></pre>
 
         <dt>--run</dt>
         <dd>Builds the program into a temporary executable for this machine, runs it with your terminal's input and output, deletes the executable and exits with the program's exit status (101 after an abort). The program is the one <code>-o</code> would build, so every feature works the same way; compile errors are reported as <code>-o</code> reports them and nothing runs. <code>--run</code> only runs programs for the machine it is on: a different <code>--target</code> is rejected.</dd>
+
+        <dt>run file.zila</dt>
+        <dd>A subcommand that does exactly what <code>file.zila --run</code> does (and takes <code>--no-opt</code>). <code>run -</code> reads a whole program, with its <code>package</code> line, from standard input.</dd>
+
+        <dt>-e code</dt>
+        <dd>Runs code given on the command line, with no file and no boilerplate (also written <code>eval code</code>; <code>eval -</code> reads the code from standard input, for pipes and here-documents). The code is a list of statements, and may mix in <code>use</code> lines and declarations (<code>func</code>, <code>type</code>, <code>extern</code>, <code>embed</code>, attributes). The tool puts the statements in the body of <code>func main() -&gt; error</code> inside <code>package main</code>, so <code>try</code> works, then builds and runs it as <code>--run</code> does. A line that starts in the first column with one of those declaration words, up to the line that is exactly <code>end</code>, is a declaration; everything else is a statement. If the code defines its own <code>func main</code>, it is compiled as written. Errors name the line and column of your code (<code>&lt;eval&gt;:2:10</code>). There is no interactive prompt.
+<pre><code>zila -e 'print("hi")'
+zila eval - &lt;&lt;'EOF'
+func double(n: int) -&gt; int
+    return n * 2
+end
+print(double(21))
+EOF</code></pre></dd>
 
         <dt>-o output.exe</dt>
         <dd>Compiles the file to a native Windows x86-64 executable (also written <code>--build</code>). The compiler writes the executable itself, so no other tool (no Visual Studio) is needed. The resulting program has no runtime to install. See <a href="native.html">Native compilation</a> for what it supports.</dd>

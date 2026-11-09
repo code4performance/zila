@@ -8,6 +8,7 @@ pub mod codegen_x64;
 pub mod comptime;
 pub mod docs;
 pub mod effects;
+pub mod eval;
 pub mod float_text;
 pub mod fetch;
 pub mod fmt;

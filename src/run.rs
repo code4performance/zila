@@ -32,6 +32,12 @@ impl Drop for Cleanup {
 /// Builds `file` for `target` (which must be the host), runs it and returns the exit status
 /// of the tool: the program's own, `128 + signal` after a signal, 1 for a build error.
 pub fn run_file(file: &File, optimize: bool, target: &str) -> i32 {
+    run_file_with(file, optimize, target, &|e| e)
+}
+
+/// Like `run_file`, but `rewrite` may change the text of a build error before it is printed
+/// (`zila eval` uses it to name the snippet's lines).
+pub fn run_file_with(file: &File, optimize: bool, target: &str, rewrite: &dyn Fn(String) -> String) -> i32 {
     let n = BUILD.fetch_add(1, Ordering::SeqCst);
     let ext = if target == "windows" { ".exe" } else { "" };
     let exe = std::env::temp_dir().join(format!("zila-run-{}-{}{}", std::process::id(), n, ext));
@@ -40,7 +46,7 @@ pub fn run_file(file: &File, optimize: bool, target: &str) -> i32 {
     let path = exe.to_string_lossy().to_string();
     let built = if target == "linux" { compile_to_linux(file, &path, &options) } else { compile_to_native_with(file, &path, &options) };
     if let Err(e) = built {
-        eprintln!("compilation error: {}", e);
+        eprintln!("compilation error: {}", rewrite(e.to_string()));
         return 1;
     }
     #[cfg(unix)]

@@ -18,6 +18,8 @@ The version lives in `Cargo.toml` and at the top of `README.md`. To release: mov
 - The generated assembly is deterministic: two compiles of the same program no longer list the record and enum helper procedures in a different order.
 
 ### Added
+- `fs.stdin()`: a reader over standard input with the methods of a file reader (`read_line`, `read`, `read_all`, `at_end`, `close`), on Windows and Linux, from a pipe, a file or a terminal. It waits for the whole program while it reads. `fs.Reader` has a new field `std` (OpenSpec change `add-stdin-reader`).
+- `zila run <file>` (the same as `--run`), `zila eval "<code>"` / `zila -e "<code>"` to run statements given inline, and `zila run -` / `zila eval -` to read the program from standard input. Errors in a snippet name the snippet's own lines (OpenSpec change `add-run-and-eval`).
 - GitHub Actions workflow (`.github/workflows/ci.yml`): build, `cargo clippy -D warnings` and every test target except `async` on Windows and Linux, and the `async` tests as a separate job.
 - `tests/docs.rs` checks that the README roadmap names only changes that are open in `openspec/changes/`, and says there are none exactly when there are none.
 

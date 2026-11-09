@@ -5,7 +5,7 @@
 //! entry and nothing else.
 
 /// Every option `zila` accepts.
-pub const FLAGS: &[&str] = &["--ast", "--tokens", "--asm", "--run", "--build", "-o", "--os", "--docs", "--no-opt", "--no-prune", "--explain-link", "--fmt", "--fmt-check", "--test", "--target", "--lsp", "--comptime-timeout", "--no-comptime-cache", "--comptime-dump", "--init", "--add", "--as", "--fetch", "--tidy", "--update", "--offline"];
+pub const FLAGS: &[&str] = &["--ast", "--tokens", "--asm", "--run", "--build", "-o", "--os", "--docs", "--no-opt", "--no-prune", "--explain-link", "--fmt", "--fmt-check", "--test", "--target", "--lsp", "--comptime-timeout", "--no-comptime-cache", "--comptime-dump", "--init", "--add", "--as", "--fetch", "--tidy", "--update", "--offline", "-e"];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Mode {
@@ -15,6 +15,8 @@ pub enum Mode {
     Tokens,
     Asm,
     Run,
+    /// Run code given on the command line or standard input (`eval`, `-e`).
+    Eval,
     Build,
     /// Build a bootable disk image from a boot file and a kernel file.
     Os,
@@ -86,7 +88,18 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
             "--ast" => o.mode = Mode::Ast,
             "--tokens" => o.mode = Mode::Tokens,
             "--asm" => o.mode = Mode::Asm,
-            "--run" => o.mode = Mode::Run,
+            "--run" | "run" if o.path.is_none() || a == "--run" => o.mode = Mode::Run,
+            "eval" if o.path.is_none() && o.mode != Mode::Eval => o.mode = Mode::Eval,
+            "-e" => {
+                i += 1;
+                match args.get(i) {
+                    Some(code) => {
+                        o.mode = Mode::Eval;
+                        o.path = Some(code.clone());
+                    }
+                    None => return Err("-e needs the code to run".into()),
+                }
+            }
             "--os" => o.mode = Mode::Os,
             "--docs" => o.mode = Mode::Docs,
             "--fmt" => o.mode = Mode::Fmt,
@@ -226,6 +239,22 @@ mod tests {
     }
 
     #[test]
+    fn run_and_eval_are_spelled_as_words_or_as_e() {
+        let r = p(&["run", "a.zila", "--no-opt"]).unwrap();
+        assert_eq!((r.mode, r.path.as_deref(), r.optimize), (Mode::Run, Some("a.zila"), false));
+        assert_eq!(p(&["a.zila", "--run"]).unwrap().mode, Mode::Run);
+        let r = p(&["run", "-"]).unwrap();
+        assert_eq!((r.mode, r.path.as_deref()), (Mode::Run, Some("-")));
+        let e = p(&["eval", "print(1)"]).unwrap();
+        assert_eq!((e.mode, e.path.as_deref()), (Mode::Eval, Some("print(1)")));
+        let e = p(&["-e", "-x"]).unwrap();
+        assert_eq!((e.mode, e.path.as_deref()), (Mode::Eval, Some("-x")));
+        let e = p(&["eval", "-"]).unwrap();
+        assert_eq!((e.mode, e.path.as_deref()), (Mode::Eval, Some("-")));
+        assert!(p(&["-e"]).is_err());
+    }
+
+    #[test]
     fn every_flag_is_accepted() {
         for f in FLAGS {
             let args: Vec<&str> = match *f {
@@ -234,6 +263,7 @@ mod tests {
                 "--comptime-timeout" => vec!["a.zila", "--comptime-timeout", "9"],
                 "--add" => vec!["--add", "https://example.org/x/codec@1.0.0"],
                 "--as" => vec!["--add", "https://example.org/x/codec", "--as", "js"],
+                "-e" => vec!["-e", "print(1)"],
                 _ => vec!["a.zila", f],
             };
             assert!(p(&args).is_ok(), "{} is listed in FLAGS but not parsed", f);

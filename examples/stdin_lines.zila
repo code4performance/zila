@@ -1,0 +1,22 @@
+package main
+
+// Reads standard input line by line and prints each line in upper case.
+//
+//   printf 'one\ntwo\n' | zila run examples/stdin_lines.zila
+//
+// Reading standard input waits for the whole program: other tasks do not run until data arrives.
+
+use fs
+use text
+
+func main() -> error
+    let r = fs.stdin()
+    var n = 0
+    while not try await r.at_end()
+        let line = try await r.read_line()
+        n += 1
+        print("{n}: {text.upper(line)}")
+    end
+    print("{n} lines")
+    return
+end

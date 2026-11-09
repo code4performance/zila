@@ -66,15 +66,15 @@ impl Compiler {
             shared_recs: self.tp.shared_recs.clone(),
             methods: self.tp.methods.clone(),
             funcs: self.tp.funcs.clone(),
-            inst_args: self.inst_args.clone(),
-            inst_funcs: self.inst_funcs.clone(),
-            pending: std::mem::take(&mut self.pending),
+            inst_args: self.tp.inst_args.clone(),
+            inst_funcs: self.tp.inst_funcs.clone(),
+            pending: std::mem::take(&mut self.tp.pending),
             fn_closures: self.fn_closures.clone(),
             bindings: self.bindings.clone(),
             cur_mod: self.cur_mod.clone(),
             line: self.line,
             derived: self.tp.derived.clone(),
-            map_thunks: self.map_thunks.clone(),
+            map_thunks: self.tp.map_thunks.clone(),
         }
     }
 
@@ -88,15 +88,15 @@ impl Compiler {
         self.tp.shared_recs = s.shared_recs;
         self.tp.methods = s.methods;
         self.tp.funcs = s.funcs;
-        self.inst_args = s.inst_args;
-        self.inst_funcs = s.inst_funcs;
-        self.pending = s.pending;
+        self.tp.inst_args = s.inst_args;
+        self.tp.inst_funcs = s.inst_funcs;
+        self.tp.pending = s.pending;
         self.fn_closures = s.fn_closures;
         self.bindings = s.bindings;
         self.cur_mod = s.cur_mod;
         self.line = s.line;
         self.tp.derived = s.derived;
-        self.map_thunks = s.map_thunks;
+        self.tp.map_thunks = s.map_thunks;
     }
 
     pub(super) fn resolve_ret(&mut self, r: &Option<RetType>, m: &str) -> R<Ty> {
@@ -291,7 +291,7 @@ impl Compiler {
         self.bump_instances()?;
         // registered before the layout, so a record may mention itself (`next: Node<T>?`)
         self.tp.rec_decls.insert(name.clone(), (tm.clone(), Vec::new()));
-        self.inst_args.insert(name.clone(), (q.to_string(), tys.clone()));
+        self.tp.inst_args.insert(name.clone(), (q.to_string(), tys.clone()));
         if shared {
             self.tp.shared_recs.insert(name.clone());
         }
@@ -333,13 +333,13 @@ impl Compiler {
         self.line = saved_line;
         let sig = sig?;
         self.tp.methods.insert((rec_inst.to_string(), fd.name.clone()), sig);
-        self.pending.push(Pending { module: module.to_string(), decl: fd.clone(), bindings: binds, line });
+        self.tp.pending.push(Pending { module: module.to_string(), decl: fd.clone(), bindings: binds, line });
         Ok(())
     }
 
     pub(super) fn bump_instances(&mut self) -> R<()> {
-        self.inst_count += 1;
-        if self.inst_count > INSTANCE_LIMIT {
+        self.tp.inst_count += 1;
+        if self.tp.inst_count > INSTANCE_LIMIT {
             return self.err("too many generic instances: does a generic function or record use itself with ever larger types?");
         }
         Ok(())
@@ -353,7 +353,7 @@ impl Compiler {
             return Ok(None);
         }
         if let Some(Ty::Rec(inst)) = want {
-            if self.inst_args.get(inst).map_or(false, |(tq, _)| *tq == q) {
+            if self.tp.inst_args.get(inst).map_or(false, |(tq, _)| *tq == q) {
                 return Ok(Some(inst.clone()));
             }
         }
@@ -406,7 +406,7 @@ impl Compiler {
                 let q = self.qname(m, path);
                 if self.tmpl_recs.contains_key(&q) {
                     if let Ty::Rec(inst) = actual {
-                        if let Some((tq, targs)) = self.inst_args.get(inst).cloned() {
+                        if let Some((tq, targs)) = self.tp.inst_args.get(inst).cloned() {
                             if tq == q && targs.len() == args.len() {
                                 for (a, t) in args.iter().zip(&targs) {
                                     self.unify(a, t, params, b, m)?;
@@ -569,7 +569,7 @@ impl Compiler {
         }
         let argkey = names.iter().map(|n| ty_full(&b[n])).collect::<Vec<_>>().join(",");
         let key = (module.to_string(), fd.name.clone(), argkey.clone());
-        let inst = match self.inst_funcs.get(&key) {
+        let inst = match self.tp.inst_funcs.get(&key) {
             Some(n) => n.clone(),
             None => {
                 self.bump_instances()?;
@@ -583,8 +583,8 @@ impl Compiler {
                 self.bindings = saved;
                 self.cur_mod = saved_mod;
                 self.tp.funcs.insert((module.to_string(), inst.clone()), sig?);
-                self.inst_funcs.insert(key, inst.clone());
-                self.pending.push(Pending { module: module.to_string(), decl, bindings: b, line: decl_line });
+                self.tp.inst_funcs.insert(key, inst.clone());
+                self.tp.pending.push(Pending { module: module.to_string(), decl, bindings: b, line: decl_line });
                 inst
             }
         };
@@ -596,7 +596,7 @@ impl Compiler {
 
     /// Compiles every instance requested so far (and those they request).
     pub(super) fn drain_pending(&mut self) -> R<()> {
-        while let Some(p) = self.pending.pop() {
+        while let Some(p) = self.tp.pending.pop() {
             self.cur_mod = p.module.clone();
             self.line = p.line;
             self.bindings = p.bindings.clone();
@@ -670,7 +670,7 @@ impl Compiler {
         let args: Vec<Type> = td.generics.iter().map(|g| Type::Named { path: vec![g.name.clone()], args: vec![] }).collect();
         self.instantiate_record(q, &args, &tm)?;
         // the methods of this instance are the template's own
-        let todo = std::mem::take(&mut self.pending);
+        let todo = std::mem::take(&mut self.tp.pending);
         for p in todo {
             self.cur_mod = p.module.clone();
             self.line = p.line;

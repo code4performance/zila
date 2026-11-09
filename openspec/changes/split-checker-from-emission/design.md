@@ -41,3 +41,14 @@ When the cache of checked packages is used, a build SHALL produce an executable 
 - **WHEN** the same package is built with `--no-opt`, and for `--target linux`
 - **THEN** each build uses its own cache entry and none returns the result of another
 ```
+
+## Findings
+
+**How a call is resolved today (task 2.2).** `Compiler::call` (`calls.rs`, about 650 lines) is a chain of cases that resolve the callee and emit code in the same arm. Two kinds of callee exist:
+
+- *By name alone:* `f(...)`, `module.f(...)`, enum variants, generic functions and globals holding a closure. The target is found from `cur_mod`, the `funcs`, `tmpl_funcs`, `variants` and `globals` tables and the import aliases; nothing is emitted to learn it (a few built-ins such as `sleep` and `channel` are special-cased by name first). These can be bound without emitting.
+- *By the type of the receiver:* `x.m(...)`. The target is `methods[(type key, m)]`, or `std_sig` for built-in types, or a field holding a closure, and the type of `x` is only known by calling `self.expr(obj)`, which emits the code of `x`. Binding these without emitting needs the checker of task 3.1 (typing an expression without emitting), so they cannot be bound before it exists.
+
+So task 2.2 splits in two: name-based calls can be bound now, receiver-based calls only after 3.1.
+
+**Step 3.1, first forms (type_of).** `src/codegen_x64/checker.rs` holds `type_of(&self, expr, want) -> Option<Ty>`, which types literals, identifiers (locals, globals, constants, functions as values), record field access and calls of functions declared by name (`f(x)`, `module.f(x)`), text literals and interpolations, comparisons, `and`, `or` and `not` without emitting; everything else answers `None`. `Compiler::expr` asserts in builds with debug assertions (all tests) that emission gives the same type. Running it on the examples found two real divergences, both the same cause: the built-in conversions (`int(...)`, `text`, other integer type names) win over a user function with the same name in the calling package (for example `db.int` called as `int(n)` inside `db`). They are excluded from `type_of`. Not covered yet: arithmetic and other operators, indexing, lists, maps, records, lambdas, `if`/`match`, methods, generics, `await`, `try`, `new`, `shared`. The check proves agreement only on code the suite compiles.

@@ -1,0 +1,71 @@
+// Generics and interfaces: write code once, use it with many types.
+//
+//   zila examples/generics.zila -o generics.exe
+//
+// <T> is a placeholder for a type. The compiler works out T from the arguments and
+// makes one copy of the code for each type you use. An interface lists methods, and a
+// bound (<T: Printable>) says "any type that has these methods".
+
+package main
+
+type Printable = interface
+    func to_text(self) -> text
+end
+
+type Point = record
+    x: int
+    y: int
+end
+
+type Dog = record
+    name: text
+end
+
+func (p: Point) to_text() -> text
+    return "({p.x}, {p.y})"
+end
+
+func (d: Dog) to_text() -> text
+    return "dog {d.name}"
+end
+
+func (n: int) to_text() -> text
+    return "the number {n}"
+end
+
+type Stack<T> = record
+    items: []T
+end
+
+func (s: Stack<T>) push(x: T)
+    s.items.add(x)
+end
+
+func (s: Stack<T>) pop() -> T
+    return s.items.take()
+end
+
+func first<T>(items: []T) -> T
+    return items[0]
+end
+
+func show<T: Printable>(x: T)
+    print("showing {x.to_text()}")
+end
+
+func main()
+    let numbers: Stack<int> = Stack { items: [] }
+    numbers.push(3)
+    numbers.push(4)
+    print("popped {numbers.pop()}")
+
+    let names: Stack<text> = Stack { items: ["ada"] }
+    names.push("alan")
+    print("popped {names.pop()}")
+
+    print("first of two lists: {first([10, 20])} and {first(["x", "y"])}")
+
+    show(Point { x: 1, y: 2 })
+    show(Dog { name: "rex" })
+    show(42)
+end

@@ -61,6 +61,7 @@ mod output;
 mod runtime;
 mod threads;
 mod typed;
+mod checker;
 use typed::TypedProgram;
 use analysis::*;
 use fold::*;
@@ -796,20 +797,11 @@ pub struct Compiler {
     tmpl_methods: HashMap<String, Vec<(String, FuncDecl, u32)>>,
     /// Type parameters bound to types while an instance is compiled.
     bindings: HashMap<String, Ty>,
-    /// Instance of a generic record -> (template, type arguments).
-    inst_args: HashMap<String, (String, Vec<Ty>)>,
-    /// (module, function, type arguments) -> instance name.
-    inst_funcs: HashMap<(String, String, String), String>,
-    /// Instances waiting to be compiled.
-    pending: Vec<Pending>,
     /// All signatures are known (bounds can be checked).
     declared: bool,
     /// Bound checks met before all methods were known: (type, interface, module, line).
     deferred_bounds: Vec<(Ty, String, u32)>,
-    inst_count: usize,
     custom_allocator: Option<crate::noalloc::CustomAllocatorInfo>,
-    /// Hash and equality thunks of general map keys, by key type: (hash symbol, equality symbol).
-    map_thunks: BTreeMap<String, (String, String)>,
     /// Map key types met before every method was known: (key type, line, module).
     deferred_keys: Vec<(Ty, u32, String)>,
 }
@@ -881,14 +873,9 @@ impl Compiler {
             tmpl_recs: HashMap::new(),
             tmpl_methods: HashMap::new(),
             bindings: HashMap::new(),
-            inst_args: HashMap::new(),
-            inst_funcs: HashMap::new(),
-            pending: Vec::new(),
             declared: false,
             deferred_bounds: Vec::new(),
-            inst_count: 0,
             custom_allocator: None,
-            map_thunks: BTreeMap::new(),
             deferred_keys: Vec::new(),
         }
     }
@@ -1851,7 +1838,7 @@ end
     fn rec_field_decls(&self, r: &str) -> Option<(&str, &[Field])> {
         let (m, f) = self.tp.rec_decls.get(r)?;
         if f.is_empty() {
-            if let Some((tq, _)) = self.inst_args.get(r) {
+            if let Some((tq, _)) = self.tp.inst_args.get(r) {
                 if let Some((tm, td, _)) = self.tmpl_recs.get(tq) {
                     if let TypeBody::Record(fs) = &td.body {
                         return Some((tm.as_str(), fs.as_slice()));

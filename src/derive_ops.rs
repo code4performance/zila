@@ -212,7 +212,7 @@ impl Compiler {
         sig.public = true;
         self.tp.methods.insert(key.clone(), sig.clone());
         self.tp.derived.insert(key);
-        self.pending.push(Pending { module, decl: fd, bindings: binds, line: self.line });
+        self.tp.pending.push(Pending { module, decl: fd, bindings: binds, line: self.line });
         Ok(Some(sig))
     }
 
@@ -520,12 +520,12 @@ impl Compiler {
     /// The hash and equality thunks the runtime map calls for keys of type `k`.
     pub(super) fn map_thunks_for(&mut self, k: &Ty) -> R<(String, String)> {
         let key = ty_full(k);
-        if let Some(p) = self.map_thunks.get(&key) {
+        if let Some(p) = self.tp.map_thunks.get(&key) {
             return Ok(p.clone());
         }
         let id = mangle(&key);
         let pair = (format!("B_maphash_{}", id), format!("B_mapeq_{}", id));
-        self.map_thunks.insert(key, pair.clone());
+        self.tp.map_thunks.insert(key, pair.clone());
         self.gen_thunk(&pair.0, k, Cap::Hash)?;
         self.gen_thunk(&pair.1, k, Cap::Eq)?;
         Ok(pair)

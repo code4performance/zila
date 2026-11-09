@@ -1,0 +1,4 @@
+# GitHub's language bar (Linguist): the documentation site is HTML written by hand and would
+# otherwise outweigh the code. Zila Lang itself is not a language Linguist knows yet; see
+# editors/linguist/README.md.
+docs/** linguist-documentation

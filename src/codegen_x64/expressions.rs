@@ -4,7 +4,18 @@ use super::*;
 
 impl Compiler {
     /// Evaluates `e`. The result is in rax; heap values are owned (+1).
+    /// Compiles `e`, leaving its value in `rax`, and returns its type. In builds with debug assertions
+    /// the type is checked against `type_of` (see `checker.rs`).
     pub(super) fn expr(&mut self, e: &Expr, want: Option<&Ty>) -> R<Ty> {
+        let typed = if cfg!(debug_assertions) { self.type_of(e, want) } else { None };
+        let r = self.expr_emit(e, want);
+        if let (Some(t), Ok(got)) = (&typed, &r) {
+            assert!(t == got, "type_of says {} but emission gives {} (line {})", t.show(), got.show(), e.line);
+        }
+        r
+    }
+
+    fn expr_emit(&mut self, e: &Expr, want: Option<&Ty>) -> R<Ty> {
         self.line = e.line;
         if self.opt && matches!(e.kind, ExprKind::Binary { .. } | ExprKind::Unary { .. }) {
             // literals are typed from the expected type, as the code generator would do

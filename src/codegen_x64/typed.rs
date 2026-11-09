@@ -31,4 +31,14 @@ pub(super) struct TypedProgram {
     pub(super) derived: HashSet<(String, String)>,
     /// functions marked `#[export]`
     pub(super) exported: std::collections::HashSet<String>,
+    // ---- generics: what the instantiations of the whole program decided ----
+    /// Instance of a generic record -> (template, type arguments).
+    pub(super) inst_args: HashMap<String, (String, Vec<Ty>)>,
+    /// (module, function, type arguments) -> instance name.
+    pub(super) inst_funcs: HashMap<(String, String, String), String>,
+    /// Instances waiting to be compiled.
+    pub(super) pending: Vec<Pending>,
+    pub(super) inst_count: usize,
+    /// Hash and equality thunks of general map keys, by key type: (hash symbol, equality symbol).
+    pub(super) map_thunks: BTreeMap<String, (String, String)>,
 }

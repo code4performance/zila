@@ -7,6 +7,7 @@ use std::process::exit;
 fn usage() -> ! {
     eprintln!("usage: zila <file.zila> [-o output.exe] [--build] [--ast | --tokens | --asm | --run]");
     eprintln!("       zila run <file.zila | -> [--no-opt]      (build, run and delete; - reads the program from standard input)");
+    eprintln!("       zila repl | zila -i                      (an interactive session: type code, see the result)");
     eprintln!("       zila eval <code | -> | zila -e <code>    (run statements given inline or on standard input)");
     eprintln!("       zila --os <boot.zila> <kernel.zila> -o <disk.img>");
     eprintln!("       zila --docs");
@@ -87,6 +88,9 @@ fn main() {
         zila::comptime::set_dump(true);
     }
     zila::warn::print_to_stderr(true);
+    if mode == Mode::Repl {
+        exit(zila::repl::run(opts.optimize));
+    }
     let path = opts.path.clone().unwrap_or_else(|| usage());
     if mode == Mode::Fmt || mode == Mode::FmtCheck {
         let mut files = vec![path];

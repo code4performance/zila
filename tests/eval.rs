@@ -130,32 +130,14 @@ fn a_missing_snippet_is_a_usage_error() {
 
 #[test]
 fn an_inline_filter_reads_piped_lines() {
-    let code = "use fs
-let r = fs.stdin()
-while not try await r.at_end()
-    print(\"> {try await r.read_line()}\")
-end";
-    let r = zila(&["-e", code], "a
-b
-");
-    assert_eq!((r.out.as_str(), r.code), ("> a
-> b
-", 0), "{}", r.err);
+    let code = "use fs\nlet r = fs.stdin()\nwhile not try await r.at_end()\n    print(\"> {try await r.read_line()}\")\nend";
+    let r = zila(&["-e", code], "a\nb\n");
+    assert_eq!((r.out.as_str(), r.code), ("> a\n> b\n", 0), "{}", r.err);
 }
 
 #[test]
 fn a_program_run_from_standard_input_finds_its_own_input_empty() {
-    let src = "package main
-
-use fs
-
-func main() -> error
-    let r = fs.stdin()
-    print(try await r.at_end())
-    return
-end
-";
+    let src = "package main\n\nuse fs\n\nfunc main() -> error\n    let r = fs.stdin()\n    print(try await r.at_end())\n    return\nend\n";
     let r = zila(&["run", "-"], src);
-    assert_eq!((r.out.as_str(), r.code), ("true
-", 0), "{}", r.err);
+    assert_eq!((r.out.as_str(), r.code), ("true\n", 0), "{}", r.err);
 }

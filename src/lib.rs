@@ -21,6 +21,7 @@ pub mod pe;
 pub mod prune;
 pub mod refcheck;
 pub mod regalloc;
+pub mod repl;
 pub mod run;
 pub mod sqlblock;
 pub mod testrun;

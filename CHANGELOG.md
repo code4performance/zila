@@ -18,6 +18,7 @@ The version lives in `Cargo.toml` and at the top of `README.md`. To release: mov
 - The generated assembly is deterministic: two compiles of the same program no longer list the record and enum helper procedures in a different order.
 
 ### Added
+- `zila repl` (also `zila -i`): an interactive session. Entries build on each other; a single expression prints its value; blocks continue on the next lines; a failed entry is discarded; `:help`, `:show`, `:reset`, `:quit`. Each entry re-runs the whole session and shows only its new output, so side effects of earlier entries repeat (OpenSpec change `add-repl`).
 - `fs.stdin()`: a reader over standard input with the methods of a file reader (`read_line`, `read`, `read_all`, `at_end`, `close`), on Windows and Linux, from a pipe, a file or a terminal. It waits for the whole program while it reads. `fs.Reader` has a new field `std` (OpenSpec change `add-stdin-reader`).
 - `zila run <file>` (the same as `--run`), `zila eval "<code>"` / `zila -e "<code>"` to run statements given inline, and `zila run -` / `zila eval -` to read the program from standard input. Errors in a snippet name the snippet's own lines (OpenSpec change `add-run-and-eval`).
 - GitHub Actions workflow (`.github/workflows/ci.yml`): build, `cargo clippy -D warnings` and every test target except `async` on Windows and Linux, and the `async` tests as a separate job.

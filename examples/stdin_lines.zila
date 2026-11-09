@@ -10,13 +10,18 @@ use fs
 use text
 
 func main() -> error
+    print("Type something, then press ENTER:\n\n")
+
     let r = fs.stdin()
     var n = 0
     while not try await r.at_end()
         let line = try await r.read_line()
+        if text.upper(line) == "EXIT"
+            break
+        end
         n += 1
         print("{n}: {text.upper(line)}")
     end
-    print("{n} lines")
+    print("Exiting, {n} lines read.")
     return
 end

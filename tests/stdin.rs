@@ -111,22 +111,15 @@ fn a_slow_producer_is_waited_for() {
 fn closing_a_reader_does_not_close_standard_input() {
     // The first reader buffers the small input and is closed; the second one must read from the
     // same standard input without an error (it finds the end, the first reader took the data).
-    let src = "package main
-
-use fs
-
-func main() -> error
-    let a = fs.stdin()
-    print(try await a.read_line())
-    await a.close()
-    let b = fs.stdin()
-    print(try await b.at_end())
-    return
-end
-";
-    let r = run(src, b"one
-");
-    assert_eq!((r.out.as_str(), r.code), ("one
-true
-", 0), "{}", r.err);
+    let src = "package main\n\nuse fs\n\nfunc main() -> error\n    let a = fs.stdin()\n    print(try await a.read_line())\n    await a.close()\n    let b = fs.stdin()\n    print(try await b.at_end())\n    return\nend\n";
+    let r = run(src, b"one\n");
+    assert_eq!((r.out.as_str(), r.code), ("one\ntrue\n", 0), "{}", r.err);
 }
+
+#[test]
+fn utf8_text_arrives_intact_and_survives_text_functions() {
+    let src = "package main\n\nuse fs\nuse text\n\nfunc main() -> error\n    let r = fs.stdin()\n    let line = try await r.read_line()\n    print(\"{line} {text.upper(line)} {line.char_count()}\")\n    return\nend\n";
+    let r = run(src, "a\u{e7}\u{e3}o\n".as_bytes());
+    assert_eq!((r.out.as_str(), r.code), ("a\u{e7}\u{e3}o A\u{e7}\u{e3}O 4\n", 0), "{}", r.err);
+}
+

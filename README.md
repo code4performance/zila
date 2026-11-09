@@ -110,13 +110,14 @@ flowchart LR
 - **Concurrency**: lightweight tasks, channels, `async`/`await`, timers, files, TCP, UDP, DNS and TLS on one scheduler written in Zila Lang; OS threads with `shared` and `sync.Mutex` (Windows).
 - **Compile-time code generation** (`comptime`, `#[derive]`) and raw `asm`, C interop with `extern`.
 - **Libraries** written in Zila Lang: `text`, `list`, `format`, `fs` (files and standard input), `net`, `tls`, `crypto`, and the packages in [`packages/`](packages): `json`, `web` (`use web`), an HTTP server and client, `ai`, `mcp`, `rag`, `db`, `postgres`, `sqlserver` (see [docs/databases.html](docs/databases.html), with `sql` blocks) and `ui` (native windows on Windows, drawn over X11 on Linux).
+- **Interactive and inline**: `zila repl` is a prompt where entries build on each other (each entry re-runs the session, so side effects repeat), `zila -e` runs code given on the command line, `zila run -` reads a program from a pipe.
 - **Tooling**: `--fmt`, `--test`, a package manager (`zila.toml`, `zila.lock`), a language server and a VS Code extension.
 - **Zila Lang OS**: a bootable 64-bit operating system whose boot sector and kernel are written in Zila Lang (18 KB, boots in QEMU). See [docs/os.html](docs/os.html).
 - **More than 1,000 automated tests**, and a documentation site that tests keep in step with the code.
 
 ## Where Zila Lang is going
 
-Every language change is an [OpenSpec](openspec) change: open ones live in `openspec/changes/`, finished ones in `openspec/changes/archive/`, and their result is the living specification in `openspec/specs/`. **There are no open changes today.** A test keeps this section from naming a change that is not open.
+Every language change is an [OpenSpec](openspec) change: open ones live in `openspec/changes/`, finished ones in `openspec/changes/archive/`, and their result is the living specification in `openspec/specs/`. **Two changes are built and waiting for a manual check on a real terminal:** `add-repl` (the interactive `zila repl`) and `fix-console-input-encoding` (UTF-8 for text typed at a Windows console). A test keeps this section from naming a change that is not open.
 
 **Known gaps** (each is a place where you can help):
 
@@ -156,6 +157,7 @@ cargo build --release          # the tool is target/release/zila
 zila program.zila -o program.exe              # compile to a native Windows executable
 zila program.zila --target linux -o program   # compile to a static Linux ELF
 zila run program.zila                         # compile, run, delete (same as --run)
+zila repl                                     # an interactive session (also: zila -i)
 zila -e 'print(1 + 2)'                        # run code given right here, no file
 zila eval - <<'EOF'                           # ...or from a pipe or here-document
 print("hi")

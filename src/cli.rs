@@ -5,7 +5,7 @@
 //! entry and nothing else.
 
 /// Every option `zila` accepts.
-pub const FLAGS: &[&str] = &["--ast", "--tokens", "--asm", "--run", "--build", "-o", "--os", "--docs", "--no-opt", "--no-prune", "--explain-link", "--fmt", "--fmt-check", "--test", "--target", "--lsp", "--comptime-timeout", "--no-comptime-cache", "--comptime-dump", "--init", "--add", "--as", "--fetch", "--tidy", "--update", "--offline", "-e"];
+pub const FLAGS: &[&str] = &["--ast", "--tokens", "--asm", "--run", "--build", "-o", "--os", "--docs", "--no-opt", "--no-prune", "--explain-link", "--fmt", "--fmt-check", "--test", "--target", "--lsp", "--comptime-timeout", "--no-comptime-cache", "--comptime-dump", "--init", "--add", "--as", "--fetch", "--tidy", "--update", "--offline", "-e", "-i"];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Mode {
@@ -17,6 +17,8 @@ pub enum Mode {
     Run,
     /// Run code given on the command line or standard input (`eval`, `-e`).
     Eval,
+    /// An interactive session (`repl`, `-i`).
+    Repl,
     Build,
     /// Build a bootable disk image from a boot file and a kernel file.
     Os,
@@ -89,6 +91,8 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
             "--tokens" => o.mode = Mode::Tokens,
             "--asm" => o.mode = Mode::Asm,
             "--run" | "run" if o.path.is_none() || a == "--run" => o.mode = Mode::Run,
+            "repl" if o.path.is_none() && o.mode != Mode::Repl => o.mode = Mode::Repl,
+            "-i" => o.mode = Mode::Repl,
             "eval" if o.path.is_none() && o.mode != Mode::Eval => o.mode = Mode::Eval,
             "-e" => {
                 i += 1;
@@ -252,6 +256,14 @@ mod tests {
         let e = p(&["eval", "-"]).unwrap();
         assert_eq!((e.mode, e.path.as_deref()), (Mode::Eval, Some("-")));
         assert!(p(&["-e"]).is_err());
+    }
+
+    #[test]
+    fn repl_is_a_word_or_i_and_needs_no_file() {
+        assert_eq!(p(&["repl"]).unwrap().mode, Mode::Repl);
+        assert_eq!(p(&["-i"]).unwrap().mode, Mode::Repl);
+        let r = p(&["repl", "--no-opt"]).unwrap();
+        assert_eq!((r.mode, r.optimize, r.path), (Mode::Repl, false, None));
     }
 
     #[test]

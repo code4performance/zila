@@ -29,6 +29,7 @@ extern "system" func ReadFile(handle: usize, buffer: *u8, count: u32, done: usiz
 extern "system" func WriteFile(handle: usize, buffer: *u8, count: u32, done: usize, overlapped: *task.Op) -> i32
 extern "system" func CloseHandle(handle: usize) -> i32
 extern "system" func GetStdHandle(n: i32) -> usize
+extern "system" func SetConsoleCP(code_page: u32) -> i32
 extern "system" func GetFileSizeEx(handle: usize, size: *long) -> i32
 extern "system" func MultiByteToWideChar(codepage: u32, flags: u32, source: *u8, source_len: i32, dest: *u8, dest_len: i32) -> i32
 
@@ -216,6 +217,12 @@ end
 // a file reader. Unlike files it waits for the whole program (other tasks do not run while it
 // waits for data), and closing it does not close standard input.
 pub func stdin() -> Reader
+    // A terminal hands over what is typed in its input code page (CP850 and the like, where
+    // `ç` is one byte that is not UTF-8). Programs run with UTF-8 output, so ask for UTF-8 input
+    // too; when standard input is not a console this does nothing.
+    unsafe
+        SetConsoleCP(65001)
+    end
     let f = File{ handle: 0, open: false }
     return Reader{ file: f, path: "standard input", offset: 0, buf: bufio.input(), reads: 0, std: true }
 end

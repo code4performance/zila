@@ -50,6 +50,7 @@ cargo test</code></pre>
 ./target/release/zila examples/hello.zila --run          <span class="cm"># compile, run, delete the executable</span>
 ./target/release/zila run examples/hello.zila            <span class="cm"># the same as --run, as a subcommand</span>
 ./target/release/zila -e 'print(1 + 2)'                  <span class="cm"># run code given right here, no file</span>
+./target/release/zila repl                               <span class="cm"># an interactive session</span>
 ./target/release/zila examples/async.zila -o async.exe   <span class="cm"># compile to a native executable</span></code></pre>
 
       <dl class="cli">
@@ -77,6 +78,19 @@ func double(n: int) -&gt; int
 end
 print(double(21))
 EOF</code></pre></dd>
+
+        <dt>-i</dt>
+        <dd>Starts an interactive session (also written <code>repl</code>): a <code>zila&gt;</code> prompt reads a statement, a declaration (<code>func</code>, <code>type</code>, <code>use</code>) or a single expression, runs it, and prints the result. An expression such as <code>1 + 2</code> prints its value without <code>print</code>. A block (<code>if</code>, <code>for</code>, <code>func</code>, ...) continues on the next lines, with the prompt <code>...&gt;</code>, until it is complete. Variables, functions, types and imports stay for the rest of the session; an entry that does not compile, or ends with an error, is reported and forgotten. Commands: <code>:help</code>, <code>:show</code> (the session's code), <code>:reset</code> and <code>:quit</code> (or Ctrl-D, Ctrl-Z on Windows). Line editing and history are those of your terminal. Piped input works too, with no prompts.
+        <p><strong>The limit.</strong> Zila compiles to machine code, so there is no live interpreter to keep state in: each entry builds and runs the <em>whole session</em> again and shows only the output after what you had already seen. Earlier entries therefore run again with every new one, and their side effects (writing a file, a network call, a database insert) repeat. Use <code>:show</code> to see what will run and <code>:reset</code> to start over.</p>
+<pre><code>$ zila repl
+zila&gt; let x = 20
+zila&gt; x + 22
+42
+zila&gt; func double(n: int) -&gt; int
+...&gt;     return n * 2
+...&gt; end
+zila&gt; double(x)
+40</code></pre></dd>
 
         <dt>-o output.exe</dt>
         <dd>Compiles the file to a native Windows x86-64 executable (also written <code>--build</code>). The compiler writes the executable itself, so no other tool (no Visual Studio) is needed. The resulting program has no runtime to install. See <a href="native.html">Native compilation</a> for what it supports.</dd>

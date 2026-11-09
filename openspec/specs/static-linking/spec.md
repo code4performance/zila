@@ -51,3 +51,14 @@ For each standard library with a Linux layer, every public function, type and gl
 #### Scenario: A fixed difference
 - **WHEN** a listed difference is removed from the code but not from the list
 - **THEN** the parity test fails asking to remove the entry
+
+### Requirement: Output depends only on the program and the flags
+Compiling the same program with the same flags and target SHALL always give the same assembly text, with the same procedures in the same order, whatever the order in which the compiler's internal tables happen to be walked.
+
+#### Scenario: Two compiles
+- **WHEN** the same file is compiled twice with the same flags and target
+- **THEN** the two assembly texts are identical
+
+#### Scenario: Another target or flags
+- **WHEN** the file is compiled for `--target linux` or with `--no-opt`
+- **THEN** each of those is also identical across two compiles

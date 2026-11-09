@@ -21,3 +21,7 @@ None.
 - `src/codegen_x64/` (the checker output type and its consumers; the layout, calls, generics, expressions and statements modules are the main work), a new cache module, `src/cli.rs`/`src/main.rs` (`--no-cache`), `tests/` (byte-identical output for every example with and without the cache, re-check counts), `docs/packages.html`, `docs/native.html`.
 - No syntax change and no change to the executables. Prerequisite already done in `language-design-review`: pruning, `--explain-link`, the module split and the list of `unreachable!()` sites (none known to be reachable).
 - Non-goals: dynamic loading of Zila Lang packages, a stable Zila Lang-to-Zila Lang ABI, caching machine code per package (generic instantiations make per-package machine code depend on the program), and parallel checking.
+
+## Outcome
+
+Only the first part was done: the declaration tables moved into `TypedProgram`, and code generation became deterministic (it walked hash maps in an unspecified order, so two runs wrote the same lines in a different order, which made byte-identical output impossible to check). The rest of the typed form moved to `split-checker-from-emission` and the cache is a later change, because the cache needs a typed form of function bodies that does not exist yet. The incremental-build requirement was dropped from the `static-linking` delta (it is kept in the design of `split-checker-from-emission`); the delta now holds the requirement this change did deliver, deterministic output, with its test.

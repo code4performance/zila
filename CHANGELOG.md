@@ -7,11 +7,16 @@ The version lives in `Cargo.toml` and at the top of `README.md`. To release: mov
 
 ## [Unreleased]
 
-### Added
-- Typed pipeline and cache (`openspec/changes/add-typed-pipeline-and-cache`, in progress).
-
 ### Changed
-- `zila` command rename (`openspec/changes/rename-command-to-zila`, in progress).
+- The command is now `zila` (before, its name ended in a suffix from the lexer-and-parser days); the VS Code extension starts `zila --lsp` by default (extension version 0.5.0).
+- `zila.ebnf` and `zila-ffi.md` moved to `docs/`.
+- The language's purpose is described more broadly in the README and the site: AI client and services, databases, web, IoT and mobile (the last two are targets), extensible through packages, open source.
+
+### Fixed
+- The generated assembly is deterministic: two compiles of the same program no longer list the record and enum helper procedures in a different order.
+
+### Internal
+- Declaration tables of the code generator live in `TypedProgram` (`src/codegen_x64/typed.rs`). The rest of the typed form is the change `split-checker-from-emission`; the cache of checked packages comes after it.
 
 ## [0.1.0] - 2026-11-08
 

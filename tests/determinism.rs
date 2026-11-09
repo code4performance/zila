@@ -12,7 +12,7 @@ fn compiling_a_program_twice_gives_the_same_assembly() {
     let mut names = Vec::new();
     for entry in std::fs::read_dir("examples").unwrap() {
         let path = entry.unwrap().path();
-        if path.extension().map_or(true, |e| e != "zila") {
+        if path.extension().is_none_or(|e| e != "zila") {
             continue;
         }
         let src = std::fs::read_to_string(&path).unwrap();

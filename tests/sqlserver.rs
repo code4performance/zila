@@ -287,7 +287,7 @@ fn an_unsupported_encryption_mode_is_refused_before_connecting_and_the_password_
 #[test]
 fn rows_come_back_through_the_fake_login_and_a_big_result_spans_many_packets() {
     let body = "    let conn = try sqlserver.open(url)\n    let ints = try db.query(int, conn, \"ints\")\n    print(ints.len, ints[0] + ints[1] + ints[2])\n    let big = try db.query(text, conn, \"big\")\n    print(big.len, big[0].len, big[4999] == big[0])\n    let n = try conn.exec(\"update\")\n    print(n)\n";
-    let src = program(body).replace("{port}", "{port}");
+    let src = program(body);
     assert_eq!(run(&src), "3 303\n5000 200 true\n3\n");
 }
 
@@ -345,7 +345,7 @@ fn typed_program(url: &str) -> String {
 fn strict_encryption_tds_8_reads_typed_rows_parameters_and_maps_unique_violations() {
     let Some(u) = env_url("ZILA_TEST_SQLSERVER_STRICT") else { return };
     let out = run(&typed_program(&u));
-    assert_eq!(out, TYPES_EXPECTED.replace("true\n", "true\n").replace("std.AlreadyExists true", "std.AlreadyExists true"), "{}", out);
+    assert_eq!(out, TYPES_EXPECTED, "{}", out);
 }
 
 #[test]

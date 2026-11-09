@@ -20,7 +20,7 @@ fn pages() -> Vec<Page> {
         .unwrap()
         .filter_map(|e| e.ok())
         .map(|e| e.path())
-        .filter(|p| p.extension().map_or(false, |x| x == "html"))
+        .filter(|p| p.extension().is_some_and(|x| x == "html"))
         .map(|p| Page {
             name: p.file_name().unwrap().to_string_lossy().to_string(),
             html: fs::read_to_string(&p).unwrap().replace("\r\n", "\n"),
@@ -40,7 +40,7 @@ fn has_word(text: &str, word: &str) -> bool {
     text.match_indices(word).any(|(i, _)| {
         let before = text[..i].chars().next_back();
         let after = text[i + word.len()..].chars().next();
-        !before.map_or(false, is_word) && !after.map_or(false, is_word)
+        !before.is_some_and(is_word) && !after.is_some_and(is_word)
     })
 }
 
@@ -463,7 +463,7 @@ fn mentions(text: &str, ext: &str) -> Vec<usize> {
         while let Some(at) = line[from..].find(ext) {
             let end = from + at + ext.len();
             let next = line[end..].chars().next();
-            if !next.map_or(false, |c| c.is_alphanumeric() || c == '_') {
+            if !next.is_some_and(|c| c.is_alphanumeric() || c == '_') {
                 found.push(i + 1);
                 break;
             }
@@ -504,4 +504,38 @@ fn no_tracked_file_uses_the_old_source_extension() {
         }
     }
     assert!(problems.is_empty(), "the old source file extension is still used ({} places):\n{}", problems.len(), problems.join("\n"));
+}
+
+/// Names of the OpenSpec changes that are written and not yet archived.
+fn open_changes() -> Vec<String> {
+    let mut v: Vec<String> = fs::read_dir("openspec/changes")
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_dir())
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .filter(|n| n != "archive")
+        .collect();
+    v.sort();
+    v
+}
+
+fn is_change_name(t: &str) -> bool {
+    const PREFIXES: [&str; 9] = ["add-", "remove-", "restrict-", "split-", "rename-", "use-", "keep-", "redesign-", "language-"];
+    PREFIXES.iter().any(|p| t.starts_with(p)) && t.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
+#[test]
+fn the_readme_roadmap_matches_the_open_openspec_changes() {
+    let readme = fs::read_to_string("README.md").unwrap().replace("\r\n", "\n");
+    let open = open_changes();
+    // A change named in backticks must be one that is open: finished ones are archived and
+    // belong to the changelog, not to the roadmap.
+    let named: Vec<&str> = readme.split('`').skip(1).step_by(2).filter(|t| is_change_name(t)).collect();
+    for n in &named {
+        assert!(open.iter().any(|o| o == n), "README names the change `{}`, which is not open in openspec/changes/", n);
+    }
+    for o in &open {
+        assert!(named.contains(&o.as_str()), "the open change `{}` is not in the README roadmap", o);
+    }
+    assert_eq!(readme.contains("no open changes"), open.is_empty(), "README must say there are no open changes exactly when openspec/changes/ has none");
 }

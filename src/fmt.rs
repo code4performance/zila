@@ -167,7 +167,7 @@ fn render(text: &str, toks: &[Token], comments: &[Comment], layout: &Layout) -> 
             }
             let mut cont = open_count;
             let chain = matches!(toks[ti].tok, Tok::Op(".") | Tok::Op("?."));
-            let after_op = prev_last_tok.map_or(false, |p| match &toks[p].tok {
+            let after_op = prev_last_tok.is_some_and(|p| match &toks[p].tok {
                 Tok::Op(o) => CONTINUING.contains(o),
                 Tok::Kw(k) => CONTINUING.contains(k),
                 _ => false,
@@ -181,6 +181,7 @@ fn render(text: &str, toks: &[Token], comments: &[Comment], layout: &Layout) -> 
             }
             levels[li] = Some((lvl + cont).max(0));
         }
+        #[allow(clippy::needless_range_loop)]
         for k in line.first..=line.last {
             if let Kind::Tok(ti) = elems[k].kind {
                 match &toks[ti].tok {
@@ -218,6 +219,7 @@ fn render(text: &str, toks: &[Token], comments: &[Comment], layout: &Layout) -> 
     let line_of_elem: Vec<usize> = {
         let mut v = vec![0usize; elems.len()];
         for (li, l) in lines.iter().enumerate() {
+            #[allow(clippy::needless_range_loop)]
             for k in l.first..=l.last {
                 v[k] = li;
             }
@@ -248,7 +250,7 @@ fn render(text: &str, toks: &[Token], comments: &[Comment], layout: &Layout) -> 
         let Some(&ea) = tok_elem.get(&a) else { continue };
         let la = line_of_elem[ea];
         let lb = tok_elem.get(&b).map(|&eb| line_of_elem[eb]);
-        if lb.map_or(true, |lb| lb != la) {
+        if lb != Some(la) {
             opens_block[la] = true;
         }
     }
@@ -265,6 +267,7 @@ fn render(text: &str, toks: &[Token], comments: &[Comment], layout: &Layout) -> 
             }
         }
         let mut s = " ".repeat(cols[li]);
+        #[allow(clippy::needless_range_loop)]
         for k in line.first..=line.last {
             let e = elems[k];
             if k > line.first {

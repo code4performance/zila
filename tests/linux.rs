@@ -902,7 +902,7 @@ func main() -> error
 end
 "#;
     let Some((out, code)) = run_linux(src) else { return };
-    assert_eq!(out, format!("no answer from 127.0.0.1\ntook true\nticker ran true\n"));
+    assert_eq!(out, "no answer from 127.0.0.1\ntook true\nticker ran true\n".to_string());
     assert_eq!(code, 0);
 }
 

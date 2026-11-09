@@ -513,7 +513,7 @@ fn parse_mem(inner: &str, size: u8) -> R<Op> {
         // fine: base + index*scale
     }
     // `[reg*2]` style where the only register was parsed as base with scale handled above
-    let sym_only = base.is_none() && index.is_none() && disp.as_ref().map_or(false, |d| d.has_sym());
+    let sym_only = base.is_none() && index.is_none() && disp.as_ref().is_some_and(|d| d.has_sym());
     Ok(Op::Mem(Mem { size, base, index, disp: disp.unwrap_or(Expr::Num(0)), sym_only }))
 }
 
@@ -626,8 +626,7 @@ impl<'a> Asm<'a> {
     fn line(&mut self, line: &str) -> R<()> {
         let mut text = line.trim().to_string();
         // labels: `name:` possibly followed by an instruction
-        loop {
-            let Some(colon) = text.find(':') else { break };
+        while let Some(colon) = text.find(':') {
             let head = &text[..colon];
             if !head.is_empty() && head.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.') && !head.contains(' ') {
                 // not a far pointer like `jmp 0x08:label` (that has a space before the colon-less head)
@@ -672,7 +671,7 @@ impl<'a> Asm<'a> {
             }
             "align" => {
                 let n = self.eval(&parse_expr(&rest_of("align"))?)? as u64;
-                while self.cur % n != 0 {
+                while !self.cur.is_multiple_of(n) {
                     self.emit(&[0]);
                 }
                 return Ok(());
@@ -732,7 +731,7 @@ impl<'a> Asm<'a> {
                 continue;
             }
             if item.starts_with('"') && item.ends_with('"') && item.len() >= 2 {
-                let b = item[1..item.len() - 1].as_bytes().to_vec();
+                let b = item.as_bytes()[1..item.len() - 1].to_vec();
                 self.emit(&b);
                 continue;
             }
@@ -961,7 +960,7 @@ impl<'a> Asm<'a> {
         Ok(())
     }
 
-    fn encode(&mut self, mn: &str, ops: &mut Vec<Op>, ins: &mut Ins) -> R<()> {
+    fn encode(&mut self, mn: &str, ops: &mut [Op], ins: &mut Ins) -> R<()> {
         // ---- no operands ----
         let simple: Option<&[u8]> = match mn {
             "nop" => Some(&[0x90]),
@@ -1208,7 +1207,7 @@ impl<'a> Asm<'a> {
     }
 
     /// Scalar SSE/SSE2 instructions (xmm registers are `Reg` with size 16).
-    fn enc_sse(&mut self, mn: &str, ops: &mut Vec<Op>, ins: &mut Ins) -> R<()> {
+    fn enc_sse(&mut self, mn: &str, ops: &mut [Op], ins: &mut Ins) -> R<()> {
         let (pre, op): (Option<u8>, &[u8]) = sse_op(mn).unwrap();
         let bad = || format!("bad operands for '{}'", mn);
         let is_x = |o: &Op| matches!(o, Op::Reg(r) if r.size == 16);
@@ -1334,7 +1333,7 @@ impl<'a> Asm<'a> {
         rm_of(&ops[0])
     }
 
-    fn enc_alu(&mut self, n: u8, ops: &mut Vec<Op>, ins: &mut Ins) -> R<()> {
+    fn enc_alu(&mut self, n: u8, ops: &mut [Op], ins: &mut Ins) -> R<()> {
         if ops.len() != 2 {
             return Err("expected two operands".into());
         }
@@ -1382,7 +1381,7 @@ impl<'a> Asm<'a> {
         }
     }
 
-    fn enc_mov(&mut self, ops: &mut Vec<Op>, ins: &mut Ins) -> R<()> {
+    fn enc_mov(&mut self, ops: &mut [Op], ins: &mut Ins) -> R<()> {
         if ops.len() != 2 {
             return Err("mov needs two operands".into());
         }
@@ -1483,7 +1482,7 @@ impl<'a> Asm<'a> {
         }
     }
 
-    fn enc_test(&mut self, ops: &mut Vec<Op>, ins: &mut Ins) -> R<()> {
+    fn enc_test(&mut self, ops: &mut [Op], ins: &mut Ins) -> R<()> {
         match (&ops[0], &ops[1]) {
             (dst, Op::Imm(e)) => {
                 let (rm, size) = rm_of(dst)?;
@@ -1513,7 +1512,7 @@ impl<'a> Asm<'a> {
         }
     }
 
-    fn enc_imul(&mut self, ops: &mut Vec<Op>, ins: &mut Ins) -> R<()> {
+    fn enc_imul(&mut self, ops: &mut [Op], ins: &mut Ins) -> R<()> {
         match ops.len() {
             1 => {
                 let (rm, size) = self.one_rm(ops)?;
@@ -1547,7 +1546,7 @@ impl<'a> Asm<'a> {
         }
     }
 
-    fn enc_pushpop(&mut self, push: bool, ops: &mut Vec<Op>, ins: &mut Ins) -> R<()> {
+    fn enc_pushpop(&mut self, push: bool, ops: &mut [Op], ins: &mut Ins) -> R<()> {
         match &ops[0] {
             Op::Reg(r) => {
                 // default operand size: 64 in long mode, 32 in protected, 16 in real
@@ -1590,7 +1589,7 @@ impl<'a> Asm<'a> {
         }
     }
 
-    fn enc_calljmp(&mut self, call: bool, ops: &mut Vec<Op>, ins: &mut Ins) -> R<()> {
+    fn enc_calljmp(&mut self, call: bool, ops: &mut [Op], ins: &mut Ins) -> R<()> {
         match &ops[0] {
             Op::Imm(t) => {
                 ins.op.push(if call { 0xE8 } else { 0xE9 });

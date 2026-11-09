@@ -1,4 +1,4 @@
-use zila::codegen_x64::{generate_asm, generate_asm_for, CompileOptions, Target};
+use zila::codegen_x64::generate_asm;
 use zila::parse_source;
 
 fn check_err(src: &str, want: &str) {

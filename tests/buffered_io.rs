@@ -238,7 +238,7 @@ end
     let Some(out) = with_file("big.txt", src) else { return };
     let size: usize = (0..100000).map(|i| format!("line {}\n", i).len()).sum();
     let sum: usize = (0..100000).map(|i| format!("line {}", i).len()).sum();
-    let max = (size + 65535) / 65536 + 1;
+    let max = size.div_ceil(65536) + 1;
     let lines: Vec<&str> = out.lines().collect();
     assert_eq!(lines[2], format!("lines 100000 {} line 0 line 99999", sum), "{}", out);
     let writes: usize = lines[1].trim_start_matches("writes ").parse().unwrap();

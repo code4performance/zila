@@ -83,11 +83,10 @@ fn needs_expansion(main: &File) -> bool {
                     return true;
                 }
             }
-            DeclKind::Type(_) => {
-                if d.attrs.iter().any(|a| a.name == "derive" && !a.args.is_empty()) {
+            DeclKind::Type(_)
+                if d.attrs.iter().any(|a| a.name == "derive" && !a.args.is_empty()) => {
                     return true;
                 }
-            }
             _ => {}
         }
     }
@@ -381,7 +380,7 @@ impl Expander {
         let main = self.main();
         let uses: Vec<String> = main.uses.iter().map(|u| u[0].clone()).collect();
         let at = format!("{}.zila:{}:", self.main_name, line);
-        let is_derive = |m: &str, n: &str| self.func_in(m, n).map_or(false, |(d, fd)| fd.comptime && has_attr(d, "derive"));
+        let is_derive = |m: &str, n: &str| self.func_in(m, n).is_some_and(|(d, fd)| fd.comptime && has_attr(d, "derive"));
         match &arg.kind {
             ExprKind::Ident(n) => {
                 let mut found: Vec<String> = Vec::new();
@@ -427,7 +426,7 @@ impl Expander {
         let a = attrs.iter().find(|a| a.name == "generated").ok_or("internal error: not generated")?;
         let at = format!("{}.zila:{}:", self.main_name, user_line(line));
         let uses: Vec<String> = self.uni.file(module).map(|f| f.uses.iter().map(|u| u[0].clone()).collect()).unwrap_or_default();
-        let ok = |m: &str, n: &str| self.func_in(m, n).map_or(false, |(_, fd)| fd.comptime);
+        let ok = |m: &str, n: &str| self.func_in(m, n).is_some_and(|(_, fd)| fd.comptime);
         match &a.args[0].kind {
             ExprKind::Ident(n) if ok(module, n) => Ok((module.to_string(), n.clone())),
             ExprKind::Ident(n) => Err(format!("{} the generator `{}` is not a comptime function of this package", at, n)),

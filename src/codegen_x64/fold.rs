@@ -45,7 +45,7 @@ impl Compiler {
     /// have, `fbits` the float width.
     pub(super) fn fold(&self, e: &Expr, t: &Ty, fbits: u8) -> Option<Const> {
         match &e.kind {
-            ExprKind::Int(n) => lit_fits(*n, false, t).then(|| Const::Int(*n as i64)),
+            ExprKind::Int(n) => lit_fits(*n, false, t).then_some(Const::Int(*n as i64)),
             ExprKind::Float(f) => Some(Const::Float(if fbits == 32 { *f as f32 as f64 } else { *f })),
             ExprKind::Bool(b) => Some(Const::Bool(*b)),
             ExprKind::Unary { op, expr } => {
@@ -65,7 +65,7 @@ impl Compiler {
                     let i64t = Ty::int();
                     let (a, b) = (self.fold(lhs, &i64t, fbits)?, self.fold(rhs, &i64t, fbits)?);
                     let r = match (a, b) {
-                        (Const::Int(a), Const::Int(b)) => cmp_op(*op, a.cmp(&b)),
+                        (Const::Int(a), Const::Int(b)) => cmp_op(op, a.cmp(&b)),
                         (Const::Float(a), Const::Float(b)) => match *op {
                             "==" => a == b,
                             "!=" => a != b,
@@ -221,7 +221,7 @@ impl Compiler {
     pub(super) fn rhs_is_simple(&self, e: &Expr) -> bool {
         match &e.kind {
             ExprKind::Int(_) | ExprKind::Float(_) => true,
-            ExprKind::Ident(n) => self.lookup(n).map_or(false, |l| !l.captured),
+            ExprKind::Ident(n) => self.lookup(n).is_some_and(|l| !l.captured),
             _ => false,
         }
     }
@@ -434,7 +434,7 @@ pub(super) fn peephole(code: &[String], ret_label: &str) -> Vec<String> {
             }
         }
         // a final jump to the epilogue that follows
-        if out.last().map_or(false, |l| l.trim() == format!("jmp {}", ret_label)) {
+        if out.last().is_some_and(|l| l.trim() == format!("jmp {}", ret_label)) {
             out.pop();
         }
         cur = out;

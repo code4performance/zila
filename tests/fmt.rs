@@ -235,7 +235,7 @@ fn repo_files() -> Vec<String> {
     for dir in dirs {
         for entry in std::fs::read_dir(dir).unwrap() {
             let p = entry.unwrap().path();
-            if p.extension().map_or(false, |e| e == "zila") {
+            if p.extension().is_some_and(|e| e == "zila") {
                 out.push(p.to_str().unwrap().to_string());
             }
         }
@@ -266,7 +266,7 @@ fn scrambled_indentation_formats_back_to_the_same_text() {
             continue;
         }
         // so do the lines of a `sql` block
-        if zila::lexer::Lexer::new(&src).tokenize().map_or(false, |t| t.iter().any(|t| matches!(t.tok, zila::lexer::Tok::Sql { .. }))) {
+        if zila::lexer::Lexer::new(&src).tokenize().is_ok_and(|t| t.iter().any(|t| matches!(t.tok, zila::lexer::Tok::Sql { .. }))) {
             continue;
         }
         let formatted = format_source(&src).unwrap();

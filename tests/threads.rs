@@ -141,7 +141,7 @@ end
     let r = run(src);
     assert_eq!(r.code, 0);
     let ms: i64 = r.out.trim().parse().unwrap();
-    assert!(ms >= 500 && ms < 950, "two 500 ms threads took {} ms", ms);
+    assert!((500..950).contains(&ms), "two 500 ms threads took {} ms", ms);
 }
 
 #[test]
@@ -962,7 +962,7 @@ fn example_mutex_counter() {
 fn kernel_rejects_spawn_thread() {
     let boot = parse_source("package boot\n\nfunc main()\nend\n").unwrap();
     let kernel = parse_source("package kernel\n\nfunc work()\nend\n\nfunc main()\n    let t = spawn_thread work()\nend\n").unwrap();
-    let e = zila::codegen_x64::build_os(&boot, &kernel).err().expect("the kernel must reject spawn_thread");
+    let e = zila::codegen_x64::build_os(&boot, &kernel).expect_err("the kernel must reject spawn_thread");
     assert!(e.contains("spawn_thread") && e.contains("bare-metal"), "{}", e);
 }
 
@@ -970,7 +970,6 @@ fn kernel_rejects_spawn_thread() {
 fn linux_target_says_threads_are_not_available_yet() {
     let file = parse_source(&main_with("    let t = spawn_thread f(1)")).unwrap();
     let e = zila::codegen_x64::generate_asm_for(&file, &zila::codegen_x64::CompileOptions::default(), zila::codegen_x64::Target::Linux)
-        .err()
-        .expect("expected an error");
+        .expect_err("expected an error");
     assert!(e.contains("not available on Linux"), "{}", e);
 }

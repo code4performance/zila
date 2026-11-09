@@ -62,6 +62,7 @@ pub fn clone_commit(url: &str, commit: &str, tmp: &Path) -> Result<(), String> {
             for e in rd.flatten() {
                 if let Ok(md) = e.metadata() {
                     let mut p = md.permissions();
+                    #[allow(clippy::permissions_set_readonly_false)]
                     p.set_readonly(false);
                     let _ = std::fs::set_permissions(e.path(), p);
                 }
@@ -215,7 +216,7 @@ pub fn effects_report(home: &Path, prev: &Lock, now: &Lock) -> String {
     let mut out = String::new();
     for e in &now.entries {
         let old = prev.for_module(&e.module);
-        if old.map_or(false, |o| o.version == e.version && o.commit == e.commit) {
+        if old.is_some_and(|o| o.version == e.version && o.commit == e.commit) {
             continue;
         }
         let Some(dir) = cache_lookup(home, &e.module, &e.version, &e.commit) else { continue };
@@ -316,12 +317,12 @@ pub fn update(cwd: &Path, home: &Path, name: Option<&str>, offline: bool) -> Res
     }
     let mut changed = Vec::new();
     for d in manifest.deps.iter_mut() {
-        if name.map_or(false, |n| n != d.name) {
+        if name.is_some_and(|n| n != d.name) {
             continue;
         }
         let tags: Vec<String> = ls_remote_tags(&repo_url(&d.git))?.keys().cloned().collect();
         let module = d.module();
-        let newest = tag_versions(&module, &tags).into_iter().filter(|v| path_major(&module).map_or(true, |m| v.major == m) && v.major == d.version.major).last();
+        let newest = tag_versions(&module, &tags).into_iter().rfind(|v| path_major(&module).is_none_or(|m| v.major == m) && v.major == d.version.major);
         if let Some(v) = newest {
             if v > d.version {
                 changed.push(format!("{} {} -> {}", d.name, d.version, v));

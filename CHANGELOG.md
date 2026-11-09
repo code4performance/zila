@@ -13,9 +13,18 @@ The version lives in `Cargo.toml` and at the top of `README.md`. To release: mov
 - The language's purpose is described more broadly in the README and the site: AI client and services, databases, web, IoT and mobile (the last two are targets), extensible through packages, open source.
 
 ### Fixed
+- The README roadmap listed 15 changes as not started that were already built and archived, and a `rename-language` change that does not exist; it now lists only the real gaps. The test count is stated as "more than 1,000".
 - The generated assembly is deterministic: two compiles of the same program no longer list the record and enum helper procedures in a different order.
 
+### Added
+- GitHub Actions workflow (`.github/workflows/ci.yml`): build, `cargo clippy -D warnings` and every test target except `async` on Windows and Linux, and the `async` tests as a separate job.
+- `tests/docs.rs` checks that the README roadmap names only changes that are open in `openspec/changes/`, and says there are none exactly when there are none.
+
+### Removed
+- `docs/Zila.docx`, an old Word copy of the README that no longer matched it (the README is the one source; the file stays in the git history).
+
 ### Internal
+- Clippy is clean with `-D warnings`: about 90 warnings fixed, and a few style lints that would make the code worse are allowed on the item with `#[allow]`.
 - Declaration tables and generic instantiation results of the code generator live in `TypedProgram` (`src/codegen_x64/typed.rs`); `type_of` (`src/codegen_x64/checker.rs`) types expressions without emitting and is checked against emission in every test build; `tools/asm-snapshot.py` compares the compiler's assembly before and after an internal change. The typed tree that emission would consume, and after it the cache of checked packages, are later changes.
 
 ## [0.1.0] - 2026-11-08

@@ -259,7 +259,7 @@ Everything in this list is implemented and covered by tests.
 
 **Engineering you can trust**
 
-- About 390 automated tests (some need Windows, WSL or Node and skip themselves without them). The documentation site is checked against the code by tests, so it cannot quietly go stale. Every design decision lives in [`openspec/`](openspec).
+- More than 1,000 automated tests (some need Windows, WSL or Node and skip themselves without them). The documentation site is checked against the code by tests, so it cannot quietly go stale. Every design decision lives in [`openspec/`](openspec).
 
 ---
 
@@ -292,7 +292,7 @@ Zila Lang is **pre-alpha**. The design is settling, but breaking changes are sti
 | Area | State |
 |---|---|
 | Lexer and parser | ✅ Complete for the grammar in [`docs/zila.ebnf`](docs/zila.ebnf) |
-| Native compiler (Windows x64) | ✅ Works for a large, useful subset. Writes the PE `.exe` itself: no Visual Studio, `ml64` or `link` (the OpenSpec change `add-direct-pe-output` is still open for review) |
+| Native compiler (Windows x64) | ✅ Works for a large, useful subset. Writes the PE `.exe` itself: no Visual Studio, `ml64` or `link` |
 | Bare-metal target and Zila Lang OS | ✅ Boots and runs |
 | `async` / `await`, timers, files, TCP, UDP | ✅ Works |
 | Floating point | ✅ Works: `float`/`f64`/`f32`, `use math`, C calls, on Windows and Linux |
@@ -318,52 +318,21 @@ Zila Lang is **pre-alpha**. The design is settling, but breaking changes are sti
 
 ## How Zila Lang will evolve
 
-Every item below is an [OpenSpec](openspec) change that is already written (proposal, spec with testable scenarios, design and task list) and not started, unless it says otherwise. They refer to each other, so the order is decided as each one is applied. **Every item is a place where you can help.**
+Every language change is an [OpenSpec](openspec) change. The ones that are written and not yet applied live in `openspec/changes/`; the finished ones are in `openspec/changes/archive/`, and what they established is the living specification in `openspec/specs/`. **Today there are no open changes**: everything the earlier roadmap listed (integer aliases, error kinds, `abort`, `pub`, derived `Eq`/`Ord`/`Hash`, copy on write, weak references, reference escape rules, `#[no_alloc]` and `#[allocator]`, threads, web, SQL blocks, the direct PE writer, the interpreter's removal, the VS Code extension) is built and archived. A test (`tests/docs.rs`) keeps this section from naming a change that is not open.
 
-**Foundations: simpler, more honest basics**
+**Known gaps** (each is a task that its change left behind, or an area with no change yet; every one is a place where you can help):
 
-| Change | What it does |
+| Area | What is missing |
 |---|---|
-| `add-int-long-aliases` | `int` is `i32` and `long` is `i64`: aliases of the sized types, with lossless widening (`int` goes into a `long`), 32-bit `int` arithmetic, `int` lengths and indices, and `long` for sizes and times. **Breaking.** |
-| `add-error-kind` | Errors carry a *kind* (`NotFound`, `PermissionDenied`, ...), a message and a cause, so programs stop comparing text. New `use errors`. **The code is in the working tree**; the change is open until archived. **Breaking.** |
-| `remove-panic-add-abort` | `panic` becomes `abort` (there are no exceptions, so the name should not suggest them), integer arithmetic wraps everywhere, and `checked_add` and friends return `int or error`. **Breaking.** |
-| `add-visibility-pub` | `pub`: declarations are private by default, so libraries can hide their helpers. **Breaking.** |
-
-**Values, memory and references**
-
-| Change | What it does |
-|---|---|
-| `add-derived-eq-ord-hash` | `Eq`, `Ord` and `Hash` derived by the compiler for records and enums; `Map` keys can be any hashable type. |
-| `add-copy-on-write` | Lists, maps and text buffers get true value semantics (copy on write), so a record really is copied when assigned. **Breaking.** |
-| `add-weak-refs` | `new` makes the explicit shared object and `Weak<T>` breaks reference cycles (trees with parent links, observers, graphs). |
-| `restrict-ref-escape` | A `ref` can no longer outlive the call that received it; the compiler rejects the use-after-free it used to allow. **Breaking.** |
-| `add-no-alloc-and-allocator` | `#[no_alloc]` (proved by the compiler) and a replaceable `#[allocator]`; the kernel moves its heap behind it. |
-
-**Concurrency**
-
-| Change | What it does |
-|---|---|
-| `remove-async-coloring` | `await` is allowed in any function, so a plain function can call something that waits. Nothing that compiles today stops compiling. |
-| `add-threads-and-shared` | Real parallelism: `shared T` with atomic reference counts, `spawn_thread`, thread-safe channels, one cooperative scheduler per thread. |
-| *(planned, stage 2)* | A work-stealing scheduler that moves tasks between threads, parallel `async`, a thread pool in the library, condition variables and read-write locks; the Linux thread layer (`clone` and `futex`). |
-
-**Metaprogramming and libraries**
-
-| Change | What it does |
-|---|---|
-| `add-web` | `use web`: an HTTP/1.1 server with routing, middleware, JSON helpers and error-to-status mapping, an HTTP client and escaping HTML templates, on top of `net`, `tls` and `json`. |
-| `add-sql-blocks` | **Built.** `sql postgres` and `sql tsql` blocks hold SQL as raw lines, with every `{value}` sent as a bound parameter and the dialect's lexical mistakes found at compile time. A dialect is a declaration in a package, so Oracle, MySQL and SQLite are planned as new packages (a driver and a declaration) with no compiler change. Dialects are lexical profiles, not SQL parsers. |
-
-**Compiler and tooling**
-
-| Change | What it does |
-|---|---|
-| `add-direct-pe-output` | The compiler writes the Windows PE itself. **The code is in the working tree** (`src/pe.rs`); the change is open until its tasks are verified and archived. |
-| `remove-interpreter` | `--run` compiles a temporary native program and runs it, with the same errors as `--build`; the second implementation of the language is gone. **The code is in the working tree**; the change is open until archived. **Breaking** for the library API. |
-| `add-vscode-extension` | **Built and tested**; open for the `.vsix` packaging step and the manual smoke test. |
-| `rename-language` | Prepares a one-command rename of the language (a tool, a leftover test and a rehearsal); the new name is not chosen yet. |
-
-**Further out** (not specified yet): TLS for servers; hover, go to definition, completion and type errors in the language server; macOS (a `ui` for it, then the rest); an ARM64 backend for Apple Silicon, Android and iOS; WebAssembly; and a Zila Lang compiler written in Zila Lang.
+| Compiler structure | The checker (`type_of`) types expressions without emitting, but emission still walks the syntax tree, and the cache of checked packages (incremental builds) does not exist yet. |
+| Threads | The Linux thread layer (`clone`, `futex`), weak references and identity on `shared T`, a work-stealing scheduler that moves tasks between threads, parallel `async`, a thread pool, condition variables and read-write locks. |
+| TLS | TLS for servers, `close_notify` on close, a buffered reader. |
+| Language server | Hover, go to definition, completion and type errors. |
+| VS Code extension | Packaging the `.vsix` and the manual smoke test. |
+| Windows/Linux library parity | `tests/data/std_parity_known.txt` lists the differences between `std/x.zila` and `std/x.linux.zila` that exist today; the list may only shrink. |
+| New targets | macOS (a `ui` for it, then the rest), an ARM64 backend for Apple Silicon, Android and iOS, WebAssembly. Not specified yet. |
+| Further libraries | Oracle, MySQL and SQLite as packages (a driver and a SQL dialect declaration, no compiler change). |
+| Self-hosting | A Zila Lang compiler written in Zila Lang. |
 
 Beyond the compiler, contributions that make a big difference right now:
 **more example programs**, **bug reports with a tiny failing program**, **documentation and tutorials**, and **tests**.

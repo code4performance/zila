@@ -43,7 +43,7 @@ fn dll_file(lib: &str) -> &str {
 }
 
 fn align_up(n: u64, a: u64) -> u64 {
-    (n + a - 1) / a * a
+    n.div_ceil(a) * a
 }
 
 /// The text of an assembler error: at the Zila Lang line of an inline `asm` block when the failing
@@ -153,6 +153,7 @@ pub fn pe_image(asm: &str, imports: &[(String, Vec<String>)], gui: bool) -> Resu
         idata.extend_from_slice(&(first_slots[i] as u32).to_le_bytes()); // FirstThunk: our slots
     }
     idata.extend_from_slice(&[0u8; 20]);
+    #[allow(clippy::needless_range_loop)]
     for i in 0..n {
         for h in &hint_at[i] {
             idata.extend_from_slice(&(rva(*h) as u64).to_le_bytes());

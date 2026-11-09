@@ -412,7 +412,7 @@ fn url(extra: &str) -> String {
 fn plain_open_runs_a_query_with_trust_login() {
     let body = format!(
         "{}    let conn = try postgres.open(base)\n    let rows = try db.query(int, conn, \"select 1\")\n    print(rows[0])\n    print(f.log.len)\n",
-        url("").replace("{port}", "{port}")
+        url("")
     );
     assert_eq!(run(&program("trust", "x", &body)), "1\n0\n");
 }
@@ -471,7 +471,7 @@ fn a_cleartext_password_is_refused_without_tls_and_unknown_methods_are_named() {
 fn parameters_are_bound_not_spliced_and_every_arg_kind_has_a_wire_form() {
     let body = format!(
         "{}    let conn = try postgres.open(base)\n    let rows = try db.query(text, conn, \"echo\", db.int(-7), db.float(1.5), db.bool(true), db.bool(false), db.str(\"x'); drop table t; --\"), db.null(), db.vector([1.0, 2.5]), db.bytes(\"ab\"))\n    print(rows[0])\n",
-        url("").replace("{port}", "{port}")
+        url("")
     );
     assert_eq!(run(&program("trust", "x", &body)), "-7|1.5|t|f|x'); drop table t; --|<null>|[1.0,2.5]|\\x6162\n");
 }
@@ -480,7 +480,7 @@ fn parameters_are_bound_not_spliced_and_every_arg_kind_has_a_wire_form() {
 fn a_failing_statement_leaves_the_connection_usable_and_maps_the_sqlstate() {
     let body = format!(
         "{}    let conn = try postgres.open(base)\n    match conn.exec(\"boom\")\n        ok(n) -> print(\"unexpected success\")\n        err(e) -> print(e.kind.name + \": \" + e.message)\n    end\n    let rows = try db.query(int, conn, \"select 1\")\n    print(rows[0])\n    let n = try conn.exec(\"update\")\n    print(n)\n",
-        url("").replace("{port}", "{port}")
+        url("")
     );
     assert_eq!(run(&program("trust", "x", &body)), "std.AlreadyExists: duplicate key value violates unique constraint (23505)\n1\n3\n");
 }
@@ -489,7 +489,7 @@ fn a_failing_statement_leaves_the_connection_usable_and_maps_the_sqlstate() {
 fn the_row_limit_gives_an_error_and_the_connection_stays_usable() {
     let body = format!(
         "{}    let conn = try postgres.open(base)\n    match db.query(int, conn, \"many\")\n        ok(r) -> print(\"unexpected success\")\n        err(e) -> print(e.kind.name + \": \" + e.message)\n    end\n    let rows = try db.query(int, conn, \"select 1\")\n    print(rows[0])\n",
-        url("&max_rows=5").replace("{port}", "{port}")
+        url("&max_rows=5")
     );
     assert_eq!(run(&program("trust", "x", &body)), "std.Overflow: the statement returned more than 5 rows (the limit of this connection)\n1\n");
 }
@@ -498,7 +498,7 @@ fn the_row_limit_gives_an_error_and_the_connection_stays_usable() {
 fn a_server_that_goes_away_gives_unavailable_on_the_next_statement() {
     let body = format!(
         "{}    let conn = try postgres.open(base)\n    let rows = try db.query(int, conn, \"select 1\")\n    print(rows[0])\n    match db.query(int, conn, \"select 1\")\n        ok(r) -> print(\"unexpected success\")\n        err(e) -> print(e.kind.name)\n    end\n    match db.query(int, conn, \"select 1\")\n        ok(r) -> print(\"unexpected success\")\n        err(e) -> print(e.kind.name)\n    end\n",
-        url("").replace("{port}", "{port}")
+        url("")
     );
     assert_eq!(run(&program("close-after-first", "x", &body)), "1\nstd.Unavailable\nstd.Unavailable\n");
 }
@@ -507,7 +507,7 @@ fn a_server_that_goes_away_gives_unavailable_on_the_next_statement() {
 fn a_slow_statement_does_not_stall_other_tasks() {
     let body = format!(
         "{}    let conn = try postgres.open(base)\n    let ticks = Fake {{ mode: \"\", password: \"\", log: [] }}\n    spawn ticker(ticks)\n    let rows = try db.query(int, conn, \"sleepy\")\n    print(rows[0], ticks.log.len >= 2)\n",
-        url("").replace("{port}", "{port}")
+        url("")
     );
     let src = program("trust", "x", &body).replace(
         "func accept_loop(",

@@ -247,7 +247,7 @@ pub fn check_program(
                             Some(Type::Slice(_)) => {
                                 local_vars.insert(format!("#cow:{}", p.name));
                             }
-                            Some(Type::Named { path, .. }) if path.last().map_or(false, |l| l == "Map") => {
+                            Some(Type::Named { path, .. }) if path.last().is_some_and(|l| l == "Map") => {
                                 local_vars.insert(format!("#cow:{}", p.name));
                             }
                             Some(Type::Named { .. }) => {
@@ -463,6 +463,7 @@ fn validate_realloc_sig(mname: &str, line: u32, fd: &FuncDecl) -> Result<(), Str
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn collect_body_allocs(
     block: &[Stmt],
     cur_mod: &str,
@@ -479,6 +480,7 @@ fn collect_body_allocs(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn collect_stmt_allocs(
     stmt: &Stmt,
     cur_mod: &str,
@@ -575,6 +577,7 @@ fn collect_stmt_allocs(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn collect_expr_allocs(
     expr: &Expr,
     cur_mod: &str,
@@ -880,7 +883,7 @@ fn find_alloc_chain(start_qname: &str, nodes: &HashMap<String, FuncNode>) -> Opt
                     let callee_name = if let Some(cnode) = nodes.get(callee_qname) {
                         cnode.name.clone()
                     } else {
-                        callee_qname.split('.').last().unwrap_or(callee_qname).to_string()
+                        callee_qname.split('.').next_back().unwrap_or(callee_qname).to_string()
                     };
                     let mut next_path = path.clone();
                     next_path.push(callee_name);

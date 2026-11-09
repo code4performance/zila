@@ -385,19 +385,19 @@ end
         for f in fields {
             let ty = self.resolve(&f.ty, m)?;
             let sz = ty.size();
-            off = (off + sz - 1) / sz * sz;
+            off = off.div_ceil(sz) * sz;
             align = align.max(sz);
             out.push((f.name.clone(), ty, off));
             off += sz;
         }
-        let size = ((off + align - 1) / align * align).max(8);
+        let size = (off.div_ceil(align) * align).max(8);
         Ok(RecInfo { size, fields: out })
     }
 
     pub(super) fn func_sig(&mut self, m: &str, fd: &FuncDecl) -> R<Sig> {
         if fd.is_async {
             // spec `ref-parameters`: a task may outlive the caller, so it cannot borrow from it
-            if fd.params.iter().any(|p| p.by_ref) || fd.receiver.as_ref().map_or(false, |r| r.by_ref) {
+            if fd.params.iter().any(|p| p.by_ref) || fd.receiver.as_ref().is_some_and(|r| r.by_ref) {
                 return self.err(format!(
                     "async func '{}' cannot take `ref` parameters: the task works on copies; pass a value or a channel",
                     fd.name
@@ -604,7 +604,7 @@ end
 
     pub(super) fn resolve(&mut self, t: &Type, m: &str) -> R<Ty> {
         match t {
-            Type::Shared(inner) => return self.resolve(inner, m),
+            Type::Shared(inner) => self.resolve(inner, m),
             Type::Named { path, args } => {
                 if path.len() == 1 {
                     let n = path[0].as_str();

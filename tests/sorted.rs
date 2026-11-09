@@ -167,9 +167,7 @@ fn random_operations_agree_with_a_simple_model() {
 
 #[test]
 fn sorted_collections_do_not_leak() {
-    let src = format!(
-        "package main\n\nuse sorted\n\nfunc work(n: int) -> int\n    let m: sorted.SortedMap<text, int> = sorted.map()\n    for i in 0..40\n        m.put(\"k {{i}}\", i)\n    end\n    m.remove(\"k 3\")\n    m.remove(\"k 30\")\n    let s: sorted.SortedSet<text> = sorted.set()\n    for i in 0..20\n        s.add(\"s {{i}}\")\n    end\n    let t = sorted.union(s, sorted.intersect(s, s))\n    var total = m.len + t.len + m.keys().len + m.entries().len\n    for x in t.range(\"s 1\", \"s 5\")\n        total += x.len\n    end\n    if n % 2 == 0\n        m.clear()\n    end\n    return total\nend\n\nfunc main()\n    let warm = work(1)\n    let before = live_objects()\n    var total = 0\n    for i in 0..3000\n        total += work(i)\n    end\n    print(\"grew {{live_objects() - before}} {{total > 0}}\")\nend\n"
-    );
+    let src = "package main\n\nuse sorted\n\nfunc work(n: int) -> int\n    let m: sorted.SortedMap<text, int> = sorted.map()\n    for i in 0..40\n        m.put(\"k {i}\", i)\n    end\n    m.remove(\"k 3\")\n    m.remove(\"k 30\")\n    let s: sorted.SortedSet<text> = sorted.set()\n    for i in 0..20\n        s.add(\"s {i}\")\n    end\n    let t = sorted.union(s, sorted.intersect(s, s))\n    var total = m.len + t.len + m.keys().len + m.entries().len\n    for x in t.range(\"s 1\", \"s 5\")\n        total += x.len\n    end\n    if n % 2 == 0\n        m.clear()\n    end\n    return total\nend\n\nfunc main()\n    let warm = work(1)\n    let before = live_objects()\n    var total = 0\n    for i in 0..3000\n        total += work(i)\n    end\n    print(\"grew {live_objects() - before} {total > 0}\")\nend\n".to_string();
     if let Some(out) = native(&src) {
         assert_eq!(out, "grew 0 true\n");
     }

@@ -501,6 +501,7 @@ impl Rng {
 }
 
 /// A random integer expression of type `t` over the variables `a` and `b` and literals.
+#[allow(clippy::only_used_in_recursion)]
 fn int_expr(r: &mut Rng, depth: u32, t: &str) -> String {
     if depth == 0 || r.below(5) == 0 {
         return match r.below(4) {

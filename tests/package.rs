@@ -629,7 +629,7 @@ fn the_sample_project_builds_offline_from_a_prepared_cache() {
     let lock = Lock::parse(&std::fs::read_to_string(proj.join("zila.lock")).unwrap()).unwrap();
     // the committed lock covers the committed manifest
     for d in &manifest.deps {
-        assert!(lock.for_module(&d.module()).map_or(false, |e| e.version >= d.version), "{} is not locked", d.name);
+        assert!(lock.for_module(&d.module()).is_some_and(|e| e.version >= d.version), "{} is not locked", d.name);
     }
     // the test fills the cache from the repository fixture and records its hash, as --fetch would
     let home = scratch("home");

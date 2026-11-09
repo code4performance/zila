@@ -48,7 +48,7 @@ fn find_qemu() -> Option<String> {
         format!("{}/qemu/qemu-system-x86_64.exe", std::env::var("USERPROFILE").unwrap_or_default()),
         r"C:\Program Files\qemu\qemu-system-x86_64.exe".to_string(),
     ];
-    candidates.into_iter().find(|c| Command::new(c).arg("--version").stdout(Stdio::null()).stderr(Stdio::null()).status().map_or(false, |s| s.success()))
+    candidates.into_iter().find(|c| Command::new(c).arg("--version").stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success()))
 }
 
 #[test]

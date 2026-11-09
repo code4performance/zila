@@ -14,7 +14,7 @@ pub(super) fn stmt_has_defer(s: &Stmt) -> bool {
         StmtKind::Unsafe(b) => block_has_defer(b),
         StmtKind::For { body, .. } | StmtKind::While { body, .. } => block_has_defer(body),
         StmtKind::Expr(e) => expr_has_defer(e),
-        StmtKind::Var(vd) => vd.value.as_ref().map_or(false, expr_has_defer),
+        StmtKind::Var(vd) => vd.value.as_ref().is_some_and(expr_has_defer),
         _ => false,
     }
 }
@@ -22,7 +22,7 @@ pub(super) fn stmt_has_defer(s: &Stmt) -> bool {
 pub(super) fn expr_has_defer(e: &Expr) -> bool {
     match &e.kind {
         ExprKind::If { branches, else_body } => {
-            branches.iter().any(|(_, b)| block_has_defer(b)) || else_body.as_ref().map_or(false, |b| block_has_defer(b))
+            branches.iter().any(|(_, b)| block_has_defer(b)) || else_body.as_ref().is_some_and(|b| block_has_defer(b))
         }
         ExprKind::Match { arms, .. } => arms.iter().any(|a| block_has_defer(&a.body)),
         _ => false,

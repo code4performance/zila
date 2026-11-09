@@ -156,7 +156,7 @@ fn use_json_compiles_for_both_targets() {
     setup();
     compile_to_linux(&file, out.to_str().unwrap(), &CompileOptions::default()).unwrap_or_else(|e| panic!("{}", e));
     let _ = std::fs::remove_file(&out);
-    let _ = build(&src).map(|e| std::fs::remove_file(e));
+    let _ = build(&src).map(std::fs::remove_file);
 }
 
 const SHOW_VALUE: &str = r#"
@@ -505,7 +505,7 @@ match json.parse(text, json.encode<text>(s) ?? "")
     err(e) -> print(e.message)
 end
 "#;
-    assert_eq!(run(&program("", body)), "\"q\\\"uote\\\\ \\n tab\\t nulé 😀 {}\"\n\"ctl\\u0001\\u001f\u{7f}\"\ntrue\n".replace("nulé", "nulé"));
+    assert_eq!(run(&program("", body)), "\"q\\\"uote\\\\ \\n tab\\t nulé 😀 {}\"\n\"ctl\\u0001\\u001f\u{7f}\"\ntrue\n");
 }
 
 // ---------------------------------------------------------------------------

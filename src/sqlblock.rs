@@ -133,7 +133,7 @@ fn build(head: &Attr, attrs: &[Attr]) -> Result<Profile, String> {
                 if v.len() < 2 {
                     return Err(format!("dialect '{}': #[sql_block_comment] needs the opening and the closing text", name));
                 }
-                p.block_comment = Some((v[0].clone(), v[1].clone(), v.get(2).map_or(false, |s| s == "nested")));
+                p.block_comment = Some((v[0].clone(), v[1].clone(), v.get(2).is_some_and(|s| s == "nested")));
             }
             "sql_dollar_quote" => p.dollar = true,
             "sql_multi" => p.multi = true,
@@ -277,7 +277,7 @@ pub fn scan(p: &Profile, raw: &str, first_line: u32) -> Result<Scanned, SqlError
             check_code(p, after_semi, line)?;
             any_code = true;
             let start_line = line;
-            let prev_is_e = !is_ident && p.estring && matches!(out.chars().last(), Some('e' | 'E')) && !out.chars().rev().nth(1).map_or(false, is_word);
+            let prev_is_e = !is_ident && p.estring && matches!(out.chars().last(), Some('e' | 'E')) && !out.chars().rev().nth(1).is_some_and(is_word);
             let backslash = !is_ident && (p.backslash || prev_is_e);
             out.push(open);
             i += 1;
@@ -316,7 +316,7 @@ pub fn scan(p: &Profile, raw: &str, first_line: u32) -> Result<Scanned, SqlError
         // dollar quoting and hand-written `$n`
         if ch == '$' {
             let prev = out.chars().last();
-            if p.dollar && !prev.map_or(false, |x| is_word(x) || x == '$') {
+            if p.dollar && !prev.is_some_and(|x| is_word(x) || x == '$') {
                 let mut j = i + 1;
                 while j < c.len() && is_word(c[j]) && !(j == i + 1 && c[j].is_ascii_digit()) {
                     j += 1;
@@ -346,7 +346,7 @@ pub fn scan(p: &Profile, raw: &str, first_line: u32) -> Result<Scanned, SqlError
                     continue;
                 }
             }
-            if p.placeholder == Placeholder::Dollar && c.get(i + 1).map_or(false, |d| d.is_ascii_digit()) && !prev.map_or(false, is_word) {
+            if p.placeholder == Placeholder::Dollar && c.get(i + 1).is_some_and(|d| d.is_ascii_digit()) && !prev.is_some_and(is_word) {
                 return err(line, format!("'{}' is a placeholder, which the compiler writes: write the value as {{expr}}", p.placeholder.example()));
             }
         }
@@ -436,10 +436,10 @@ pub fn scan(p: &Profile, raw: &str, first_line: u32) -> Result<Scanned, SqlError
                 any_code = true;
                 after_semi = true;
             }
-            '@' if p.placeholder == Placeholder::AtP && matches!(c.get(i + 1), Some('p' | 'P')) && c.get(i + 2).map_or(false, |d| d.is_ascii_digit()) && !out.chars().last().map_or(false, is_word) => {
+            '@' if p.placeholder == Placeholder::AtP && matches!(c.get(i + 1), Some('p' | 'P')) && c.get(i + 2).is_some_and(|d| d.is_ascii_digit()) && !out.chars().last().is_some_and(is_word) => {
                 return err(line, format!("'{}' is a placeholder, which the compiler writes: write the value as {{expr}}", p.placeholder.example()));
             }
-            ':' if p.placeholder == Placeholder::Colon && c.get(i + 1).map_or(false, |d| d.is_ascii_digit()) && out.chars().last() != Some(':') => {
+            ':' if p.placeholder == Placeholder::Colon && c.get(i + 1).is_some_and(|d| d.is_ascii_digit()) && !out.ends_with(':') => {
                 return err(line, format!("'{}' is a placeholder, which the compiler writes: write the value as {{expr}}", p.placeholder.example()));
             }
             '?' if p.placeholder == Placeholder::Question => {

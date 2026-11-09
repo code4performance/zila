@@ -268,7 +268,7 @@ pub fn diagnostics(text: &str) -> Json {
         if file.package == "main" && !crate::comptime::uses_comptime(file) {
             if let Err(e) = crate::codegen_x64::generate_asm(file) {
                 let line = e.strip_prefix("main.zila:").and_then(|r| r.split(':').next()).and_then(|n| n.trim().parse::<i64>().ok()).unwrap_or(1);
-                let line = (line.max(1) - 1) as i64;
+                let line = line.max(1) - 1;
                 let src_line = text.lines().nth(line as usize).unwrap_or("");
                 let end = src_line.chars().count();
                 let start = src_line.chars().take_while(|c| c.is_whitespace()).count();

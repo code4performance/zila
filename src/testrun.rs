@@ -119,7 +119,7 @@ fn run_file(path: &str, optimize: bool) -> Result<Outcome, String> {
         None => {
             let code = out.status.code().unwrap_or(-1);
             // Windows exception codes (a crash) read better in hexadecimal
-            let shown = if code < 0 || code > 255 { format!("0x{:X}", code as u32) } else { code.to_string() };
+            let shown = if !(0..=255).contains(&code) { format!("0x{:X}", code as u32) } else { code.to_string() };
             let how = if code == 101 { "by an abort, " } else { "" };
             println!("run stopped early ({}exit code {})", how, shown);
             Ok(Outcome::Failed)

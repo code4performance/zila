@@ -121,10 +121,10 @@ fn sources(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
     entries.sort();
     for p in entries {
         if p.is_dir() {
-            if !p.file_name().and_then(|n| n.to_str()).map_or(false, |n| n.starts_with('.')) {
+            if !p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with('.')) {
                 sources(&p, out);
             }
-        } else if p.extension().and_then(|x| x.to_str()) == Some("zila") && !p.file_name().and_then(|n| n.to_str()).map_or(false, |n| n.ends_with("_test.zila")) {
+        } else if p.extension().and_then(|x| x.to_str()) == Some("zila") && !p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.ends_with("_test.zila")) {
             out.push(p);
         }
     }
@@ -197,8 +197,7 @@ mod tests {
     #[test]
     fn gained_effects_are_named() {
         let old = Effects::default();
-        let mut new = Effects::default();
-        new.unsafe_code = true;
+        let mut new = Effects { unsafe_code: true, ..Default::default() };
         new.externs.insert("ws2_32".into());
         assert_eq!(new.gained_over(&old), vec!["unsafe".to_string(), "extern (ws2_32)".to_string()]);
         assert!(old.gained_over(&new).is_empty());

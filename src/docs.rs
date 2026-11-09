@@ -27,7 +27,7 @@ impl Block {
     }
 
     pub fn is_excerpt(&self) -> bool {
-        self.label.as_deref().map_or(false, |l| l.contains("(excerpt)"))
+        self.label.as_deref().is_some_and(|l| l.contains("(excerpt)"))
     }
 }
 
@@ -176,7 +176,7 @@ pub fn sync(root: &Path) -> Result<Report, String> {
         .map_err(|e| format!("cannot read {}: {}", docs.display(), e))?
         .filter_map(|e| e.ok())
         .map(|e| e.path())
-        .filter(|p| p.extension().map_or(false, |x| x == "html"))
+        .filter(|p| p.extension().is_some_and(|x| x == "html"))
         .collect();
     pages.sort();
     let mut report = Report { checked: 0, changes: Vec::new() };

@@ -113,7 +113,7 @@ pub(super) const ELF_HEADERS: u64 = 64 + 56;
 /// `entry`, with `LINUX_HEAP` bytes of zeroed memory after it (`p_memsz` beyond `p_filesz`).
 pub fn elf_image(code: &[u8], entry: u64) -> Vec<u8> {
     let filesz = ELF_HEADERS + code.len() as u64;
-    let memsz = (filesz + 4095) / 4096 * 4096 + LINUX_HEAP;
+    let memsz = filesz.div_ceil(4096) * 4096 + LINUX_HEAP;
     let mut out = Vec::with_capacity(filesz as usize);
     out.extend_from_slice(&[0x7F, b'E', b'L', b'F', 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     out.extend_from_slice(&2u16.to_le_bytes()); // ET_EXEC
@@ -184,6 +184,7 @@ pub(super) fn callback_thunk(name: &str, kinds: &[u8], ret: u8) -> String {
             _ => {}
         }
     }
+    #[allow(clippy::needless_range_loop)]
     for i in 0..kinds.len().min(6) {
         if i < 4 {
             t.push_str(&format!("    mov {}, qword ptr [rsp + {}]
@@ -241,7 +242,7 @@ pub fn elf_dynamic_head(imports: &[String], needed: &[String], slots: &[u64], en
     const INTERP: &[u8] = b"/lib64/ld-linux-x86-64.so.2\0";
     let phnum = 5u64;
     let interp_off = 64 + 56 * phnum;
-    let str_off = (interp_off + INTERP.len() as u64 + 7) / 8 * 8;
+    let str_off = (interp_off + INTERP.len() as u64).div_ceil(8) * 8;
     // dynamic strings: "\0", the libraries, then the imported names
     let mut strtab = vec![0u8];
     let name_at = |strtab: &mut Vec<u8>, n: &str| {
@@ -253,15 +254,15 @@ pub fn elf_dynamic_head(imports: &[String], needed: &[String], slots: &[u64], en
     let needed_at: Vec<u32> = needed.iter().map(|n| name_at(&mut strtab, n)).collect();
     let import_at: Vec<u32> = imports.iter().map(|n| name_at(&mut strtab, n)).collect();
     let n = imports.len() as u64;
-    let sym_off = (str_off + strtab.len() as u64 + 7) / 8 * 8;
+    let sym_off = (str_off + strtab.len() as u64).div_ceil(8) * 8;
     let hash_off = sym_off + 24 * (n + 1);
     let hash_len = 4 * (2 + 1 + (n + 1));
-    let rela_off = (hash_off + hash_len + 7) / 8 * 8;
-    let dyn_off = (rela_off + 24 * n + 15) / 16 * 16;
+    let rela_off = (hash_off + hash_len).div_ceil(8) * 8;
+    let dyn_off = (rela_off + 24 * n).div_ceil(16) * 16;
     let dyn_entries = needed.len() as u64 + 11;
     let head_len = dyn_off + 16 * dyn_entries;
-    let filesz = (head_len + 15) / 16 * 16 + code_len;
-    let memsz = (filesz + 4095) / 4096 * 4096 + LINUX_HEAP;
+    let filesz = head_len.div_ceil(16) * 16 + code_len;
+    let memsz = filesz.div_ceil(4096) * 4096 + LINUX_HEAP;
     let at = |off: u64| LINUX_BASE + off;
 
     let mut out = Vec::new();
@@ -346,7 +347,7 @@ pub fn elf_dynamic_head(imports: &[String], needed: &[String], slots: &[u64], en
     dynamic(&mut out, 0, 0); // DT_NULL
     dynamic(&mut out, 0, 0);
     debug_assert_eq!(out.len() as u64, head_len);
-    out.resize(((head_len + 15) / 16 * 16) as usize, 0);
+    out.resize((head_len.div_ceil(16) * 16) as usize, 0);
     out
 }
 

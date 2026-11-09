@@ -150,7 +150,7 @@ impl Compiler {
                     self.e(format!("mov rdx, qword ptr [rbp - {}]", ks));
                     self.e(format!("mov rcx, qword ptr [rbp - {}]", mt));
                     self.e("call rt_map_set");
-                    if kt.as_ref().map_or(false, |k| self.is_rc(k)) {
+                    if kt.as_ref().is_some_and(|k| self.is_rc(k)) {
                         self.release_slot(ks);
                     }
                     self.free(ks);
@@ -422,7 +422,7 @@ impl Compiler {
             self.check_member_vis(m, name, self.tp.pub_types.contains(&q))?;
             return self.enum_construct(&q, idx, &[]);
         }
-        if self.imports.get(&self.cur_mod).map_or(false, |i| i.contains(name)) {
+        if self.imports.get(&self.cur_mod).is_some_and(|i| i.contains(name)) {
             return self.err(format!("module '{}' cannot be used as a value", name));
         }
         if m != self.cur_mod {
@@ -792,7 +792,7 @@ impl Compiler {
                 "operator '{}' is not available for {}: a type parameter only has the methods of its bound{}",
                 op,
                 if matches!(lt, Ty::Param { .. }) { a } else { b },
-                if (matches!(lt, Ty::Param { .. }) && matches!(rt, Ty::Param { .. })) || true { "" } else { "" }
+                ""
             ));
         }
         if lt.is_float() || rt.is_float() {
@@ -1172,8 +1172,8 @@ impl Compiler {
         self.push_scope();
         let (st, own) = self.operand(scrut, None)?;
         let s = if own {
-            let h = self.hidden_local(st.clone());
-            h
+            
+            self.hidden_local(st.clone())
         } else {
             self.slot()
         };
@@ -1474,7 +1474,7 @@ impl Compiler {
             self.alloc(8 * caps.len() as u32, &env_drop);
             self.e(format!("mov qword ptr [rbp - {}], rax", env));
             for (i, (_, l)) in caps.iter().enumerate() {
-                self.load_local("rax", &l);
+                self.load_local("rax", l);
                 if !share_records && matches!(&l.ty, Ty::Rec(r) if !self.tp.shared_recs.contains(r)) {
                     let Ty::Rec(r) = &l.ty else { unreachable!() };
                     self.e("mov rcx, rax");

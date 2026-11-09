@@ -174,7 +174,7 @@ pub fn idents(e: &Expr, out: &mut Vec<String>) {
     let mut w = Walk::default();
     w.expr(e, 0);
     out.extend(w.score.into_keys());
-    out.extend(w.bad.into_iter());
+    out.extend(w.bad);
 }
 
 /// The registers for the variables of `fd`, by name.

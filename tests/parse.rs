@@ -7,7 +7,7 @@ fn all_examples_parse() {
     let mut n = 0;
     for entry in fs::read_dir("examples").unwrap() {
         let path = entry.unwrap().path();
-        if path.extension().map_or(false, |e| e == "zila") {
+        if path.extension().is_some_and(|e| e == "zila") {
             let src = fs::read_to_string(&path).unwrap();
             if let Err(d) = parse_source(&src) {
                 panic!("{}: {}", path.display(), d);

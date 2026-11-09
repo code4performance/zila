@@ -239,7 +239,7 @@ fn driver_file(uni: &super::reflect::Universe, main_module: &str, specs: &[&Call
         let keep = match &d.kind {
             DeclKind::Func(fd) => reached.contains(&fd.name) && fd.name != "main",
             DeclKind::Type(_) => true,
-            DeclKind::Var(v) => !v.mutable && v.value.as_ref().map_or(true, |e| !has_call(e)),
+            DeclKind::Var(v) => !v.mutable && v.value.as_ref().is_none_or(|e| !has_call(e)),
             _ => false,
         };
         if !keep {

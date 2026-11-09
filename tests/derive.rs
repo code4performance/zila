@@ -598,7 +598,7 @@ fn linux_output_for_general_keys_generates() {
     let asm = generate_asm_for(&file, &CompileOptions::default(), Target::Linux).unwrap();
     assert!(asm.contains("B_maphash_") && asm.contains("B_mapeq_") && asm.contains("rt_map_new"));
     let win = generate_asm_for(&file, &CompileOptions::default(), Target::Windows).unwrap();
-    assert!(win.contains("B_maphash_") && win.contains("rt_dv_text_cmp") == false);
+    assert!(win.contains("B_maphash_") && !win.contains("rt_dv_text_cmp"));
 }
 
 #[test]

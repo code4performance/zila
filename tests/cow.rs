@@ -405,7 +405,7 @@ fn random_copy_and_write_programs_agree() {
                 10 => format!("bag.items.push({})", v),
                 11 => format!("bag2.items.push({})", v),
                 12 => "if b.len > 1\n    let t = b.take()\nend".to_string(),
-                _ => format!("bag2.items = a"),
+                _ => "bag2.items = a".to_string(),
             };
             body.push_str(&line);
             body.push('\n');

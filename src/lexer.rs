@@ -301,7 +301,7 @@ impl Lexer {
             gap += 1;
         }
         let start = i;
-        while self.chars.get(i).map_or(false, |c| c.is_ascii_alphanumeric() || *c == '_') {
+        while self.chars.get(i).is_some_and(|c| c.is_ascii_alphanumeric() || *c == '_') {
             i += 1;
         }
         if gap == 0 || i == start || self.chars[start].is_ascii_digit() || !self.blank_from(i) {
@@ -374,7 +374,7 @@ impl Lexer {
                 let after = rest[name.len()..].trim_start();
                 !name.is_empty() && after.starts_with('=') && !after.starts_with("==")
             };
-            let is_clobber = word == "clobber" && (rest.is_empty() || text[word.len()..].starts_with(|c: char| c == ' ' || c == '\t'));
+            let is_clobber = word == "clobber" && (rest.is_empty() || text[word.len()..].starts_with([' ', '\t']));
             if text.starts_with('"') || is_operand || is_clobber {
                 return Ok(());
             }

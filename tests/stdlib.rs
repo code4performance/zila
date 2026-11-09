@@ -25,9 +25,6 @@ fn run(src: &str) -> Option<(String, i32)> {
     Some((text, out.status.code().unwrap_or(-1)))
 }
 
-/// The compile error of a program that must not compile.
-
-
 fn expect(src: &str, want: &str) {
     let Some((out, code)) = run(src) else { return };
     assert_eq!(out, want, "program output");

@@ -752,7 +752,7 @@ pub struct Project {
 const OUT_OF_DATE: &str = "zila.lock is out of date; run zila --fetch";
 
 fn covers(lock: &Lock, dep_module: &str, min: &Version) -> bool {
-    lock.for_module(dep_module).map_or(false, |e| e.version >= *min)
+    lock.for_module(dep_module).is_some_and(|e| e.version >= *min)
 }
 
 /// The resolver entry point: finds the manifest above `source`, reads the lock, checks that it
@@ -796,7 +796,7 @@ pub fn load_project(root: &Path, home: &Path) -> Result<Project, String> {
         let m = if dir.join(MANIFEST).is_file() { read_manifest(&dir)? } else { Manifest::default() };
         packages.insert(e.module.clone(), (dir, m));
     }
-    for (_, (_, m)) in packages.iter() {
+    for (_, m) in packages.values() {
         for d in &m.deps {
             if !covers(&lock, &d.module(), &d.version) {
                 return Err(OUT_OF_DATE.to_string());
@@ -819,7 +819,7 @@ fn br_files(dir: &Path) -> (Vec<PathBuf>, Vec<PathBuf>) {
             if !p.is_file() || p.extension().and_then(|x| x.to_str()) != Some("zila") {
                 continue;
             }
-            if p.file_name().and_then(|n| n.to_str()).map_or(false, |n| n.ends_with("_test.zila")) {
+            if p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.ends_with("_test.zila")) {
                 tests.push(p);
             } else {
                 files.push(p);

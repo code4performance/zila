@@ -25,7 +25,7 @@ fn layout_float(nan: bool, neg: bool, inf: bool, zero: bool, sci: impl Fn() -> S
     let x: i32 = exp.parse().unwrap();
     let digits: String = mant.chars().filter(|c| *c != '.').collect();
     let n = digits.len() as i32;
-    if x >= 16 || x < -4 {
+    if !(-4..16).contains(&x) {
         let rest = &digits[1..];
         let m = if rest.is_empty() { digits[..1].to_string() } else { format!("{}.{}", &digits[..1], rest) };
         return format!("{}{}e{}", sign, m, x);

@@ -164,8 +164,8 @@ impl Compiler {
         self.push_scope();
         let l = self.hidden_local(lt.clone());
         self.e(format!("mov qword ptr [rbp - {}], rax", l));
-        let res;
-        if which == "all" {
+        
+        let res = if which == "all" {
             if *v == Ty::Void {
                 return self.err("all() needs futures that return a value");
             }
@@ -193,7 +193,7 @@ impl Compiler {
             self.e(format!("jmp {}", start));
             self.label(&end);
             self.e(format!("mov rax, qword ptr [rbp - {}]", out));
-            res = Ty::List(v);
+            Ty::List(v)
         } else {
             let any = self.future_fn("wait_any")?;
             let arg_t = self.temp();
@@ -211,8 +211,8 @@ impl Compiler {
             self.emit_call(&[tmp], &format!("call {}", wait.sym), None);
             self.free(tmp);
             self.norm(&v);
-            res = *v;
-        }
+            *v
+        };
         self.pop_scope();
         Ok(res)
     }

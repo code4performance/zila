@@ -543,7 +543,7 @@ fn reads_only(e: &Expr) -> bool {
 fn literal_bits(e: &Expr, ty: &Ty) -> Option<i64> {
     let int = |v: i128, bits: u8, signed: bool| -> Option<i64> {
         let (lo, hi) = if signed { (-(1i128 << (bits - 1)), (1i128 << (bits - 1)) - 1) } else { (0, (1i128 << bits) - 1) };
-        (lo <= v && v <= hi).then(|| v as i64)
+        (lo <= v && v <= hi).then_some(v as i64)
     };
     match (&e.kind, ty) {
         (ExprKind::Int(n), Ty::Int { bits, signed }) => int(*n as i128, *bits, *signed),
@@ -642,12 +642,12 @@ fn mangle(s: &str) -> String {
     for c in s.chars() {
         match c {
             c if c.is_ascii_alphanumeric() => out.push(c),
-            '[' => out.push_str("L"),
-            ']' => out.push_str("R"),
+            '[' => out.push('L'),
+            ']' => out.push('R'),
             '<' => out.push_str("_o_"),
             '>' => out.push_str("_c_"),
             ',' => out.push_str("_k_"),
-            '*' => out.push_str("P"),
+            '*' => out.push('P'),
             '.' => out.push_str("_d_"),
             _ => out.push('_'),
         }
@@ -1183,7 +1183,7 @@ option casemap:none
         out.push('\n');
         if !bare && !linux {
             let heap_syms: &[&str] = if self.custom_allocator.is_some() { &[] } else { &["GetProcessHeap", "HeapAlloc", "HeapFree"] };
-            for s in ["ExitProcess", "GetStdHandle", "WriteFile", "SetConsoleOutputCP"].iter().chain(heap_syms.iter()).copied() {
+            for s in ["ExitProcess", "GetStdHandle", "WriteFile", "SetConsoleOutputCP"].iter().chain(heap_syms.iter()) {
                 self.extern_syms.insert(s.to_string());
                 self.extern_lib.entry(s.to_string()).or_insert_with(|| "kernel32".to_string());
             }
@@ -1510,7 +1510,7 @@ end
         self.line = line;
         let block_line = line;
         let profile = self.sql_profile(dialect)?;
-        if !self.imports.get(&self.cur_mod).map_or(false, |s| s.contains("db")) {
+        if !self.imports.get(&self.cur_mod).is_some_and(|s| s.contains("db")) {
             return self.err("a `sql` block needs `use db`");
         }
         let scanned = match scan(&profile, raw, block_line + 1) {
@@ -1916,7 +1916,7 @@ end
     fn is_module(&self, name: &str) -> bool {
         self.lookup(name).is_none()
             && !self.tp.globals.contains_key(&(self.cur_mod.clone(), name.to_string()))
-            && self.imports.get(&self.cur_mod).map_or(false, |i| i.contains(name))
+            && self.imports.get(&self.cur_mod).is_some_and(|i| i.contains(name))
     }
 
     /// Qualified name of the enum called `name` in the current module.
@@ -1982,6 +1982,7 @@ end
     }
 
     /// Converts the owned value in rax to an owned text.
+    #[allow(clippy::wrong_self_convention)]
     fn to_text(&mut self, t: &Ty) -> R<()> {
         match t {
             Ty::Text | Ty::Kind => {}

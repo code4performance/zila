@@ -36,7 +36,7 @@ pub(super) fn mentions_param(t: &Type, names: &[String]) -> bool {
         Type::Optional(i) | Type::Shared(i) | Type::Pointer(i) | Type::Slice(i) | Type::Array(_, i) => mentions_param(i, names),
         Type::Func { params, ret, .. } => {
             params.iter().any(|p| mentions_param(p, names))
-                || ret.as_ref().map_or(false, |r| r.ty.as_ref().map_or(false, |t| mentions_param(t, names)))
+                || ret.as_ref().is_some_and(|r| r.ty.as_ref().is_some_and(|t| mentions_param(t, names)))
         }
     }
 }
@@ -353,7 +353,7 @@ impl Compiler {
             return Ok(None);
         }
         if let Some(Ty::Rec(inst)) = want {
-            if self.tp.inst_args.get(inst).map_or(false, |(tq, _)| *tq == q) {
+            if self.tp.inst_args.get(inst).is_some_and(|(tq, _)| *tq == q) {
                 return Ok(Some(inst.clone()));
             }
         }
@@ -371,7 +371,7 @@ impl Compiler {
 
     pub(super) fn unify(&mut self, pat: &Type, actual: &Ty, params: &[String], b: &mut HashMap<String, Ty>, m: &str) -> R<()> {
         match pat {
-            Type::Shared(inner) => return self.unify(inner, actual, params, b, m),
+            Type::Shared(inner) => self.unify(inner, actual, params, b, m),
             Type::Named { path, args } => {
                 if path.len() == 1 && args.is_empty() && params.contains(&path[0]) {
                     match b.get(&path[0]) {

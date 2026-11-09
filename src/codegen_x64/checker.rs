@@ -25,6 +25,24 @@ impl Compiler {
             ExprKind::Text(_) => Some(Ty::Text),
             ExprKind::Binary { op, .. } if matches!(*op, "==" | "!=" | "<" | "<=" | ">" | ">=" | "and" | "or") => Some(Ty::Bool),
             ExprKind::Unary { op: "not", .. } => Some(Ty::Bool),
+            ExprKind::Unary { op: "-", expr } => {
+                let t = self.type_of(expr, want)?;
+                (t.is_int() || matches!(t, Ty::Float { .. })).then_some(t)
+            }
+            // arithmetic is typed only when both sides have the same number type (or both are
+            // text for `+`); mixed widths and the literal rules stay with emission for now
+            ExprKind::Binary { op, lhs, rhs } if matches!(*op, "+" | "-" | "*" | "/" | "%") => {
+                let w = want.filter(|t| t.is_int() || matches!(t, Ty::Float { .. }));
+                let l = self.type_of(lhs, w)?;
+                let r = self.type_of(rhs, Some(&l))?;
+                let number = l.is_int() || matches!(l, Ty::Float { .. });
+                (l == r && (number || (*op == "+" && l == Ty::Text))).then_some(l)
+            }
+            ExprKind::Index { expr, .. } => match rc_view(&self.type_of(expr, None)?) {
+                Ty::List(el) => Some(*el),
+                Ty::Map(_, v) => Some(*v),
+                _ => None,
+            },
             ExprKind::Ident(name) => self.type_of_ident(name, want),
             ExprKind::Field { expr, name, safe: false } => {
                 let Ty::Rec(r) = rc_view(&self.type_of(expr, None)?) else { return None };
@@ -71,11 +89,18 @@ impl Compiler {
                 (self.cur_mod.clone(), name.clone())
             }
             ExprKind::Field { expr, name, safe: false } => {
-                let ExprKind::Ident(m) = &expr.kind else { return None };
-                if !self.is_module(m) || m == "c" || m == "format" {
-                    return None;
+                if let ExprKind::Ident(m) = &expr.kind {
+                    if self.is_module(m) {
+                        if m == "c" || m == "format" {
+                            return None;
+                        }
+                        let key = (self.modkey(&self.cur_mod, m), name.clone());
+                        return self.tp.funcs.get(&key).map(|sig| sig.ret.clone());
+                    }
                 }
-                (self.modkey(&self.cur_mod, m), name.clone())
+                // a method of a record: found by the type of the receiver
+                let Ty::Rec(r) = rc_view(&self.type_of(expr, None)?) else { return None };
+                return self.tp.methods.get(&(r, name.clone())).map(|sig| sig.ret.clone());
             }
             _ => return None,
         };

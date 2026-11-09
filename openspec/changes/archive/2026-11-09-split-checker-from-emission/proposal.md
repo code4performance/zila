@@ -21,3 +21,7 @@ None. No behaviour, syntax or executable changes.
 
 - `src/codegen_x64.rs` and `src/codegen_x64/` (`expressions`, `calls`, `statements`, `generics`, `memory`, `lifecycle`, `drop`), `src/codegen_x64/typed.rs`, `src/derive_ops.rs`.
 - Non-goals: the cache of checked packages (a later change, see the design), dynamic loading, a stable ABI, per-package machine code, parallel checking.
+
+## Outcome
+
+Done: a repeatable check of the compiler's output (`tools/asm-snapshot.py`), the instantiation results in `TypedProgram`, and `type_of`, a typing function that does not emit, whose agreement with emission is asserted in every test build. Not done: the typed tree that emission would consume (generic and call binding as emission input, function bodies, clean-up). It is a rewrite of the expression and statement methods and was left for a later change; `type_of` and its agreement check stay as the safety net until then.

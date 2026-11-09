@@ -16,7 +16,7 @@ The version lives in `Cargo.toml` and at the top of `README.md`. To release: mov
 - The generated assembly is deterministic: two compiles of the same program no longer list the record and enum helper procedures in a different order.
 
 ### Internal
-- Declaration tables of the code generator live in `TypedProgram` (`src/codegen_x64/typed.rs`). The rest of the typed form is the change `split-checker-from-emission`; the cache of checked packages comes after it.
+- Declaration tables and generic instantiation results of the code generator live in `TypedProgram` (`src/codegen_x64/typed.rs`); `type_of` (`src/codegen_x64/checker.rs`) types expressions without emitting and is checked against emission in every test build; `tools/asm-snapshot.py` compares the compiler's assembly before and after an internal change. The typed tree that emission would consume, and after it the cache of checked packages, are later changes.
 
 ## [0.1.0] - 2026-11-08
 

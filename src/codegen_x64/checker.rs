@@ -147,6 +147,8 @@ impl Compiler {
                     x
                 } else if let Some(x) = self.check_generic_call(callee, args) {
                     x
+                } else if let Some(x) = self.check_closure_call(callee, args) {
+                    x
                 } else {
                     self.check_member_call(callee, args)?
                 }
@@ -445,6 +447,37 @@ impl Compiler {
             let typed = c.bind_args(&params, false, args)?;
             Some((TypedExprKind::Call { callee: TypedCallee::GenericInstance { inst_name: inst }, args: typed }, sig.ret.clone()))
         })
+    }
+
+    /// A call of a closure: a local of function type, or a field of function type of a record
+    /// (`n.less(a, b)`) that has no method of that name. Positional arguments only.
+    fn check_closure_call(&mut self, callee: &Expr, args: &[Arg]) -> Option<(TypedExprKind, Ty)> {
+        let (target, fty) = match &callee.kind {
+            ExprKind::Ident(name) => {
+                let l = self.lookup(name)?;
+                (TypedCallee::Local(name.clone()), l.ty)
+            }
+            ExprKind::Field { expr, name, safe: false } => {
+                if matches!(&expr.kind, ExprKind::Ident(m) if self.is_module(m)) {
+                    return None;
+                }
+                let recv = self.check_expr(expr, None)?;
+                let Ty::Rec(r) = rc_view(&recv.ty) else { return None };
+                if self.tp.methods.contains_key(&(r.clone(), name.clone())) {
+                    return None;
+                }
+                let fty = self.field_of(&r, name)?.0;
+                (TypedCallee::Member { receiver: Box::new(recv), name: name.clone() }, fty)
+            }
+            _ => return None,
+        };
+        let Ty::Func { params, ret, ext: false } = fty else { return None };
+        if args.iter().any(|a| a.name.is_some()) {
+            return None;
+        }
+        let bound: Vec<BoundParam> = params.iter().map(|t| (None, t.clone())).collect();
+        let typed = self.bind_args(&bound, false, args)?;
+        Some((TypedExprKind::Call { callee: target, args: typed }, *ret))
     }
 
     /// Calls of the methods of built-in types that need no inference: `push`/`add`/`clear` on a

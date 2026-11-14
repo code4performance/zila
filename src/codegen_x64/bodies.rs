@@ -140,7 +140,9 @@ impl Compiler {
                     t => t.clone(),
                 };
                 let x = self.check_expr(e, Some(&want))?;
-                if x.ty != want {
+                // in a function that can fail, an error value is returned as the failure
+                let fails = matches!(self.fs.ret, Ty::Result(_)) && x.ty == Ty::Err;
+                if x.ty != want && !fails {
                     return None;
                 }
                 TypedStmtKind::Return(Some(x))

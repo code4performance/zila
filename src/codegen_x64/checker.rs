@@ -336,6 +336,18 @@ impl Compiler {
             return None;
         }
         let user = self.tp.funcs.contains_key(&(self.cur_mod.clone(), name.clone()));
+        // `int(x)`, `u8(x)`, `bool(x)`...: a conversion to the named type
+        if let Some(target) = int_type(name).or(if name == "bool" { Some(Ty::Bool) } else { None }) {
+            let [a] = args else { return None };
+            let x = self.check_expr(&a.value, None)?;
+            let from_float = matches!(x.ty, Ty::Float { .. });
+            let ok = from_float && target != Ty::Bool || x.ty.is_int() || matches!(x.ty, Ty::Ptr(_) | Ty::Bool | Ty::Func { ext: true, .. });
+            if !ok {
+                return None;
+            }
+            let arg = TypedArg { param: 0, by_ref: false, value: x };
+            return Some((TypedExprKind::Call { callee: TypedCallee::Builtin(name.clone()), args: vec![arg] }, target));
+        }
         let (want, ty): (Vec<Option<Ty>>, Ty) = match (name.as_str(), args.len()) {
             ("print" | "println", _) => (vec![None; args.len()], Ty::Void),
             ("error", 1) => (vec![Some(Ty::Text)], Ty::Err),

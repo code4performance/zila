@@ -21,7 +21,8 @@
   - [x] 2.2b method calls emit to the method the checker resolved; snapshot identical
   - [x] 2.2c calls of the simple built-in functions (`print`, `println`, `error`, `abort`, `char`) are emitted from the typed node; snapshot identical
   - [x] 2.2f calls of the conversions (`int(x)`, `u8(x)`, `float(x)`, `bool(x)`...), `sleep` and `live_objects` are emitted from the typed node; snapshot identical
-  - [ ] 2.2g calls of methods of built-in types (`push`, `has`, `slice`, `byte`...) and of `channel`, `weak`, `timeout`
+  - [x] 2.2g calls of methods of a text or a char (`byte`, `bytes`, `char_count`, `slice`, `to_text`, `len_utf8`, `is_ascii`) are emitted from the typed node; snapshot identical
+  - [ ] 2.2h calls of methods of lists and maps (copy-on-write places) and of `channel`, `weak`, `timeout`
   - [ ] 2.2d operators (arithmetic, comparison, boolean)
   - [ ] 2.2e field, index, literals and the remaining expression forms
 

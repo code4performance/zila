@@ -288,6 +288,104 @@ impl Compiler {
         Ok(t)
     }
 
+    /// Emits `c.to_text()`, `c.len_utf8()` and `c.is_ascii()`: the receiver is in rax (a method of a built-in type).
+    pub(super) fn emit_char_member(&mut self, name: &str, args: &[Arg]) -> R<Ty> {
+        if !args.is_empty() {
+            return self.err(format!("{}() takes no arguments", name));
+        }
+        match name {
+            "to_text" => {
+                self.e("mov rcx, rax");
+                self.e("call rt_text_from_char");
+                Ok(Ty::Text)
+            }
+            "len_utf8" => {
+                self.e("mov ecx, eax");
+                self.e("mov eax, 1");
+                for (lim, n) in [(128, 2), (2048, 3), (65536, 4)] {
+                    self.e(format!("mov edx, {}", n));
+                    self.e(format!("cmp ecx, {}", lim));
+                    self.e("cmovae eax, edx");
+                }
+                Ok(Ty::int())
+            }
+            _ => {
+                self.e("cmp eax, 128");
+                self.e("setb al");
+                self.e("movzx eax, al");
+                Ok(Ty::Bool)
+            }
+        }
+    }
+
+    /// Emits `text.bytes()` and `text.char_count()`: the receiver is in rax (a method of a built-in type).
+    pub(super) fn emit_text_bytes(&mut self, name: &str, args: &[Arg]) -> R<Ty> {
+        if !args.is_empty() {
+            return self.err(format!("{}() takes no arguments", name));
+        }
+        let t = self.temp();
+        self.e(format!("mov qword ptr [rbp - {}], rax", t));
+        self.e("mov rcx, rax");
+        self.e(format!("call {}", if name == "bytes" { "rt_text_bytes" } else { "rt_text_char_count" }));
+        let keep = self.temp();
+        self.e(format!("mov qword ptr [rbp - {}], rax", keep));
+        self.release_slot(t);
+        self.e(format!("mov rax, qword ptr [rbp - {}]", keep));
+        self.free(keep);
+        self.free(t);
+        Ok(if name == "bytes" { Ty::List(Box::new(Ty::Int { bits: 8, signed: false })) } else { Ty::int() })
+    }
+
+    /// Emits `text.byte(i)`: the receiver is in rax (a method of a built-in type).
+    pub(super) fn emit_text_byte(&mut self, args: &[Arg]) -> R<Ty> {
+        if args.len() != 1 {
+            return self.err("byte(i) takes one position");
+        }
+        let t = self.temp();
+        self.e(format!("mov qword ptr [rbp - {}], rax", t));
+        let it = self.expr(&args[0].value, Some(&Ty::i64()))?;
+        if !it.is_int() {
+            return self.err(format!("byte position must be a number, found {}", it.show()));
+        }
+        self.e("mov rdx, rax");
+        self.e(format!("mov rcx, qword ptr [rbp - {}]", t));
+        self.at("r9");
+        self.e("call rt_text_byte_at");
+        let keep = self.temp();
+        self.e(format!("mov qword ptr [rbp - {}], rax", keep));
+        self.release_slot(t);
+        self.e(format!("mov rax, qword ptr [rbp - {}]", keep));
+        self.free(keep);
+        self.free(t);
+        Ok(Ty::Int { bits: 8, signed: false })
+    }
+
+    /// Emits `text.slice(a, b)`: the receiver is in rax (a method of a built-in type).
+    pub(super) fn emit_text_slice(&mut self, name: &str, args: &[Arg]) -> R<Ty> {
+        if args.len() != 2 {
+            return self.err("slice(start, end) takes two numbers");
+        }
+        let t = self.temp();
+        let a = self.temp();
+        self.e(format!("mov qword ptr [rbp - {}], rax", t));
+        self.expr(&args[0].value, Some(&Ty::i64()))?;
+        self.e(format!("mov qword ptr [rbp - {}], rax", a));
+        self.expr(&args[1].value, Some(&Ty::i64()))?;
+        self.e("mov r8, rax");
+        self.e(format!("mov rdx, qword ptr [rbp - {}]", a));
+        self.e(format!("mov rcx, qword ptr [rbp - {}]", t));
+        self.at("r9");
+        self.e(if name == "slice" { "call rt_text_slice" } else { "call rt_text_slice_raw" });
+        let keep = self.temp();
+        self.e(format!("mov qword ptr [rbp - {}], rax", keep));
+        self.release_slot(t);
+        self.e(format!("mov rax, qword ptr [rbp - {}]", keep));
+        self.free(keep);
+        self.free(a);
+        self.free(t);
+        Ok(Ty::Text)
+    }
+
     /// Emits the call of a typed call node whose target the checker settled: a function by name,
     /// an enum variant, a method or one of the simple built-ins. `None` when the node is not one of those (the caller then resolves the
     /// callee itself). Visibility of a function of another module is still checked here.
@@ -318,12 +416,37 @@ impl Compiler {
                     Some(self.emit_int_conversion(name, target, args))
                 }
             },
+            // a method of a text or a char the checker typed: no copy-on-write place is involved
+            TypedCallee::Member { receiver, name } if matches!(receiver.ty, Ty::Text | Ty::Char) => {
+                let ExprKind::Field { expr: obj, .. } = &callee.kind else { return None };
+                let known = match receiver.ty {
+                    Ty::Text => matches!(name.as_str(), "bytes" | "char_count" | "byte" | "slice" | "__raw_slice"),
+                    _ => matches!(name.as_str(), "to_text" | "len_utf8" | "is_ascii"),
+                };
+                if !known {
+                    return None;
+                }
+                Some(self.emit_builtin_member(obj, name.as_str(), args))
+            }
             TypedCallee::Method { rec_key, name } => {
                 let ExprKind::Field { expr: obj, .. } = &callee.kind else { return None };
                 let sig = self.tp.methods.get(&(rec_key.clone(), name.clone()))?.clone();
                 Some(self.emit_method_call(obj, rec_key, name, &sig, args))
             }
             _ => None,
+        }
+    }
+
+    /// `obj.name(args)` for a method of a text or a char: the receiver is evaluated, then the
+    /// method emits from it.
+    fn emit_builtin_member(&mut self, obj: &Expr, name: &str, args: &[Arg]) -> R<Ty> {
+        let ot = self.expr(obj, None)?;
+        match (rc_view(&ot), name) {
+            (Ty::Char, _) => self.emit_char_member(name, args),
+            (Ty::Text, "bytes" | "char_count") => self.emit_text_bytes(name, args),
+            (Ty::Text, "byte") => self.emit_text_byte(args),
+            (Ty::Text, _) => self.emit_text_slice(name, args),
+            (other, _) => self.err(format!("{} has no method '{}'", other.show(), name)),
         }
     }
 
@@ -582,94 +705,16 @@ impl Compiler {
                     return self.err(format!("{} has no method '{}'", r, name));
                 }
                 if ot == Ty::Char && matches!(name.as_str(), "to_text" | "len_utf8" | "is_ascii") {
-                    if !args.is_empty() {
-                        return self.err(format!("{}() takes no arguments", name));
-                    }
-                    match name.as_str() {
-                        "to_text" => {
-                            self.e("mov rcx, rax");
-                            self.e("call rt_text_from_char");
-                            return Ok(Ty::Text);
-                        }
-                        "len_utf8" => {
-                            self.e("mov ecx, eax");
-                            self.e("mov eax, 1");
-                            for (lim, n) in [(128, 2), (2048, 3), (65536, 4)] {
-                                self.e(format!("mov edx, {}", n));
-                                self.e(format!("cmp ecx, {}", lim));
-                                self.e("cmovae eax, edx");
-                            }
-                            return Ok(Ty::int());
-                        }
-                        _ => {
-                            self.e("cmp eax, 128");
-                            self.e("setb al");
-                            self.e("movzx eax, al");
-                            return Ok(Ty::Bool);
-                        }
-                    }
+                    return self.emit_char_member(name.as_str(), args);
                 }
                 if ot == Ty::Text && matches!(name.as_str(), "bytes" | "char_count") {
-                    if !args.is_empty() {
-                        return self.err(format!("{}() takes no arguments", name));
-                    }
-                    let t = self.temp();
-                    self.e(format!("mov qword ptr [rbp - {}], rax", t));
-                    self.e("mov rcx, rax");
-                    self.e(format!("call {}", if name == "bytes" { "rt_text_bytes" } else { "rt_text_char_count" }));
-                    let keep = self.temp();
-                    self.e(format!("mov qword ptr [rbp - {}], rax", keep));
-                    self.release_slot(t);
-                    self.e(format!("mov rax, qword ptr [rbp - {}]", keep));
-                    self.free(keep);
-                    self.free(t);
-                    return Ok(if name == "bytes" { Ty::List(Box::new(Ty::Int { bits: 8, signed: false })) } else { Ty::int() });
+                    return self.emit_text_bytes(name.as_str(), args);
                 }
                 if ot == Ty::Text && name == "byte" {
-                    if args.len() != 1 {
-                        return self.err("byte(i) takes one position");
-                    }
-                    let t = self.temp();
-                    self.e(format!("mov qword ptr [rbp - {}], rax", t));
-                    let it = self.expr(&args[0].value, Some(&Ty::i64()))?;
-                    if !it.is_int() {
-                        return self.err(format!("byte position must be a number, found {}", it.show()));
-                    }
-                    self.e("mov rdx, rax");
-                    self.e(format!("mov rcx, qword ptr [rbp - {}]", t));
-                    self.at("r9");
-                    self.e("call rt_text_byte_at");
-                    let keep = self.temp();
-                    self.e(format!("mov qword ptr [rbp - {}], rax", keep));
-                    self.release_slot(t);
-                    self.e(format!("mov rax, qword ptr [rbp - {}]", keep));
-                    self.free(keep);
-                    self.free(t);
-                    return Ok(Ty::Int { bits: 8, signed: false });
+                    return self.emit_text_byte(args);
                 }
                 if ot == Ty::Text && (name == "slice" || name == "__raw_slice") {
-                    if args.len() != 2 {
-                        return self.err("slice(start, end) takes two numbers");
-                    }
-                    let t = self.temp();
-                    let a = self.temp();
-                    self.e(format!("mov qword ptr [rbp - {}], rax", t));
-                    self.expr(&args[0].value, Some(&Ty::i64()))?;
-                    self.e(format!("mov qword ptr [rbp - {}], rax", a));
-                    self.expr(&args[1].value, Some(&Ty::i64()))?;
-                    self.e("mov r8, rax");
-                    self.e(format!("mov rdx, qword ptr [rbp - {}]", a));
-                    self.e(format!("mov rcx, qword ptr [rbp - {}]", t));
-                    self.at("r9");
-                    self.e(if name == "slice" { "call rt_text_slice" } else { "call rt_text_slice_raw" });
-                    let keep = self.temp();
-                    self.e(format!("mov qword ptr [rbp - {}], rax", keep));
-                    self.release_slot(t);
-                    self.e(format!("mov rax, qword ptr [rbp - {}]", keep));
-                    self.free(keep);
-                    self.free(a);
-                    self.free(t);
-                    return Ok(Ty::Text);
+                    return self.emit_text_slice(name.as_str(), args);
                 }
                 if ot == Ty::Err && (name == "context" || name == "is") {
                     if args.len() != 1 {

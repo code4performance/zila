@@ -785,6 +785,9 @@ pub struct Compiler {
     next_lambda_share: bool,
     /// the next `lambda()` may ignore the result of a call that can fail
     next_lambda_ignore_result: bool,
+    /// Types the body checker found for the locals of an `async` body, handed to the closure that
+    /// the body is compiled as (see `bodies.rs`).
+    next_lambda_vars: Option<HashMap<(u32, String), Ty>>,
     cur_mod: String,
     line: u32,
     fs: FnState,
@@ -868,6 +871,7 @@ impl Compiler {
             await_syms: std::collections::HashSet::new(),
             next_lambda_share: false,
             next_lambda_ignore_result: false,
+            next_lambda_vars: None,
             cur_mod: String::new(),
             line: 0,
             fs: FnState::new(Ty::Void, String::new()),
@@ -1699,6 +1703,9 @@ end
             self.check_refs(&refs, &fd.body)?;
         }
         let prologue = self.bind_params(&incoming, None);
+        if cfg!(debug_assertions) && !naked && fd.is_async {
+            self.check_function_body(fd, &sig);
+        }
         if fd.is_async {
             self.gen_async_body(&sig, &fd.body)?;
             self.emit_unwind(0);

@@ -28,7 +28,12 @@ impl Compiler {
     /// program under the function's symbol. Emission state is left untouched.
     pub(super) fn check_function_body(&mut self, fd: &FuncDecl, sig: &Sig) {
         let inst_count = self.tp.inst_count;
-        let saved = std::mem::replace(&mut self.fs, FnState::new(sig.ret.clone(), String::new()));
+        // an `async` body returns the type inside its future
+        let ret = match (&sig.ret, fd.is_async) {
+            (Ty::Future(inner), true) => (**inner).clone(),
+            (r, _) => r.clone(),
+        };
+        let saved = std::mem::replace(&mut self.fs, FnState::new(ret, String::new()));
         let mut incoming: Vec<(String, Ty, bool)> = Vec::new();
         if let (Some(r), Some(rt)) = (&fd.receiver, &sig.receiver) {
             incoming.push((r.name.clone(), rt.clone(), r.by_ref && !matches!(rt, Ty::List(_) | Ty::Map(..))));
@@ -46,7 +51,11 @@ impl Compiler {
         }
         self.tp.inst_count = inst_count;
         self.fs = saved;
-        self.fs.checked_vars = w.vars;
+        if fd.is_async {
+            self.next_lambda_vars = Some(w.vars);
+        } else {
+            self.fs.checked_vars = w.vars;
+        }
         self.tp.bodies.insert(sig.sym.clone(), TypedBody { stmts, ret: sig.ret.clone(), complete: w.complete });
     }
 
@@ -153,6 +162,7 @@ impl Compiler {
             // the call a `defer` or `spawn` runs later: typed like any call, nothing is declared
             StmtKind::Defer(e) => TypedStmtKind::Defer(self.check_expr(e, None)?),
             StmtKind::Spawn(e) => TypedStmtKind::Spawn(self.check_expr(e, None)?),
+            StmtKind::Asm(a) => TypedStmtKind::Asm(a.clone()),
             StmtKind::Break => TypedStmtKind::Break,
             StmtKind::Continue => TypedStmtKind::Continue,
             StmtKind::While { cond, body } => {

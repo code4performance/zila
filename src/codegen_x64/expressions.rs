@@ -1437,6 +1437,7 @@ impl Compiler {
     pub(super) fn lambda(&mut self, params: &[Param], body: &[Stmt], want: Option<&Ty>) -> R<Ty> {
         let share_records = std::mem::take(&mut self.next_lambda_share);
         let ignore_result = std::mem::take(&mut self.next_lambda_ignore_result);
+        let checked_vars = self.next_lambda_vars.take();
         let (wparams, wret) = match want {
             Some(Ty::Func { params, ret, ext: false }) => (Some(params.clone()), (**ret).clone()),
             Some(Ty::Func { ext: true, .. }) => return self.err("a closure cannot be used as an extern callback; pass a top-level function"),
@@ -1503,6 +1504,9 @@ impl Compiler {
         // Compile the body as its own procedure.
         let rl = self.lbl("ret");
         let saved = std::mem::replace(&mut self.fs, FnState::new(wret.clone(), rl));
+        if let Some(v) = checked_vars {
+            self.fs.checked_vars = v;
+        }
         self.fs.unsafe_depth = saved.unsafe_depth;
         self.fs.allow_ignored_result = ignore_result;
         let env_slot = self.slot();

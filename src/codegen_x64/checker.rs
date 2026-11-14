@@ -235,6 +235,12 @@ impl Compiler {
                 let t = want?.clone();
                 (TypedExprKind::Lambda { params: params.clone(), body: body.clone() }, t)
             }
+            ExprKind::SpawnThread(call) => {
+                let ExprKind::Call { .. } = &call.kind else { return None };
+                let x = self.check_expr(call, None)?;
+                let t = self.tp.funcs.get(&("thread".to_string(), "start".to_string()))?.ret.clone();
+                (TypedExprKind::SpawnThread(Box::new(x)), t)
+            }
             ExprKind::Propagate(inner) => {
                 if !matches!(self.fs.ret, Ty::Result(_)) {
                     return None;

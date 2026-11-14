@@ -7,9 +7,21 @@
 ## 2. Pre-Emission Checking and Call Resolution
 
 - [ ] 2.1 `src/codegen_x64/checker.rs` and `generics.rs`: add the forms moved from 1.2 (`if`, `match`, closures, `spawn_thread`, `sql`, generic calls) and type-check function bodies and concrete generic instances ahead of emission, attaching the resolved `TypedBody` to `TypedProgram`; verify all test targets compile
-  - Progress: `check_function_body` (`src/codegen_x64/bodies.rs`) checks bodies before emission in debug builds (own scopes, no slots; the generic-instantiation state is restored after annotations are resolved) and stores a `TypedBody` per symbol in `TypedProgram::bodies`. Covered statements: `let`/`var`, assignment, `return`, expression statements, `if`, `while`, `for` (range, list, map, text), `match` as a statement (enum, `ok`/`err`, catch-all names), `unsafe`, `break`/`continue`; closures are typed when the expected function type is given; `.len` and `.code`, `push`/`add`/`clear` on lists, `has` on maps and `slice` on texts, methods declared on built-in types, integer conversions, `return` of an error in a fallible function, and globals of other modules are typed. The rest is `Opaque` and marks the body `complete: false`. Emission asserts the type of every checked `let`/`var`. Remaining: `match` and `if` used as values, closure bodies, `defer`/`spawn`/`asm`, `async` bodies, `spawn_thread`, `sql`, generic calls and typed bodies for generic instances, other built-in methods, `??`/optional forms; about half of the bodies in the larger examples are complete (`json` 85+ of 143, `errors` 101+ of 158, `taskbox` 7 of 7; 807 of 1,325 bodies in the examples measured).
+  - [x] 2.1a `bodies.rs`: `check_function_body` walks bodies before emission (own scopes, no slots) and stores a `TypedBody` per symbol in `TypedProgram::bodies`: `let`/`var`, assignment, `return`, expression statements, `if`, `while`, `for`, `unsafe`, `break`/`continue`; emission asserts the type of every checked `let`/`var`
+  - [x] 2.1b `match` statements, closures whose function type is given, members and methods of built-in types, integer conversions, globals of other modules
+  - [x] 2.1c `if` and `match` as values, `defer` and `spawn` statements
+  - [ ] 2.1d bodies of closures (walked with their own scopes)
+  - [x] 2.1e `async` bodies (checked as the closure they are compiled as; the type of each local is asserted there too)
+  - [ ] 2.1f generic calls and the bodies of concrete generic instances
+  - [x] 2.1g `spawn_thread` and inline `asm`
+  - [ ] 2.1i `sql` blocks (emission expands them into calls after typing each hole by a speculative compile)
+  - [ ] 2.1h the statement forms that are still `Opaque` in the examples, by frequency (measured: 807 of 1,325 bodies complete)
 - [ ] 2.2 `src/codegen_x64/expressions.rs` and `calls.rs`: refactor expression emission to consume `TypedExpr` directly, reading pre-resolved types and call target symbols; verify `cargo test --test codegen` passes
-  - Progress: calls of functions by name, methods (`obj.m(args)` whose method the checker found for the receiver type) and enum-variant constructors are emitted from the typed node (`emit_resolved_call`: the target the checker resolved, no second lookup of the callee; visibility of a function of another module is still checked). `tools/asm-snapshot.py compare` against the snapshot taken before the change: identical (40 programs, 3 variants). Remaining: calls of built-ins and of methods of built-in types, operators, field/index, literals and the other forms.
+  - [x] 2.2a calls of functions by name and enum-variant constructors are emitted from the typed node (`emit_resolved_call`); `tools/asm-snapshot.py compare`: identical
+  - [x] 2.2b method calls emit to the method the checker resolved; snapshot identical
+  - [ ] 2.2c calls of built-ins and of methods of built-in types
+  - [ ] 2.2d operators (arithmetic, comparison, boolean)
+  - [ ] 2.2e field, index, literals and the remaining expression forms
 
 ## 3. Statement Emission and Clean-up
 

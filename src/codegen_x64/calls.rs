@@ -62,6 +62,26 @@ impl Compiler {
         self.e(format!("call qword ptr GOT_{}", sym));
     }
 
+    /// Emits the call of a typed call node whose target the checker settled: a function by name or
+    /// an enum variant. `None` when the node is not one of those (the caller then resolves the
+    /// callee itself). Visibility of a function of another module is still checked here.
+    pub(super) fn emit_resolved_call(&mut self, t: &TypedExpr, callee: &Expr, args: &[Arg]) -> Option<R<Ty>> {
+        let TypedExprKind::Call { callee: target, .. } = &t.kind else { return None };
+        match target {
+            TypedCallee::Func { module, name } => {
+                let sig = self.tp.funcs.get(&(module.clone(), name.clone()))?.clone();
+                if matches!(callee.kind, ExprKind::Field { .. }) {
+                    if let Err(e) = self.check_member_vis(module, name, sig.public) {
+                        return Some(Err(e));
+                    }
+                }
+                Some(self.call_sig(&sig, None, args))
+            }
+            TypedCallee::Variant { enum_key, index } => Some(self.enum_construct(enum_key, *index, args)),
+            _ => None,
+        }
+    }
+
     pub(super) fn call(&mut self, callee: &Expr, args: &[Arg], targs: &[Type], want: Option<&Ty>) -> R<Ty> {
         match &callee.kind {
             // test hook: lowers the element ceiling of lists, maps and texts so a test can reach it

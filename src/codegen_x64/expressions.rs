@@ -316,7 +316,18 @@ impl Compiler {
                 self.free(t);
                 Ok(res)
             }
-            ExprKind::Call { callee, args, targs } => self.call(callee, args, targs, want),
+            ExprKind::Call { callee, args, targs } => {
+                // a call the checker resolved (a function, or an enum variant used as a
+                // constructor) is emitted to its resolved target without looking the callee up again
+                if targs.is_empty() {
+                    if let Some(t) = self.check_expr(e, want) {
+                        if let Some(r) = self.emit_resolved_call(&t, callee, args) {
+                            return r;
+                        }
+                    }
+                }
+                self.call(callee, args, targs, want)
+            }
         }
     }
 

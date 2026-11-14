@@ -255,8 +255,8 @@ impl Compiler {
                 if args.len() != 1 {
                     return self.err(format!("{}() takes one argument", name));
                 }
-                let t = Ty::Float { bits: if name == "f32" { 32 } else { 64 } };
-                let Ty::Float { bits: tb } = t else { unreachable!() };
+                let tb = if name == "f32" { 32 } else { 64 };
+                let t = Ty::Float { bits: tb };
                 let at = self.expr(&args[0].value, None)?;
                 match at {
                     Ty::Int { bits: 64, signed: false } => {

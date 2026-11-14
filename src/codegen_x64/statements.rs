@@ -840,13 +840,7 @@ impl Compiler {
             self.e("cmp rdx, qword ptr [rcx]");
             self.e(format!("jge {}", end));
             self.e("call rt_list_get");
-            if matches!(&*el, Ty::Rec(r) if !self.tp.shared_recs.contains(r)) {
-                let Ty::Rec(r) = &*el else { unreachable!() };
-                self.e("mov rcx, rax");
-                self.e(format!("call B_copy_{}", sym_of(r)));
-            } else {
-                self.retain_if(&el);
-            }
+            self.copy_or_retain(&el);
             if self.is_rc(&el) {
                 self.e(format!("mov rcx, qword ptr [rbp - {}]", vv));
                 self.e(format!("mov qword ptr [rbp - {}], rax", vv));
@@ -871,16 +865,22 @@ impl Compiler {
         Ok(())
     }
 
+    /// The borrowed value in rax becomes an owned one: a plain record is copied, any other heap
+    /// value is retained.
+    pub(super) fn copy_or_retain(&mut self, t: &Ty) {
+        match t {
+            Ty::Rec(r) if !self.tp.shared_recs.contains(r) => {
+                self.e("mov rcx, rax");
+                self.e(format!("call B_copy_{}", sym_of(r)));
+            }
+            _ => self.retain_if(t),
+        }
+    }
+
     /// Stores the borrowed element in rax into the loop variable at `slot`: a copy for plain
     /// records, a retained reference for other heap values; the previous value is released.
     pub(super) fn bind_loop_var(&mut self, el: &Ty, slot: i32) {
-        if matches!(el, Ty::Rec(r) if !self.tp.shared_recs.contains(r)) {
-            let Ty::Rec(r) = el else { unreachable!() };
-            self.e("mov rcx, rax");
-            self.e(format!("call B_copy_{}", sym_of(r)));
-        } else {
-            self.retain_if(el);
-        }
+        self.copy_or_retain(el);
         if self.is_rc(el) {
             self.e(format!("mov rcx, qword ptr [rbp - {}]", slot));
             self.e(format!("mov qword ptr [rbp - {}], rax", slot));

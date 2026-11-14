@@ -5,13 +5,10 @@ use super::*;
 impl Compiler {
     /// Evaluates `e`. The result is in rax; heap values are owned (+1).
     /// Compiles `e`, leaving its value in `rax`, and returns its type. In builds with debug assertions
-    /// the type is checked against `type_of` (see `checker.rs`).
+    /// the type is checked against `check_expr` (see `checker.rs`).
     pub(super) fn expr(&mut self, e: &Expr, want: Option<&Ty>) -> R<Ty> {
-        let (typed, tree) = if cfg!(debug_assertions) { (self.type_of(e, want), self.check_expr(e, want)) } else { (None, None) };
+        let tree = if cfg!(debug_assertions) { self.check_expr(e, want) } else { None };
         let r = self.expr_emit(e, want);
-        if let (Some(t), Ok(got)) = (&typed, &r) {
-            assert!(t == got, "type_of says {} but emission gives {} (line {})", t.show(), got.show(), e.line);
-        }
         if let (Some(t), Ok(got)) = (&tree, &r) {
             assert!(&t.ty == got, "check_expr says {} but emission gives {} (line {})", t.ty.show(), got.show(), e.line);
         }
@@ -1498,12 +1495,10 @@ impl Compiler {
             self.e(format!("mov qword ptr [rbp - {}], rax", env));
             for (i, (_, l)) in caps.iter().enumerate() {
                 self.load_local("rax", l);
-                if !share_records && matches!(&l.ty, Ty::Rec(r) if !self.tp.shared_recs.contains(r)) {
-                    let Ty::Rec(r) = &l.ty else { unreachable!() };
-                    self.e("mov rcx, rax");
-                    self.e(format!("call B_copy_{}", sym_of(r)));
-                } else {
+                if share_records {
                     self.retain_if(&l.ty);
+                } else {
+                    self.copy_or_retain(&l.ty);
                 }
                 self.e(format!("mov rcx, qword ptr [rbp - {}]", env));
                 self.e(format!("mov qword ptr [rcx + {}], rax", 8 * i));

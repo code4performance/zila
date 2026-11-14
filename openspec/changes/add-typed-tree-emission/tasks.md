@@ -31,6 +31,8 @@
   - [ ] 3.1b statement emission reads the typed statement (the type of a `let`/`var` and of a condition) instead of deriving it again
   - [ ] 3.1c the speculative fallbacks that remain for forms the checker does not cover
 - [ ] 3.2 Clean up redundant type checking and dead `unreachable!()` branches across `src/codegen_x64/`; verify `cargo clippy --all-targets -- -D warnings` is clean
+  - [x] 3.2a the duplicate `type_of` is gone (`check_expr` is the one typing; emission asserts against it), and the repeated copy-or-retain code with its `unreachable!()` guards is one helper (`copy_or_retain`); clippy clean, `compare --labels` identical
+  - [ ] 3.2b the typing emission still repeats for forms the tree does not feed it yet, and the remaining `unreachable!()` guards of invariants (they go with 3.1b and 3.1c)
 
 ## 4. Verification and Wrap-up
 

@@ -62,8 +62,106 @@ impl Compiler {
         self.e(format!("call qword ptr GOT_{}", sym));
     }
 
-    /// Emits the call of a typed call node whose target the checker settled: a function by name or
-    /// an enum variant. `None` when the node is not one of those (the caller then resolves the
+    /// Emits `abort(message)` (arguments already known to fit the form).
+    pub(super) fn emit_abort(&mut self, args: &[Arg]) -> R<Ty> {
+        let t = self.expr(&args[0].value, Some(&Ty::Text))?;
+        self.check(&Ty::Text, &t, "abort message")?;
+        self.e("mov rcx, rax");
+        self.at("rdx");
+        self.e("call rt_abort");
+        Ok(Ty::Void)
+    }
+
+    /// Emits `print(...)` and `println(...)` (arguments already known to fit the form).
+    pub(super) fn emit_print(&mut self, args: &[Arg]) -> R<Ty> {
+        let mut first = true;
+        for a in args {
+            if !first {
+                let sp = self.string_lit(" ");
+                self.e(format!("lea rcx, {}", sp));
+                self.e("call rt_write_out");
+            }
+            first = false;
+            let t = self.expr(&a.value, None)?;
+            self.to_text(&t)?;
+            let keep = self.temp();
+            self.e(format!("mov qword ptr [rbp - {}], rax", keep));
+            self.e("mov rcx, rax");
+            self.e("call rt_write_out");
+            self.release_slot(keep);
+            self.free(keep);
+        }
+        let nl = self.string_lit("\n");
+        self.e(format!("lea rcx, {}", nl));
+        self.e("call rt_write_out");
+        Ok(Ty::Void)
+    }
+
+    /// Emits `error(message)`, `error(kind, message)` and `error(kind, message, cause)` (arguments already known to fit the form).
+    pub(super) fn emit_error(&mut self, args: &[Arg]) -> R<Ty> {
+        let (k, m, c) = (self.temp(), self.temp(), self.temp());
+        if args.len() == 1 {
+            let t = self.expr(&args[0].value, Some(&Ty::Text))?;
+            self.check(&Ty::Text, &t, "error message")?;
+            self.e(format!("mov qword ptr [rbp - {}], rax", m));
+            self.e("call rt_kind_other");
+            self.e(format!("mov qword ptr [rbp - {}], rax", k));
+        } else {
+            let kt = self.expr(&args[0].value, Some(&Ty::Kind))?;
+            if kt == Ty::Text {
+                return self.err("error(kind, message): expected an ErrorKind, found text; make a kind with errors.kind(\"package.Name\")");
+            }
+            self.check(&Ty::Kind, &kt, "error kind")?;
+            self.e(format!("mov qword ptr [rbp - {}], rax", k));
+            let t = self.expr(&args[1].value, Some(&Ty::Text))?;
+            self.check(&Ty::Text, &t, "error message")?;
+            self.e(format!("mov qword ptr [rbp - {}], rax", m));
+        }
+        if args.len() == 3 {
+            let ct = self.expr(&args[2].value, Some(&Ty::Err))?;
+            self.check(&Ty::Err, &ct, "error cause")?;
+            self.e(format!("mov qword ptr [rbp - {}], rax", c));
+        } else {
+            self.e(format!("mov qword ptr [rbp - {}], 0", c));
+        }
+        self.alloc(24, "rt_drop_error");
+        self.e(format!("mov rcx, qword ptr [rbp - {}]", m));
+        self.e("mov qword ptr [rax], rcx");
+        self.e(format!("mov rcx, qword ptr [rbp - {}]", k));
+        self.e("mov qword ptr [rax + 8], rcx");
+        self.e(format!("mov rcx, qword ptr [rbp - {}]", c));
+        self.e("mov qword ptr [rax + 16], rcx");
+        self.free(c);
+        self.free(m);
+        self.free(k);
+        Ok(Ty::Err)
+    }
+
+    /// Emits `char(n)` (arguments already known to fit the form).
+    pub(super) fn emit_char(&mut self, args: &[Arg]) -> R<Ty> {
+        let t = self.expr(&args[0].value, None)?;
+        if !t.is_int() {
+            return self.err(format!("char() needs an integer code point, found {}", t.show()));
+        }
+        let (bad, ok) = (self.lbl("charbad"), self.lbl("charok"));
+        self.e("cmp rax, 1114111");
+        self.e(format!("ja {}", bad));
+        self.e("lea rcx, [rax - 55296]");
+        self.e("cmp rcx, 2047");
+        self.e(format!("ja {}", ok));
+        self.label(&bad);
+        self.e("mov rdx, rax");
+        self.e("lea rcx, rt_msg_char1");
+        self.e("lea r8, rt_msg_char2");
+        self.at("r9");
+        self.e("call rt_abort_val");
+        self.label(&ok);
+        self.e("mov eax, eax");
+        Ok(Ty::Char)
+    }
+
+    /// Emits the call of a typed call node whose target the checker settled: a function by name,
+    /// an enum variant, a method or one of the simple built-ins. `None` when the node is not one of those (the caller then resolves the
     /// callee itself). Visibility of a function of another module is still checked here.
     pub(super) fn emit_resolved_call(&mut self, t: &TypedExpr, callee: &Expr, args: &[Arg]) -> Option<R<Ty>> {
         let TypedExprKind::Call { callee: target, .. } = &t.kind else { return None };
@@ -78,6 +176,14 @@ impl Compiler {
                 Some(self.call_sig(&sig, None, args))
             }
             TypedCallee::Variant { enum_key, index } => Some(self.enum_construct(enum_key, *index, args)),
+            // a built-in function the checker typed (it is not shadowed by a local or a function)
+            TypedCallee::Builtin(name) => match name.as_str() {
+                "print" | "println" => Some(self.emit_print(args)),
+                "error" => Some(self.emit_error(args)),
+                "abort" => Some(self.emit_abort(args)),
+                "char" => Some(self.emit_char(args)),
+                _ => None,
+            },
             TypedCallee::Method { rec_key, name } => {
                 let ExprKind::Field { expr: obj, .. } = &callee.kind else { return None };
                 let sig = self.tp.methods.get(&(rec_key.clone(), name.clone()))?.clone();
@@ -251,35 +357,10 @@ impl Compiler {
                     return Ok(t);
                 }
                 if (name == "__abort" || name == "abort" && !self.tp.funcs.contains_key(&(self.cur_mod.clone(), name.clone()))) && args.len() == 1 {
-                    let t = self.expr(&args[0].value, Some(&Ty::Text))?;
-                    self.check(&Ty::Text, &t, "abort message")?;
-                    self.e("mov rcx, rax");
-                    self.at("rdx");
-                    self.e("call rt_abort");
-                    return Ok(Ty::Void);
+                    return self.emit_abort(args);
                 }
                 if name == "print" || name == "println" {
-                    let mut first = true;
-                    for a in args {
-                        if !first {
-                            let sp = self.string_lit(" ");
-                            self.e(format!("lea rcx, {}", sp));
-                            self.e("call rt_write_out");
-                        }
-                        first = false;
-                        let t = self.expr(&a.value, None)?;
-                        self.to_text(&t)?;
-                        let keep = self.temp();
-                        self.e(format!("mov qword ptr [rbp - {}], rax", keep));
-                        self.e("mov rcx, rax");
-                        self.e("call rt_write_out");
-                        self.release_slot(keep);
-                        self.free(keep);
-                    }
-                    let nl = self.string_lit("\n");
-                    self.e(format!("lea rcx, {}", nl));
-                    self.e("call rt_write_out");
-                    return Ok(Ty::Void);
+                    return self.emit_print(args);
                 }
                 if name == "__kind" && args.len() == 1 {
                     // the interned kind for a name: the one way a kind is made at run time
@@ -298,63 +379,10 @@ impl Compiler {
                     return Ok(Ty::Kind);
                 }
                 if name == "error" && (1..=3).contains(&args.len()) {
-                    let (k, m, c) = (self.temp(), self.temp(), self.temp());
-                    if args.len() == 1 {
-                        let t = self.expr(&args[0].value, Some(&Ty::Text))?;
-                        self.check(&Ty::Text, &t, "error message")?;
-                        self.e(format!("mov qword ptr [rbp - {}], rax", m));
-                        self.e("call rt_kind_other");
-                        self.e(format!("mov qword ptr [rbp - {}], rax", k));
-                    } else {
-                        let kt = self.expr(&args[0].value, Some(&Ty::Kind))?;
-                        if kt == Ty::Text {
-                            return self.err("error(kind, message): expected an ErrorKind, found text; make a kind with errors.kind(\"package.Name\")");
-                        }
-                        self.check(&Ty::Kind, &kt, "error kind")?;
-                        self.e(format!("mov qword ptr [rbp - {}], rax", k));
-                        let t = self.expr(&args[1].value, Some(&Ty::Text))?;
-                        self.check(&Ty::Text, &t, "error message")?;
-                        self.e(format!("mov qword ptr [rbp - {}], rax", m));
-                    }
-                    if args.len() == 3 {
-                        let ct = self.expr(&args[2].value, Some(&Ty::Err))?;
-                        self.check(&Ty::Err, &ct, "error cause")?;
-                        self.e(format!("mov qword ptr [rbp - {}], rax", c));
-                    } else {
-                        self.e(format!("mov qword ptr [rbp - {}], 0", c));
-                    }
-                    self.alloc(24, "rt_drop_error");
-                    self.e(format!("mov rcx, qword ptr [rbp - {}]", m));
-                    self.e("mov qword ptr [rax], rcx");
-                    self.e(format!("mov rcx, qword ptr [rbp - {}]", k));
-                    self.e("mov qword ptr [rax + 8], rcx");
-                    self.e(format!("mov rcx, qword ptr [rbp - {}]", c));
-                    self.e("mov qword ptr [rax + 16], rcx");
-                    self.free(c);
-                    self.free(m);
-                    self.free(k);
-                    return Ok(Ty::Err);
+                    return self.emit_error(args);
                 }
                 if name == "char" && args.len() == 1 && !self.tp.funcs.contains_key(&(self.cur_mod.clone(), name.clone())) {
-                    let t = self.expr(&args[0].value, None)?;
-                    if !t.is_int() {
-                        return self.err(format!("char() needs an integer code point, found {}", t.show()));
-                    }
-                    let (bad, ok) = (self.lbl("charbad"), self.lbl("charok"));
-                    self.e("cmp rax, 1114111");
-                    self.e(format!("ja {}", bad));
-                    self.e("lea rcx, [rax - 55296]");
-                    self.e("cmp rcx, 2047");
-                    self.e(format!("ja {}", ok));
-                    self.label(&bad);
-                    self.e("mov rdx, rax");
-                    self.e("lea rcx, rt_msg_char1");
-                    self.e("lea r8, rt_msg_char2");
-                    self.at("r9");
-                    self.e("call rt_abort_val");
-                    self.label(&ok);
-                    self.e("mov eax, eax");
-                    return Ok(Ty::Char);
+                    return self.emit_char(args);
                 }
                 if name == "heap_bytes" && args.is_empty() {
                     if self.custom_allocator.is_some() {

@@ -19,7 +19,8 @@
 - [ ] 2.2 `src/codegen_x64/expressions.rs` and `calls.rs`: refactor expression emission to consume `TypedExpr` directly, reading pre-resolved types and call target symbols; verify `cargo test --test codegen` passes
   - [x] 2.2a calls of functions by name and enum-variant constructors are emitted from the typed node (`emit_resolved_call`); `tools/asm-snapshot.py compare`: identical
   - [x] 2.2b method calls emit to the method the checker resolved; snapshot identical
-  - [ ] 2.2c calls of built-ins and of methods of built-in types
+  - [x] 2.2c calls of the simple built-in functions (`print`, `println`, `error`, `abort`, `char`) are emitted from the typed node; snapshot identical
+  - [ ] 2.2f calls of the other built-ins (conversions, `sleep`, `channel`, `weak`, ...) and of methods of built-in types
   - [ ] 2.2d operators (arithmetic, comparison, boolean)
   - [ ] 2.2e field, index, literals and the remaining expression forms
 

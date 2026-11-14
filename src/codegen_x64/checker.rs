@@ -484,9 +484,9 @@ impl Compiler {
                     }
                 }
                 // a method of a record: found by the type of the receiver
-                let Ty::Rec(r) = rc_view(&self.type_of(expr, None)?) else { return None };
-                let ret = self.tp.methods.get(&(r.clone(), name.clone()))?.ret.clone();
-                Some((TypedCallee::Method { rec_key: r, name: name.clone() }, ret))
+                let key = method_key(&rc_view(&self.type_of(expr, None)?));
+                let ret = self.tp.methods.get(&(key.clone(), name.clone()))?.ret.clone();
+                Some((TypedCallee::Method { rec_key: key, name: name.clone() }, ret))
             }
             _ => None,
         }

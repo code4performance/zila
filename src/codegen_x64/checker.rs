@@ -135,16 +135,22 @@ impl Compiler {
             }
             ExprKind::Field { expr, name, safe: false } => {
                 let x = self.check_expr(expr, None)?;
-                let Ty::Rec(r) = rc_view(&x.ty) else { return None };
-                let t = self.field_of(&r, name)?.0;
+                let t = match rc_view(&x.ty) {
+                    Ty::Rec(r) => self.field_of(&r, name)?.0,
+                    Ty::List(_) | Ty::Text | Ty::Map(..) if name == "len" => Ty::int(),
+                    Ty::Char if name == "code" => Ty::int(),
+                    _ => return None,
+                };
                 (TypedExprKind::Field { expr: Box::new(x), name: name.clone(), safe: false }, t)
             }
             ExprKind::Call { callee, args, targs } if targs.is_empty() => {
                 if let Some(shape) = self.resolve_call_sig(callee) {
                     let args = self.bind_args(&shape.params, shape.variadic, args)?;
                     (TypedExprKind::Call { callee: shape.callee, args }, shape.ret)
+                } else if let Some(x) = self.check_builtin_call(callee, args) {
+                    x
                 } else {
-                    self.check_builtin_call(callee, args)?
+                    self.check_member_call(callee, args)?
                 }
             }
             ExprKind::List(items) => {
@@ -208,6 +214,16 @@ impl Compiler {
                 let x = self.check_expr(inner, None)?;
                 let Ty::Ptr(el) = x.ty.clone() else { return None };
                 (TypedExprKind::Deref(Box::new(x)), *el)
+            }
+            // a closure whose type is fully given by the expected function type; its body is
+            // not walked (it has scopes of its own), so it declares nothing here
+            ExprKind::Lambda { params, body } => {
+                let Some(Ty::Func { params: wp, ret, ext: false }) = want else { return None };
+                if wp.len() != params.len() || params.iter().any(|p| p.ty.is_some() || p.by_ref) || matches!(&**ret, Ty::Param { name, .. } if name == "?") {
+                    return None;
+                }
+                let t = want?.clone();
+                (TypedExprKind::Lambda { params: params.clone(), body: body.clone() }, t)
             }
             ExprKind::Propagate(inner) => {
                 if !matches!(self.fs.ret, Ty::Result(_)) {
@@ -347,6 +363,37 @@ impl Compiler {
             typed.push(TypedArg { param: i, by_ref: false, value: x });
         }
         Some((TypedExprKind::Call { callee: TypedCallee::Builtin(name.clone()), args: typed }, ty))
+    }
+
+    /// Calls of the methods of built-in types that need no inference: `push`/`add`/`clear` on a
+    /// list, `has` on a map, `slice` on a text. A method the user declared on the type wins.
+    fn check_member_call(&self, callee: &Expr, args: &[Arg]) -> Option<(TypedExprKind, Ty)> {
+        let ExprKind::Field { expr, name, safe: false } = &callee.kind else { return None };
+        if args.iter().any(|a| a.by_ref || a.spread || a.name.is_some()) {
+            return None;
+        }
+        let recv = self.check_expr(expr, None)?;
+        let ot = rc_view(&recv.ty);
+        if self.tp.methods.contains_key(&(method_key(&ot), name.clone())) {
+            return None;
+        }
+        let (want, ty): (Vec<Ty>, Ty) = match (&ot, name.as_str(), args.len()) {
+            (Ty::List(el), "push" | "add", 1) => (vec![(**el).clone()], Ty::Void),
+            (Ty::List(_), "clear", 0) => (vec![], Ty::Void),
+            (Ty::Map(k, _), "has", 1) => (vec![(**k).clone()], Ty::Bool),
+            (Ty::Text, "slice", 2) => (vec![Ty::i64(), Ty::i64()], Ty::Text),
+            _ => return None,
+        };
+        let mut typed = Vec::new();
+        for (i, (a, w)) in args.iter().zip(&want).enumerate() {
+            let x = self.check_expr(&a.value, Some(w))?;
+            let fits = if ot == Ty::Text { x.ty.is_int() } else { x.ty == *w };
+            if !fits {
+                return None;
+            }
+            typed.push(TypedArg { param: i, by_ref: false, value: x });
+        }
+        Some((TypedExprKind::Call { callee: TypedCallee::Member { receiver: Box::new(recv), name: name.clone() }, args: typed }, ty))
     }
 
     /// A record literal of a record that is not generic: its typed fields (each typed from the

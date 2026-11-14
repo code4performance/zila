@@ -42,7 +42,7 @@ pub(super) enum TypedExprKind {
     Shared(Box<TypedExpr>),
     Lambda { params: Vec<Param>, body: Block },
     If { branches: Vec<(TypedExpr, Vec<TypedStmt>)>, else_body: Option<Vec<TypedStmt>> },
-    Match { scrutinee: Box<TypedExpr>, arms: Vec<MatchArm> },
+    Match { scrutinee: Box<TypedExpr>, arms: Vec<TypedMatchArm> },
     Unary { op: &'static str, expr: Box<TypedExpr> },
     Binary { op: &'static str, lhs: Box<TypedExpr>, rhs: Box<TypedExpr> },
     Field { expr: Box<TypedExpr>, name: String, safe: bool },
@@ -53,6 +53,15 @@ pub(super) enum TypedExprKind {
     Await(Box<TypedExpr>),
     SpawnThread(Box<TypedExpr>),
     Sql { dialect: String, raw: String },
+}
+
+/// An arm of a `match`: its patterns as written and its typed body (the variables the patterns
+/// bind are in scope there).
+#[allow(dead_code)] // until emission consumes the tree (tasks 2.2, 3.1)
+#[derive(Debug, Clone)]
+pub(super) struct TypedMatchArm {
+    pub(super) pattern: Vec<PatAtom>,
+    pub(super) body: Vec<TypedStmt>,
 }
 
 /// An argument of a call, bound to its parameter and typed from the parameter's type.
@@ -79,6 +88,8 @@ pub(super) enum TypedCallee {
     Builtin(String),
     /// A variant of an enum used as a constructor: `enum_key` and the variant's index.
     Variant { enum_key: String, index: usize },
+    /// A method of a built-in type (`list.push(x)`, `text.slice(a, b)`): the typed receiver.
+    Member { receiver: Box<TypedExpr>, name: String },
     /// A local variable of function type (closure call).
     Local(String),
     /// Any call form not yet migrated; emission falls back to its own resolution.

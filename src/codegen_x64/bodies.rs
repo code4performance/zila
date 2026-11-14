@@ -176,13 +176,89 @@ impl Compiler {
                     let x = TypedExpr { kind: TypedExprKind::If { branches: typed, else_body }, ty: Ty::Void, line: e.line };
                     TypedStmtKind::Expr(x)
                 }
-                ExprKind::Match { .. } | ExprKind::Lambda { .. } => return None,
+                ExprKind::Match { scrutinee, arms } => {
+                    let kind = self.check_match(scrutinee, arms, w)?;
+                    TypedStmtKind::Expr(TypedExpr { kind, ty: Ty::Void, line: e.line })
+                }
+                ExprKind::Lambda { .. } => return None,
                 ExprKind::Call { callee, .. } if matches!(&callee.kind, ExprKind::Ident(n) if n == "assert" || n == "assert_eq") => return None,
                 _ => TypedStmtKind::Expr(self.check_expr(e, None)?),
             },
             _ => return None,
         };
         Some(TypedStmt { kind, line })
+    }
+
+    /// A `match` used as a statement. The type of each variable an arm binds is the one emission
+    /// gives it; a pattern emission would reject is not covered.
+    fn check_match(&mut self, scrut: &Expr, arms: &[MatchArm], w: &mut Walk) -> Option<TypedExprKind> {
+        let s = self.check_expr(scrut, None)?;
+        let st = s.ty.clone();
+        let mut typed = Vec::new();
+        for arm in arms {
+            let mut binds: Option<(String, Vec<String>)> = None;
+            let mut catch_name: Option<String> = None;
+            for atom in &arm.pattern {
+                let PatAtom::Name { name, bindings } = atom else { continue };
+                match &st {
+                    Ty::Enum(q) => {
+                        let info = self.tp.enums.get(q)?;
+                        match info.variants.iter().find(|v| &v.0 == name) {
+                            Some(v) => {
+                                if v.1.len() != bindings.as_ref().map_or(0, |b| b.len()) {
+                                    return None;
+                                }
+                                if let Some(b) = bindings {
+                                    binds = Some((name.clone(), b.clone()));
+                                }
+                            }
+                            None if bindings.is_none() => catch_name = Some(name.clone()),
+                            None => return None,
+                        }
+                    }
+                    Ty::Result(inner) => {
+                        let n = bindings.as_ref().map_or(0, |b| b.len());
+                        match name.as_str() {
+                            "ok" if n > 1 || (n == 1 && **inner == Ty::Void) => return None,
+                            "err" if n > 1 => return None,
+                            "ok" | "err" => {}
+                            _ => return None,
+                        }
+                        if let Some(b) = bindings {
+                            binds = Some((name.clone(), b.clone()));
+                        }
+                    }
+                    _ => {
+                        if bindings.is_some() {
+                            return None;
+                        }
+                        catch_name = Some(name.clone());
+                    }
+                }
+            }
+            self.fs.scopes.push(Scope::default());
+            if let Some(n) = catch_name {
+                if n != "_" {
+                    self.declare_checked(&n, st.clone(), false, false);
+                }
+            }
+            if let Some((vname, names)) = binds {
+                let tys: Vec<Ty> = match &st {
+                    Ty::Enum(q) => self.tp.enums[q].variants.iter().find(|v| v.0 == vname).map(|v| v.1.clone()).unwrap_or_default(),
+                    Ty::Result(inner) if vname == "ok" => vec![(**inner).clone()],
+                    _ => vec![Ty::Err],
+                };
+                for (n, ty) in names.iter().zip(tys) {
+                    if n != "_" {
+                        self.declare_checked(n, ty, false, false);
+                    }
+                }
+            }
+            let body = self.check_stmts(&arm.body, w);
+            self.fs.scopes.pop();
+            typed.push(TypedMatchArm { pattern: arm.pattern.clone(), body });
+        }
+        Some(TypedExprKind::Match { scrutinee: Box::new(s), arms: typed })
     }
 
     /// A `for` loop over a range, a map, a text or a list; its variables are declared in the

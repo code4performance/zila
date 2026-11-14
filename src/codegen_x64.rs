@@ -63,7 +63,7 @@ mod threads;
 mod bodies;
 mod typed;
 mod checker;
-use typed::{TypedArg, TypedBody, TypedCallee, TypedExpr, TypedExprKind, TypedProgram, TypedStmt, TypedStmtKind};
+use typed::{TypedArg, TypedBody, TypedCallee, TypedExpr, TypedExprKind, TypedMatchArm, TypedProgram, TypedStmt, TypedStmtKind};
 use analysis::*;
 use fold::*;
 use generics::*;

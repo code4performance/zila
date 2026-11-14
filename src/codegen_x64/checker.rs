@@ -235,6 +235,17 @@ impl Compiler {
                 };
                 (TypedExprKind::Lambda { params: params.clone(), body: typed }, t)
             }
+            // a `sql` block is a call of `db.sql_const` (no holes) or `db.sql` (holes): that type
+            ExprKind::Sql { dialect, raw } => {
+                if !self.imports.get(&self.cur_mod).is_some_and(|s| s.contains("db")) {
+                    return None;
+                }
+                let profile = self.sql_profile(dialect).ok()?;
+                let scanned = crate::sqlblock::scan(&profile, raw, e.line + 1).ok()?;
+                let name = if scanned.holes.is_empty() { "sql_const" } else { "sql" };
+                let t = self.tp.funcs.get(&("db".to_string(), name.to_string()))?.ret.clone();
+                (TypedExprKind::Sql { dialect: dialect.clone(), raw: raw.clone() }, t)
+            }
             ExprKind::SpawnThread(call) => {
                 let ExprKind::Call { .. } = &call.kind else { return None };
                 let x = self.check_expr(call, None)?;

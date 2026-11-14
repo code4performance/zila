@@ -520,7 +520,7 @@ fn open_changes() -> Vec<String> {
 }
 
 fn is_change_name(t: &str) -> bool {
-    const PREFIXES: [&str; 9] = ["add-", "remove-", "restrict-", "split-", "rename-", "use-", "keep-", "redesign-", "language-"];
+    const PREFIXES: [&str; 10] = ["add-", "remove-", "restrict-", "split-", "rename-", "use-", "keep-", "redesign-", "language-", "fix-"];
     PREFIXES.iter().any(|p| t.starts_with(p)) && t.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 

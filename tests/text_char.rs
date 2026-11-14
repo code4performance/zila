@@ -351,7 +351,7 @@ println(text.upper("Straße 1"), text.lower("AÇÃO"), text.upper("coração"))
 println(text.pad_left("7", 3, "0"), text.pad_right("ab", 4, "."), text.pad_right("ação", 6, "."), text.pad_left("ação", 2, "."))
 println("[" + text.pad_left("São", 5, " ") + "]", "[" + text.pad_right("😀", 3, "·") + "]")
 println(text.pad_left("x", 3, "ç"))"#,
-        "oãça oluaP oãS a😀 \n4 ação\nSTRAßE 1 aÇÃo CORAçãO\n007 ab.. ação.. ação\n[  São] [😀··]\nççx\n",
+        "oãça oluaP oãS a😀 \n4 ação\nSTRAßE 1 ação CORAÇÃO\n007 ab.. ação.. ação\n[  São] [😀··]\nççx\n",
     );
 }
 

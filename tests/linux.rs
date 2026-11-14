@@ -207,7 +207,7 @@ fn maps_floats_text_and_the_pure_libraries_work() {
     let src = "package main\n\nuse text\nuse list\nuse format\nuse sorted\n\nfunc main()\n    let m: Map<text, int> = {}\n    m[\"b\"] = 2\n    m[\"a\"] = 1\n    print(m.len)\n    print(2.5 * 2.0)\n    print(text.upper(\"abc ação\"))\n    print(format.fmt(\"%(08x)|%(>8.2f)\", 255, 3.14159) ?? \"?\")\n    let s: sorted.SortedSet<int> = sorted.set()\n    for x in [3, 1, 2]\n        s.add(x)\n    end\n    print(s.min() ?? 0)\n    print(list.range(0, 3).len)\nend\n";
     let Some((out, code)) = run_linux(src) else { return };
     assert_eq!(code, 0, "{}", out);
-    assert_eq!(out, "2\n5.0\nABC AçãO\n000000ff|    3.14\n1\n3\n");
+    assert_eq!(out, "2\n5.0\nABC AÇÃO\n000000ff|    3.14\n1\n3\n");
 }
 
 #[test]

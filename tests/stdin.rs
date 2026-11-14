@@ -120,6 +120,6 @@ fn closing_a_reader_does_not_close_standard_input() {
 fn utf8_text_arrives_intact_and_survives_text_functions() {
     let src = "package main\n\nuse fs\nuse text\n\nfunc main() -> error\n    let r = fs.stdin()\n    let line = try await r.read_line()\n    print(\"{line} {text.upper(line)} {line.char_count()}\")\n    return\nend\n";
     let r = run(src, "a\u{e7}\u{e3}o\n".as_bytes());
-    assert_eq!((r.out.as_str(), r.code), ("a\u{e7}\u{e3}o A\u{e7}\u{e3}O 4\n", 0), "{}", r.err);
+    assert_eq!((r.out.as_str(), r.code), ("a\u{e7}\u{e3}o A\u{c7}\u{c3}O 4\n", 0), "{}", r.err);
 }
 

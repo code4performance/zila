@@ -7,8 +7,8 @@
 // A text is immutable UTF-8: `len` counts bytes, a `char` is one Unicode code point, `for c in s`
 // walks the characters and `s.slice(a, b)` cuts by byte positions (aborting inside a character).
 // Searching, splitting, trimming and replacing compare whole byte sequences, so they are correct
-// for UTF-8. `upper` and `lower` only change ASCII letters; `reverse` and the padding functions
-// work on characters.
+// for UTF-8. `upper` and `lower` change the case of ASCII, Latin, Greek, Cyrillic and Armenian letters;
+// `reverse` and the padding functions work on characters.
 // =====================================================================
 
 package text
@@ -255,14 +255,385 @@ func shift_ascii(s: text, lo: int, hi: int, delta: int) -> text
     return concat_all(parts)
 end
 
-// ASCII letters in capitals; other bytes unchanged.
-pub func upper(s: text) -> text
-    return shift_ascii(s, 97, 122, 0 - 32)
+func is_ascii_text(s: text) -> bool
+    for i in 0..s.len
+        if int(s.byte(i)) >= 128
+            return false
+        end
+    end
+    return true
 end
 
-// ASCII letters in lower case; other bytes unchanged.
+func upper_cp(cp: int) -> int
+    // ASCII
+    if cp >= 0x61 and cp <= 0x7A
+        return cp - 32
+    end
+    // Fullwidth Latin
+    if cp >= 0xFF41 and cp <= 0xFF5A
+        return cp - 32
+    end
+    // Latin-1 Supplement
+    if (cp >= 0xE0 and cp <= 0xF6) or (cp >= 0xF8 and cp <= 0xFE)
+        return cp - 32
+    end
+    if cp == 0xFF
+        return 0x0178
+    end
+    if cp == 0xB5
+        return 0x039C
+    end
+
+    // Latin Extended-A
+    if cp >= 0x0100 and cp <= 0x012F
+        if (cp bitand 1) == 1
+            return cp - 1
+        end
+        return cp
+    end
+    if cp == 0x0131
+        return 0x0049
+    end
+    if cp >= 0x0132 and cp <= 0x0137
+        if (cp bitand 1) == 1
+            return cp - 1
+        end
+        return cp
+    end
+    if cp >= 0x0139 and cp <= 0x0148
+        if (cp bitand 1) == 0
+            return cp - 1
+        end
+        return cp
+    end
+    if cp >= 0x014A and cp <= 0x0177
+        if (cp bitand 1) == 1
+            return cp - 1
+        end
+        return cp
+    end
+    if cp >= 0x0179 and cp <= 0x017E
+        if (cp bitand 1) == 0
+            return cp - 1
+        end
+        return cp
+    end
+    if cp == 0x017F
+        return 0x0053
+    end
+
+    // Greek
+    if (cp >= 0x0370 and cp <= 0x0373) or cp == 0x0376 or cp == 0x0377
+        if (cp bitand 1) == 1
+            return cp - 1
+        end
+        return cp
+    end
+    if cp >= 0x037B and cp <= 0x037D
+        return cp + 130
+    end
+    if cp == 0x03F3
+        return 0x037F
+    end
+    if cp == 0x03AC
+        return 0x0386
+    end
+    if cp >= 0x03AD and cp <= 0x03AF
+        return cp - 37
+    end
+    if cp >= 0x03B1 and cp <= 0x03C1
+        return cp - 32
+    end
+    if cp == 0x03C2
+        return 0x03A3
+    end
+    if cp >= 0x03C3 and cp <= 0x03CB
+        return cp - 32
+    end
+    if cp == 0x03CC
+        return 0x038C
+    end
+    if cp >= 0x03CD and cp <= 0x03CE
+        return cp - 63
+    end
+    if cp == 0x03D0
+        return 0x0392
+    end
+    if cp == 0x03D1
+        return 0x0398
+    end
+    if cp == 0x03D5
+        return 0x03A6
+    end
+    if cp == 0x03D6
+        return 0x03A0
+    end
+    if cp == 0x03D7
+        return 0x03CF
+    end
+    if cp >= 0x03D8 and cp <= 0x03EF
+        if (cp bitand 1) == 1
+            return cp - 1
+        end
+        return cp
+    end
+    if cp == 0x03F0
+        return 0x039A
+    end
+    if cp == 0x03F1
+        return 0x03A1
+    end
+    if cp == 0x03F2
+        return 0x03F9
+    end
+    if cp == 0x03F5
+        return 0x0395
+    end
+    if cp == 0x03F8 or cp == 0x03FB
+        return cp - 1
+    end
+
+    // Cyrillic
+    if cp >= 0x0430 and cp <= 0x044F
+        return cp - 32
+    end
+    if cp >= 0x0450 and cp <= 0x045F
+        return cp - 80
+    end
+    if (cp >= 0x0460 and cp <= 0x0481) or (cp >= 0x048A and cp <= 0x04BF)
+        if (cp bitand 1) == 1
+            return cp - 1
+        end
+        return cp
+    end
+    if cp == 0x04CF
+        return 0x04C0
+    end
+    if cp >= 0x04C1 and cp <= 0x04CE
+        if (cp bitand 1) == 0
+            return cp - 1
+        end
+        return cp
+    end
+    if cp >= 0x04D0 and cp <= 0x052F
+        if (cp bitand 1) == 1
+            return cp - 1
+        end
+        return cp
+    end
+
+    // Armenian
+    if cp >= 0x0561 and cp <= 0x0586
+        return cp - 48
+    end
+
+    // Latin Extended Additional
+    if cp >= 0x1E00 and cp <= 0x1E95
+        if (cp bitand 1) == 1
+            return cp - 1
+        end
+        return cp
+    end
+    if cp == 0x1E9B
+        return 0x1E60
+    end
+    if cp >= 0x1EA0 and cp <= 0x1EFF
+        if (cp bitand 1) == 1
+            return cp - 1
+        end
+        return cp
+    end
+
+    return cp
+end
+
+func lower_cp(cp: int) -> int
+    // ASCII
+    if cp >= 0x41 and cp <= 0x5A
+        return cp + 32
+    end
+    // Fullwidth Latin
+    if cp >= 0xFF21 and cp <= 0xFF3A
+        return cp + 32
+    end
+    // Latin-1 Supplement
+    if (cp >= 0xC0 and cp <= 0xD6) or (cp >= 0xD8 and cp <= 0xDE)
+        return cp + 32
+    end
+
+    // Latin Extended-A
+    if cp >= 0x0100 and cp <= 0x012F
+        if (cp bitand 1) == 0
+            return cp + 1
+        end
+        return cp
+    end
+    if cp == 0x0130
+        return 0x0069
+    end
+    if cp >= 0x0132 and cp <= 0x0137
+        if (cp bitand 1) == 0
+            return cp + 1
+        end
+        return cp
+    end
+    if cp >= 0x0139 and cp <= 0x0148
+        if (cp bitand 1) == 1
+            return cp + 1
+        end
+        return cp
+    end
+    if cp >= 0x014A and cp <= 0x0177
+        if (cp bitand 1) == 0
+            return cp + 1
+        end
+        return cp
+    end
+    if cp == 0x0178
+        return 0x00FF
+    end
+    if cp >= 0x0179 and cp <= 0x017E
+        if (cp bitand 1) == 1
+            return cp + 1
+        end
+        return cp
+    end
+
+    // Greek
+    if (cp >= 0x0370 and cp <= 0x0373) or cp == 0x0376 or cp == 0x0377
+        if (cp bitand 1) == 0
+            return cp + 1
+        end
+        return cp
+    end
+    if cp == 0x037F
+        return 0x03F3
+    end
+    if cp == 0x0386
+        return 0x03AC
+    end
+    if cp >= 0x0388 and cp <= 0x038A
+        return cp + 37
+    end
+    if cp == 0x038C
+        return 0x03CC
+    end
+    if cp >= 0x038E and cp <= 0x038F
+        return cp + 63
+    end
+    if (cp >= 0x0391 and cp <= 0x03A1) or (cp >= 0x03A3 and cp <= 0x03AB)
+        return cp + 32
+    end
+    if cp == 0x03CF
+        return 0x03D7
+    end
+    if cp >= 0x03D8 and cp <= 0x03EF
+        if (cp bitand 1) == 0
+            return cp + 1
+        end
+        return cp
+    end
+    if cp == 0x03F4
+        return 0x03B8
+    end
+    if cp == 0x03F7 or cp == 0x03FA
+        return cp + 1
+    end
+    if cp == 0x03F9
+        return 0x03F2
+    end
+    if cp >= 0x03FD and cp <= 0x03FF
+        return cp - 130
+    end
+
+    // Cyrillic
+    if cp >= 0x0400 and cp <= 0x040F
+        return cp + 80
+    end
+    if cp >= 0x0410 and cp <= 0x042F
+        return cp + 32
+    end
+    if (cp >= 0x0460 and cp <= 0x0481) or (cp >= 0x048A and cp <= 0x04BF)
+        if (cp bitand 1) == 0
+            return cp + 1
+        end
+        return cp
+    end
+    if cp == 0x04C0
+        return 0x04CF
+    end
+    if cp >= 0x04C1 and cp <= 0x04CE
+        if (cp bitand 1) == 1
+            return cp + 1
+        end
+        return cp
+    end
+    if cp >= 0x04D0 and cp <= 0x052F
+        if (cp bitand 1) == 0
+            return cp + 1
+        end
+        return cp
+    end
+
+    // Armenian
+    if cp >= 0x0531 and cp <= 0x0556
+        return cp + 48
+    end
+
+    // Latin Extended Additional
+    if cp >= 0x1E00 and cp <= 0x1E95
+        if (cp bitand 1) == 0
+            return cp + 1
+        end
+        return cp
+    end
+    if cp == 0x1E9E
+        return 0x00DF
+    end
+    if cp >= 0x1EA0 and cp <= 0x1EFF
+        if (cp bitand 1) == 0
+            return cp + 1
+        end
+        return cp
+    end
+
+    return cp
+end
+
+// Letters in capitals; characters with no single capital unchanged.
+pub func upper(s: text) -> text
+    if is_ascii_text(s)
+        return shift_ascii(s, 97, 122, 0 - 32)
+    end
+    let parts: []text = []
+    for c in s
+        let cp = c.code
+        let u = upper_cp(cp)
+        if u == cp
+            parts.add(c.to_text())
+        else
+            parts.add(char(u).to_text())
+        end
+    end
+    return concat_all(parts)
+end
+
+// Letters in lower case; characters with no single lower case unchanged.
 pub func lower(s: text) -> text
-    return shift_ascii(s, 65, 90, 32)
+    if is_ascii_text(s)
+        return shift_ascii(s, 65, 90, 32)
+    end
+    let parts: []text = []
+    for c in s
+        let cp = c.code
+        let l = lower_cp(cp)
+        if l == cp
+            parts.add(c.to_text())
+        else
+            parts.add(char(l).to_text())
+        end
+    end
+    return concat_all(parts)
 end
 
 // The characters of `s` in order.

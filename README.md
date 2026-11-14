@@ -117,7 +117,7 @@ flowchart LR
 
 ## Where Zila Lang is going
 
-Every language change is an [OpenSpec](openspec) change: open ones live in `openspec/changes/`, finished ones in `openspec/changes/archive/`, and their result is the living specification in `openspec/specs/`. **Two changes are built and waiting for a manual check on a real terminal:** `add-repl` (the interactive `zila repl`) and `fix-console-input-encoding` (UTF-8 for text typed at a Windows console). A test keeps this section from naming a change that is not open.
+Every language change is an [OpenSpec](openspec) change: open ones live in `openspec/changes/`, finished ones in `openspec/changes/archive/`, and their result is the living specification in `openspec/specs/`. **One change is in progress:** `add-typed-tree-emission` (compiler emission consumes a typed tree instead of raw syntax). A test keeps this section from naming a change that is not open.
 
 **Known gaps** (each is a place where you can help):
 

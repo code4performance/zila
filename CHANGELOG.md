@@ -8,12 +8,14 @@ The version lives in `Cargo.toml` and at the top of `README.md`. To release: mov
 ## [Unreleased]
 
 ### Changed
+- `text.upper` and `text.lower` map letters of Latin (including Latin-1 Supplement, Latin Extended-A, Latin Extended Additional and fullwidth), Greek, Cyrillic and Armenian with simple one-to-one casing instead of ASCII only (`upper("ação")` gives `AÇÃO`); other scripts and characters with multi-character expansions like `ß` remain unchanged (OpenSpec change `add-unicode-case`).
 - The command is now `zila` (before, its name ended in a suffix from the lexer-and-parser days); the VS Code extension starts `zila --lsp` by default (extension version 0.5.0).
 - `zila.ebnf` and `zila-ffi.md` moved to `docs/`.
 - The language's purpose is described more broadly in the README and the site: AI client and services, databases, web, IoT and mobile (the last two are targets), extensible through packages, open source.
 - The README is about a third shorter and says openly that the language is designed with the help of AI under detailed human direction, and that the project most needs volunteers to refine it and, above all, to test and use it in practice. The diagrams moved to `docs/diagrams.md`.
 
 ### Fixed
+- On Windows, `fs.stdin()` switches the console input code page to UTF-8 (`SetConsoleCP(65001)`), so accented characters typed interactively arrive intact without aborting (OpenSpec change `fix-console-input-encoding`).
 - The README roadmap listed 15 changes as not started that were already built and archived, and a `rename-language` change that does not exist; it now lists only the real gaps. The test count is stated as "more than 1,000".
 - The generated assembly is deterministic: two compiles of the same program no longer list the record and enum helper procedures in a different order.
 

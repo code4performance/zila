@@ -1,0 +1,97 @@
+package main
+
+type Status = enum
+    Open
+    InProgress
+    Done
+end
+
+type Priority = enum
+    Low
+    Normal
+    High
+end
+
+type Task = record
+    id: int
+    title: text
+    status: Status
+    priority: Priority
+end
+
+func add_task(ref tasks: []Task, id: int, title: text, priority: Priority) -> error
+    if title == ""
+        return error("o título não pode ficar vazio")
+    end
+
+    for task in tasks
+        if task.id == id
+            return error("já existe uma tarefa com esse id")
+        end
+    end
+
+    tasks.add(Task{
+            id: id,
+            title: title,
+            status: Open,
+            priority: priority
+        })
+    return
+end
+
+func find_task(ref tasks: []Task, id: int) -> int
+    for i, task in tasks
+        if task.id == id
+            return i
+        end
+    end
+    return -1
+end
+
+func set_status(ref tasks: []Task, id: int, status: Status) -> error
+    for i, task in tasks
+        if task.id == id
+            tasks[i].status = status
+            return
+        end
+    end
+    return error("tarefa não encontrada")
+end
+
+func status_name(status: Status) -> text
+    match status
+        Open       -> return "Aberta"
+        InProgress -> return "Em andamento"
+        Done       -> return "Concluída"
+    end
+end
+
+func priority_name(priority: Priority) -> text
+    match priority
+        Low    -> return "Baixa"
+        Normal -> return "Normal"
+        High   -> return "Alta"
+    end
+end
+
+func print_tasks(tasks: []Task)
+    for task in tasks
+        print("#{task.id} [{status_name(task.status)}] {task.title} — prioridade {priority_name(task.priority)}")
+    end
+end
+
+func main() -> error
+    var tasks: []Task = []
+
+    try add_task(ref tasks, 1, "Estudar a sintaxe de Zila", High)
+    try add_task(ref tasks, 2, "Criar o primeiro programa", Normal)
+    try add_task(ref tasks, 3, "Ler a documentação de pacotes", Low)
+
+    try set_status(ref tasks, 1, InProgress)
+    try set_status(ref tasks, 2, Done)
+
+    print("=== TaskBox ===")
+    print_tasks(tasks)
+
+    return
+end

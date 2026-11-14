@@ -118,9 +118,97 @@ impl Compiler {
                 let (callee, t) = self.resolve_call(callee)?;
                 (TypedExprKind::Call { callee, args: args.clone() }, t)
             }
+            ExprKind::List(items) => {
+                let mut el = match want {
+                    Some(Ty::List(t)) => Some((**t).clone()),
+                    _ => None,
+                };
+                let mut typed = Vec::new();
+                for it in items {
+                    let x = self.check_expr(it, el.as_ref())?;
+                    match &el {
+                        Some(w) if *w != x.ty => return None,
+                        Some(_) => {}
+                        None => el = Some(x.ty.clone()),
+                    }
+                    typed.push(x);
+                }
+                (TypedExprKind::List(typed), Ty::List(Box::new(el?)))
+            }
+            ExprKind::Map(pairs) => {
+                let (mut kt, mut vt) = match want {
+                    Some(Ty::Map(k, v)) => (Some((**k).clone()), Some((**v).clone())),
+                    _ => (None, None),
+                };
+                let mut typed = Vec::new();
+                for (ke, ve) in pairs {
+                    let k = self.check_expr(ke, kt.as_ref())?;
+                    let v = self.check_expr(ve, vt.as_ref())?;
+                    match (&kt, &vt) {
+                        (Some(a), Some(b)) if *a != k.ty || *b != v.ty => return None,
+                        (Some(_), Some(_)) => {}
+                        _ => {
+                            kt = Some(k.ty.clone());
+                            vt = Some(v.ty.clone());
+                        }
+                    }
+                    typed.push((k, v));
+                }
+                (TypedExprKind::Map(typed), Ty::Map(Box::new(kt?), Box::new(vt?)))
+            }
+            ExprKind::Record { .. } => {
+                let (kind, rec) = self.check_record_literal(e)?;
+                (kind, Ty::Rec(rec))
+            }
+            ExprKind::New(inner) => {
+                let ExprKind::Record { .. } = &inner.kind else { return None };
+                let (kind, rec) = self.check_record_literal(inner)?;
+                let x = TypedExpr { kind, ty: Ty::Rec(rec), line: inner.line };
+                let t = Ty::Rc(Box::new(x.ty.clone()));
+                (TypedExprKind::New(Box::new(x)), t)
+            }
+            ExprKind::Shared(inner) => {
+                let x = self.check_expr(inner, want)?;
+                if !matches!(x.ty, Ty::Rec(_) | Ty::List(_) | Ty::Map(..) | Ty::Text) {
+                    return None;
+                }
+                let t = x.ty.clone();
+                (TypedExprKind::Shared(Box::new(x)), t)
+            }
+            ExprKind::Deref(inner) => {
+                let x = self.check_expr(inner, None)?;
+                let Ty::Ptr(el) = x.ty.clone() else { return None };
+                (TypedExprKind::Deref(Box::new(x)), *el)
+            }
+            ExprKind::Await(inner) => {
+                let x = self.check_expr(inner, None)?;
+                let Ty::Future(v) = x.ty.clone() else { return None };
+                (TypedExprKind::Await(Box::new(x)), *v)
+            }
             _ => return None,
         };
         Some(TypedExpr { kind, ty, line: e.line })
+    }
+
+    /// A record literal of a record that is not generic: its typed fields (each typed from the
+    /// declared field type) and the record's key. Unknown fields and mistyped values are not typed.
+    fn check_record_literal(&self, e: &Expr) -> Option<(TypedExprKind, String)> {
+        let ExprKind::Record { path, fields } = &e.kind else { return None };
+        let q = self.qname(&self.cur_mod, path);
+        if !self.tp.rec_decls.contains_key(&q) {
+            return None;
+        }
+        let decl = &self.tp.records.get(&q)?.fields;
+        let mut typed = Vec::new();
+        for (name, value) in fields {
+            let fty = &decl.iter().find(|d| &d.0 == name)?.1;
+            let x = self.check_expr(value, Some(fty))?;
+            if x.ty != *fty {
+                return None;
+            }
+            typed.push((name.clone(), x));
+        }
+        Some((TypedExprKind::Record { rec_key: q.clone(), fields: typed }, q))
     }
 
     /// A local, or a global, constant or function of the current module used as a value.

@@ -128,6 +128,11 @@ impl Compiler {
                 let w = want.filter(|t| t.is_int() || matches!(t, Ty::Float { .. }));
                 let l = self.check_expr(lhs, w)?;
                 let r = self.check_expr(rhs, Some(&l.ty))?;
+                // pointer arithmetic: a pointer plus or minus an integer is a pointer
+                if matches!(l.ty, Ty::Ptr(_)) && r.ty.is_int() && matches!(*op, "+" | "-") {
+                    let t = l.ty.clone();
+                    return Some(TypedExpr { kind: TypedExprKind::Binary { op, lhs: Box::new(l), rhs: Box::new(r) }, ty: t, line: e.line });
+                }
                 let number = l.ty.is_int() || matches!(l.ty, Ty::Float { .. });
                 if l.ty != r.ty || !(number || (*op == "+" && l.ty == Ty::Text)) {
                     return None;
@@ -141,7 +146,11 @@ impl Compiler {
                 let t = match rc_view(&x.ty) {
                     Ty::List(el) => *el,
                     Ty::Map(_, v) => *v,
-                    _ => return None,
+                    _ => match &x.ty {
+                        // reading through a raw pointer (emission requires `unsafe`)
+                        Ty::Ptr(el) => (**el).clone(),
+                        _ => return None,
+                    },
                 };
                 (TypedExprKind::Index { expr: Box::new(x), index: Box::new(i) }, t)
             }

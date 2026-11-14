@@ -785,6 +785,9 @@ pub struct Compiler {
     next_lambda_share: bool,
     /// the next `lambda()` may ignore the result of a call that can fail
     next_lambda_ignore_result: bool,
+    /// A function body is being checked (`bodies.rs`): the checker may then try things that need
+    /// the instantiation state undone afterwards (generic calls, bounded type parameters).
+    checking_body: bool,
     /// Types the body checker found for the locals of an `async` body, handed to the closure that
     /// the body is compiled as (see `bodies.rs`).
     next_lambda_vars: Option<HashMap<(u32, String), Ty>>,
@@ -871,6 +874,7 @@ impl Compiler {
             await_syms: std::collections::HashSet::new(),
             next_lambda_share: false,
             next_lambda_ignore_result: false,
+            checking_body: false,
             next_lambda_vars: None,
             cur_mod: String::new(),
             line: 0,

@@ -45,7 +45,9 @@ impl Compiler {
             self.declare_checked(&name, ty, true, by_ref);
         }
         let mut w = Walk { complete: true, ..Walk::default() };
+        self.checking_body = true;
         let stmts = self.check_stmts(&fd.body, &mut w);
+        self.checking_body = false;
         if let Some(snap) = w.snap.take() {
             self.restore(snap);
         }
@@ -57,6 +59,20 @@ impl Compiler {
             self.fs.checked_vars = w.vars;
         }
         self.tp.bodies.insert(sig.sym.clone(), TypedBody { stmts, ret: sig.ret.clone(), complete: w.complete });
+    }
+
+    /// Runs `f` and undoes what it did to the instantiation state (resolving a type can instantiate
+     /// generics). Only while a body is being checked; otherwise the answer is `None`.
+    pub(super) fn speculative<T>(&mut self, f: impl FnOnce(&mut Self) -> Option<T>) -> Option<T> {
+        if !self.checking_body {
+            return None;
+        }
+        let inst_count = self.tp.inst_count;
+        let snap = self.snapshot();
+        let r = f(self);
+        self.restore(snap);
+        self.tp.inst_count = inst_count;
+        r
     }
 
     fn declare_checked(&mut self, name: &str, ty: Ty, mutable: bool, is_ref: bool) {

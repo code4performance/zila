@@ -27,7 +27,7 @@ impl Compiler {
     /// The typed tree of `e`, for the forms migrated so far (`None` for the rest, and when any
     /// part of `e` is not covered). Its type is the one emission gives: emission
     /// asserts it in builds with debug assertions.
-    pub(super) fn check_expr(&self, e: &Expr, want: Option<&Ty>) -> Option<TypedExpr> {
+    pub(super) fn check_expr(&mut self, e: &Expr, want: Option<&Ty>) -> Option<TypedExpr> {
         let (kind, ty) = match &e.kind {
             ExprKind::Int(n) => {
                 let t = match want {
@@ -145,6 +145,8 @@ impl Compiler {
                     (TypedExprKind::Call { callee: shape.callee, args }, shape.ret)
                 } else if let Some(x) = self.check_builtin_call(callee, args) {
                     x
+                } else if let Some(x) = self.check_generic_call(callee, args) {
+                    x
                 } else {
                     self.check_member_call(callee, args)?
                 }
@@ -248,7 +250,7 @@ impl Compiler {
     /// The parameter types of a callee found by `resolve_call` (a function, a method or an enum
     /// variant used as a constructor), with its destination and result type. Variadic and
     /// extern-variadic callees are not covered.
-    fn resolve_call_sig(&self, callee: &Expr) -> Option<CallShape> {
+    fn resolve_call_sig(&mut self, callee: &Expr) -> Option<CallShape> {
         let params = |sig: &Sig| {
             (!sig.c_variadic).then(|| sig.params.iter().map(|p| (Some(p.name.clone()), p.ty.clone())).collect::<Vec<_>>())
         };
@@ -274,7 +276,7 @@ impl Compiler {
 
     /// Binds the arguments of a call to the parameters and types each one from its parameter's
     /// type. Not covered (`None`): spread arguments, missing or mistyped arguments.
-    fn bind_args(&self, params: &[BoundParam], variadic: bool, args: &[Arg]) -> Option<Vec<TypedArg>> {
+    fn bind_args(&mut self, params: &[BoundParam], variadic: bool, args: &[Arg]) -> Option<Vec<TypedArg>> {
         let fixed = if variadic { params.len() - 1 } else { params.len() };
         let mut slots: Vec<Option<&Arg>> = vec![None; params.len()];
         let mut rest: Vec<&Arg> = Vec::new();
@@ -332,7 +334,7 @@ impl Compiler {
     /// Calls of the built-ins whose typing needs no inference: `print`, `println`, `error`,
     /// `abort`, `char`, `float`/`f64`/`f32`, `sleep`, `live_objects`. Arguments are typed in the
     /// order of the call; `by_ref` and spread arguments are not covered.
-    fn check_builtin_call(&self, callee: &Expr, args: &[Arg]) -> Option<(TypedExprKind, Ty)> {
+    fn check_builtin_call(&mut self, callee: &Expr, args: &[Arg]) -> Option<(TypedExprKind, Ty)> {
         let ExprKind::Ident(name) = &callee.kind else { return None };
         if self.lookup(name).is_some() || args.iter().any(|a| a.by_ref || a.spread || a.name.is_some()) {
             return None;
@@ -383,10 +385,72 @@ impl Compiler {
         Some((TypedExprKind::Call { callee: TypedCallee::Builtin(name.clone()), args: typed }, ty))
     }
 
+    /// A call of a generic function whose type arguments follow from its arguments: the type
+    /// arguments are bound as emission binds them, the instance's signature is built (and
+    /// forgotten again) and the arguments are typed against it. Not covered: explicit type
+    /// arguments, closures or bare number literals where a type parameter is inferred, variadic
+    /// parameters, named arguments.
+    fn check_generic_call(&mut self, callee: &Expr, args: &[Arg]) -> Option<(TypedExprKind, Ty)> {
+        if !self.checking_body || args.iter().any(|a| a.spread || a.by_ref || a.name.is_some()) {
+            return None;
+        }
+        let (module, fd) = match &callee.kind {
+            ExprKind::Ident(name) if self.lookup(name).is_none() => {
+                let key = (self.cur_mod.clone(), name.clone());
+                (key.0.clone(), self.tmpl_funcs.get(&key)?.0.clone())
+            }
+            ExprKind::Field { expr, name, safe: false } => {
+                let ExprKind::Ident(m) = &expr.kind else { return None };
+                if self.lookup(m).is_some() || !self.is_module(m) {
+                    return None;
+                }
+                let module = self.modkey(&self.cur_mod, m);
+                let fd = self.tmpl_funcs.get(&(module.clone(), name.clone()))?.0.clone();
+                (module, fd)
+            }
+            _ => return None,
+        };
+        if fd.params.len() != args.len() || fd.params.iter().any(|p| p.variadic || p.ty.is_none() || p.default.is_some()) {
+            return None;
+        }
+        let names: Vec<String> = fd.generics.iter().map(|g| g.name.clone()).collect();
+        self.speculative(|c| {
+            let mut b: HashMap<String, Ty> = HashMap::new();
+            for (a, p) in args.iter().zip(&fd.params) {
+                let pt = p.ty.as_ref()?;
+                if !mentions_param(pt, &names) {
+                    continue;
+                }
+                if matches!(a.value.kind, ExprKind::Lambda { .. }) || is_int_literal(&a.value) {
+                    return None;
+                }
+                let x = c.check_expr(&a.value, None)?;
+                c.unify(pt, &x.ty, &names, &mut b, &module).ok()?;
+            }
+            if names.iter().any(|n| !b.contains_key(n) || b[n] == Ty::Void) {
+                return None;
+            }
+            let argkey = names.iter().map(|n| ty_full(&b[n])).collect::<Vec<_>>().join(",");
+            let inst = format!("{}__{}", fd.name, sym_of(&argkey));
+            let mut decl = fd.clone();
+            decl.generics.clear();
+            decl.name = inst.clone();
+            let saved = std::mem::replace(&mut c.bindings, b);
+            let saved_mod = std::mem::replace(&mut c.cur_mod, module.clone());
+            let sig = c.func_sig(&module, &decl);
+            c.bindings = saved;
+            c.cur_mod = saved_mod;
+            let sig = sig.ok()?;
+            let params: Vec<BoundParam> = sig.params.iter().map(|p| (Some(p.name.clone()), p.ty.clone())).collect();
+            let typed = c.bind_args(&params, false, args)?;
+            Some((TypedExprKind::Call { callee: TypedCallee::GenericInstance { inst_name: inst }, args: typed }, sig.ret.clone()))
+        })
+    }
+
     /// Calls of the methods of built-in types that need no inference: `push`/`add`/`clear` on a
     /// list, `has` on a map, `slice`/`byte`/`bytes`/`char_count` on a text, `to_text`/`len_utf8`/
     /// `is_ascii` on a char. A method the user declared on the type wins.
-    fn check_member_call(&self, callee: &Expr, args: &[Arg]) -> Option<(TypedExprKind, Ty)> {
+    fn check_member_call(&mut self, callee: &Expr, args: &[Arg]) -> Option<(TypedExprKind, Ty)> {
         let ExprKind::Field { expr, name, safe: false } = &callee.kind else { return None };
         if args.iter().any(|a| a.by_ref || a.spread || a.name.is_some()) {
             return None;
@@ -395,6 +459,26 @@ impl Compiler {
         let ot = rc_view(&recv.ty);
         if self.tp.methods.contains_key(&(method_key(&ot), name.clone())) {
             return None;
+        }
+        // a method of the bound of a type parameter
+        if let Ty::Param { bound: Some(b), .. } = &ot {
+            let (im, sg) = self.bound_sig(b, name)?;
+            let self_ty = ot.clone();
+            return self.speculative(|c| {
+                let (ps, ret) = c.interface_method(&im, &sg, &self_ty).ok()?;
+                if ps.len() != args.len() {
+                    return None;
+                }
+                let mut typed = Vec::new();
+                for (i, (a, pt)) in args.iter().zip(&ps).enumerate() {
+                    let x = c.check_expr(&a.value, Some(pt))?;
+                    if x.ty != *pt {
+                        return None;
+                    }
+                    typed.push(TypedArg { param: i, by_ref: false, value: x });
+                }
+                Some((TypedExprKind::Call { callee: TypedCallee::Member { receiver: Box::new(recv), name: name.clone() }, args: typed }, ret))
+            });
         }
         let (want, ty): (Vec<Ty>, Ty) = match (&ot, name.as_str(), args.len()) {
             (Ty::List(el), "push" | "add", 1) => (vec![(**el).clone()], Ty::Void),
@@ -423,13 +507,13 @@ impl Compiler {
 
     /// A record literal of a record that is not generic: its typed fields (each typed from the
     /// declared field type) and the record's key. Unknown fields and mistyped values are not typed.
-    fn check_record_literal(&self, e: &Expr) -> Option<(TypedExprKind, String)> {
+    fn check_record_literal(&mut self, e: &Expr) -> Option<(TypedExprKind, String)> {
         let ExprKind::Record { path, fields } = &e.kind else { return None };
         let q = self.qname(&self.cur_mod, path);
         if !self.tp.rec_decls.contains_key(&q) {
             return None;
         }
-        let decl = &self.tp.records.get(&q)?.fields;
+        let decl = self.tp.records.get(&q)?.fields.clone();
         let mut typed = Vec::new();
         for (name, value) in fields {
             let fty = &decl.iter().find(|d| &d.0 == name)?.1;
@@ -469,7 +553,7 @@ impl Compiler {
     /// The destination and the result type of a call of a function declared by name (`f(x)` or
     /// `module.f(x)`) or of a method of a record. Calls of built-ins, of generic functions, of
     /// closures and of other methods are not covered yet.
-    fn resolve_call(&self, callee: &Expr) -> Option<(TypedCallee, Ty)> {
+    fn resolve_call(&mut self, callee: &Expr) -> Option<(TypedCallee, Ty)> {
         const BUILTINS: &[&str] = &["abort", "bool", "char", "error", "print", "println", "weak", "live_objects", "channel", "timeout", "sleep", "heap_bytes", "float", "f64", "f32"];
         let func = |key: (String, String)| {
             let ret = self.tp.funcs.get(&key)?.ret.clone();

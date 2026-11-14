@@ -388,7 +388,8 @@ impl Compiler {
     }
 
     /// Calls of the methods of built-in types that need no inference: `push`/`add`/`clear` on a
-    /// list, `has` on a map, `slice` on a text. A method the user declared on the type wins.
+    /// list, `has` on a map, `slice`/`byte`/`bytes`/`char_count` on a text, `to_text`/`len_utf8`/
+    /// `is_ascii` on a char. A method the user declared on the type wins.
     fn check_member_call(&self, callee: &Expr, args: &[Arg]) -> Option<(TypedExprKind, Ty)> {
         let ExprKind::Field { expr, name, safe: false } = &callee.kind else { return None };
         if args.iter().any(|a| a.by_ref || a.spread || a.name.is_some()) {
@@ -403,7 +404,13 @@ impl Compiler {
             (Ty::List(el), "push" | "add", 1) => (vec![(**el).clone()], Ty::Void),
             (Ty::List(_), "clear", 0) => (vec![], Ty::Void),
             (Ty::Map(k, _), "has", 1) => (vec![(**k).clone()], Ty::Bool),
-            (Ty::Text, "slice", 2) => (vec![Ty::i64(), Ty::i64()], Ty::Text),
+            (Ty::Text, "slice" | "__raw_slice", 2) => (vec![Ty::i64(), Ty::i64()], Ty::Text),
+            (Ty::Text, "byte", 1) => (vec![Ty::i64()], Ty::Int { bits: 8, signed: false }),
+            (Ty::Text, "bytes", 0) => (vec![], Ty::List(Box::new(Ty::Int { bits: 8, signed: false }))),
+            (Ty::Text, "char_count", 0) => (vec![], Ty::int()),
+            (Ty::Char, "to_text", 0) => (vec![], Ty::Text),
+            (Ty::Char, "len_utf8", 0) => (vec![], Ty::int()),
+            (Ty::Char, "is_ascii", 0) => (vec![], Ty::Bool),
             _ => return None,
         };
         let mut typed = Vec::new();

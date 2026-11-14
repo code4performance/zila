@@ -106,7 +106,10 @@ impl Compiler {
                     },
                     None => None,
                 };
-                let value = vd.value.as_ref().and_then(|e| self.check_expr(e, ann.as_ref()));
+                let value = match &vd.value {
+                    Some(e) => self.check_value(e, ann.as_ref(), w),
+                    None => None,
+                };
                 let ty = match (&ann, &vd.value, &value) {
                     (Some(a), _, _) => a.clone(),
                     (None, Some(_), Some(x)) if x.ty != Ty::Nil && x.ty != Ty::Void => x.ty.clone(),
@@ -127,7 +130,7 @@ impl Compiler {
             }
             StmtKind::Assign { target, op, value } => {
                 let t = self.check_expr(target, None)?;
-                let v = self.check_expr(value, Some(&t.ty))?;
+                let v = self.check_value(value, Some(&t.ty), w)?;
                 if v.ty != t.ty {
                     return None;
                 }
@@ -139,7 +142,7 @@ impl Compiler {
                     Ty::Result(inner) => (**inner).clone(),
                     t => t.clone(),
                 };
-                let x = self.check_expr(e, Some(&want))?;
+                let x = self.check_value(e, Some(&want), w)?;
                 // in a function that can fail, an error value is returned as the failure
                 let fails = matches!(self.fs.ret, Ty::Result(_)) && x.ty == Ty::Err;
                 if x.ty != want && !fails {
@@ -147,6 +150,9 @@ impl Compiler {
                 }
                 TypedStmtKind::Return(Some(x))
             }
+            // the call a `defer` or `spawn` runs later: typed like any call, nothing is declared
+            StmtKind::Defer(e) => TypedStmtKind::Defer(self.check_expr(e, None)?),
+            StmtKind::Spawn(e) => TypedStmtKind::Spawn(self.check_expr(e, None)?),
             StmtKind::Break => TypedStmtKind::Break,
             StmtKind::Continue => TypedStmtKind::Continue,
             StmtKind::While { cond, body } => {
@@ -165,23 +171,7 @@ impl Compiler {
                 r?
             }
             StmtKind::Expr(e) => match &e.kind {
-                ExprKind::If { branches, else_body } => {
-                    let mut typed = Vec::new();
-                    for (c, b) in branches {
-                        let cx = self.check_expr(c, None)?;
-                        if cx.ty != Ty::Bool {
-                            return None;
-                        }
-                        typed.push((cx, self.check_block(b, w)));
-                    }
-                    let else_body = else_body.as_ref().map(|b| self.check_block(b, w));
-                    let x = TypedExpr { kind: TypedExprKind::If { branches: typed, else_body }, ty: Ty::Void, line: e.line };
-                    TypedStmtKind::Expr(x)
-                }
-                ExprKind::Match { scrutinee, arms } => {
-                    let kind = self.check_match(scrutinee, arms, w)?;
-                    TypedStmtKind::Expr(TypedExpr { kind, ty: Ty::Void, line: e.line })
-                }
+                ExprKind::If { .. } | ExprKind::Match { .. } => TypedStmtKind::Expr(self.check_branching(e, None, false, w)?),
                 ExprKind::Lambda { .. } => return None,
                 ExprKind::Call { callee, .. } if matches!(&callee.kind, ExprKind::Ident(n) if n == "assert" || n == "assert_eq") => return None,
                 _ => TypedStmtKind::Expr(self.check_expr(e, None)?),
@@ -191,12 +181,103 @@ impl Compiler {
         Some(TypedStmt { kind, line })
     }
 
-    /// A `match` used as a statement. The type of each variable an arm binds is the one emission
+    /// An expression in a value position (a `let` or `return` value, an assigned value, the last
+    /// expression of a block used as a value): an `if` or `match` is walked with scopes of its
+    /// own, anything else is typed by `check_expr`.
+    fn check_value(&mut self, e: &Expr, want: Option<&Ty>, w: &mut Walk) -> Option<TypedExpr> {
+        match &e.kind {
+            ExprKind::If { .. } | ExprKind::Match { .. } => {
+                let before = w.stopped;
+                let x = self.check_branching(e, want, true, w);
+                // a walk that lost track of a local cannot give the value a trustworthy type
+                if w.stopped && !before {
+                    return None;
+                }
+                x
+            }
+            _ => self.check_expr(e, want),
+        }
+    }
+
+    /// An `if` or `match`, as a statement (`as_value` false: its type is `Void`) or as a value
+    /// (the type of its first branch; the branches must agree, and an `if` needs its `else`).
+    fn check_branching(&mut self, e: &Expr, want: Option<&Ty>, as_value: bool, w: &mut Walk) -> Option<TypedExpr> {
+        match &e.kind {
+            ExprKind::If { branches, else_body } => {
+                if as_value && else_body.is_none() {
+                    return None;
+                }
+                let mut typed = Vec::new();
+                let mut ty: Option<Ty> = None;
+                for (c, b) in branches {
+                    let cx = self.check_expr(c, None)?;
+                    if cx.ty != Ty::Bool {
+                        return None;
+                    }
+                    let (body, t) = self.check_arm(b, want, as_value, w)?;
+                    if ty.get_or_insert_with(|| t.clone()) != &t {
+                        return None;
+                    }
+                    typed.push((cx, body));
+                }
+                let else_typed = match else_body {
+                    Some(b) => {
+                        let (body, t) = self.check_arm(b, want, as_value, w)?;
+                        if ty.as_ref().is_some_and(|f| *f != t) {
+                            return None;
+                        }
+                        Some(body)
+                    }
+                    None => None,
+                };
+                let ty = if as_value { ty.unwrap_or(Ty::Void) } else { Ty::Void };
+                Some(TypedExpr { kind: TypedExprKind::If { branches: typed, else_body: else_typed }, ty, line: e.line })
+            }
+            ExprKind::Match { scrutinee, arms } => {
+                let (kind, ty) = self.check_match(scrutinee, arms, want, as_value, w)?;
+                Some(TypedExpr { kind, ty, line: e.line })
+            }
+            _ => None,
+        }
+    }
+
+    /// The body of a branch, in a scope of its own. As a value, its last expression gives the type
+    /// (`Void` when the block does not end in an expression), as emission's `block_value` does.
+    fn check_arm(&mut self, b: &[Stmt], want: Option<&Ty>, as_value: bool, w: &mut Walk) -> Option<(Vec<TypedStmt>, Ty)> {
+        self.fs.scopes.push(Scope::default());
+        let r = self.check_arm_in_scope(b, want, as_value, w);
+        self.fs.scopes.pop();
+        r
+    }
+
+    fn check_arm_in_scope(&mut self, b: &[Stmt], want: Option<&Ty>, as_value: bool, w: &mut Walk) -> Option<(Vec<TypedStmt>, Ty)> {
+        let last_value = match (as_value, b.last()) {
+            (true, Some(Stmt { kind: StmtKind::Expr(_), .. })) => b.len() - 1,
+            _ => b.len(),
+        };
+        let mut out = self.check_stmts(&b[..last_value], w);
+        let mut ty = Ty::Void;
+        if last_value < b.len() {
+            let s = &b[last_value];
+            let StmtKind::Expr(e) = &s.kind else { return None };
+            if w.stopped {
+                return None;
+            }
+            let x = self.check_value(e, want, w)?;
+            ty = x.ty.clone();
+            out.push(TypedStmt { kind: TypedStmtKind::Expr(x), line: s.line });
+        }
+        Some((out, ty))
+    }
+
+    /// A `match`, as a statement or a value. The type of each variable an arm binds is the one
+    /// emission gives it; a pattern emission would reject is not covered. The type of each variable an arm binds is the one emission
     /// gives it; a pattern emission would reject is not covered.
-    fn check_match(&mut self, scrut: &Expr, arms: &[MatchArm], w: &mut Walk) -> Option<TypedExprKind> {
+    fn check_match(&mut self, scrut: &Expr, arms: &[MatchArm], want: Option<&Ty>, as_value: bool, w: &mut Walk) -> Option<(TypedExprKind, Ty)> {
         let s = self.check_expr(scrut, None)?;
         let st = s.ty.clone();
         let mut typed = Vec::new();
+        let mut result = Ty::Void;
         for arm in arms {
             let mut binds: Option<(String, Vec<String>)> = None;
             let mut catch_name: Option<String> = None;
@@ -256,11 +337,20 @@ impl Compiler {
                     }
                 }
             }
-            let body = self.check_stmts(&arm.body, w);
+            let arm_value = self.check_arm_in_scope(&arm.body, want, as_value, w);
             self.fs.scopes.pop();
+            let (body, t) = arm_value?;
+            // the value is the first arm's that has one; the others must agree
+            if t != Ty::Void {
+                if result == Ty::Void {
+                    result = t;
+                } else if result != t {
+                    return None;
+                }
+            }
             typed.push(TypedMatchArm { pattern: arm.pattern.clone(), body });
         }
-        Some(TypedExprKind::Match { scrutinee: Box::new(s), arms: typed })
+        Some((TypedExprKind::Match { scrutinee: Box::new(s), arms: typed }, if as_value { result } else { Ty::Void }))
     }
 
     /// A `for` loop over a range, a map, a text or a list; its variables are declared in the

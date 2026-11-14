@@ -78,8 +78,26 @@ impl Compiler {
                 Some(self.call_sig(&sig, None, args))
             }
             TypedCallee::Variant { enum_key, index } => Some(self.enum_construct(enum_key, *index, args)),
+            TypedCallee::Method { rec_key, name } => {
+                let ExprKind::Field { expr: obj, .. } = &callee.kind else { return None };
+                let sig = self.tp.methods.get(&(rec_key.clone(), name.clone()))?.clone();
+                Some(self.emit_method_call(obj, rec_key, name, &sig, args))
+            }
             _ => None,
         }
+    }
+
+    /// `obj.name(args)` where the checker found the method `sig` for the receiver's type: the
+    /// receiver is evaluated (the method owns it), then the call goes to the method.
+    fn emit_method_call(&mut self, obj: &Expr, key: &str, name: &str, sig: &Sig, args: &[Arg]) -> R<Ty> {
+        let ot = self.expr(obj, None)?;
+        debug_assert!(method_key(&rc_view(&ot)) == key, "the checker found a method of {} but the receiver is {}", key, ot.show());
+        self.check_method_vis(sig, name)?;
+        let t = self.temp();
+        self.e(format!("mov qword ptr [rbp - {}], rax", t));
+        let res = self.call_sig(sig, Some(t), args);
+        self.free(t);
+        res
     }
 
     pub(super) fn call(&mut self, callee: &Expr, args: &[Arg], targs: &[Type], want: Option<&Ty>) -> R<Ty> {

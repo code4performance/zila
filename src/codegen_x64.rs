@@ -60,9 +60,10 @@ mod generics;
 mod output;
 mod runtime;
 mod threads;
+mod bodies;
 mod typed;
 mod checker;
-use typed::{TypedArg, TypedCallee, TypedExpr, TypedExprKind, TypedProgram};
+use typed::{TypedArg, TypedBody, TypedCallee, TypedExpr, TypedExprKind, TypedProgram, TypedStmt, TypedStmtKind};
 use analysis::*;
 use fold::*;
 use generics::*;
@@ -440,6 +441,9 @@ struct FnState {
     used_regs: Vec<&'static str>,
     /// Names of locals that hold a `shared` value: their content is immutable.
     shared_locals: HashSet<String>,
+    /// Types the body checker (`bodies.rs`) found for the `let`/`var` of this function, by (line,
+    /// name); emission asserts it gives the same one.
+    checked_vars: HashMap<(u32, String), Ty>,
 }
 
 impl FnState {
@@ -463,6 +467,7 @@ impl FnState {
             regs: HashMap::new(),
             used_regs: Vec::new(),
             shared_locals: HashSet::new(),
+            checked_vars: HashMap::new(),
         }
     }
 }
@@ -1700,6 +1705,9 @@ end
             let p = self.finish_proc(&sig.sym, prologue, false);
             self.procs.push(p);
             return Ok(());
+        }
+        if cfg!(debug_assertions) && !naked {
+            self.check_function_body(fd, &sig);
         }
         if !naked {
             self.init_defers(&fd.body)?;

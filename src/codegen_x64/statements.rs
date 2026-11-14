@@ -46,6 +46,9 @@ impl Compiler {
                     }
                 };
                 self.norm(&ty);
+                if let Some(c) = self.fs.checked_vars.get(&(s.line, vd.name.clone())) {
+                    assert!(*c == ty, "the body checker says '{}' is {} but emission gives {} (line {})", vd.name, c.show(), ty.show(), s.line);
+                }
                 let off = self.declare_local(&vd.name, ty, vd.mutable);
                 let is_shared = matches!(vd.ty, Some(Type::Shared(_)))
                     || matches!(&vd.value, Some(Expr { kind: ExprKind::Shared(_), .. }))

@@ -7,6 +7,7 @@
 ## 2. Pre-Emission Checking and Call Resolution
 
 - [ ] 2.1 `src/codegen_x64/checker.rs` and `generics.rs`: add the forms moved from 1.2 (`if`, `match`, closures, `spawn_thread`, `sql`, generic calls) and type-check function bodies and concrete generic instances ahead of emission, attaching the resolved `TypedBody` to `TypedProgram`; verify all test targets compile
+  - Progress: `check_function_body` (`src/codegen_x64/bodies.rs`) checks bodies before emission in debug builds (own scopes, no slots; the generic-instantiation state is restored after annotations are resolved) and stores a `TypedBody` per symbol in `TypedProgram::bodies`. Covered statements: `let`/`var`, assignment, `return`, expression statements, `if`, `while`, `for` (range, list, map, text), `unsafe`, `break`/`continue`; the rest is `Opaque` and marks the body `complete: false`. Emission asserts the type of every checked `let`/`var`. Remaining: `match`, closures, `defer`/`spawn`/`asm`, `async` bodies, `spawn_thread`, `sql`, generic calls, and typed bodies for generic instances; in the larger examples about a third to a half of the bodies are complete.
 - [ ] 2.2 `src/codegen_x64/expressions.rs` and `calls.rs`: refactor expression emission to consume `TypedExpr` directly, reading pre-resolved types and call target symbols; verify `cargo test --test codegen` passes
 
 ## 3. Statement Emission and Clean-up

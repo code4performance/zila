@@ -41,7 +41,7 @@ pub(super) enum TypedExprKind {
     New(Box<TypedExpr>),
     Shared(Box<TypedExpr>),
     Lambda { params: Vec<Param>, body: Block },
-    If { branches: Vec<(TypedExpr, Block)>, else_body: Option<Block> },
+    If { branches: Vec<(TypedExpr, Vec<TypedStmt>)>, else_body: Option<Vec<TypedStmt>> },
     Match { scrutinee: Box<TypedExpr>, arms: Vec<MatchArm> },
     Unary { op: &'static str, expr: Box<TypedExpr> },
     Binary { op: &'static str, lhs: Box<TypedExpr>, rhs: Box<TypedExpr> },
@@ -106,13 +106,15 @@ pub(super) enum TypedStmtKind {
     Return(Option<TypedExpr>),
     Defer(TypedExpr),
     Spawn(TypedExpr),
-    For { vars: Vec<String>, iter: TypedExpr, body: Block },
-    While { cond: TypedExpr, body: Block },
+    For { vars: Vec<String>, iter: TypedExpr, body: Vec<TypedStmt> },
+    While { cond: TypedExpr, body: Vec<TypedStmt> },
     Break,
     Continue,
     Expr(TypedExpr),
-    Unsafe(Block),
+    Unsafe(Vec<TypedStmt>),
     Asm(AsmBlock),
+    /// A statement the checker does not cover yet: emission handles it from the syntax.
+    Opaque(Box<Stmt>),
 }
 
 /// A type-checked function body: the sequence of typed statements and the declared return type.
@@ -122,6 +124,8 @@ pub(super) struct TypedBody {
     pub(super) stmts: Vec<TypedStmt>,
     /// The declared return type of the function (`Ty::Void` for `-> void` or no return clause).
     pub(super) ret: Ty,
+    /// No statement of the body is `Opaque`.
+    pub(super) complete: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -163,4 +167,6 @@ pub(super) struct TypedProgram {
     pub(super) inst_count: usize,
     /// Hash and equality thunks of general map keys, by key type: (hash symbol, equality symbol).
     pub(super) map_thunks: BTreeMap<String, (String, String)>,
+    /// Checked function bodies by symbol (see `bodies.rs`).
+    pub(super) bodies: HashMap<String, TypedBody>,
 }

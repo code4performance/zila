@@ -13,7 +13,7 @@ use super::*;
 
 /// State of one walk over a body.
 #[derive(Default)]
-struct Walk {
+pub(super) struct Walk {
     /// A local of unknown type was met: the rest of the function is opaque.
     stopped: bool,
     /// Type of each local declared by a `let`/`var`, by (line, name).
@@ -46,17 +46,19 @@ impl Compiler {
         }
         let mut w = Walk { complete: true, ..Walk::default() };
         self.checking_body = true;
+        self.lambda_vars.clear();
         let stmts = self.check_stmts(&fd.body, &mut w);
         self.checking_body = false;
+        w.vars.extend(std::mem::take(&mut self.lambda_vars));
         if let Some(snap) = w.snap.take() {
             self.restore(snap);
         }
         self.tp.inst_count = inst_count;
         self.fs = saved;
         if fd.is_async {
-            self.next_lambda_vars = Some(w.vars);
+            self.next_lambda_vars = Some(Rc::new(w.vars));
         } else {
-            self.fs.checked_vars = w.vars;
+            self.fs.checked_vars = Rc::new(w.vars);
         }
         self.tp.bodies.insert(sig.sym.clone(), TypedBody { stmts, ret: sig.ret.clone(), complete: w.complete });
     }
@@ -73,6 +75,28 @@ impl Compiler {
         self.restore(snap);
         self.tp.inst_count = inst_count;
         r
+    }
+
+    /// Walks the body of a closure whose parameter and result types are known: its own scope over
+    /// the enclosing ones (which it captures from), its own `return` type. The types of its locals
+    /// are recorded for emission to assert.
+    pub(super) fn check_lambda_body(&mut self, params: &[Param], ptys: &[Ty], ret: &Ty, body: &[Stmt]) -> Vec<TypedStmt> {
+        let before = self.fs.clone();
+        self.fs.scopes.push(Scope::default());
+        for (p, t) in params.iter().zip(ptys) {
+            self.declare_checked(&p.name, t.clone(), true, false);
+        }
+        let saved_ret = std::mem::replace(&mut self.fs.ret, ret.clone());
+        let mut w = Walk { complete: true, ..Walk::default() };
+        let stmts = self.check_stmts(body, &mut w);
+        self.fs.ret = saved_ret;
+        self.fs.scopes.pop();
+        if let Some(snap) = w.snap.take() {
+            self.restore(snap);
+            self.fs = before;
+        }
+        self.lambda_vars.extend(w.vars);
+        stmts
     }
 
     fn declare_checked(&mut self, name: &str, ty: Ty, mutable: bool, is_ref: bool) {

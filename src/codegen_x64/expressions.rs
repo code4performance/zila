@@ -1507,9 +1507,9 @@ impl Compiler {
         // Compile the body as its own procedure.
         let rl = self.lbl("ret");
         let saved = std::mem::replace(&mut self.fs, FnState::new(wret.clone(), rl));
-        if let Some(v) = checked_vars {
-            self.fs.checked_vars = v;
-        }
+        // the types the body checker found for the locals of the enclosing function, closure
+        // bodies included (an `async` body is handed its own)
+        self.fs.checked_vars = checked_vars.unwrap_or_else(|| saved.checked_vars.clone());
         self.fs.unsafe_depth = saved.unsafe_depth;
         self.fs.allow_ignored_result = ignore_result;
         let env_slot = self.slot();

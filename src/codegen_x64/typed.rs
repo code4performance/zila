@@ -42,7 +42,7 @@ pub(super) enum TypedExprKind {
     Record { rec_key: String, fields: Vec<(String, TypedExpr)> },
     New(Box<TypedExpr>),
     Shared(Box<TypedExpr>),
-    Lambda { params: Vec<Param>, body: Block },
+    Lambda { params: Vec<Param>, body: Vec<TypedStmt> },
     If { branches: Vec<(TypedExpr, Vec<TypedStmt>)>, else_body: Option<Vec<TypedStmt>> },
     Match { scrutinee: Box<TypedExpr>, arms: Vec<TypedMatchArm> },
     Unary { op: &'static str, expr: Box<TypedExpr> },

@@ -227,7 +227,13 @@ impl Compiler {
                     return None;
                 }
                 let t = want?.clone();
-                (TypedExprKind::Lambda { params: params.clone(), body: body.clone() }, t)
+                let Some(Ty::Func { params: ptys, ret, .. }) = want else { return None };
+                let typed = if self.checking_body {
+                    self.check_lambda_body(params, ptys, ret, body)
+                } else {
+                    body.iter().map(|s| TypedStmt { kind: TypedStmtKind::Opaque(Box::new(s.clone())), line: s.line }).collect()
+                };
+                (TypedExprKind::Lambda { params: params.clone(), body: typed }, t)
             }
             ExprKind::SpawnThread(call) => {
                 let ExprKind::Call { .. } = &call.kind else { return None };

@@ -41,6 +41,7 @@
 use crate::ast::*;
 use crate::parser::parse_source;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::rc::Rc;
 
 type R<T> = Result<T, String>;
 
@@ -443,7 +444,7 @@ struct FnState {
     shared_locals: HashSet<String>,
     /// Types the body checker (`bodies.rs`) found for the `let`/`var` of this function, by (line,
     /// name); emission asserts it gives the same one.
-    checked_vars: HashMap<(u32, String), Ty>,
+    checked_vars: Rc<HashMap<(u32, String), Ty>>,
 }
 
 impl FnState {
@@ -467,7 +468,7 @@ impl FnState {
             regs: HashMap::new(),
             used_regs: Vec::new(),
             shared_locals: HashSet::new(),
-            checked_vars: HashMap::new(),
+            checked_vars: Rc::new(HashMap::new()),
         }
     }
 }
@@ -790,7 +791,10 @@ pub struct Compiler {
     checking_body: bool,
     /// Types the body checker found for the locals of an `async` body, handed to the closure that
     /// the body is compiled as (see `bodies.rs`).
-    next_lambda_vars: Option<HashMap<(u32, String), Ty>>,
+    next_lambda_vars: Option<Rc<HashMap<(u32, String), Ty>>>,
+    /// Types of the locals declared in closure bodies the body checker walked, by (line, name);
+    /// joined with the types of the enclosing function when its check ends.
+    lambda_vars: HashMap<(u32, String), Ty>,
     cur_mod: String,
     line: u32,
     fs: FnState,
@@ -876,6 +880,7 @@ impl Compiler {
             next_lambda_ignore_result: false,
             checking_body: false,
             next_lambda_vars: None,
+            lambda_vars: HashMap::new(),
             cur_mod: String::new(),
             line: 0,
             fs: FnState::new(Ty::Void, String::new()),

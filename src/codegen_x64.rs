@@ -1542,12 +1542,18 @@ end
                     return self.err(format!("in the hole {{{}}}: {}", h.src, d.msg));
                 }
             };
-            // the type of the value, found by compiling it once and undoing that
+            // the type of the value: the checker's when it covers the expression, otherwise found
+            // by compiling it once and undoing that
             self.line = h.line;
-            let snap = self.snapshot();
-            let t = self.value(&e, None);
-            self.restore(snap);
-            let t = t?;
+            let t = match self.check_expr(&e, None) {
+                Some(x) => x.ty,
+                None => {
+                    let snap = self.snapshot();
+                    let t = self.value(&e, None);
+                    self.restore(snap);
+                    t?
+                }
+            };
             let arg = match &t {
                 Ty::Int { .. } => call(db("int", h.line), vec![e], h.line),
                 Ty::Float { bits: 64 } => call(db("float", h.line), vec![e], h.line),

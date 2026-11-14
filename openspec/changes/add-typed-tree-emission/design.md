@@ -31,6 +31,7 @@ Currently, `Compiler` resolves types, instantiates generics, checks borrow/visib
 
 4. **Retain `tools/asm-snapshot.py` as the regression gate**:
    Every refactored module must produce identical assembly snapshots for all `examples/*.zila` across Windows, Linux, and unoptimized builds before landing.
+   *Refinement (decided while implementing 3.1):* a step that stops emission from compiling something it then throws away (the speculative typing of a `sql` hole, of a literal operand or of a generic argument) no longer uses up label numbers, so every later generated name is numbered differently (`ret_1103` becomes `ret_1054`) while the instructions are the same. Such steps are checked with `python tools/asm-snapshot.py compare --labels`, which renames the numbers of generated names by order of first appearance, per prefix, before comparing. The strict byte comparison stays the gate for every other step.
 
 ## Risks / Trade-offs
 

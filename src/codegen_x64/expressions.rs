@@ -547,9 +547,17 @@ impl Compiler {
     pub(super) fn literal_side_type(&mut self, op: &str, lhs: &Expr, rhs: &Expr, want: Option<&Ty>) -> Option<Ty> {
         let is_cmp = matches!(op, "==" | "!=" | "<" | "<=" | ">" | ">=");
         if is_const_int_expr(lhs) && !is_const_int_expr(rhs) && op != "<<" && op != ">>" && (is_cmp || !want.is_some_and(|w| w.is_int())) {
-            let snap = self.snapshot();
-            let r = self.expr(rhs, None);
-            self.restore(snap);
+            // the checker's type for the right side; a form it does not cover is typed by
+            // compiling it once and undoing that
+            let r = match self.check_expr(rhs, None) {
+                Some(x) => Ok(x.ty),
+                None => {
+                    let snap = self.snapshot();
+                    let r = self.expr(rhs, None);
+                    self.restore(snap);
+                    r
+                }
+            };
             if let Ok(t) = r {
                 if t.is_int() {
                     return Some(t);

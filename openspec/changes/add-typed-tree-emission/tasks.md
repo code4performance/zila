@@ -27,6 +27,9 @@
 ## 3. Statement Emission and Clean-up
 
 - [ ] 3.1 `src/codegen_x64/statements.rs`: refactor statement emission to consume `TypedStmt`, removing speculative `Snapshot` rollbacks during body emission; verify `cargo test --test statements` and `--test run` pass
+  - [x] 3.1a the speculative typing of a `sql` hole, of the literal side of an operator and of an argument of a generic call uses the checker's type when the checker covers the expression; `tools/asm-snapshot.py compare --labels`: identical (label numbers shift, see design.md)
+  - [ ] 3.1b statement emission reads the typed statement (the type of a `let`/`var` and of a condition) instead of deriving it again
+  - [ ] 3.1c the speculative fallbacks that remain for forms the checker does not cover
 - [ ] 3.2 Clean up redundant type checking and dead `unreachable!()` branches across `src/codegen_x64/`; verify `cargo clippy --all-targets -- -D warnings` is clean
 
 ## 4. Verification and Wrap-up

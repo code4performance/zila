@@ -489,11 +489,17 @@ impl Compiler {
                 late_lits.push((pt.clone(), &a.value));
                 continue;
             }
-            // type the argument by compiling it into a scratch buffer
-            let snap = self.snapshot();
-            let r = self.expr(&a.value, None);
-            self.restore(snap);
-            let aty = r?;
+            // type the argument: the checker's type when it covers the expression, otherwise by
+            // compiling it into a scratch buffer
+            let aty = match self.check_expr(&a.value, None) {
+                Some(x) => x.ty,
+                None => {
+                    let snap = self.snapshot();
+                    let r = self.expr(&a.value, None);
+                    self.restore(snap);
+                    r?
+                }
+            };
             self.unify(pt, &aty, &names, &mut b, module)?;
         }
         for (pt, lit) in late_lits {

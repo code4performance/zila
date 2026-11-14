@@ -135,6 +135,10 @@ impl Compiler {
                     Ty::Rec(r) => self.field_of(&r, name)?.0,
                     Ty::List(_) | Ty::Text | Ty::Map(..) if name == "len" => Ty::int(),
                     Ty::Char if name == "code" => Ty::int(),
+                    Ty::Err if name == "message" || name == "full_message" => Ty::Text,
+                    Ty::Err if name == "kind" => Ty::Kind,
+                    Ty::Err if name == "cause" => Ty::Err,
+                    Ty::Kind if name == "name" => Ty::Text,
                     _ => return None,
                 };
                 (TypedExprKind::Field { expr: Box::new(x), name: name.clone(), safe: false }, t)

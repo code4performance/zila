@@ -62,7 +62,7 @@ mod runtime;
 mod threads;
 mod typed;
 mod checker;
-use typed::{TypedCallee, TypedExpr, TypedExprKind, TypedProgram};
+use typed::{TypedArg, TypedCallee, TypedExpr, TypedExprKind, TypedProgram};
 use analysis::*;
 use fold::*;
 use generics::*;

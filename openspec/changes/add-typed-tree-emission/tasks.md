@@ -2,7 +2,7 @@
 
 - [x] 1.1 `src/codegen_x64/typed.rs`: define `TypedExpr`, `TypedExprKind`, `TypedStmt`, `TypedStmtKind`, and `TypedBody` holding resolved `Ty`, variable bindings, and explicit call targets; verify unit tests build and pass with `cargo test --lib`
 - [ ] 1.2 `src/codegen_x64/checker.rs`: expand expression typing into a full `check_expr` producing `TypedExpr` across literals, arithmetic/bitwise/boolean binary ops, records, enums, calls, field access, index, and closures; verify `type_of` coverage across the test suite
-  - Progress: `check_expr` covers literals, text, identifiers, `not`/`-`, comparison/boolean/arithmetic operators, field, index, lists, maps, non-generic record literals, `new`, `shared`, `^`, `await`, and calls of named functions and record methods (call arguments still raw `Arg`); emission asserts its type in debug builds. Remaining: enums, closures, `if`/`match`, `try`, `spawn_thread`, `sql`, generic and built-in calls, typed call arguments.
+  - Progress: `check_expr` covers every expression form that has no block inside: literals, text, identifiers, operators, field, index, lists, maps, non-generic record literals, `new`, `shared`, `^`, `await`, enum variants (as values and as constructors), calls of named functions and record methods with arguments bound to their parameters (`TypedArg`), and the built-ins `print`, `println`, `error`, `abort`, `char`, `float`/`f64`/`f32`, `sleep`, `live_objects`; emission asserts its type in debug builds. Remaining: forms with blocks (`if`, `match`, closures) and the statement tree (see 2.1), `try`, `spawn_thread`, `sql`, generic calls, variadic calls.
 
 ## 2. Pre-Emission Checking and Call Resolution
 

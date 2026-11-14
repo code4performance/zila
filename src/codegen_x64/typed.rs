@@ -47,12 +47,22 @@ pub(super) enum TypedExprKind {
     Binary { op: &'static str, lhs: Box<TypedExpr>, rhs: Box<TypedExpr> },
     Field { expr: Box<TypedExpr>, name: String, safe: bool },
     Index { expr: Box<TypedExpr>, index: Box<TypedExpr> },
-    Call { callee: TypedCallee, args: Vec<Arg> },
+    Call { callee: TypedCallee, args: Vec<TypedArg> },
     Deref(Box<TypedExpr>),
     Propagate(Box<TypedExpr>),
     Await(Box<TypedExpr>),
     SpawnThread(Box<TypedExpr>),
     Sql { dialect: String, raw: String },
+}
+
+/// An argument of a call, bound to its parameter and typed from the parameter's type.
+#[allow(dead_code)] // until emission consumes the tree (tasks 2.2, 3.1)
+#[derive(Debug, Clone)]
+pub(super) struct TypedArg {
+    /// Position of the parameter it binds to.
+    pub(super) param: usize,
+    pub(super) by_ref: bool,
+    pub(super) value: TypedExpr,
 }
 
 /// The resolved call destination stored on a `TypedExprKind::Call` node.
@@ -67,6 +77,8 @@ pub(super) enum TypedCallee {
     GenericInstance { inst_name: String },
     /// A built-in intrinsic (`print`, `abort`, `channel`, …).
     Builtin(String),
+    /// A variant of an enum used as a constructor: `enum_key` and the variant's index.
+    Variant { enum_key: String, index: usize },
     /// A local variable of function type (closure call).
     Local(String),
     /// Any call form not yet migrated; emission falls back to its own resolution.

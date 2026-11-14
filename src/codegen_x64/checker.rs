@@ -112,6 +112,18 @@ impl Compiler {
                 let r = self.check_expr(rhs, Some(&l.ty))?;
                 (TypedExprKind::Binary { op, lhs: Box::new(l), rhs: Box::new(r) }, Ty::Bool)
             }
+            // bitwise operators: integers of one type; a shift keeps the type of the value shifted
+            ExprKind::Binary { op, lhs, rhs } if matches!(*op, "bitand" | "bitor" | "bitxor" | "<<" | ">>") => {
+                let w = want.filter(|t| t.is_int());
+                let l = self.check_expr(lhs, w)?;
+                let r = self.check_expr(rhs, Some(&l.ty))?;
+                let shift = matches!(*op, "<<" | ">>");
+                if !l.ty.is_int() || !r.ty.is_int() || (!shift && l.ty != r.ty) {
+                    return None;
+                }
+                let t = l.ty.clone();
+                (TypedExprKind::Binary { op, lhs: Box::new(l), rhs: Box::new(r) }, t)
+            }
             ExprKind::Binary { op, lhs, rhs } if matches!(*op, "+" | "-" | "*" | "/" | "%") => {
                 let w = want.filter(|t| t.is_int() || matches!(t, Ty::Float { .. }));
                 let l = self.check_expr(lhs, w)?;
@@ -375,6 +387,10 @@ impl Compiler {
             ("f32", 1) => (vec![None], Ty::Float { bits: 32 }),
             ("sleep", 1) if !user => (vec![Some(Ty::i64())], Ty::Future(Box::new(Ty::Void))),
             ("live_objects", 0) => (vec![], Ty::int()),
+            ("__from_bits", 1) => (vec![Some(Ty::i64())], Ty::Float { bits: 64 }),
+            ("__bits", 1) => (vec![Some(Ty::Float { bits: 64 })], Ty::i64()),
+            ("__sqrt" | "__floor" | "__ceil" | "__trunc", 1) => (vec![Some(Ty::Float { bits: 64 })], Ty::Float { bits: 64 }),
+            ("__kind", 1) => (vec![Some(Ty::Text)], Ty::Kind),
             _ => return None,
         };
         let mut typed = Vec::new();

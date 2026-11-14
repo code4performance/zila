@@ -133,6 +133,16 @@ impl Compiler {
                 };
                 (TypedExprKind::Index { expr: Box::new(x), index: Box::new(i) }, t)
             }
+            ExprKind::Field { expr, name, safe: false } if matches!(&expr.kind, ExprKind::Ident(m) if self.lookup(m).is_none() && self.is_module(m)) => {
+                let ExprKind::Ident(m) = &expr.kind else { return None };
+                let module = self.modkey(&self.cur_mod, m);
+                let g = self.tp.globals.get(&(module.clone(), name.clone()))?;
+                let t = match (&g.konst, want) {
+                    (Some(_), Some(w)) if w.is_int() => w.clone(),
+                    _ => g.ty.clone(),
+                };
+                (TypedExprKind::Global { module, name: name.clone() }, t)
+            }
             ExprKind::Field { expr, name, safe: false } => {
                 let x = self.check_expr(expr, None)?;
                 let t = match rc_view(&x.ty) {

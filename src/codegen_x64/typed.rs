@@ -35,6 +35,8 @@ pub(super) enum TypedExprKind {
     Nil,
     Text(Vec<TextPart>),
     Ident(String),
+    /// A global or constant of another module: `module.name`.
+    Global { module: String, name: String },
     List(Vec<TypedExpr>),
     Map(Vec<(TypedExpr, TypedExpr)>),
     Record { rec_key: String, fields: Vec<(String, TypedExpr)> },

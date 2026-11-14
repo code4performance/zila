@@ -168,7 +168,7 @@ impl Compiler {
                     }
                 };
                 // a value that does not have exactly the declared type (a coercion) stays opaque
-                if ann.is_some() && vd.value.is_some() && value.as_ref().is_none_or(|x| x.ty != ty && !(x.ty == Ty::Nil && ty.nullable())) {
+                if ann.is_some() && vd.value.is_some() && value.as_ref().is_none_or(|x| !compatible(&ty, &x.ty)) {
                     self.declare_checked(&vd.name, ty.clone(), vd.mutable, false);
                     w.vars.insert((line, vd.name.clone()), ty);
                     return None;
@@ -180,7 +180,7 @@ impl Compiler {
             StmtKind::Assign { target, op, value } => {
                 let t = self.check_expr(target, None)?;
                 let v = self.check_value(value, Some(&t.ty), w)?;
-                if v.ty != t.ty && !(v.ty == Ty::Nil && t.ty.nullable()) {
+                if !compatible(&t.ty, &v.ty) {
                     return None;
                 }
                 TypedStmtKind::Assign { target: t, op, value: v }
@@ -193,8 +193,12 @@ impl Compiler {
                 };
                 let x = self.check_value(e, Some(&want), w)?;
                 // in a function that can fail, an error value is returned as the failure
-                let fails = matches!(self.fs.ret, Ty::Result(_)) && x.ty == Ty::Err;
-                if x.ty != want && !fails && !(x.ty == Ty::Nil && want.nullable()) {
+                let fails = match (&self.fs.ret, &x.ty) {
+                    (Ty::Result(_), Ty::Err) => true,
+                    (Ty::Result(inner), Ty::Result(got)) => compatible(inner, got),
+                    _ => false,
+                };
+                if !compatible(&want, &x.ty) && !fails {
                     return None;
                 }
                 TypedStmtKind::Return(Some(x))

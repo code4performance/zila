@@ -166,7 +166,7 @@ impl Compiler {
                 for it in items {
                     let x = self.check_expr(it, el.as_ref())?;
                     match &el {
-                        Some(w) if *w != x.ty => return None,
+                        Some(w) if !compatible(w, &x.ty) => return None,
                         Some(_) => {}
                         None => el = Some(x.ty.clone()),
                     }
@@ -184,7 +184,7 @@ impl Compiler {
                     let k = self.check_expr(ke, kt.as_ref())?;
                     let v = self.check_expr(ve, vt.as_ref())?;
                     match (&kt, &vt) {
-                        (Some(a), Some(b)) if *a != k.ty || *b != v.ty => return None,
+                        (Some(a), Some(b)) if *a != k.ty || !compatible(b, &v.ty) => return None,
                         (Some(_), Some(_)) => {}
                         _ => {
                             kt = Some(k.ty.clone());
@@ -334,7 +334,7 @@ impl Compiler {
                 let mut items = Vec::new();
                 for a in &rest {
                     let x = self.check_expr(&a.value, Some(el))?;
-                    if x.ty != **el || a.by_ref {
+                    if !compatible(el, &x.ty) || a.by_ref {
                         return None;
                     }
                     items.push(x);
@@ -346,7 +346,7 @@ impl Compiler {
             }
             let a = slot?;
             let x = self.check_expr(&a.value, Some(pty))?;
-            if x.ty != *pty {
+            if !compatible(pty, &x.ty) {
                 return None;
             }
             typed.push(TypedArg { param: i, by_ref: a.by_ref, value: x });
@@ -414,7 +414,7 @@ impl Compiler {
     /// arguments, closures or bare number literals where a type parameter is inferred, variadic
     /// parameters, named arguments.
     fn check_generic_call(&mut self, callee: &Expr, args: &[Arg]) -> Option<(TypedExprKind, Ty)> {
-        if !self.checking_body || args.iter().any(|a| a.spread || a.by_ref || a.name.is_some()) {
+        if !self.checking_body || args.iter().any(|a| a.spread || a.name.is_some()) {
             return None;
         }
         let (module, fd) = match &callee.kind {
@@ -526,7 +526,7 @@ impl Compiler {
                 let mut typed = Vec::new();
                 for (i, (a, pt)) in args.iter().zip(&ps).enumerate() {
                     let x = c.check_expr(&a.value, Some(pt))?;
-                    if x.ty != *pt {
+                    if !compatible(pt, &x.ty) {
                         return None;
                     }
                     typed.push(TypedArg { param: i, by_ref: false, value: x });
@@ -572,7 +572,7 @@ impl Compiler {
         for (name, value) in fields {
             let fty = &decl.iter().find(|d| &d.0 == name)?.1;
             let x = self.check_expr(value, Some(fty))?;
-            if x.ty != *fty {
+            if !compatible(fty, &x.ty) {
                 return None;
             }
             typed.push((name.clone(), x));

@@ -14,6 +14,15 @@ use super::*;
 /// A parameter as call binding sees it: its name (none for a variant's values) and its type.
 type BoundParam = (Option<String>, Ty);
 
+/// What binding the arguments of a call needs: the destination, the parameters (the last one a
+/// list when `variadic`) and the result type.
+struct CallShape {
+    callee: TypedCallee,
+    params: Vec<BoundParam>,
+    variadic: bool,
+    ret: Ty,
+}
+
 impl Compiler {
     pub(super) fn type_of(&self, e: &Expr, want: Option<&Ty>) -> Option<Ty> {
         match &e.kind {
@@ -131,9 +140,9 @@ impl Compiler {
                 (TypedExprKind::Field { expr: Box::new(x), name: name.clone(), safe: false }, t)
             }
             ExprKind::Call { callee, args, targs } if targs.is_empty() => {
-                if let Some((callee, params, t)) = self.resolve_call_sig(callee) {
-                    let args = self.bind_args(&params, args)?;
-                    (TypedExprKind::Call { callee, args }, t)
+                if let Some(shape) = self.resolve_call_sig(callee) {
+                    let args = self.bind_args(&shape.params, shape.variadic, args)?;
+                    (TypedExprKind::Call { callee: shape.callee, args }, shape.ret)
                 } else {
                     self.check_builtin_call(callee, args)?
                 }
@@ -200,6 +209,14 @@ impl Compiler {
                 let Ty::Ptr(el) = x.ty.clone() else { return None };
                 (TypedExprKind::Deref(Box::new(x)), *el)
             }
+            ExprKind::Propagate(inner) => {
+                if !matches!(self.fs.ret, Ty::Result(_)) {
+                    return None;
+                }
+                let x = self.check_expr(inner, None)?;
+                let Ty::Result(v) = x.ty.clone() else { return None };
+                (TypedExprKind::Propagate(Box::new(x)), *v)
+            }
             ExprKind::Await(inner) => {
                 let x = self.check_expr(inner, None)?;
                 let Ty::Future(v) = x.ty.clone() else { return None };
@@ -213,9 +230,9 @@ impl Compiler {
     /// The parameter types of a callee found by `resolve_call` (a function, a method or an enum
     /// variant used as a constructor), with its destination and result type. Variadic and
     /// extern-variadic callees are not covered.
-    fn resolve_call_sig(&self, callee: &Expr) -> Option<(TypedCallee, Vec<BoundParam>, Ty)> {
+    fn resolve_call_sig(&self, callee: &Expr) -> Option<CallShape> {
         let params = |sig: &Sig| {
-            (!sig.variadic && !sig.c_variadic).then(|| sig.params.iter().map(|p| (Some(p.name.clone()), p.ty.clone())).collect::<Vec<_>>())
+            (!sig.c_variadic).then(|| sig.params.iter().map(|p| (Some(p.name.clone()), p.ty.clone())).collect::<Vec<_>>())
         };
         if let Some((c, t)) = self.resolve_call(callee) {
             let sig = match &c {
@@ -223,7 +240,7 @@ impl Compiler {
                 TypedCallee::Method { rec_key, name } => self.tp.methods.get(&(rec_key.clone(), name.clone()))?,
                 _ => return None,
             };
-            return Some((c, params(sig)?, t));
+            return Some(CallShape { params: params(sig)?, variadic: sig.variadic, callee: c, ret: t });
         }
         // an enum variant used as a constructor (a function of the same name wins, as in emission)
         let ExprKind::Ident(name) = &callee.kind else { return None };
@@ -234,13 +251,15 @@ impl Compiler {
         let (q, idx) = self.tp.variants.get(&key)?;
         let tys = &self.tp.enums.get(q)?.variants.get(*idx)?.1;
         let params = tys.iter().map(|t| (None, t.clone())).collect();
-        Some((TypedCallee::Variant { enum_key: q.clone(), index: *idx }, params, Ty::Enum(q.clone())))
+        Some(CallShape { callee: TypedCallee::Variant { enum_key: q.clone(), index: *idx }, params, variadic: false, ret: Ty::Enum(q.clone()) })
     }
 
     /// Binds the arguments of a call to the parameters and types each one from its parameter's
     /// type. Not covered (`None`): spread arguments, missing or mistyped arguments.
-    fn bind_args(&self, params: &[BoundParam], args: &[Arg]) -> Option<Vec<TypedArg>> {
+    fn bind_args(&self, params: &[BoundParam], variadic: bool, args: &[Arg]) -> Option<Vec<TypedArg>> {
+        let fixed = if variadic { params.len() - 1 } else { params.len() };
         let mut slots: Vec<Option<&Arg>> = vec![None; params.len()];
+        let mut rest: Vec<&Arg> = Vec::new();
         let mut pos = 0;
         for a in args {
             if a.spread {
@@ -248,18 +267,40 @@ impl Compiler {
             }
             let i = match &a.name {
                 Some(n) => params.iter().position(|p| p.0.as_ref() == Some(n))?,
-                None => {
+                None if pos < fixed => {
                     pos += 1;
                     pos - 1
                 }
+                // the values of a variadic parameter
+                None if variadic => {
+                    rest.push(a);
+                    continue;
+                }
+                None => return None,
             };
-            if i >= params.len() || slots[i].is_some() {
+            if i >= fixed || slots[i].is_some() {
                 return None;
             }
             slots[i] = Some(a);
         }
         let mut typed = Vec::new();
         for (i, (slot, (_, pty))) in slots.into_iter().zip(params).enumerate() {
+            if variadic && i == fixed {
+                // the values collected into the list parameter: each typed from the element type
+                let Ty::List(el) = pty else { return None };
+                let mut items = Vec::new();
+                for a in &rest {
+                    let x = self.check_expr(&a.value, Some(el))?;
+                    if x.ty != **el || a.by_ref {
+                        return None;
+                    }
+                    items.push(x);
+                }
+                let line = items.first().map_or(0, |x| x.line);
+                let list = TypedExpr { kind: TypedExprKind::List(items), ty: pty.clone(), line };
+                typed.push(TypedArg { param: i, by_ref: false, value: list });
+                continue;
+            }
             let a = slot?;
             let x = self.check_expr(&a.value, Some(pty))?;
             if x.ty != *pty {

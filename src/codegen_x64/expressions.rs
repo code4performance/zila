@@ -7,10 +7,13 @@ impl Compiler {
     /// Compiles `e`, leaving its value in `rax`, and returns its type. In builds with debug assertions
     /// the type is checked against `type_of` (see `checker.rs`).
     pub(super) fn expr(&mut self, e: &Expr, want: Option<&Ty>) -> R<Ty> {
-        let typed = if cfg!(debug_assertions) { self.type_of(e, want) } else { None };
+        let (typed, tree) = if cfg!(debug_assertions) { (self.type_of(e, want), self.check_expr(e, want)) } else { (None, None) };
         let r = self.expr_emit(e, want);
         if let (Some(t), Ok(got)) = (&typed, &r) {
             assert!(t == got, "type_of says {} but emission gives {} (line {})", t.show(), got.show(), e.line);
+        }
+        if let (Some(t), Ok(got)) = (&tree, &r) {
+            assert!(&t.ty == got, "check_expr says {} but emission gives {} (line {})", t.ty.show(), got.show(), e.line);
         }
         r
     }

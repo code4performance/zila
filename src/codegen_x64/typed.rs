@@ -3,8 +3,118 @@
 //! Records, enums, interfaces, signatures, globals and the facts derived from them live here, apart
 //! from the emission state of `Compiler` (labels, frame slots, assembly text). Code generation reads
 //! this form for everything it asks about a declaration, and `load`/`declare` are what fill it.
+//!
+//! `TypedExpr`, `TypedStmt`, and `TypedBody` are the typed intermediate tree produced by the checker
+//! (see `checker.rs`) and consumed by emission. Each node carries its resolved `Ty` and line number;
+//! call nodes carry an explicit `TypedCallee` so emission never re-resolves the callee.
 
 use super::*;
+
+// ---------------------------------------------------------------------------
+// Typed expression tree
+// ---------------------------------------------------------------------------
+
+/// A fully-typed expression node.  `ty` is the resolved type of the whole expression; `line` is
+/// the source line for error messages.
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // until emission consumes the tree (tasks 2.2, 3.1)
+pub(super) struct TypedExpr {
+    pub(super) kind: TypedExprKind,
+    pub(super) ty: Ty,
+    pub(super) line: u32,
+}
+
+/// The shape of a typed expression.
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // until emission consumes the tree (tasks 2.2, 3.1)
+pub(super) enum TypedExprKind {
+    Int(u64),
+    Float(f64),
+    Char(char),
+    Bool(bool),
+    Nil,
+    Text(Vec<TextPart>),
+    Ident(String),
+    List(Vec<TypedExpr>),
+    Map(Vec<(TypedExpr, TypedExpr)>),
+    Record { rec_key: String, fields: Vec<(String, TypedExpr)> },
+    New(Box<TypedExpr>),
+    Shared(Box<TypedExpr>),
+    Lambda { params: Vec<Param>, body: Block },
+    If { branches: Vec<(TypedExpr, Block)>, else_body: Option<Block> },
+    Match { scrutinee: Box<TypedExpr>, arms: Vec<MatchArm> },
+    Unary { op: &'static str, expr: Box<TypedExpr> },
+    Binary { op: &'static str, lhs: Box<TypedExpr>, rhs: Box<TypedExpr> },
+    Field { expr: Box<TypedExpr>, name: String, safe: bool },
+    Index { expr: Box<TypedExpr>, index: Box<TypedExpr> },
+    Call { callee: TypedCallee, args: Vec<Arg> },
+    Deref(Box<TypedExpr>),
+    Propagate(Box<TypedExpr>),
+    Await(Box<TypedExpr>),
+    SpawnThread(Box<TypedExpr>),
+    Sql { dialect: String, raw: String },
+}
+
+/// The resolved call destination stored on a `TypedExprKind::Call` node.
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // until emission consumes the tree (tasks 2.2, 3.1)
+pub(super) enum TypedCallee {
+    /// A named function in the given module: `module.name(args)` or `name(args)` in the same module.
+    Func { module: String, name: String },
+    /// A method on a concrete record type: `rec_key` is the record key (e.g. `"pkg.Foo"`).
+    Method { rec_key: String, name: String },
+    /// A generic function already instantiated: instance symbol is the final assembly label.
+    GenericInstance { inst_name: String },
+    /// A built-in intrinsic (`print`, `abort`, `channel`, …).
+    Builtin(String),
+    /// A local variable of function type (closure call).
+    Local(String),
+    /// Any call form not yet migrated; emission falls back to its own resolution.
+    Opaque(Box<Expr>),
+}
+
+// ---------------------------------------------------------------------------
+// Typed statement tree
+// ---------------------------------------------------------------------------
+
+/// A fully-typed statement node.
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // until emission consumes the tree (tasks 2.2, 3.1)
+pub(super) struct TypedStmt {
+    pub(super) kind: TypedStmtKind,
+    pub(super) line: u32,
+}
+
+/// The shape of a typed statement.
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // until emission consumes the tree (tasks 2.2, 3.1)
+pub(super) enum TypedStmtKind {
+    Var { name: String, ty: Ty, value: Option<TypedExpr>, mutable: bool },
+    Assign { target: TypedExpr, op: &'static str, value: TypedExpr },
+    Return(Option<TypedExpr>),
+    Defer(TypedExpr),
+    Spawn(TypedExpr),
+    For { vars: Vec<String>, iter: TypedExpr, body: Block },
+    While { cond: TypedExpr, body: Block },
+    Break,
+    Continue,
+    Expr(TypedExpr),
+    Unsafe(Block),
+    Asm(AsmBlock),
+}
+
+/// A type-checked function body: the sequence of typed statements and the declared return type.
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // until emission consumes the tree (tasks 2.2, 3.1)
+pub(super) struct TypedBody {
+    pub(super) stmts: Vec<TypedStmt>,
+    /// The declared return type of the function (`Ty::Void` for `-> void` or no return clause).
+    pub(super) ret: Ty,
+}
+
+// ---------------------------------------------------------------------------
+// Declaration tables
+// ---------------------------------------------------------------------------
 
 #[derive(Default)]
 pub(super) struct TypedProgram {

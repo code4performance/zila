@@ -1,7 +1,8 @@
 ## 1. Typed Tree Definition and Checker Expansion
 
-- [ ] 1.1 `src/codegen_x64/typed.rs`: define `TypedExpr`, `TypedExprKind`, `TypedStmt`, `TypedStmtKind`, and `TypedBody` holding resolved `Ty`, variable bindings, and explicit call targets; verify unit tests build and pass with `cargo test --lib`
+- [x] 1.1 `src/codegen_x64/typed.rs`: define `TypedExpr`, `TypedExprKind`, `TypedStmt`, `TypedStmtKind`, and `TypedBody` holding resolved `Ty`, variable bindings, and explicit call targets; verify unit tests build and pass with `cargo test --lib`
 - [ ] 1.2 `src/codegen_x64/checker.rs`: expand expression typing into a full `check_expr` producing `TypedExpr` across literals, arithmetic/bitwise/boolean binary ops, records, enums, calls, field access, index, and closures; verify `type_of` coverage across the test suite
+  - Progress: `check_expr` covers literals, text, identifiers, `not`/`-`, comparison/boolean/arithmetic operators, field, index and calls of named functions and record methods (call arguments still raw `Arg`); emission asserts its type in debug builds. Remaining: records, enums, closures, `if`/`match`, `new`/`shared`, generic and built-in calls, typed call arguments.
 
 ## 2. Pre-Emission Checking and Call Resolution
 

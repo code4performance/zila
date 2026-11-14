@@ -53,6 +53,76 @@ impl Compiler {
         }
     }
 
+    /// The typed tree of `e`, for the forms migrated so far (`None` for the rest, and when any
+    /// part of `e` is not covered). Its type is the one `type_of` and emission give: emission
+    /// asserts it in builds with debug assertions.
+    pub(super) fn check_expr(&self, e: &Expr, want: Option<&Ty>) -> Option<TypedExpr> {
+        let (kind, ty) = match &e.kind {
+            ExprKind::Int(n) => (TypedExprKind::Int(*n), self.type_of(e, want)?),
+            ExprKind::Float(f) => (TypedExprKind::Float(*f), self.type_of(e, want)?),
+            ExprKind::Char(c) => (TypedExprKind::Char(*c), Ty::Char),
+            ExprKind::Bool(b) => (TypedExprKind::Bool(*b), Ty::Bool),
+            ExprKind::Nil => (TypedExprKind::Nil, Ty::Nil),
+            ExprKind::Text(parts) => (TypedExprKind::Text(parts.clone()), Ty::Text),
+            ExprKind::Ident(name) => (TypedExprKind::Ident(name.clone()), self.type_of_ident(name, want)?),
+            ExprKind::Unary { op: "not", expr } => {
+                let x = self.check_expr(expr, None)?;
+                (TypedExprKind::Unary { op: "not", expr: Box::new(x) }, Ty::Bool)
+            }
+            ExprKind::Unary { op: "-", expr } => {
+                let x = self.check_expr(expr, want)?;
+                let t = x.ty.clone();
+                if !(t.is_int() || matches!(t, Ty::Float { .. })) {
+                    return None;
+                }
+                (TypedExprKind::Unary { op: "-", expr: Box::new(x) }, t)
+            }
+            ExprKind::Binary { op, lhs, rhs } if matches!(*op, "and" | "or") => {
+                let l = self.check_expr(lhs, None)?;
+                let r = self.check_expr(rhs, None)?;
+                (TypedExprKind::Binary { op, lhs: Box::new(l), rhs: Box::new(r) }, Ty::Bool)
+            }
+            ExprKind::Binary { op, lhs, rhs } if matches!(*op, "==" | "!=" | "<" | "<=" | ">" | ">=") => {
+                let l = self.check_expr(lhs, None)?;
+                let r = self.check_expr(rhs, Some(&l.ty))?;
+                (TypedExprKind::Binary { op, lhs: Box::new(l), rhs: Box::new(r) }, Ty::Bool)
+            }
+            ExprKind::Binary { op, lhs, rhs } if matches!(*op, "+" | "-" | "*" | "/" | "%") => {
+                let w = want.filter(|t| t.is_int() || matches!(t, Ty::Float { .. }));
+                let l = self.check_expr(lhs, w)?;
+                let r = self.check_expr(rhs, Some(&l.ty))?;
+                let number = l.ty.is_int() || matches!(l.ty, Ty::Float { .. });
+                if l.ty != r.ty || !(number || (*op == "+" && l.ty == Ty::Text)) {
+                    return None;
+                }
+                let t = l.ty.clone();
+                (TypedExprKind::Binary { op, lhs: Box::new(l), rhs: Box::new(r) }, t)
+            }
+            ExprKind::Index { expr, index } => {
+                let x = self.check_expr(expr, None)?;
+                let i = self.check_expr(index, None)?;
+                let t = match rc_view(&x.ty) {
+                    Ty::List(el) => *el,
+                    Ty::Map(_, v) => *v,
+                    _ => return None,
+                };
+                (TypedExprKind::Index { expr: Box::new(x), index: Box::new(i) }, t)
+            }
+            ExprKind::Field { expr, name, safe: false } => {
+                let x = self.check_expr(expr, None)?;
+                let Ty::Rec(r) = rc_view(&x.ty) else { return None };
+                let t = self.field_of(&r, name)?.0;
+                (TypedExprKind::Field { expr: Box::new(x), name: name.clone(), safe: false }, t)
+            }
+            ExprKind::Call { callee, args, targs } if targs.is_empty() => {
+                let (callee, t) = self.resolve_call(callee)?;
+                (TypedExprKind::Call { callee, args: args.clone() }, t)
+            }
+            _ => return None,
+        };
+        Some(TypedExpr { kind, ty, line: e.line })
+    }
+
     /// A local, or a global, constant or function of the current module used as a value.
     fn type_of_ident(&self, name: &str, want: Option<&Ty>) -> Option<Ty> {
         if let Some(l) = self.lookup(name) {
@@ -77,16 +147,26 @@ impl Compiler {
         None
     }
 
-    /// The result type of a call of a function declared by name (`f(x)` or `module.f(x)`). Calls of
-    /// built-ins, of generic functions, of closures and of methods are not covered yet.
+    /// The result type of a call of a function declared by name (`f(x)` or `module.f(x)`).
     fn type_of_call(&self, callee: &Expr) -> Option<Ty> {
+        self.resolve_call(callee).map(|(_, ty)| ty)
+    }
+
+    /// The destination and the result type of a call of a function declared by name (`f(x)` or
+    /// `module.f(x)`) or of a method of a record. Calls of built-ins, of generic functions, of
+    /// closures and of other methods are not covered yet.
+    fn resolve_call(&self, callee: &Expr) -> Option<(TypedCallee, Ty)> {
         const BUILTINS: &[&str] = &["abort", "bool", "char", "error", "print", "println", "weak", "live_objects", "channel", "timeout", "sleep", "heap_bytes", "float", "f64", "f32"];
-        let key = match &callee.kind {
+        let func = |key: (String, String)| {
+            let ret = self.tp.funcs.get(&key)?.ret.clone();
+            Some((TypedCallee::Func { module: key.0, name: key.1 }, ret))
+        };
+        match &callee.kind {
             ExprKind::Ident(name) => {
                 if self.lookup(name).is_some() || name.starts_with("__") || BUILTINS.contains(&name.as_str()) || int_type(name).is_some() {
                     return None;
                 }
-                (self.cur_mod.clone(), name.clone())
+                func((self.cur_mod.clone(), name.clone()))
             }
             ExprKind::Field { expr, name, safe: false } => {
                 if let ExprKind::Ident(m) = &expr.kind {
@@ -94,16 +174,15 @@ impl Compiler {
                         if m == "c" || m == "format" {
                             return None;
                         }
-                        let key = (self.modkey(&self.cur_mod, m), name.clone());
-                        return self.tp.funcs.get(&key).map(|sig| sig.ret.clone());
+                        return func((self.modkey(&self.cur_mod, m), name.clone()));
                     }
                 }
                 // a method of a record: found by the type of the receiver
                 let Ty::Rec(r) = rc_view(&self.type_of(expr, None)?) else { return None };
-                return self.tp.methods.get(&(r, name.clone())).map(|sig| sig.ret.clone());
+                let ret = self.tp.methods.get(&(r.clone(), name.clone()))?.ret.clone();
+                Some((TypedCallee::Method { rec_key: r, name: name.clone() }, ret))
             }
-            _ => return None,
-        };
-        self.tp.funcs.get(&key).map(|sig| sig.ret.clone())
+            _ => None,
+        }
     }
 }

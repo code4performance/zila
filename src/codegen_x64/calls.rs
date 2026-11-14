@@ -160,6 +160,134 @@ impl Compiler {
         Ok(Ty::Char)
     }
 
+    /// Emits `sleep(ms)`.
+    pub(super) fn emit_sleep(&mut self, args: &[Arg]) -> R<Ty> {
+            let t = self.expr(&args[0].value, Some(&Ty::i64()))?;
+            if !t.is_int() {
+                return self.err(format!("sleep() needs a number of milliseconds, found {}", t.show()));
+            }
+            let s = self.temp();
+            self.e(format!("mov qword ptr [rbp - {}], rax", s));
+            let sig = self.future_fn("sleep_future")?;
+            self.emit_call(&[s], &format!("call {}", sig.sym), None);
+            self.free(s);
+            Ok(Ty::Future(Box::new(Ty::Void)))
+    }
+
+    /// Emits `live_objects()`.
+    pub(super) fn emit_live_objects(&mut self) -> R<Ty> {
+            self.e("mov rax, qword ptr rt_live");
+            Ok(Ty::int())
+    }
+
+    /// Emits `int(x)`, `u8(x)`, `bool(x)`... (a conversion to the type `t`, written `name`).
+    pub(super) fn emit_int_conversion(&mut self, name: &str, t: Ty, args: &[Arg]) -> R<Ty> {
+        if args.len() != 1 {
+            return self.err(format!("{}() takes one argument", name));
+        }
+        let at = self.expr(&args[0].value, None)?;
+        if let Ty::Float { bits } = at {
+            // truncate toward zero; NaN, infinities and out-of-range values abort
+            let ok = self.lbl("f2iok");
+            if bits == 32 {
+                self.e("movd xmm0, eax");
+                self.e("cvtss2sd xmm0, xmm0");
+            } else {
+                self.e("movq xmm0, rax");
+            }
+            self.e("cvttsd2si rax, xmm0");
+            self.e("mov rcx, 8000000000000000h");
+            self.e("cmp rax, rcx");
+            self.e(format!("jne {}", ok));
+            self.e("movq rdx, xmm0");
+            self.e("mov rcx, 0C3E0000000000000h");
+            self.e("cmp rdx, rcx");
+            self.e(format!("je {}", ok));
+            self.e("lea rcx, rt_msg_floatrange");
+            self.at("rdx");
+            self.e("call rt_abort");
+            self.label(&ok);
+            if t == Ty::Bool {
+                return self.err("cannot convert float to bool");
+            }
+            if let (Ty::Int { bits, .. }, Some(_)) = (&t, norm_insn(&t)) {
+                // a narrower target: the truncated value must be the converted one
+                if *bits < 64 {
+                    let fits = self.lbl("f2ifit");
+                    self.e("mov rdx, rax");
+                    self.norm(&t);
+                    self.e("cmp rax, rdx");
+                    self.e(format!("je {}", fits));
+                    self.e("lea rcx, rt_msg_floatrange");
+                    self.at("rdx");
+                    self.e("call rt_abort");
+                    self.label(&fits);
+                }
+            }
+            self.norm(&t);
+            return Ok(t);
+        }
+        if !(at.is_int() || matches!(at, Ty::Ptr(_) | Ty::Bool | Ty::Func { ext: true, .. })) {
+            return self.err(format!("cannot convert {} to {}", at.show(), name));
+        }
+        if t == Ty::Bool {
+            self.e("test rax, rax");
+            self.e("setnz al");
+            self.e("movzx eax, al");
+        }
+        self.norm(&t);
+        Ok(t)
+    }
+
+    /// Emits `float(x)`, `f64(x)` and `f32(x)` (written `name`).
+    pub(super) fn emit_float_conversion(&mut self, name: &str, args: &[Arg]) -> R<Ty> {
+        if args.len() != 1 {
+            return self.err(format!("{}() takes one argument", name));
+        }
+        let tb = if name == "f32" { 32 } else { 64 };
+        let t = Ty::Float { bits: tb };
+        let at = self.expr(&args[0].value, None)?;
+        match at {
+            Ty::Int { bits: 64, signed: false } => {
+                // values above i64::MAX: halve (keeping the low bit), convert, double
+                let (big, end) = (self.lbl("ubig"), self.lbl("uend"));
+                let cvt = if tb == 32 { "cvtsi2ss" } else { "cvtsi2sd" };
+                let mv = if tb == 32 { "movd" } else { "movq" };
+                let (add, ra) = if tb == 32 { ("addss", "eax") } else { ("addsd", "rax") };
+                self.e("test rax, rax");
+                self.e(format!("js {}", big));
+                self.e(format!("{} xmm0, rax", cvt));
+                self.e(format!("jmp {}", end));
+                self.label(&big);
+                self.e("mov rcx, rax");
+                self.e("shr rax, 1");
+                self.e("and ecx, 1");
+                self.e("or rax, rcx");
+                self.e(format!("{} xmm0, rax", cvt));
+                self.e(format!("{} xmm0, xmm0", add));
+                self.label(&end);
+                self.e(format!("{} {}, xmm0", mv, ra));
+            }
+            Ty::Int { .. } | Ty::Bool => {
+                self.e(format!("{} xmm0, rax", if tb == 32 { "cvtsi2ss" } else { "cvtsi2sd" }));
+                self.e(if tb == 32 { "movd eax, xmm0" } else { "movq rax, xmm0" });
+            }
+            Ty::Float { bits: sb } if sb == tb => {}
+            Ty::Float { bits: 64 } => {
+                self.e("movq xmm0, rax");
+                self.e("cvtsd2ss xmm0, xmm0");
+                self.e("movd eax, xmm0");
+            }
+            Ty::Float { .. } => {
+                self.e("movd xmm0, eax");
+                self.e("cvtss2sd xmm0, xmm0");
+                self.e("movq rax, xmm0");
+            }
+            other => return self.err(format!("cannot convert {} to {}", other.show(), name)),
+        }
+        Ok(t)
+    }
+
     /// Emits the call of a typed call node whose target the checker settled: a function by name,
     /// an enum variant, a method or one of the simple built-ins. `None` when the node is not one of those (the caller then resolves the
     /// callee itself). Visibility of a function of another module is still checked here.
@@ -182,7 +310,13 @@ impl Compiler {
                 "error" => Some(self.emit_error(args)),
                 "abort" => Some(self.emit_abort(args)),
                 "char" => Some(self.emit_char(args)),
-                _ => None,
+                "float" | "f64" | "f32" => Some(self.emit_float_conversion(name, args)),
+                "sleep" => Some(self.emit_sleep(args)),
+                "live_objects" => Some(self.emit_live_objects()),
+                _ => {
+                    let target = int_type(name).or(if name == "bool" { Some(Ty::Bool) } else { None })?;
+                    Some(self.emit_int_conversion(name, target, args))
+                }
             },
             TypedCallee::Method { rec_key, name } => {
                 let ExprKind::Field { expr: obj, .. } = &callee.kind else { return None };
@@ -251,110 +385,10 @@ impl Compiler {
                 self.e("movq rax, xmm0");
                 Ok(Ty::Float { bits: 64 })
             }
-            ExprKind::Ident(name) if self.lookup(name).is_none() && matches!(name.as_str(), "float" | "f64" | "f32") => {
-                if args.len() != 1 {
-                    return self.err(format!("{}() takes one argument", name));
-                }
-                let tb = if name == "f32" { 32 } else { 64 };
-                let t = Ty::Float { bits: tb };
-                let at = self.expr(&args[0].value, None)?;
-                match at {
-                    Ty::Int { bits: 64, signed: false } => {
-                        // values above i64::MAX: halve (keeping the low bit), convert, double
-                        let (big, end) = (self.lbl("ubig"), self.lbl("uend"));
-                        let cvt = if tb == 32 { "cvtsi2ss" } else { "cvtsi2sd" };
-                        let mv = if tb == 32 { "movd" } else { "movq" };
-                        let (add, ra) = if tb == 32 { ("addss", "eax") } else { ("addsd", "rax") };
-                        self.e("test rax, rax");
-                        self.e(format!("js {}", big));
-                        self.e(format!("{} xmm0, rax", cvt));
-                        self.e(format!("jmp {}", end));
-                        self.label(&big);
-                        self.e("mov rcx, rax");
-                        self.e("shr rax, 1");
-                        self.e("and ecx, 1");
-                        self.e("or rax, rcx");
-                        self.e(format!("{} xmm0, rax", cvt));
-                        self.e(format!("{} xmm0, xmm0", add));
-                        self.label(&end);
-                        self.e(format!("{} {}, xmm0", mv, ra));
-                    }
-                    Ty::Int { .. } | Ty::Bool => {
-                        self.e(format!("{} xmm0, rax", if tb == 32 { "cvtsi2ss" } else { "cvtsi2sd" }));
-                        self.e(if tb == 32 { "movd eax, xmm0" } else { "movq rax, xmm0" });
-                    }
-                    Ty::Float { bits: sb } if sb == tb => {}
-                    Ty::Float { bits: 64 } => {
-                        self.e("movq xmm0, rax");
-                        self.e("cvtsd2ss xmm0, xmm0");
-                        self.e("movd eax, xmm0");
-                    }
-                    Ty::Float { .. } => {
-                        self.e("movd xmm0, eax");
-                        self.e("cvtss2sd xmm0, xmm0");
-                        self.e("movq rax, xmm0");
-                    }
-                    other => return self.err(format!("cannot convert {} to {}", other.show(), name)),
-                }
-                Ok(t)
-            }
+            ExprKind::Ident(name) if self.lookup(name).is_none() && matches!(name.as_str(), "float" | "f64" | "f32") => self.emit_float_conversion(name, args),
             ExprKind::Ident(name) if self.lookup(name).is_none() => {
                 if let Some(t) = int_type(name).or(if name == "bool" { Some(Ty::Bool) } else { None }) {
-                    if args.len() != 1 {
-                        return self.err(format!("{}() takes one argument", name));
-                    }
-                    let at = self.expr(&args[0].value, None)?;
-                    if let Ty::Float { bits } = at {
-                        // truncate toward zero; NaN, infinities and out-of-range values abort
-                        let ok = self.lbl("f2iok");
-                        if bits == 32 {
-                            self.e("movd xmm0, eax");
-                            self.e("cvtss2sd xmm0, xmm0");
-                        } else {
-                            self.e("movq xmm0, rax");
-                        }
-                        self.e("cvttsd2si rax, xmm0");
-                        self.e("mov rcx, 8000000000000000h");
-                        self.e("cmp rax, rcx");
-                        self.e(format!("jne {}", ok));
-                        self.e("movq rdx, xmm0");
-                        self.e("mov rcx, 0C3E0000000000000h");
-                        self.e("cmp rdx, rcx");
-                        self.e(format!("je {}", ok));
-                        self.e("lea rcx, rt_msg_floatrange");
-                        self.at("rdx");
-                        self.e("call rt_abort");
-                        self.label(&ok);
-                        if t == Ty::Bool {
-                            return self.err("cannot convert float to bool");
-                        }
-                        if let (Ty::Int { bits, .. }, Some(_)) = (&t, norm_insn(&t)) {
-                            // a narrower target: the truncated value must be the converted one
-                            if *bits < 64 {
-                                let fits = self.lbl("f2ifit");
-                                self.e("mov rdx, rax");
-                                self.norm(&t);
-                                self.e("cmp rax, rdx");
-                                self.e(format!("je {}", fits));
-                                self.e("lea rcx, rt_msg_floatrange");
-                                self.at("rdx");
-                                self.e("call rt_abort");
-                                self.label(&fits);
-                            }
-                        }
-                        self.norm(&t);
-                        return Ok(t);
-                    }
-                    if !(at.is_int() || matches!(at, Ty::Ptr(_) | Ty::Bool | Ty::Func { ext: true, .. })) {
-                        return self.err(format!("cannot convert {} to {}", at.show(), name));
-                    }
-                    if t == Ty::Bool {
-                        self.e("test rax, rax");
-                        self.e("setnz al");
-                        self.e("movzx eax, al");
-                    }
-                    self.norm(&t);
-                    return Ok(t);
+                    return self.emit_int_conversion(name, t, args);
                 }
                 if (name == "__abort" || name == "abort" && !self.tp.funcs.contains_key(&(self.cur_mod.clone(), name.clone()))) && args.len() == 1 {
                     return self.emit_abort(args);
@@ -399,8 +433,7 @@ impl Compiler {
                     return self.weak_of(args);
                 }
                 if name == "live_objects" && args.is_empty() {
-                    self.e("mov rax, qword ptr rt_live");
-                    return Ok(Ty::int());
+                    return self.emit_live_objects();
                 }
                 if name == "channel" {
                     return self.channel_new(args);
@@ -409,16 +442,7 @@ impl Compiler {
                     return self.timeout_future(&args[0].value, &args[1].value);
                 }
                 if name == "sleep" && args.len() == 1 && !self.tp.funcs.contains_key(&(self.cur_mod.clone(), name.clone())) {
-                    let t = self.expr(&args[0].value, Some(&Ty::i64()))?;
-                    if !t.is_int() {
-                        return self.err(format!("sleep() needs a number of milliseconds, found {}", t.show()));
-                    }
-                    let s = self.temp();
-                    self.e(format!("mov qword ptr [rbp - {}], rax", s));
-                    let sig = self.future_fn("sleep_future")?;
-                    self.emit_call(&[s], &format!("call {}", sig.sym), None);
-                    self.free(s);
-                    return Ok(Ty::Future(Box::new(Ty::Void)));
+                return self.emit_sleep(args);
                 }
                 let key = (self.cur_mod.clone(), name.clone());
                 if let Some(sig) = self.tp.funcs.get(&key).cloned() {

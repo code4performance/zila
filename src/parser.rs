@@ -13,6 +13,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 type R<T> = Result<T, Diag>;
 
+/// The fields of a record literal and the ranges of their names.
+type RecordFields = (Vec<(String, Expr)>, Vec<Span>);
+
 pub fn parse_source(src: &str) -> R<File> {
     parse_source_with(src, crate::comptime::block_names(src))
 }
@@ -99,6 +102,8 @@ pub struct Parser {
     /// Keep going after a syntax error (see `parse_partial`); the errors are collected in `errors`.
     recover: bool,
     errors: Vec<Diag>,
+    /// A block was closed at the end of the text: what encloses it ends there too.
+    closed_at_eof: bool,
 }
 
 const ASSIGN_OPS: &[&str] = &["=", "+=", "-=", "*=", "/=", "%="];
@@ -106,7 +111,7 @@ const CMP_OPS: &[&str] = &["==", "!=", "<", "<=", ">", ">="];
 
 impl Parser {
     pub fn new(toks: Vec<Token>) -> Self {
-        Parser { toks, pos: 0, layout: Layout::default(), recover: false, errors: Vec::new() }
+        Parser { toks, pos: 0, layout: Layout::default(), recover: false, errors: Vec::new(), closed_at_eof: false }
     }
 
     /// Consumes the `end` that closes the block opened at token `open`.
@@ -117,6 +122,7 @@ impl Parser {
             let d = Diag { line: self.toks[at].line, col: self.toks[at].col, msg: "expected 'end', found end of file".into() };
             self.errors.push(d);
             self.layout.blocks.insert(open, at);
+            self.closed_at_eof = true;
             return Ok(());
         }
         self.expect_kw("end")?;
@@ -165,6 +171,10 @@ impl Parser {
 
     /// From `start` to the end of the last token consumed (line ends do not count).
     fn span_from(&self, start: (u32, u32)) -> Span {
+        if self.closed_at_eof {
+            let t = &self.toks[self.toks.len() - 1];
+            return Span::new(start.0, start.1, t.line, t.col);
+        }
         let mut i = self.pos;
         while i > 0 && matches!(self.toks[i - 1].tok, Tok::Newline) {
             i -= 1;
@@ -959,15 +969,17 @@ impl Parser {
             Some("for") => {
                 let open = self.pos;
                 self.bump();
+                let mut var_spans = vec![self.tok_span()];
                 let mut vars = vec![self.expect_ident()?];
                 if self.eat_op(",") {
+                    var_spans.push(self.tok_span());
                     vars.push(self.expect_ident()?);
                 }
                 self.expect_kw("in")?;
                 let iter = self.expr()?;
                 let body = self.block()?;
                 self.end_block(open)?;
-                StmtKind::For { vars, iter, body }
+                StmtKind::For { vars, var_spans, iter, body }
             }
             Some("while") => {
                 let open = self.pos;
@@ -1223,8 +1235,8 @@ impl Parser {
                 Tok::Op("{") if path_of(&e).is_some() => {
                     let path = path_of(&e).unwrap();
                     self.bump();
-                    let fields = self.record_fields()?;
-                    e = Expr { kind: ExprKind::Record { path, fields }, line, span: self.span_from(start) };
+                    let (fields, field_spans) = self.record_fields()?;
+                    e = Expr { kind: ExprKind::Record { path, fields, field_spans }, line, span: self.span_from(start) };
                 }
                 _ => break,
             }
@@ -1232,10 +1244,12 @@ impl Parser {
         Ok(e)
     }
 
-    fn record_fields(&mut self) -> R<Vec<(String, Expr)>> {
+    fn record_fields(&mut self) -> R<RecordFields> {
         let mut fields = Vec::new();
+        let mut spans = Vec::new();
         self.skip_nl();
         while !self.is_op("}") {
+            spans.push(self.tok_span());
             let name = self.expect_name()?;
             self.expect_op(":")?;
             self.skip_nl();
@@ -1248,7 +1262,7 @@ impl Parser {
             self.skip_nl();
         }
         self.expect_op("}")?;
-        Ok(fields)
+        Ok((fields, spans))
     }
 
     fn args(&mut self) -> R<Vec<Arg>> {
@@ -1347,6 +1361,7 @@ impl Parser {
             }
             Tok::Kw("new") => {
                 self.bump();
+                let path_start = self.start();
                 let mut path = vec![self.expect_name()?];
                 while self.is_op(".") {
                     self.bump();
@@ -1356,8 +1371,8 @@ impl Parser {
                     return self.err(format!("'new' needs a record literal such as `new {}{{ ... }}`", path.join(".")));
                 }
                 self.bump();
-                let fields = self.record_fields()?;
-                ExprKind::New(Box::new(Expr { kind: ExprKind::Record { path, fields }, line, span: self.span_from(start) }))
+                let (fields, field_spans) = self.record_fields()?;
+                ExprKind::New(Box::new(Expr { kind: ExprKind::Record { path, fields, field_spans }, line, span: self.span_from(path_start) }))
             }
             Tok::Op("(") => {
                 self.bump();
@@ -1493,6 +1508,7 @@ impl Parser {
                 if self.recover {
                     let d = Diag { line: self.toks[self.pos].line, col: self.toks[self.pos].col, msg: "unterminated 'match': expected 'end'".into() };
                     self.errors.push(d);
+                    self.closed_at_eof = true;
                     break;
                 }
                 return self.err("unterminated 'match': expected 'end'");
@@ -1558,22 +1574,25 @@ impl Parser {
         let start = self.start();
         match self.cur().clone() {
             Tok::Ident(n) => {
+                let span = self.tok_span();
                 self.bump();
                 if n == "_" && !self.is_op("(") {
                     return Ok(PatAtom::Wildcard);
                 }
                 if self.eat_op("(") {
                     let mut b = Vec::new();
+                    let mut binding_spans = Vec::new();
                     while !self.is_op(")") {
+                        binding_spans.push(self.tok_span());
                         b.push(self.expect_ident()?);
                         if !self.eat_op(",") {
                             break;
                         }
                     }
                     self.expect_op(")")?;
-                    Ok(PatAtom::Name { name: n, bindings: Some(b) })
+                    Ok(PatAtom::Name { name: n, bindings: Some(b), span, binding_spans })
                 } else {
-                    Ok(PatAtom::Name { name: n, bindings: None })
+                    Ok(PatAtom::Name { name: n, bindings: None, span, binding_spans: Vec::new() })
                 }
             }
             Tok::Int(_)

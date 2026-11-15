@@ -164,7 +164,7 @@ impl Compiler {
                 self.free(mt);
                 Ok(Ty::Map(Box::new(k), Box::new(v)))
             }
-            ExprKind::Record { path, fields } => {
+            ExprKind::Record { path, fields, .. } => {
                 let r = match self.generic_literal(path, want)? {
                     Some(r) => r,
                     None => self.record_name(path, &self.cur_mod.clone())?,
@@ -179,7 +179,7 @@ impl Compiler {
             ExprKind::Shared(inner) => self.shared_expr(inner, want),
             ExprKind::SpawnThread(call) => self.spawn_thread(call, e.line),
             ExprKind::New(inner) => {
-                let ExprKind::Record { path, fields } = &inner.kind else {
+                let ExprKind::Record { path, fields, .. } = &inner.kind else {
                     return self.err("'new' needs a record literal such as `new Node{ ... }`");
                 };
                 let want_rec = want.map(rc_view);
@@ -1219,7 +1219,7 @@ impl Compiler {
                     PatAtom::Literal(lit) => {
                         self.pattern_literal(&st, s, lit, &body_l)?;
                     }
-                    PatAtom::Name { name, bindings } => match &st {
+                    PatAtom::Name { name, bindings, .. } => match &st {
                         Ty::Enum(q) => {
                             let info = self.tp.enums[q].clone();
                             if let Some(idx) = info.variants.iter().position(|v| &v.0 == name) {

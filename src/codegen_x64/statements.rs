@@ -134,7 +134,7 @@ impl Compiler {
                 self.e(format!("jmp {}", start));
                 self.label(&end);
             }
-            StmtKind::For { vars, iter, body } => self.for_loop(vars, iter, body)?,
+            StmtKind::For { vars, iter, body, .. } => self.for_loop(vars, iter, body)?,
             StmtKind::Unsafe(b) => {
                 self.fs.unsafe_depth += 1;
                 self.block(b)?;

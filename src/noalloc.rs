@@ -554,7 +554,7 @@ fn collect_stmt_allocs(
             });
             collect_expr_allocs(e, cur_mod, locals, fn_vals, iface_vars, direct_allocs, callees, interfaces, extern_allocates);
         }
-        StmtKind::For { vars, iter, body } => {
+        StmtKind::For { vars, iter, body, .. } => {
             for v in vars {
                 locals.insert(v.clone());
                 locals.remove(&format!("#cow:{}", v));

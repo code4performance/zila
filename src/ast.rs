@@ -6,7 +6,7 @@
 ///
 /// `Debug` prints just `Span`, whatever the range: code that compares or hashes the debug text of
 /// a tree (the generator cache key, the library parity tests) must not change when code moves.
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Span {
     pub line: u32,
     pub col: u32,
@@ -248,7 +248,8 @@ pub enum StmtKind {
     Spawn(Expr),
     Unsafe(Block),
     Asm(AsmBlock),
-    For { vars: Vec<String>, iter: Expr, body: Block },
+    /// `var_spans` are the ranges of the names in `vars`.
+    For { vars: Vec<String>, var_spans: Vec<Span>, iter: Expr, body: Block },
     While { cond: Expr, body: Block },
     Break,
     Continue,
@@ -276,7 +277,8 @@ pub enum ExprKind {
     Ident(String),
     List(Vec<Expr>),
     Map(Vec<(Expr, Expr)>),
-    Record { path: Vec<String>, fields: Vec<(String, Expr)> },
+    /// `field_spans` are the ranges of the field names, in order (empty for a literal the compiler made).
+    Record { path: Vec<String>, fields: Vec<(String, Expr)>, field_spans: Vec<Span> },
     Lambda { params: Vec<Param>, body: Block },
     /// `if` / `else if` / `else`; usable as a statement or a value.
     If { branches: Vec<(Expr, Block)>, else_body: Option<Block> },
@@ -333,5 +335,6 @@ pub enum PatAtom {
     Wildcard,
     Literal(Expr),
     /// `Circle(r)` binds; a bare `Empty` has `bindings: None`.
-    Name { name: String, bindings: Option<Vec<String>> },
+    /// `span` is the range of `name`, `binding_spans` those of the bindings.
+    Name { name: String, bindings: Option<Vec<String>>, span: Span, binding_spans: Vec<Span> },
 }

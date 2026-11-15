@@ -376,3 +376,58 @@ fn rapid_edits_publish_only_the_diagnostics_of_the_last_text() {
     assert_eq!(d.len(), 1, "{:?}", d);
     assert_eq!(d[0].get("range").get("start").get("line"), &Json::Num(3.0), "the error of the last text");
 }
+
+fn hover(docs: &mut HashMap<String, String>, uri: &str, line: i64, character: i64) -> Json {
+    let msg = format!(r#"{{"jsonrpc":"2.0","id":9,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":{},"character":{}}}}}}}"#, uri, line, character);
+    send(docs, &msg).remove(0).get("result").clone()
+}
+
+#[test]
+fn hovering_a_function_shows_its_signature_and_doc_comment() {
+    let mut docs = HashMap::new();
+    let uri = "file:///h.zila";
+    let src = "package main\n\n// Adds one to n.\n// Second line.\n#[export(\"inc\")]\nfunc inc(n: int) -> int\n    return n + 1\nend\n\nfunc main()\n    let x = inc(1)\n    print(\"{x}\")\nend\n";
+    open(&mut docs, uri, src);
+    // on the call `inc(1)`: line 10, `    let x = inc(1)` has `inc` at characters 12 to 15
+    let h = hover(&mut docs, uri, 10, 13);
+    let value = h.get("contents").get("value").str().unwrap().to_string();
+    assert!(value.contains("func inc(n: int) -> int"), "{}", value);
+    assert!(value.contains("Adds one to n.\nSecond line."), "{}", value);
+    assert_eq!(h.get("range").get("start").get("character"), &Json::Num(12.0));
+    assert_eq!(h.get("range").get("end").get("character"), &Json::Num(15.0));
+    // on the declaration itself
+    let h = hover(&mut docs, uri, 5, 6);
+    assert!(h.get("contents").get("value").str().unwrap().contains("Adds one to n."));
+    // a local, in the text interpolation: its type
+    let h = hover(&mut docs, uri, 11, 12);
+    assert!(h.get("contents").get("value").str().unwrap().contains("x: int"), "{:?}", h);
+    // a parameter in its body
+    let h = hover(&mut docs, uri, 6, 11);
+    assert!(h.get("contents").get("value").str().unwrap().contains("n: int"), "{:?}", h);
+}
+
+#[test]
+fn hover_answers_null_where_there_is_nothing_to_show() {
+    let mut docs = HashMap::new();
+    let uri = "file:///n.zila";
+    open(&mut docs, uri, "package main\n\nfunc main()\n    let x = 1\n    print(\"{x}\")\nend\n");
+    assert_eq!(hover(&mut docs, uri, 3, 1), Json::Null, "indentation");
+    assert_eq!(hover(&mut docs, uri, 0, 3), Json::Null, "a keyword");
+    assert_eq!(hover(&mut docs, uri, 40, 0), Json::Null, "past the end");
+    // a text with a syntax error: the broken statement shows nothing, the rest still does
+    open(&mut docs, "file:///b.zila", "package main\n\nfunc main()\n    let = 1\n    let y = 2\n    print(\"{y}\")\nend\n");
+    assert_eq!(hover(&mut docs, "file:///b.zila", 3, 6), Json::Null);
+    assert!(hover(&mut docs, "file:///b.zila", 5, 12).get("contents").get("value").str().unwrap().contains("y: int"));
+    // a document that is not open
+    assert_eq!(hover(&mut docs, "file:///closed.zila", 0, 0), Json::Null);
+}
+
+#[test]
+fn hover_follows_an_unsaved_edit() {
+    let mut docs = HashMap::new();
+    let uri = "file:///e.zila";
+    open(&mut docs, uri, "package main\n\nfunc main()\n    let x = 1\n    print(\"{x}\")\nend\n");
+    assert!(hover(&mut docs, uri, 4, 12).get("contents").get("value").str().unwrap().contains("x: int"));
+    change(&mut docs, uri, "package main\n\nfunc main()\n    let x = \"one\"\n    print(\"{x}\")\nend\n");
+    assert!(hover(&mut docs, uri, 4, 12).get("contents").get("value").str().unwrap().contains("x: text"));
+}

@@ -627,7 +627,7 @@ impl Compiler {
     /// A record literal of a record that is not generic: its typed fields (each typed from the
     /// declared field type) and the record's key. Unknown fields and mistyped values are not typed.
     fn check_record_literal(&mut self, e: &Expr) -> Option<(TypedExprKind, String)> {
-        let ExprKind::Record { path, fields } = &e.kind else { return None };
+        let ExprKind::Record { path, fields, .. } = &e.kind else { return None };
         let q = self.qname(&self.cur_mod, path);
         if !self.tp.rec_decls.contains_key(&q) {
             return None;

@@ -13,7 +13,7 @@ mod json;
 mod transport;
 
 pub use diagnostics::diagnostics;
-pub use features::formatting;
+pub use features::{completion, formatting, hover, signature_help};
 pub use json::{parse_json, Json};
 
 use diagnostics::{publish, publish_all};
@@ -51,7 +51,7 @@ fn handle_with(msg: &Json, docs: &mut HashMap<String, String>, out: &mut dyn Wri
         "initialize" => reply(
             out,
             obj(vec![
-                ("capabilities", obj(vec![("textDocumentSync", num(1)), ("documentFormattingProvider", Json::Bool(true))])),
+                ("capabilities", obj(vec![("textDocumentSync", num(1)), ("documentFormattingProvider", Json::Bool(true)), ("hoverProvider", Json::Bool(true)), ("completionProvider", obj(vec![("triggerCharacters", Json::Arr(vec![Json::Str(".".into())]))])), ("signatureHelpProvider", obj(vec![("triggerCharacters", Json::Arr(vec![Json::Str("(".into()), Json::Str(",".into())]))]))])),
                 ("serverInfo", obj(vec![("name", Json::Str("zila".into()))])),
             ]),
         ),
@@ -81,11 +81,30 @@ fn handle_with(msg: &Json, docs: &mut HashMap<String, String>, out: &mut dyn Wri
         "textDocument/didClose" => {
             if let Some(uri) = params.get("textDocument").get("uri").str() {
                 docs.remove(uri);
+                diagnostics::forget(uri);
                 if let Some(list) = changed.as_mut() {
                     list.retain(|u| u != uri);
                 }
                 publish(out, uri, Json::Arr(Vec::new()));
             }
+        }
+        "textDocument/hover" => {
+            let uri = params.get("textDocument").get("uri").str().unwrap_or("");
+            let at = params.get("position");
+            let (Json::Num(line), Json::Num(character)) = (at.get("line"), at.get("character")) else { return reply_null(out, &id) };
+            reply(out, hover(uri, docs, *line as i64, *character as i64));
+        }
+        "textDocument/completion" => {
+            let uri = params.get("textDocument").get("uri").str().unwrap_or("");
+            let at = params.get("position");
+            let (Json::Num(line), Json::Num(character)) = (at.get("line"), at.get("character")) else { return reply_null(out, &id) };
+            reply(out, completion(uri, docs, *line as i64, *character as i64));
+        }
+        "textDocument/signatureHelp" => {
+            let uri = params.get("textDocument").get("uri").str().unwrap_or("");
+            let at = params.get("position");
+            let (Json::Num(line), Json::Num(character)) = (at.get("line"), at.get("character")) else { return reply_null(out, &id) };
+            reply(out, signature_help(uri, docs, *line as i64, *character as i64));
         }
         "textDocument/formatting" => {
             let uri = params.get("textDocument").get("uri").str().unwrap_or("");
@@ -99,6 +118,11 @@ fn handle_with(msg: &Json, docs: &mut HashMap<String, String>, out: &mut dyn Wri
             }
         }
     }
+    true
+}
+
+fn reply_null(out: &mut dyn Write, id: &Json) -> bool {
+    send(out, &obj(vec![("jsonrpc", Json::Str("2.0".into())), ("id", id.clone()), ("result", Json::Null)]));
     true
 }
 

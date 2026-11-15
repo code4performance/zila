@@ -241,7 +241,7 @@ impl Compiler {
                 TypedStmtKind::While { cond: c, body }
             }
             StmtKind::Unsafe(b) => TypedStmtKind::Unsafe(self.check_block(b, w)),
-            StmtKind::For { vars, iter, body } => {
+            StmtKind::For { vars, iter, body, .. } => {
                 self.fs.scopes.push(Scope::default());
                 let r = self.check_for(vars, iter, body, w);
                 self.fs.scopes.pop();
@@ -359,7 +359,7 @@ impl Compiler {
             let mut binds: Option<(String, Vec<String>)> = None;
             let mut catch_name: Option<String> = None;
             for atom in &arm.pattern {
-                let PatAtom::Name { name, bindings } = atom else { continue };
+                let PatAtom::Name { name, bindings, .. } = atom else { continue };
                 match &st {
                     Ty::Enum(q) => {
                         let info = self.tp.enums.get(q)?;

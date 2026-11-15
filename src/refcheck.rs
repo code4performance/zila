@@ -61,7 +61,7 @@ impl Checker {
                 self.strict -= 1;
                 r
             }
-            StmtKind::For { vars, iter, body } => {
+            StmtKind::For { vars, iter, body, .. } => {
                 self.base(iter)?;
                 let mark = self.env.len();
                 for v in vars {

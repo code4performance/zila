@@ -35,6 +35,9 @@ pub struct Checked {
     pub program: TypedProgram,
     /// In the order found; empty when the program is correct.
     pub errors: Vec<CheckError>,
+    /// Every name of the project's packages with its range and what it refers to; empty after an
+    /// error in loading or declaring.
+    pub index: PositionIndex,
 }
 
 /// Checks `file` (the main package, already parsed) without emitting. `source` is the path of the
@@ -68,11 +71,11 @@ fn check(file: &File) -> Checked {
     let main = file.package.clone();
     if let Err(e) = c.load(file).map_err(crate::comptime::map_error) {
         errors.push(split_error(&e, (&main, 1), c.err_span.take()));
-        return Checked { program: c.tp, errors };
+        return Checked { program: c.tp, errors, index: PositionIndex::default() };
     }
     if let Err(e) = c.declare().map_err(crate::comptime::map_error) {
         errors.push(split_error(&e, (&main, c.line), c.err_span.take()));
-        return Checked { program: c.tp, errors };
+        return Checked { program: c.tp, errors, index: PositionIndex::default() };
     }
     if let Err(e) = c.check_templates() {
         errors.push(split_error(&e, (&c.cur_mod, c.line), c.err_span.take()));
@@ -99,5 +102,6 @@ fn check(file: &File) -> Checked {
     if let Err(e) = c.drain_pending() {
         errors.push(split_error(&e, (&c.cur_mod, c.line), c.err_span.take()));
     }
-    Checked { program: c.tp, errors }
+    let index = c.index_program();
+    Checked { program: c.tp, errors, index }
 }

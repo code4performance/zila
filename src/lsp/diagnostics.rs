@@ -5,11 +5,59 @@ use super::documents::{position, uri_to_path, utf16_col};
 use super::json::{num, obj, Json};
 use super::transport::send;
 use crate::ast::Span;
-use crate::codegen_x64::{check_program, CheckError};
+use crate::codegen_x64::{check_program, CheckError, Checked, PositionIndex};
 use crate::parser::parse_partial;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::PathBuf;
+use std::rc::Rc;
+
+thread_local! {
+    /// The index of the last check of each document, with the hash of the texts it was made from.
+    static INDEXES: RefCell<HashMap<String, (u64, Rc<PositionIndex>)>> = RefCell::new(HashMap::new());
+}
+
+/// A hash of the text of every open document: a check is valid for exactly these texts.
+fn docs_hash(docs: &HashMap<String, String>) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut all: Vec<(&String, &String)> = docs.iter().collect();
+    all.sort();
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    all.hash(&mut h);
+    h.finish()
+}
+
+/// Checks the program in `file` (the document `uri`) over the open documents. `None` when the
+/// checker stopped on an internal error: a bug in the compiler must not take the server with it.
+fn run_check(uri: &str, docs: &HashMap<String, String>, file: &crate::ast::File) -> Option<Checked> {
+    let path = uri_to_path(uri);
+    let overlay: HashMap<PathBuf, String> = docs.iter().filter_map(|(u, t)| Some((uri_to_path(u)?, t.clone()))).collect();
+    crate::warn::clear();
+    let checked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check_program(file, path.as_deref(), overlay))).ok()?;
+    let index = Rc::new(checked.index.clone());
+    let hash = docs_hash(docs);
+    INDEXES.with(|c| c.borrow_mut().insert(uri.to_string(), (hash, index)));
+    Some(checked)
+}
+
+/// The position index for the current text of the open documents: the one the last check made,
+/// or a new check when the texts changed since. A document with syntax errors is checked without
+/// the statements and declarations that did not parse. `None` when the document is not a program
+/// that can be checked (not even a `package` line, not `main`, or it uses code generation).
+pub(super) fn index_of(uri: &str, docs: &HashMap<String, String>) -> Option<Rc<PositionIndex>> {
+    let hash = docs_hash(docs);
+    if let Some(i) = INDEXES.with(|c| c.borrow().get(uri).filter(|e| e.0 == hash).map(|e| e.1.clone())) {
+        return Some(i);
+    }
+    // the tree of what parses: a syntax error elsewhere in the text does not hide the rest
+    let file = parse_partial(docs.get(uri)?).file?;
+    if file.package != "main" || crate::comptime::uses_comptime(&file) {
+        return None;
+    }
+    run_check(uri, docs, &file)?;
+    INDEXES.with(|c| c.borrow().get(uri).map(|e| e.1.clone()))
+}
 
 /// The diagnostics for the open document `uri`: its syntax error or, for a document that parses,
 /// what the compiler's checking reports over the text of every open document (unsaved edits of the
@@ -23,13 +71,8 @@ pub fn diagnostics(uri: &str, docs: &HashMap<String, String>) -> Json {
             // a program that asks for code generation is not checked here: the server never runs
             // comptime code, so opening a file from an untrusted package executes nothing
             if file.package == "main" && !crate::comptime::uses_comptime(&file) {
-                let path = uri_to_path(uri);
-                let overlay: HashMap<PathBuf, String> = docs.iter().filter_map(|(u, t)| Some((uri_to_path(u)?, t.clone()))).collect();
-                crate::warn::clear();
-                // a bug in the compiler must not take the server down with it
-                let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check_program(&file, path.as_deref(), overlay)));
-                match run {
-                    Ok(checked) => {
+                match run_check(uri, docs, &file) {
+                    Some(checked) => {
                         for e in &checked.errors {
                             list.push(error_diagnostic(text, &file.package, e));
                         }
@@ -37,7 +80,7 @@ pub fn diagnostics(uri: &str, docs: &HashMap<String, String>) -> Json {
                             list.push(diagnostic(text, whole_line(text, 0), 2, w));
                         }
                     }
-                    Err(_) => list.push(diagnostic(text, whole_line(text, 0), 2, "the checker stopped on an internal error; no semantic diagnostics for this text".into())),
+                    None => list.push(diagnostic(text, whole_line(text, 0), 2, "the checker stopped on an internal error; no semantic diagnostics for this text".into())),
                 }
             }
         }
@@ -52,6 +95,11 @@ pub fn diagnostics(uri: &str, docs: &HashMap<String, String>) -> Json {
         (None, None) => {}
     }
     Json::Arr(list)
+}
+
+/// Forgets what was kept for a document that was closed.
+pub(super) fn forget(uri: &str) {
+    INDEXES.with(|c| c.borrow_mut().remove(uri));
 }
 
 /// A range as (line, start character, line, end character), counting characters from 0.

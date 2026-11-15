@@ -57,7 +57,7 @@ impl Walk {
             }
             StmtKind::Defer(_) | StmtKind::Spawn(_) | StmtKind::Asm(_) => self.blocked = true,
             StmtKind::Unsafe(b) => self.block(b, depth),
-            StmtKind::For { vars, iter, body } => {
+            StmtKind::For { vars, iter, body, .. } => {
                 if matches!(&iter.kind, ExprKind::Binary { op: "..", .. }) && vars.len() == 1 {
                     // a counting loop: its variable is tested and stepped on every turn
                     *self.binds.entry(vars[0].clone()).or_default() += 1;
@@ -128,7 +128,7 @@ impl Walk {
                         match p {
                             PatAtom::Wildcard => {}
                             PatAtom::Literal(x) => self.expr(x, depth),
-                            PatAtom::Name { name, bindings } => {
+                            PatAtom::Name { name, bindings, .. } => {
                                 self.bad.insert(name.clone());
                                 for b in bindings.iter().flatten() {
                                     self.bad.insert(b.clone());

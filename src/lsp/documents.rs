@@ -7,6 +7,27 @@ pub(super) fn utf16_col(line: &str, chars: usize) -> i64 {
     line.chars().take(chars).map(|c| c.len_utf16() as i64).sum()
 }
 
+/// The number of characters before UTF-16 unit `units` of a line (the inverse of `utf16_col`).
+pub(super) fn char_col(line: &str, units: i64) -> usize {
+    let mut seen = 0;
+    for (i, c) in line.chars().enumerate() {
+        if seen >= units {
+            return i;
+        }
+        seen += c.len_utf16() as i64;
+    }
+    line.chars().count()
+}
+
+/// The LSP range of a range of the syntax tree (lines and columns from 1, in characters).
+pub(super) fn range_of(text: &str, s: crate::ast::Span) -> Json {
+    let col = |line: u32, c: u32| utf16_col(text.lines().nth(line as usize - 1).unwrap_or(""), c as usize - 1);
+    obj(vec![
+        ("start", position(s.line as i64 - 1, col(s.line, s.col))),
+        ("end", position(s.end_line as i64 - 1, col(s.end_line, s.end_col))),
+    ])
+}
+
 pub(super) fn position(line: i64, character: i64) -> Json {
     obj(vec![("line", num(line)), ("character", num(character))])
 }

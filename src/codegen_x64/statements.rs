@@ -45,10 +45,17 @@ impl Compiler {
                         a
                     }
                 };
+                // the type of the local is the one the body checker settled; what emission derived
+                // from the value is the same (asserted in debug builds) and is used where the
+                // checker did not cover the statement
+                let ty = match self.fs.checked_vars.get(&(s.line, vd.name.clone())) {
+                    Some(c) => {
+                        debug_assert!(*c == ty, "the body checker says '{}' is {} but emission gives {} (line {})", vd.name, c.show(), ty.show(), s.line);
+                        c.clone()
+                    }
+                    None => ty,
+                };
                 self.norm(&ty);
-                if let Some(c) = self.fs.checked_vars.get(&(s.line, vd.name.clone())) {
-                    assert!(*c == ty, "the body checker says '{}' is {} but emission gives {} (line {})", vd.name, c.show(), ty.show(), s.line);
-                }
                 let off = self.declare_local(&vd.name, ty, vd.mutable);
                 let is_shared = matches!(vd.ty, Some(Type::Shared(_)))
                     || matches!(&vd.value, Some(Expr { kind: ExprKind::Shared(_), .. }))

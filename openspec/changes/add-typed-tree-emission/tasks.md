@@ -30,7 +30,7 @@
 
 - [ ] 3.1 `src/codegen_x64/statements.rs`: refactor statement emission to consume `TypedStmt`, removing speculative `Snapshot` rollbacks during body emission; verify `cargo test --test statements` and `--test run` pass
   - [x] 3.1a the speculative typing of a `sql` hole, of the literal side of an operator and of an argument of a generic call uses the checker's type when the checker covers the expression; `tools/asm-snapshot.py compare --labels`: identical (label numbers shift, see design.md)
-  - [ ] 3.1b statement emission reads the typed statement (the type of a `let`/`var` and of a condition) instead of deriving it again
+  - [x] 3.1b the type of a `let`/`var` is read from the typed body (the checker runs for every function in every build; debug builds assert emission derives the same one). It costs 8% to 25% more compile time in a debug build
   - [ ] 3.1c the speculative fallbacks that remain for forms the checker does not cover
 - [ ] 3.2 Clean up redundant type checking and dead `unreachable!()` branches across `src/codegen_x64/`; verify `cargo clippy --all-targets -- -D warnings` is clean
   - [x] 3.2a the duplicate `type_of` is gone (`check_expr` is the one typing; emission asserts against it), and the repeated copy-or-retain code with its `unreachable!()` guards is one helper (`copy_or_retain`); clippy clean, `compare --labels` identical

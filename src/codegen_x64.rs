@@ -1718,7 +1718,7 @@ end
             self.check_refs(&refs, &fd.body)?;
         }
         let prologue = self.bind_params(&incoming, None);
-        if cfg!(debug_assertions) && !naked && fd.is_async {
+        if !naked && fd.is_async {
             self.check_function_body(fd, &sig);
         }
         if fd.is_async {
@@ -1728,7 +1728,7 @@ end
             self.procs.push(p);
             return Ok(());
         }
-        if cfg!(debug_assertions) && !naked {
+        if !naked {
             self.check_function_body(fd, &sig);
         }
         if !naked {

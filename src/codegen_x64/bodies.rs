@@ -6,8 +6,9 @@
 //! `complete: false`. A local whose type cannot be settled ends the walk (everything after it is
 //! opaque), so a name is never looked up in a scope that lacks one of its locals.
 //!
-//! Emission checks the type it gives each `let`/`var` against the one recorded here (in builds with
-//! debug assertions), the same way it checks `check_expr`.
+//! The check runs for every function in every build. Emission takes the type of each `let`/`var`
+//! from the record kept here, and in builds with debug assertions it also checks that the type it
+//! derived itself from the value is the same, the way it checks `check_expr`.
 
 use super::*;
 

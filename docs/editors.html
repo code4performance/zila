@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Editors and debugging — Zila Lang</title>
+  <meta name="description" content="Zila Lang in your editor: install the extension, completion, hover, go to definition, rename, type errors as you type, and a debugger with breakpoints and variables.">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="assets/zila.svg" type="image/svg+xml">
+</head>
+<body>
+  <a class="skip" href="#content">Skip to content</a>
+  <header class="site-header">
+    <a class="brand" href="index.html"><img src="assets/zila.svg" alt="" width="28" height="28"><span>Zila Lang</span><small>docs</small></a>
+    <input type="checkbox" id="menu" class="menu-toggle">
+    <label for="menu" class="menu-button">Menu</label>
+    <nav class="site-nav">
+      <a href="index.html">Overview</a>
+      <a href="syntax.html">Syntax</a>
+      <a href="examples.html">Examples</a>
+      <a href="native.html">Native</a>
+      <a href="concurrency.html">Tasks</a>
+      <a href="async.html">Async</a>
+      <a href="stdlib.html">Library</a>
+      <a href="databases.html">Databases</a>
+      <a href="ai.html">AI</a>
+      <a href="packages.html">Packages</a>
+      <a href="editors.html" aria-current="page">Editors</a>
+      <a href="os.html">Zila Lang OS</a>
+      <a href="getting-started.html">Getting Started</a>
+    </nav>
+  </header>
+
+  <main id="content">
+    <h1>Editors and debugging</h1>
+    <p>The <code>zila</code> program is also a <strong>language server</strong> (<code>zila --lsp</code>) and a <strong>debug adapter</strong> (<code>zila --dap</code>). The VS Code extension in <code>editors/vscode</code> connects an editor to both; any editor that speaks the Language Server Protocol or the Debug Adapter Protocol can do the same by starting those commands.</p>
+
+    <section id="install">
+      <h2>Install the extension</h2>
+      <p>Put <code>zila</code> on your <code>PATH</code> (or set <code>zila.server.path</code>), build the package once and install it with the <strong>editor's own</strong> command:</p>
+      <pre><code>cd editors/vscode
+npx @vscode/vsce package                                  <span class="cm"># writes zila-lang-0.5.0.vsix</span>
+
+code --install-extension zila-lang-0.5.0.vsix             <span class="cm"># VS Code</span>
+antigravity-ide --install-extension zila-lang-0.5.0.vsix  <span class="cm"># Antigravity</span></code></pre>
+      <p>VS Code and the editors built on it keep separate extension folders; copying the files into one of them by hand leaves the extension unregistered, because the editor never learns about it. After installing, reload the window (<strong>Developer: Reload Window</strong>) and open a <code>.zila</code> file. Highlighting works even when the language server is off.</p>
+    </section>
+
+    <section id="language-server">
+      <h2>What the language server does</h2>
+      <p>It works on the text in the editor, saved or not, and on the unsaved text of every other open file of the project, without producing an executable. After you stop typing for a moment it checks the program the way a build does.</p>
+      <dl>
+        <dt>Errors and warnings</dt>
+        <dd>A syntax error is shown alone, on the first one. A text that parses is checked: type mismatches, unknown names, wrong arguments and the other errors of a build appear on the expression they are about, and the warnings of the compiler as warnings. Editing a function in one file updates the errors of the files that use it.</dd>
+        <dt>Completion</dt>
+        <dd>The names in scope (locals, parameters, functions, types, imported packages), the fields and methods after <code>.</code>, the public members after a package name, the variants after an enum name, and the attributes inside <code>#[</code>. It works while the file has a syntax error elsewhere: what parses is used.</dd>
+        <dt>Hover and signature help</dt>
+        <dd>Hover shows the type or signature of a name and the <code>//</code> comment above its declaration. Inside a call the signature of the function appears with the parameter you are typing marked.</dd>
+        <dt>Go to definition and references</dt>
+        <dd>To the declaration in the same file, another file of a package of the project, or the standard library (a read-only copy of its source). References lists every use in the program.</dd>
+        <dt>Symbols and rename</dt>
+        <dd>The outline of a file and a search of the declarations of the program. Rename changes the declaration and every use, in every file of the project, and refuses with a message when the new name is taken, is not a name, or when the symbol belongs to the standard library or a dependency.</dd>
+      </dl>
+      <p>A program that uses code generation (<code>comptime</code>) is not checked by the server: it would have to run that code, and opening a file must never run anything.</p>
+    </section>
+
+    <section id="debugging">
+      <h2>Debugging</h2>
+      <p>Press <strong>F5</strong> in a <code>.zila</code> file, or add a launch configuration:</p>
+      <pre><code>{
+  "type": "zila",
+  "request": "launch",
+  "name": "Debug current file",
+  "program": "${file}",
+  "stopOnEntry": false
+}</code></pre>
+      <p>The adapter builds the program with <code>--debug</code> (a compile error fails the launch with its message), starts it under the debugger and stops at the breakpoints you set in the editor. It supports continue, pause, step over, step into and step out, the call stack with file and line, and stopping when the program aborts or crashes. The program's output appears in the debug console.</p>
+      <ul>
+        <li>A breakpoint on a blank or comment line moves to the next line that has code, and the editor shows it there.</li>
+        <li>The <strong>Variables</strong> view shows the parameters and locals of the selected frame with their types: numbers, <code>text</code>, <code>char</code> and <code>bool</code> as values; records, lists, maps and enums expanded into their parts; errors with their message. A value that cannot be read is shown as <code>unavailable</code>, never as a wrong one. The optimizer keeps some locals in registers, which can only be read in the innermost frame.</li>
+        <li>The <strong>debug console</strong> evaluates names, field accesses and indexes: <code>p.x</code>, <code>items[2].name</code>, <code>xs.len</code>, <code>m["key"]</code>.</li>
+        <li>An <code>abort</code> stops the program with its message and the stack of the call; continuing ends the program with status 101.</li>
+      </ul>
+      <p>The debugger works for programs built for the operating system it runs on (Windows, or Linux through <code>ptrace</code>). Launching a program of the other system fails with a message that says so.</p>
+    </section>
+
+    <section id="debug-file">
+      <h2>The debug-information file</h2>
+      <pre><code>zila main.zila --debug -o main.exe     <span class="cm"># also writes main.zdbg next to it</span></code></pre>
+      <p><code>--debug</code> writes a JSON file next to the executable that maps machine-code addresses to files and lines and describes each function, parameter and local with its name, type and where it lives. <strong>The executable is byte-identical with and without the flag</strong>: debugging cannot change what the program does. Use it to build a program you want to attach your own tools to; the adapter does it for you when you launch.</p>
+    </section>
+
+    <section id="other-editors">
+      <h2>Other editors</h2>
+      <p>Start <code>zila --lsp</code> for <code>.zila</code> files in any editor with a Language Server Protocol client. For debugging, start <code>zila --dap</code> in any Debug Adapter Protocol client and send a <code>launch</code> request with <code>program</code> (the <code>.zila</code> file), and optionally <code>args</code>, <code>cwd</code> and <code>stopOnEntry</code>. Both speak on standard input and output.</p>
+    </section>
+  </main>
+</body>
+</html>

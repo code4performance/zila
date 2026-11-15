@@ -5,6 +5,8 @@ pub mod asm_x86;
 pub mod ast;
 pub mod cli;
 pub mod codegen_x64;
+pub mod dap;
+pub mod debugger;
 pub mod comptime;
 pub mod docs;
 pub mod effects;

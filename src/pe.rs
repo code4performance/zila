@@ -68,6 +68,12 @@ fn asm_error(asm: &str, e: &str) -> String {
 /// The executable for the generated assembly. `imports` lists `(library, functions)` in the order
 /// the slots appear in the assembly; `gui` selects the Windows subsystem instead of the console.
 pub fn pe_image(asm: &str, imports: &[(String, Vec<String>)], gui: bool) -> Result<Vec<u8>, String> {
+    pe_image_marks(asm, imports, gui).map(|r| r.0)
+}
+
+/// `pe_image`, also giving the addresses of the `;@` notes of the assembly and of its symbols (for
+/// the debug-information file).
+pub fn pe_image_marks(asm: &str, imports: &[(String, Vec<String>)], gui: bool) -> Result<PeBuild, String> {
     const MARK: &str = "\n.data\n";
     let Some(at) = asm.find(MARK) else {
         return Err("internal error: no data section".into());
@@ -274,5 +280,8 @@ pub fn pe_image(asm: &str, imports: &[(String, Vec<String>)], gui: bool) -> Resu
     sum = (sum & 0xFFFF) + (sum >> 16);
     let checksum = (sum + out.len() as u64) as u32;
     out[checksum_at..checksum_at + 4].copy_from_slice(&checksum.to_le_bytes());
-    Ok(out)
+    Ok((out, assembled.marks, assembled.symbols))
 }
+
+/// An executable with the notes and symbols of its assembly.
+pub type PeBuild = (Vec<u8>, Vec<(String, u64)>, std::collections::HashMap<String, u64>);

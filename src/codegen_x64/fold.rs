@@ -365,6 +365,17 @@ impl Compiler {
     }
 }
 
+/// A note for the debugger (`;@...`): it stands between instructions without being one, so every
+/// rule below looks past it, and a build with notes gives the same code as one without.
+fn is_note(line: &str) -> bool {
+    line.starts_with(";@")
+}
+
+/// The last line of `out` that is an instruction or label, not a note.
+fn last_real(out: &[String]) -> Option<&String> {
+    out.iter().rev().find(|l| !is_note(l))
+}
+
 /// Local cleanups of one function's code: a reload of a value just stored, a jump to the next
 /// label, code that can never run, and a register moved to itself. Every rule looks at adjacent
 /// lines only and never moves anything across a label.
@@ -376,12 +387,19 @@ pub(super) fn peephole(code: &[String], ret_label: &str) -> Vec<String> {
         let mut dead = false; // after an unconditional jump or ret, up to the next label
         for line in &cur {
             let t = line.trim();
+            if is_note(line) {
+                // a note in code that can never run points at nothing
+                if !dead {
+                    out.push(line.clone());
+                }
+                continue;
+            }
             let is_label = t.ends_with(':') && !line.starts_with(' ');
             if is_label {
                 dead = false;
                 // a jump to the label that follows it is no jump at all
                 let mut i = out.len();
-                while i > 0 && out[i - 1].ends_with(':') && !out[i - 1].starts_with(' ') {
+                while i > 0 && ((out[i - 1].ends_with(':') && !out[i - 1].starts_with(' ')) || is_note(&out[i - 1])) {
                     i -= 1;
                 }
                 if i > 0 && out[i - 1].trim() == format!("jmp {}", &t[..t.len() - 1]) {
@@ -394,7 +412,7 @@ pub(super) fn peephole(code: &[String], ret_label: &str) -> Vec<String> {
                 continue;
             }
             // sign-extending twice in a row is the same as once
-            if (t == "movsxd rax, eax" || t == "movsx rax, al" || t == "movsx rax, ax") && out.last().is_some_and(|p| p.trim() == t) {
+            if (t == "movsxd rax, eax" || t == "movsx rax, al" || t == "movsx rax, ax") && last_real(&out).is_some_and(|p| p.trim() == t) {
                 continue;
             }
             // `mov [X], r` then `mov r, [X]`: the register already holds the value
@@ -404,7 +422,7 @@ pub(super) fn peephole(code: &[String], ret_label: &str) -> Vec<String> {
                     if dst == src && dst.starts_with('r') && !dst.contains('[') {
                         continue;
                     }
-                    if let Some(prev) = out.last() {
+                    if let Some(prev) = last_real(&out) {
                         if let Some(pr) = prev.trim().strip_prefix("mov ") {
                             if let Some((pdst, psrc)) = pr.split_once(", ") {
                                 if pdst.starts_with("qword ptr [") && src == pdst && !psrc.contains('[') && psrc.starts_with('r') {
@@ -434,8 +452,10 @@ pub(super) fn peephole(code: &[String], ret_label: &str) -> Vec<String> {
             }
         }
         // a final jump to the epilogue that follows
-        if out.last().is_some_and(|l| l.trim() == format!("jmp {}", ret_label)) {
-            out.pop();
+        if let Some(i) = out.iter().rposition(|l| !is_note(l)) {
+            if out[i].trim() == format!("jmp {}", ret_label) {
+                out.remove(i);
+            }
         }
         cur = out;
         if cur.len() == before {

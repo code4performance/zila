@@ -66,12 +66,14 @@ mod typed;
 mod checker;
 mod check_program;
 mod index;
+mod debuginfo;
 pub use typed::{TypedBody, TypedProgram};
 use typed::{TypedArg, TypedCallee, TypedExpr, TypedExprKind, TypedMatchArm, TypedStmt, TypedStmtKind};
 use analysis::*;
 use fold::*;
 use generics::*;
 pub use check_program::{check_program, CheckError, Checked};
+pub use debuginfo::{debug_info_path, DebugInfo};
 pub use index::{IndexEntry, Member, MemberKind, PositionIndex, Referent, BUILTIN_NAMES};
 pub use output::*;
 use runtime::*;
@@ -743,11 +745,14 @@ pub struct CompileOptions {
     /// that returns `error` then returns the error (one test fails, the run goes on). It is not
     /// a command-line flag; a normal build aborts instead.
     pub test_mode: bool,
+    /// `--debug`: also write the debug-information file (`.zdbg`) next to the executable. The
+    /// executable itself is the same with and without it.
+    pub debug: bool,
 }
 
 impl Default for CompileOptions {
     fn default() -> Self {
-        CompileOptions { optimize: true, test_mode: false }
+        CompileOptions { optimize: true, test_mode: false, debug: false }
     }
 }
 
@@ -806,6 +811,10 @@ pub struct Compiler {
     span: Span,
     /// The range `err` last saw; `check_program` reads it to give an error a range.
     err_span: std::cell::Cell<Span>,
+    /// `--debug`: notes for the debugger are written (see `debuginfo.rs`).
+    debug: bool,
+    dbg_cur: Option<debuginfo::DbgFunc>,
+    dbg_funcs: Vec<debuginfo::DbgFunc>,
     fs: FnState,
     uses_ui: bool,
     /// `use thread` was written; counts become atomic only if a function of it is reachable.
@@ -894,6 +903,9 @@ impl Compiler {
             line: 0,
             span: Span::default(),
             err_span: std::cell::Cell::new(Span::default()),
+            debug: false,
+            dbg_cur: None,
+            dbg_funcs: Vec::new(),
             fs: FnState::new(Ty::Void, String::new()),
             uses_ui: false,
             uses_thread_lib: false,
@@ -1024,6 +1036,7 @@ impl Compiler {
         let off = self.slot();
         let rc = self.is_rc(&ty);
         let reg = self.reg_for(name, &ty);
+        self.dbg_local(name, &ty, off, reg, false, false, false);
         let sc = self.fs.scopes.last_mut().unwrap();
         sc.vars.insert(name.to_string(), Local { off, ty: ty.clone(), mutable, captured: false, reg, imm: None, is_ref: false, ind: false });
         if rc {
@@ -1118,12 +1131,14 @@ impl Compiler {
     }
 
     fn push_scope(&mut self) {
+        self.dbg_scope_open();
         self.fs.scopes.push(Scope::default());
     }
 
     fn pop_scope(&mut self) {
         let top = self.fs.scopes.len() - 1;
         self.emit_unwind(top);
+        self.dbg_scope_close();
         self.fs.scopes.pop();
     }
 
@@ -1610,6 +1625,9 @@ end
                 s.push_str(l);
                 s.push('\n');
             }
+            if self.debug {
+                s.push_str(&format!(";@E{}\n", sym));
+            }
             s.push_str(&format!("{} endp\n", sym));
             return s;
         }
@@ -1652,7 +1670,11 @@ end
         for (r, off) in &saves {
             s.push_str(&format!("    mov {}, qword ptr [rbp - {}]\n", r, off));
         }
-        s.push_str(&format!("    mov rsp, rbp\n    pop rbp\n    ret\n{} endp\n", sym));
+        s.push_str("    mov rsp, rbp\n    pop rbp\n    ret\n");
+        if self.debug {
+            s.push_str(&format!(";@E{}\n", sym));
+        }
+        s.push_str(&format!("{} endp\n", sym));
         s
     }
 
@@ -1695,6 +1717,11 @@ end
         };
         let rl = self.lbl("ret");
         self.fs = FnState::new(sig.ret.clone(), rl);
+        let shown = match &sig.receiver {
+            Some(t) => format!("{}.{}", t.show(), fd.name),
+            None => fd.name.clone(),
+        };
+        self.dbg_begin(&shown, m, &sig.sym);
         for p in &fd.params {
             if matches!(p.ty, Some(Type::Shared(_))) {
                 self.fs.shared_locals.insert(p.name.clone());
@@ -1739,6 +1766,7 @@ end
             self.gen_async_body(&sig, &fd.body)?;
             self.emit_unwind(0);
             let p = self.finish_proc(&sig.sym, prologue, false);
+            self.dbg_end();
             self.procs.push(p);
             return Ok(());
         }
@@ -1760,6 +1788,7 @@ end
             self.emit_unwind(0);
         }
         let p = self.finish_proc(&sig.sym, prologue, naked);
+        self.dbg_end();
         self.procs.push(p);
         Ok(())
     }
@@ -1791,6 +1820,7 @@ end
                 pro.push(format!("    mov {}, qword ptr [rbp - {}]", r, off));
             }
             let rc = self.is_rc(ty) && !ind;
+            self.dbg_local(name, ty, off, reg, ind, *by_ref, true);
             let sc = &mut self.fs.scopes[0];
             sc.vars.insert(name.clone(), Local { off, ty: ty.clone(), mutable: true, captured: false, reg, imm: None, is_ref: *by_ref, ind });
             if rc {

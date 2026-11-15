@@ -10,11 +10,13 @@ mod diagnostics;
 mod documents;
 mod features;
 mod json;
+mod navigation;
 mod transport;
 
 pub use diagnostics::diagnostics;
 pub use features::{completion, formatting, hover, signature_help};
 pub use json::{parse_json, Json};
+pub use navigation::{definition, document_symbols, references, rename, workspace_symbols};
 
 use diagnostics::{publish, publish_all};
 use documents::register_neighbours;
@@ -23,7 +25,7 @@ use std::collections::{HashMap, VecDeque};
 use std::io::Write;
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::Duration;
-use transport::{read_message, send};
+pub use transport::{read_message, send};
 
 /// Handles one message and publishes the diagnostics it calls for at once. Returns false after
 /// `exit`.
@@ -51,7 +53,7 @@ fn handle_with(msg: &Json, docs: &mut HashMap<String, String>, out: &mut dyn Wri
         "initialize" => reply(
             out,
             obj(vec![
-                ("capabilities", obj(vec![("textDocumentSync", num(1)), ("documentFormattingProvider", Json::Bool(true)), ("hoverProvider", Json::Bool(true)), ("completionProvider", obj(vec![("triggerCharacters", Json::Arr(vec![Json::Str(".".into())]))])), ("signatureHelpProvider", obj(vec![("triggerCharacters", Json::Arr(vec![Json::Str("(".into()), Json::Str(",".into())]))]))])),
+                ("capabilities", obj(vec![("textDocumentSync", num(1)), ("documentFormattingProvider", Json::Bool(true)), ("hoverProvider", Json::Bool(true)), ("completionProvider", obj(vec![("triggerCharacters", Json::Arr(vec![Json::Str(".".into())]))])), ("renameProvider", Json::Bool(true)), ("documentSymbolProvider", Json::Bool(true)), ("workspaceSymbolProvider", Json::Bool(true)), ("definitionProvider", Json::Bool(true)), ("referencesProvider", Json::Bool(true)), ("signatureHelpProvider", obj(vec![("triggerCharacters", Json::Arr(vec![Json::Str("(".into()), Json::Str(",".into())]))]))])),
                 ("serverInfo", obj(vec![("name", Json::Str("zila".into()))])),
             ]),
         ),
@@ -105,6 +107,37 @@ fn handle_with(msg: &Json, docs: &mut HashMap<String, String>, out: &mut dyn Wri
             let at = params.get("position");
             let (Json::Num(line), Json::Num(character)) = (at.get("line"), at.get("character")) else { return reply_null(out, &id) };
             reply(out, signature_help(uri, docs, *line as i64, *character as i64));
+        }
+        "textDocument/definition" => {
+            let uri = params.get("textDocument").get("uri").str().unwrap_or("");
+            let at = params.get("position");
+            let (Json::Num(line), Json::Num(character)) = (at.get("line"), at.get("character")) else { return reply_null(out, &id) };
+            reply(out, definition(uri, docs, *line as i64, *character as i64));
+        }
+        "textDocument/references" => {
+            let uri = params.get("textDocument").get("uri").str().unwrap_or("");
+            let at = params.get("position");
+            let (Json::Num(line), Json::Num(character)) = (at.get("line"), at.get("character")) else { return reply_null(out, &id) };
+            let with_decl = params.get("context").get("includeDeclaration") == &Json::Bool(true);
+            reply(out, references(uri, docs, *line as i64, *character as i64, with_decl));
+        }
+        "textDocument/documentSymbol" => {
+            let uri = params.get("textDocument").get("uri").str().unwrap_or("");
+            reply(out, document_symbols(uri, docs));
+        }
+        "workspace/symbol" => {
+            let query = params.get("query").str().unwrap_or("");
+            reply(out, workspace_symbols(docs, query));
+        }
+        "textDocument/rename" => {
+            let uri = params.get("textDocument").get("uri").str().unwrap_or("");
+            let at = params.get("position");
+            let (Json::Num(line), Json::Num(character)) = (at.get("line"), at.get("character")) else { return reply_null(out, &id) };
+            match rename(uri, docs, *line as i64, *character as i64, params.get("newName").str().unwrap_or("")) {
+                Ok(edit) => reply(out, edit),
+                // a request that cannot be carried out is an error with a message, and no edits
+                Err(message) => send(out, &obj(vec![("jsonrpc", Json::Str("2.0".into())), ("id", id.clone()), ("error", obj(vec![("code", num(-32803)), ("message", Json::Str(message))]))])),
+            }
         }
         "textDocument/formatting" => {
             let uri = params.get("textDocument").get("uri").str().unwrap_or("");

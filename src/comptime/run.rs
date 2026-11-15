@@ -296,7 +296,7 @@ fn driver_file(uni: &super::reflect::Universe, main_module: &str, specs: &[&Call
 
 fn compile_host(file: &File, exe: &Path, target: Target) -> R<()> {
     let prev = set_driver_mode(true);
-    let opts = CompileOptions { optimize: true, test_mode: false };
+    let opts = CompileOptions { optimize: true, test_mode: false, debug: false };
     let path = exe.to_string_lossy().to_string();
     let r = match target {
         Target::Linux => compile_to_linux(file, &path, &opts),

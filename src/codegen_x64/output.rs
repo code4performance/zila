@@ -144,12 +144,30 @@ pub fn elf_image(code: &[u8], entry: u64) -> Vec<u8> {
 
 /// `generate_asm_with` for a given target.
 pub fn generate_asm_for(file: &File, options: &CompileOptions, target: Target) -> Result<String, String> {
+    generate_asm_debug(file, options, target).map(|r| r.0)
+}
+
+/// `generate_asm_for`, with the notes for the debugger when `options.debug` is set (the assembly
+/// then also holds the `;@` note lines).
+pub fn generate_asm_debug(file: &File, options: &CompileOptions, target: Target) -> Result<(String, Option<DebugInfo>), String> {
     let mut c = Compiler::new(target);
     c.opt = options.optimize;
     c.test_mode = options.test_mode;
+    c.debug = options.debug;
     c.load(file).map_err(crate::comptime::map_error)?;
     c.declare().map_err(crate::comptime::map_error)?;
-    c.generate().map_err(crate::comptime::map_error)
+    let asm = c.generate().map_err(crate::comptime::map_error)?;
+    let info = c.debug_info();
+    Ok((asm, info))
+}
+
+/// Writes the debug-information file of the executable `exe` (see `debuginfo.rs`).
+fn write_debug_info(exe: &str, info: &DebugInfo, marks: &[(String, u64)], symbols: &std::collections::HashMap<String, u64>, base: u64) -> Result<(), String> {
+    let json = info.to_json(marks, symbols, base);
+    let mut text = String::new();
+    json.write(&mut text);
+    let path = debug_info_path(exe);
+    std::fs::write(&path, text).map_err(|e| format!("cannot write {}: {}", path.display(), e))
 }
 
 /// The entry C uses to call Zila Lang function `name`: its System V arguments (integers in rdi, rsi,
@@ -354,13 +372,16 @@ pub fn elf_dynamic_head(imports: &[String], needed: &[String], slots: &[u64], en
 /// Compiles to a Linux x86-64 executable with the compiler's own assembler (no linker): a static
 /// one that needs no library, or, when the program calls C functions, a dynamically linked one.
 pub fn compile_to_linux(file: &File, output: &str, options: &CompileOptions) -> Result<(), String> {
-    let asm = generate_asm_for(file, options, Target::Linux)?;
+    let (asm, info) = generate_asm_debug(file, options, Target::Linux)?;
     let imports = linux_imports(&asm);
     let image = if imports.is_empty() {
         let assembled = crate::asm_x86::assemble(&asm, LINUX_BASE + ELF_HEADERS, 64)?;
         let Some(&entry) = assembled.symbols.get("zila_start") else {
             return Err("internal error: no entry point".into());
         };
+        if let Some(info) = &info {
+            write_debug_info(output, info, &assembled.marks, &assembled.symbols, LINUX_BASE)?;
+        }
         elf_image(&assembled.bytes, entry)
     } else {
         let needed = linux_needed(&asm);
@@ -375,6 +396,9 @@ pub fn compile_to_linux(file: &File, output: &str, options: &CompileOptions) -> 
                 return Err(format!("internal error: no import slot for {}", n));
             };
             slots.push(a);
+        }
+        if let Some(info) = &info {
+            write_debug_info(output, info, &assembled.marks, &assembled.symbols, LINUX_BASE)?;
         }
         let mut image = elf_dynamic_head(&imports, &needed, &slots, entry, assembled.bytes.len() as u64);
         image.extend_from_slice(&assembled.bytes);
@@ -528,10 +552,14 @@ pub fn compile_to_native_with(file: &File, output_exe: &str, options: &CompileOp
     let mut c = Compiler::new(Target::Windows);
     c.opt = options.optimize;
     c.test_mode = options.test_mode;
+    c.debug = options.debug;
     c.load(file).map_err(crate::comptime::map_error)?;
     c.declare().map_err(crate::comptime::map_error)?;
     let asm = c.generate().map_err(crate::comptime::map_error)?;
-    let image = crate::pe::pe_image(&asm, &c.win_imports, c.uses_ui)?;
+    let (image, marks, symbols) = crate::pe::pe_image_marks(&asm, &c.win_imports, c.uses_ui)?;
+    if let Some(info) = c.debug_info() {
+        write_debug_info(output_exe, &info, &marks, &symbols, crate::pe::PE_BASE)?;
+    }
     std::fs::write(output_exe, &image).map_err(|e| format!("cannot write {}: {}", output_exe, e))
 }
 

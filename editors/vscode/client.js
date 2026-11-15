@@ -2,7 +2,8 @@
 //
 // It has no dependencies and does not import `vscode`, so it can be tested with plain Node
 // (see test/client.test.js). It speaks the part of the protocol the Zila Lang server offers:
-// initialize, full-text document sync, publishDiagnostics, formatting, shutdown and exit.
+// initialize, full-text document sync, publishDiagnostics, formatting, the language features
+// (completion, hover, signature help, definition, references, symbols, rename), shutdown and exit.
 
 'use strict';
 
@@ -192,7 +193,8 @@ class Client {
       if (p) {
         this.pending.delete(message.id);
         clearTimeout(p.timer);
-        p.resolve(message.error ? null : message.result === undefined ? null : message.result);
+        if (p.raw) p.resolve({ result: message.result === undefined ? null : message.result, error: message.error || null });
+        else p.resolve(message.error ? null : message.result === undefined ? null : message.result);
       }
       return;
     }
@@ -205,14 +207,15 @@ class Client {
     }
   }
 
-  request(method, params, timeoutMs) {
+  /** `raw`: the answer is `{ result, error }`, so that an error keeps its message. */
+  request(method, params, timeoutMs, raw) {
     return new Promise((resolve) => {
       const id = this.nextId++;
       const timer = setTimeout(() => {
         this.pending.delete(id);
         resolve(undefined);
       }, timeoutMs || FORMAT_TIMEOUT_MS);
-      this.pending.set(id, { resolve, timer });
+      this.pending.set(id, { resolve, timer, raw: !!raw });
       if (!this.send({ jsonrpc: '2.0', id, method, params })) {
         clearTimeout(timer);
         this.pending.delete(id);
@@ -276,6 +279,16 @@ class Client {
     if (!this.docs.has(uri)) return;
     this.docs.delete(uri);
     this.notify('textDocument/didClose', { textDocument: { uri } });
+  }
+
+  /**
+   * A request about a document: the text the server has is brought up to date first, so that the
+   * answer is about what the editor shows. `undefined` when there was no answer in time.
+   */
+  async query(method, uri, params, raw) {
+    this.flush(uri);
+    if (!this.docs.has(uri)) return undefined;
+    return this.request(method, Object.assign({ textDocument: { uri } }, params), undefined, raw);
   }
 
   /** The formatting edits of a document, or null (nothing to change, or no answer in time). */

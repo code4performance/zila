@@ -102,7 +102,7 @@ fn run_file(path: &str, optimize: bool) -> Result<Outcome, String> {
 
     println!("running {} test(s) in {}", tests.len(), path);
     let exe = std::env::temp_dir().join(format!("zila-test-{}-{}.exe", std::process::id(), BUILD.fetch_add(1, Ordering::SeqCst)));
-    match compile_to_native_with(&file, exe.to_str().unwrap(), &CompileOptions { optimize, test_mode: true }) {
+    match compile_to_native_with(&file, exe.to_str().unwrap(), &CompileOptions { optimize, test_mode: true, debug: false }) {
         Ok(()) => {}
         Err(e) => return Err(format!("{}: {}", path, e)),
     }

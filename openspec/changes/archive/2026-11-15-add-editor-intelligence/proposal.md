@@ -27,3 +27,7 @@
 - `src/lsp.rs` (split into modules), reuse of the checker and `src/codegen_x64/typed.rs`; new `src/dap.rs`; debug info in `src/pe.rs` and the code generator; `editors/vscode/`.
 - Depends on `add-typed-tree-emission` (typed tree, resolved bindings).
 - No change to language syntax, standard library or the ABI of produced programs. Debug info is opt-in (`--debug`) and does not alter the code emitted.
+
+## Split
+
+Everything above was delivered except two things that could not be verified on the machine this was built on, which moved to the change `verify-linux-debugger-and-editor`: the debugger on Linux (the `ptrace` backend is written but was never compiled there), and trying the extension in a real editor. The `debugger` specification therefore says the adapter works on Windows, and the requirements of the extension that depend on an editor (`Language features`, `Debugging`) are in the new change.

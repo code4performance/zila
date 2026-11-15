@@ -89,9 +89,17 @@ pub struct PositionIndex {
     pub package_members: HashMap<String, Vec<Member>>,
     /// The packages each indexed module imports.
     pub imports: HashMap<String, Vec<String>>,
+    /// The files of each package of the project other than the main one (see
+    /// `package::module_files`), to turn a line of the merged text into a file and line.
+    pub files: HashMap<String, Vec<(std::path::PathBuf, u32, u32)>>,
 }
 
 impl PositionIndex {
+    /// The file and line (from 1) a line of the merged text of the package `module` comes from.
+    pub fn file_of(&self, module: &str, line: u32) -> Option<(&std::path::Path, u32)> {
+        self.files.get(module)?.iter().find(|(_, start, n)| line >= *start && line < start + n).map(|(p, start, _)| (p.as_path(), line - start + 1))
+    }
+
     /// The entries of `module`.
     pub fn entries(&self, module: &str) -> &[IndexEntry] {
         self.modules.get(module).map(|v| v.as_slice()).unwrap_or(&[])

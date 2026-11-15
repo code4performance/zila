@@ -30,3 +30,11 @@ Checked against the code at the commit that archived `add-typed-tree-emission`.
 ### Consequence for the plan
 
 Tasks 1.3 (spans on the AST, the parser and the typed nodes; gap 1) and 1.4 (the check-only entry point; gap 3) come first, then 2.x and 3.1 build on them. The typed tree itself does not need to change shape.
+
+## 7.1 What the extension got
+
+`extension.js` registers completion (trigger `.`), hover, signature help (triggers `(` and `,`), definition, references, document and workspace symbols and rename (the server's reason for refusing is shown), maps the severity of diagnostics, contributes the `zila` debugger (`debuggers`, `breakpoints`, launch attributes, an initial configuration and a snippet in `package.json`), a configuration provider that debugs the file in the editor when nothing is configured, an adapter factory that runs the server executable with `--dap`, and the command **Zila Lang: Debug Current File**. `client.js` has `query` (brings the server up to date with the editor text first) and raw requests that keep an error message. Nineteen Node tests (`editors/vscode/test/`, run by `tests/vscode.rs` with the manifest check) exercise it against the real server. The version stays 0.5.0 because the main extension spec has a scenario that names it. Trying it in VS Code or Antigravity is in `verify-linux-debugger-and-editor`.
+
+## Windows virus scanner
+
+Windows Defender sometimes blocks a small executable the compiler has just written (`CreateProcess` fails with error 225). The adapter says so in its message, and the tests that launch a program skip with a note in that case.

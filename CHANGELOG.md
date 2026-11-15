@@ -7,6 +7,12 @@ The version lives in `Cargo.toml` and at the top of `README.md`. To release: mov
 
 ## [Unreleased]
 
+### Added
+- Editor intelligence (OpenSpec change `add-editor-intelligence`): the language server (`zila --lsp`) now reports the errors and warnings of the compiler's checking on the expression they are about, with the unsaved text of every open file, and answers completion, hover, signature help, go to definition (also into the standard library), references, document and workspace symbols and rename; a text with a syntax error elsewhere still gets completion and hover, and checks wait for a quiet moment after typing.
+- A debugger. `zila --debug` writes `<program>.zdbg` (a line table, functions, locals and type descriptors) next to the executable, which is byte-identical with and without the flag. `zila --dap` is a Debug Adapter Protocol server for Windows programs (breakpoints, continue, pause, step over/in/out, call stack, variables and values of every kind, the debug console, stopping on `abort` and on crashes); the Linux part (`ptrace`) is written but not yet built or run on Linux.
+- The VS Code extension offers the new language features and a `zila` debugger (F5 on a `.zila` file); `docs/editors.html` describes them and the install command for VS Code (`code --install-extension`) and Antigravity (`antigravity-ide --install-extension`).
+- The syntax tree carries source ranges (`ast::Span`); `parser::parse_partial` parses as far as it can; `codegen_x64::check_program` checks a program without emitting it.
+
 ### Changed
 - `text.upper` and `text.lower` map letters of Latin (including Latin-1 Supplement, Latin Extended-A, Latin Extended Additional and fullwidth), Greek, Cyrillic and Armenian with simple one-to-one casing instead of ASCII only (`upper("ação")` gives `AÇÃO`); other scripts and characters with multi-character expansions like `ß` remain unchanged (OpenSpec change `add-unicode-case`).
 - The command is now `zila` (before, its name ended in a suffix from the lexer-and-parser days); the VS Code extension starts `zila --lsp` by default (extension version 0.5.0).

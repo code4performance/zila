@@ -40,8 +40,28 @@ fn initialize_announces_the_features() {
     let mut docs = HashMap::new();
     let r = send(&mut docs, r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#);
     let caps = r[0].get("result").get("capabilities");
-    assert_eq!(caps.get("documentFormattingProvider"), &Json::Bool(true));
     assert_eq!(r[0].get("id"), &Json::Num(1.0));
+    assert_eq!(caps.get("textDocumentSync"), &Json::Num(1.0), "full-text sync");
+    for feature in ["documentFormattingProvider", "hoverProvider", "definitionProvider", "referencesProvider", "documentSymbolProvider", "workspaceSymbolProvider", "renameProvider"] {
+        assert_eq!(caps.get(feature), &Json::Bool(true), "{}", feature);
+    }
+    assert_eq!(caps.get("completionProvider").get("triggerCharacters"), &Json::Arr(vec![Json::Str(".".into())]));
+    assert!(matches!(caps.get("signatureHelpProvider").get("triggerCharacters"), Json::Arr(v) if v.contains(&Json::Str("(".into()))));
+    assert_eq!(r[0].get("result").get("serverInfo").get("name").str(), Some("zila"));
+}
+
+#[test]
+fn a_request_the_server_does_not_implement_gets_null_and_a_notification_is_ignored() {
+    let mut docs = HashMap::new();
+    let r = send(&mut docs, r#"{"jsonrpc":"2.0","id":11,"method":"textDocument/codeLens","params":{"textDocument":{"uri":"file:///x.zila"}}}"#);
+    assert_eq!(r.len(), 1);
+    assert_eq!((r[0].get("id"), r[0].get("result")), (&Json::Num(11.0), &Json::Null));
+    assert!(r[0].get("error") == &Json::Null);
+    // a notification gets no answer at all
+    assert!(send(&mut docs, r#"{"jsonrpc":"2.0","method":"$/setTrace","params":{"value":"off"}}"#).is_empty());
+    // and the requests that are implemented still answer null for what they cannot do
+    let r = send(&mut docs, r#"{"jsonrpc":"2.0","id":12,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///none.zila"},"position":{"line":0,"character":0}}}"#);
+    assert_eq!(r[0].get("result"), &Json::Null);
 }
 
 #[test]

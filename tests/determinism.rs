@@ -18,7 +18,7 @@ fn compiling_a_program_twice_gives_the_same_assembly() {
         let src = std::fs::read_to_string(&path).unwrap();
         let Ok(file) = parse_source(&src) else { continue };
         for (target, optimize) in [(Target::Windows, true), (Target::Linux, true), (Target::Windows, false)] {
-            let options = CompileOptions { optimize, test_mode: false };
+            let options = CompileOptions { optimize, test_mode: false, debug: false };
             let (Ok(a), Ok(b)) = (generate_asm_for(&file, &options, target), generate_asm_for(&file, &options, target)) else { continue };
             assert!(a == b, "{} ({:?}, optimize {}) compiles to different text on two runs", path.display(), target, optimize);
             compared += 1;

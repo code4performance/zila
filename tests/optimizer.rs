@@ -11,8 +11,8 @@ use std::time::{Duration, Instant};
 
 static N: AtomicUsize = AtomicUsize::new(0);
 
-const ON: CompileOptions = CompileOptions { optimize: true, test_mode: false };
-const OFF: CompileOptions = CompileOptions { optimize: false, test_mode: false };
+const ON: CompileOptions = CompileOptions { optimize: true, test_mode: false, debug: false };
+const OFF: CompileOptions = CompileOptions { optimize: false, test_mode: false, debug: false };
 
 /// Compiles and runs `src`; `None` when there is no native toolchain.
 fn run_with(src: &str, options: &CompileOptions) -> Option<(String, i32, Duration)> {

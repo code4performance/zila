@@ -10,8 +10,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 static N: AtomicUsize = AtomicUsize::new(0);
 
-const ON: CompileOptions = CompileOptions { optimize: true, test_mode: false };
-const OFF: CompileOptions = CompileOptions { optimize: false, test_mode: false };
+const ON: CompileOptions = CompileOptions { optimize: true, test_mode: false, debug: false };
+const OFF: CompileOptions = CompileOptions { optimize: false, test_mode: false, debug: false };
 
 struct Ran {
     out: String,

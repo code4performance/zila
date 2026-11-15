@@ -14,6 +14,7 @@ impl Compiler {
 
     pub(super) fn stmt(&mut self, s: &Stmt) -> R<()> {
         self.line = s.line;
+        self.dbg_note(s.line);
         let saved = std::mem::replace(&mut self.span, s.span);
         let mark = self.fs.stmt_temps.len();
         let r = self.stmt_inner(s);
@@ -911,7 +912,7 @@ impl Compiler {
 
     pub(super) fn asm_block(&mut self, a: &AsmBlock) -> R<()> {
         self.fs.has_asm = true;
-        if self.fs.unsafe_depth == 0 && !self.fs.code.is_empty() {
+        if self.fs.unsafe_depth == 0 && self.fs.code.iter().any(|l| !l.starts_with(";@")) {
             self.require_unsafe("inline 'asm'")?;
         }
         // lets an assembler error be reported at the Zila Lang line of the block

@@ -26,6 +26,9 @@ pub struct Assembled {
     pub bytes: Vec<u8>,
     pub symbols: HashMap<String, u64>,
     pub org: u64,
+    /// The `;@name` comment lines of the source, with the address they stand at: the compiler's
+    /// notes for the debugger. They never change the bytes.
+    pub marks: Vec<(String, u64)>,
 }
 
 pub fn assemble(src: &str, default_org: u64, default_bits: u8) -> R<Assembled> {
@@ -41,15 +44,16 @@ pub fn assemble(src: &str, default_org: u64, default_bits: u8) -> R<Assembled> {
             out: Vec::new(),
             syms: &mut syms,
             new_syms: HashMap::new(),
+            marks: Vec::new(),
         };
         for (n, l) in lines.iter().enumerate() {
             a.line(l).map_err(|e| format!("asm line {}: {} (in `{}`)", numbers[n], e, l.trim()))?;
         }
-        let Asm { out, new_syms, org, .. } = a;
+        let Asm { out, new_syms, org, marks, .. } = a;
         if pass == 1 {
             syms = new_syms;
         } else {
-            result = Some(Assembled { bytes: out, symbols: syms.clone(), org });
+            result = Some(Assembled { bytes: out, symbols: syms.clone(), org, marks });
         }
     }
     Ok(result.unwrap())
@@ -64,6 +68,12 @@ fn parse_lines(src: &str) -> R<(Vec<String>, Vec<usize>)> {
     let mut out = Vec::new();
     let mut numbers = Vec::new();
     for (at, raw) in src.lines().enumerate() {
+        // a note for the debugger: kept as a directive that records the address it stands at
+        if let Some(note) = raw.trim_start().strip_prefix(";@") {
+            out.push(format!("@mark {}", note.trim()));
+            numbers.push(at + 1);
+            continue;
+        }
         // strip comments, but not inside quotes
         let mut line = String::new();
         let mut q: Option<char> = None;
@@ -529,6 +539,7 @@ struct Asm<'a> {
     out: Vec<u8>,
     syms: &'a mut HashMap<String, u64>,
     new_syms: HashMap<String, u64>,
+    marks: Vec<(String, u64)>,
 }
 
 #[derive(Default)]
@@ -624,6 +635,10 @@ impl<'a> Asm<'a> {
     }
 
     fn line(&mut self, line: &str) -> R<()> {
+        if let Some(note) = line.trim().strip_prefix("@mark ") {
+            self.marks.push((note.to_string(), self.cur));
+            return Ok(());
+        }
         let mut text = line.trim().to_string();
         // labels: `name:` possibly followed by an instruction
         while let Some(colon) = text.find(':') {

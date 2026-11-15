@@ -117,7 +117,7 @@ flowchart LR
 
 ## Where Zila Lang is going
 
-Every language change is an [OpenSpec](openspec) change: open ones live in `openspec/changes/`, finished ones in `openspec/changes/archive/`, and their result is the living specification in `openspec/specs/`. **One change is in progress:** `add-editor-intelligence` (language server completion, hover, go to definition and type errors, and a debugger). A test keeps this section from naming a change that is not open.
+Every language change is an [OpenSpec](openspec) change: open ones live in `openspec/changes/`, finished ones in `openspec/changes/archive/`, and their result is the living specification in `openspec/specs/`. **One change is in progress:** `verify-linux-debugger-and-editor` (the debugger on Linux and a check of the extension in a real editor; the editor features and the Windows debugger are done and archived as `add-editor-intelligence`). A test keeps this section from naming a change that is not open.
 
 **Known gaps** (each is a place where you can help):
 
@@ -167,7 +167,7 @@ zila --test file.zila                         # run the #[test] functions
 zila --os os/boot.zila os/kernel.zila -o zila-os.img   # bootable disk image
 ```
 
-Run `zila` with no arguments for every option. Try `examples/hello.zila` and `examples/async.zila`, run `cargo test` (tests that need Windows, WSL, QEMU or a database skip themselves), and open [`docs/index.html`](docs/index.html) for the documentation (a static site). The VS Code extension is in [`editors/vscode`](editors/vscode): put `zila` on your `PATH`, then `npx @vscode/vsce package` and install the `.vsix`.
+Run `zila` with no arguments for every option. Try `examples/hello.zila` and `examples/async.zila`, run `cargo test` (tests that need Windows, WSL, QEMU or a database skip themselves), and open [`docs/index.html`](docs/index.html) for the documentation (a static site). The VS Code extension is in [`editors/vscode`](editors/vscode) (syntax errors and type errors as you type, completion, hover, go to definition, rename and a debugger with breakpoints, stepping and variables, from `zila --lsp` and `zila --dap`): put `zila` on your `PATH`, then `npx @vscode/vsce package` and install the `.vsix` with the editor's own command, `code --install-extension zila-lang-0.5.0.vsix` for VS Code or `antigravity-ide --install-extension zila-lang-0.5.0.vsix` for Antigravity (copying files by hand leaves the extension unregistered), and reload the window. `zila main.zila --debug -o main.exe` also writes `main.zdbg`, the debug information, without changing the executable. See [docs/editors.html](docs/editors.html).
 
 ## What is in the repository
 

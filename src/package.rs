@@ -702,6 +702,11 @@ pub fn cache_lookup(home: &Path, module: &str, version: &Version, commit: &str) 
 // Projects
 // ---------------------------------------------------------------------------
 
+/// A path without the `\?\` prefix Windows puts on the result of `canonicalize`.
+pub fn strip_verbatim(p: PathBuf) -> PathBuf {
+    clean_path(p)
+}
+
 fn clean_path(p: PathBuf) -> PathBuf {
     let s = p.to_string_lossy().to_string();
     match s.strip_prefix(r"\\?\") {
@@ -920,6 +925,36 @@ fn merge_text(dir: &Path, expected: &str, extra: &[PathBuf]) -> Result<(String, 
     }
     out.push_str(&bodies);
     Ok((out, parts))
+}
+
+/// Where the files of the package `module` (a key the installed project knows) start in the merged
+/// text of the package: for each file its path, the line of the merged text its first line is, and
+/// its number of lines. A line of an error or of a name in the merged text maps to the file and
+/// line it came from. `None` for a module that is not a package of the project.
+pub fn module_files(module: &str) -> Option<Vec<(PathBuf, u32, u32)>> {
+    let r = registry()?;
+    let meta = r.state.lock().unwrap().metas.get(module).cloned()?;
+    let (mut files, _) = br_files(&meta.dir);
+    files.extend(test_files_of(&meta.dir));
+    let mut uses: Vec<String> = Vec::new();
+    let mut sizes = Vec::new();
+    for f in &files {
+        let sp = split_file(&read_source(f).ok()?);
+        for u in sp.uses {
+            if !uses.contains(&u) {
+                uses.push(u);
+            }
+        }
+        sizes.push((f.clone(), sp.body.len() as u32));
+    }
+    // the merged text is the package line, the `use` lines, then the body of each file
+    let mut start = 2 + uses.len() as u32;
+    let mut out = Vec::new();
+    for (f, n) in sizes {
+        out.push((f, start, n));
+        start += n;
+    }
+    Some(out)
 }
 
 /// A name declared at the top level of a file, for the duplicate check.

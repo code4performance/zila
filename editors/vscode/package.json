@@ -17,6 +17,9 @@
     "Programming Languages",
     "Formatters"
   ],
+  "activationEvents": [
+    "onDebugResolve:zila"
+  ],
   "main": "./extension.js",
   "capabilities": {
     "untrustedWorkspaces": {
@@ -74,6 +77,79 @@
         "command": "zila.restartServer",
         "title": "Restart Language Server",
         "category": "Zila Lang"
+      },
+      {
+        "command": "zila.debugFile",
+        "title": "Debug Current File",
+        "category": "Zila Lang"
+      }
+    ],
+    "breakpoints": [
+      {
+        "language": "zila"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "zila",
+        "label": "Zila Lang",
+        "languages": [
+          "zila"
+        ],
+        "configurationAttributes": {
+          "launch": {
+            "required": [
+              "program"
+            ],
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "The .zila program to build with --debug and run under the debugger.",
+                "default": "${file}"
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Arguments for the program.",
+                "default": []
+              },
+              "cwd": {
+                "type": "string",
+                "description": "The directory the program runs in (default: the directory of the program).",
+                "default": "${workspaceFolder}"
+              },
+              "stopOnEntry": {
+                "type": "boolean",
+                "description": "Stop at the first statement of main.",
+                "default": false
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "zila",
+            "request": "launch",
+            "name": "Debug current file",
+            "program": "${file}",
+            "stopOnEntry": false
+          }
+        ],
+        "configurationSnippets": [
+          {
+            "label": "Zila Lang: Launch a program",
+            "description": "Build a .zila file with --debug and run it under the debugger.",
+            "body": {
+              "type": "zila",
+              "request": "launch",
+              "name": "${1:Debug program}",
+              "program": "^\"\\${file}\"",
+              "stopOnEntry": false
+            }
+          }
+        ]
       }
     ]
   }

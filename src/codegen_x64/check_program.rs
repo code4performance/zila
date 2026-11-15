@@ -102,6 +102,12 @@ fn check(file: &File) -> Checked {
     if let Err(e) = c.drain_pending() {
         errors.push(split_error(&e, (&c.cur_mod, c.line), c.err_span.take()));
     }
-    let index = c.index_program();
+    let mut index = c.index_program();
+    let modules: Vec<String> = index.modules().filter(|m| *m != main).map(|m| m.to_string()).collect();
+    for m in modules {
+        if let Some(files) = crate::package::module_files(&m) {
+            index.files.insert(m, files);
+        }
+    }
     Checked { program: c.tp, errors, index }
 }

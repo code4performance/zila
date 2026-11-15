@@ -14,6 +14,8 @@ fn usage() -> ! {
     eprintln!("       zila --fmt | --fmt-check <file.zila>...");
     eprintln!("       zila --test <file.zila>... [--no-opt]");
     eprintln!("       zila <file.zila> --target linux -o <program>");
+    eprintln!("       zila --lsp | zila --dap                  (language server, debug adapter: on standard input and output)");
+    eprintln!("       zila <file.zila> --debug -o <program>    (also write <program>.zdbg, the debug information)");
     eprintln!("       packages: --init [name] | --add <git-url>[@version] [--as <name>] | --fetch | --tidy | --update [name] [--offline]");
     eprintln!("       comptime: [--comptime-timeout <seconds>] [--no-comptime-cache] [--comptime-dump]");
     eprintln!("       link: <file.zila> --explain-link [-o output]   (bytes of code and data per package)");
@@ -71,6 +73,9 @@ fn main() {
     }
     if mode == Mode::Lsp {
         exit(zila::lsp::run());
+    }
+    if mode == Mode::Dap {
+        exit(zila::dap::run());
     }
     if matches!(mode, Mode::Init | Mode::Add | Mode::Fetch | Mode::Tidy | Mode::Update) {
         exit(zila::fetch::run(&opts));
@@ -179,7 +184,7 @@ fn main() {
         Ok(file) => {
             if opts.explain_link {
                 let target = if opts.target == "linux" { zila::codegen_x64::Target::Linux } else { zila::codegen_x64::Target::Windows };
-                match zila::codegen_x64::link_report(&file, &zila::codegen_x64::CompileOptions { optimize: opts.optimize, test_mode: false }, target) {
+                match zila::codegen_x64::link_report(&file, &zila::codegen_x64::CompileOptions { optimize: opts.optimize, test_mode: false, debug: false }, target) {
                     Ok(r) => print!("{}", r),
                     Err(e) => {
                         eprintln!("error: {}", e);
@@ -194,7 +199,7 @@ fn main() {
                 println!("{:#?}", file);
             } else if mode == Mode::Asm {
                 let target = if opts.target == "linux" { zila::codegen_x64::Target::Linux } else { zila::codegen_x64::Target::Windows };
-                match zila::codegen_x64::generate_asm_for(&file, &zila::codegen_x64::CompileOptions { optimize: opts.optimize, test_mode: false }, target) {
+                match zila::codegen_x64::generate_asm_for(&file, &zila::codegen_x64::CompileOptions { optimize: opts.optimize, test_mode: false, debug: false }, target) {
                     Ok(asm) => println!("{}", asm),
                     Err(e) => {
                         eprintln!("error: {}", e);
@@ -215,7 +220,7 @@ fn main() {
                     }
                 };
                 let target_exe = out_exe.unwrap_or(default_out);
-                let options = zila::codegen_x64::CompileOptions { optimize: opts.optimize, test_mode: false };
+                let options = zila::codegen_x64::CompileOptions { optimize: opts.optimize, test_mode: false, debug: opts.debug };
                 println!("Compiling {} to native x86-64 binary: {}...", path, target_exe);
                 let built = if linux {
                     zila::codegen_x64::compile_to_linux(&file, &target_exe, &options)

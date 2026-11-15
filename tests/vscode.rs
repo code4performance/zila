@@ -20,13 +20,13 @@ fn the_extension_client_and_layer_pass_their_tests_against_the_real_server() {
         .unwrap();
     let text = String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "node tests failed:\n{}", text);
-    assert!(text.contains("pass 14"), "expected 14 passing tests:\n{}", text);
+    assert!(text.contains("pass 19"), "expected 19 passing tests:\n{}", text);
 }
 
 #[test]
 fn the_package_manifest_declares_the_settings_command_and_entry_point() {
     let text = std::fs::read_to_string("editors/vscode/package.json").unwrap();
-    for needle in ["\"main\": \"./extension.js\"", "zila.server.path", "zila.server.enabled", "zila.trace", "zila.restartServer", "restrictedConfigurations"] {
+    for needle in ["\"main\": \"./extension.js\"", "zila.server.path", "zila.server.enabled", "zila.trace", "zila.restartServer", "restrictedConfigurations", "zila.debugFile", "\"debuggers\"", "\"breakpoints\"", "onDebugResolve:zila", "initialConfigurations", "configurationSnippets"] {
         assert!(text.contains(needle), "package.json lacks {}", needle);
     }
     for file in ["editors/vscode/extension.js", "editors/vscode/client.js", "editors/vscode/.vscodeignore", "editors/vscode/README.md"] {

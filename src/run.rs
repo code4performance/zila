@@ -82,7 +82,7 @@ fn build_exe(file: &File, optimize: bool, target: &str) -> Result<(PathBuf, Clea
     let ext = if target == "windows" { ".exe" } else { "" };
     let exe = std::env::temp_dir().join(format!("zila-run-{}-{}{}", std::process::id(), n, ext));
     let guard = Cleanup(exe.clone());
-    let options = CompileOptions { optimize, test_mode: false };
+    let options = CompileOptions { optimize, test_mode: false, debug: false };
     let path = exe.to_string_lossy().to_string();
     let built = if target == "linux" { compile_to_linux(file, &path, &options) } else { compile_to_native_with(file, &path, &options) };
     if let Err(e) = built {

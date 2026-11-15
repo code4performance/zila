@@ -25,6 +25,7 @@
       <a href="databases.html">Databases</a>
       <a href="ai.html">AI</a>
       <a href="packages.html">Packages</a>
+      <a href="editors.html">Editors</a>
       <a href="os.html">Zila Lang OS</a>
       <a href="getting-started.html" aria-current="page">Getting Started</a>
     </nav>
@@ -123,7 +124,13 @@ zila&gt; double(x)
         <dd>Builds each file with a generated entry point that runs its <code>#[test]</code> functions in order and prints <code>ok name</code> or <code>FAIL name: message</code> for each, then <code>test result: N passed, M failed</code>. The exit status is 1 when a test failed, a file does not compile or the run stopped early (a crash such as a division by zero is reported with its exit code). The file's own <code>main</code> is not used; combine with <code>--no-opt</code> to test without the optimizer. See <a href="syntax.html#testing">Testing</a>.</dd>
 
         <dt>--lsp</dt>
-        <dd>Runs a language server on standard input and output (Language Server Protocol). It reports syntax errors as you type and formats documents in the standard style, like <code>--fmt</code>. Any editor with an LSP client can use it by starting <code>zila --lsp</code> for <code>.zila</code> files.</dd>
+        <dd>Runs a language server on standard input and output (Language Server Protocol). It reports syntax and type errors as you type, formats documents in the standard style, like <code>--fmt</code>, and offers completion, hover, signature help, go to definition, references, symbols and rename. Any editor with an LSP client can use it by starting <code>zila --lsp</code> for <code>.zila</code> files. See <a href="editors.html#language-server">Editors and debugging</a>.</dd>
+
+        <dt>--dap</dt>
+        <dd>Runs a debug adapter on standard input and output (Debug Adapter Protocol). A <code>launch</code> request names a <code>.zila</code> program; the adapter builds it with <code>--debug</code>, runs it under the debugger and supports breakpoints, stepping, the call stack and the values of variables. See <a href="editors.html#debugging">Editors and debugging</a>.</dd>
+
+        <dt>--debug</dt>
+        <dd>Also writes the debug-information file (<code>.zdbg</code>) next to the executable: a map from machine-code addresses to source lines and a description of every function, parameter and local. The executable is byte-identical with and without the flag. See <a href="editors.html#debug-file">Editors and debugging</a>.</dd>
 
         <dt>--comptime-timeout seconds</dt>
         <dd>The time one run of comptime generators may take (default 5). A generator that takes longer is stopped and the build fails with an error naming it. See <a href="syntax.html#comptime">Compile-time code generation</a>.</dd>
@@ -162,10 +169,12 @@ zila&gt; double(x)
 
     <section id="editors">
       <h2>Editor support</h2>
-      <p>The repository has a VS Code extension in <code>editors/vscode</code>: syntax highlighting, syntax errors as you type and Format Document, using the language server (<code>zila --lsp</code>). It has no npm dependencies and needs no build step. Put <code>zila</code> on your <code>PATH</code> (or set <code>zila.server.path</code>), then package and install it:</p>
+      <p>The repository has a VS Code extension in <code>editors/vscode</code>: syntax highlighting, errors as you type, Format Document, completion, hover, go to definition, rename and a debugger, using the language server (<code>zila --lsp</code>) and the debug adapter (<code>zila --dap</code>); <a href="editors.html">Editors and debugging</a> describes them. It has no npm dependencies and needs no build step. Put <code>zila</code> on your <code>PATH</code> (or set <code>zila.server.path</code>), then package and install it:</p>
       <pre><code>cd editors/vscode
 npx @vscode/vsce package
-code --install-extension zila-lang-0.4.0.vsix</code></pre>
+code --install-extension zila-lang-0.5.0.vsix             # VS Code
+antigravity-ide --install-extension zila-lang-0.5.0.vsix  # Antigravity</code></pre>
+      <p>Use the editor's own <code>--install-extension</code>: VS Code and the editors built on it keep separate extension folders, and files copied by hand are not registered. Reload the window afterwards.</p>
       <p>The settings are <code>zila.server.path</code> (the executable, default <code>zila</code>), <code>zila.server.enabled</code> and <code>zila.trace</code> (log the protocol to the <strong>Zila Lang Language Server</strong> output channel), and the command <strong>Zila Lang: Restart Language Server</strong>. If the executable cannot be started you get one message and highlighting keeps working. Other editors can run <code>zila --lsp</code> with any Language Server Protocol client.</p>
     </section>
 

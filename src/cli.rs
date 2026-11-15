@@ -5,7 +5,7 @@
 //! entry and nothing else.
 
 /// Every option `zila` accepts.
-pub const FLAGS: &[&str] = &["--ast", "--tokens", "--asm", "--run", "--build", "-o", "--os", "--docs", "--no-opt", "--no-prune", "--explain-link", "--fmt", "--fmt-check", "--test", "--target", "--lsp", "--comptime-timeout", "--no-comptime-cache", "--comptime-dump", "--init", "--add", "--as", "--fetch", "--tidy", "--update", "--offline", "-e", "-i"];
+pub const FLAGS: &[&str] = &["--ast", "--tokens", "--asm", "--run", "--build", "-o", "--os", "--docs", "--no-opt", "--debug", "--no-prune", "--explain-link", "--fmt", "--fmt-check", "--test", "--target", "--lsp", "--dap", "--comptime-timeout", "--no-comptime-cache", "--comptime-dump", "--init", "--add", "--as", "--fetch", "--tidy", "--update", "--offline", "-e", "-i"];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Mode {
@@ -32,6 +32,8 @@ pub enum Mode {
     Test,
     /// Run the language server on standard input and output.
     Lsp,
+    /// `--dap`: the debug adapter on standard input and output.
+    Dap,
     /// Write `zila.toml`.
     Init,
     /// Add a dependency to the manifest and fetch it.
@@ -65,6 +67,8 @@ pub struct Options {
     pub no_comptime_cache: bool,
     /// `--no-prune`: keep declarations nothing reaches (see the spec `static-linking`).
     pub no_prune: bool,
+    /// `--debug`: write the debug-information file next to the executable.
+    pub debug: bool,
     /// `--explain-link`: print the bytes each package contributes to the program.
     pub explain_link: bool,
     /// `--comptime-dump`: print the text every generator produced to standard error.
@@ -81,7 +85,7 @@ pub struct Options {
 pub const TARGETS: &[&str] = &["windows", "linux"];
 
 pub fn parse(args: &[String]) -> Result<Options, String> {
-    let mut o = Options { mode: Mode::Check, path: None, extra: Vec::new(), out: None, optimize: true, target: "windows".to_string(), target_explicit: false, comptime_timeout: None, no_comptime_cache: false, no_prune: false, explain_link: false, comptime_dump: false, add: None, as_name: None, offline: false };
+    let mut o = Options { mode: Mode::Check, path: None, extra: Vec::new(), out: None, optimize: true, target: "windows".to_string(), target_explicit: false, comptime_timeout: None, no_comptime_cache: false, no_prune: false, debug: false, explain_link: false, comptime_dump: false, add: None, as_name: None, offline: false };
     let mut explicit = false;
     let mut i = 0;
     while i < args.len() {
@@ -110,6 +114,7 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
             "--fmt-check" => o.mode = Mode::FmtCheck,
             "--test" => o.mode = Mode::Test,
             "--lsp" => o.mode = Mode::Lsp,
+            "--dap" => o.mode = Mode::Dap,
             "--init" => o.mode = Mode::Init,
             "--fetch" => o.mode = Mode::Fetch,
             "--tidy" => o.mode = Mode::Tidy,
@@ -133,6 +138,7 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
             "--no-opt" => o.optimize = false,
             "--no-comptime-cache" => o.no_comptime_cache = true,
             "--no-prune" => o.no_prune = true,
+            "--debug" => o.debug = true,
             "--explain-link" => o.explain_link = true,
             "--comptime-dump" => o.comptime_dump = true,
             "--comptime-timeout" => {
@@ -174,7 +180,7 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
                 }
             }
         }
-        if FLAGS.contains(&a) && !matches!(a, "-o" | "--no-opt" | "--no-prune" | "--explain-link" | "--target" | "--comptime-timeout" | "--no-comptime-cache" | "--comptime-dump" | "--as" | "--offline") {
+        if FLAGS.contains(&a) && !matches!(a, "-o" | "--no-opt" | "--debug" | "--no-prune" | "--explain-link" | "--target" | "--comptime-timeout" | "--no-comptime-cache" | "--comptime-dump" | "--as" | "--offline") {
             explicit = true;
         }
         i += 1;

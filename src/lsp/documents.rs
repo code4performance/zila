@@ -53,6 +53,18 @@ pub(super) fn uri_to_path(uri: &str) -> Option<std::path::PathBuf> {
     Some(std::path::PathBuf::from(path))
 }
 
+/// The `file://` URI of a file (the inverse of `uri_to_path`).
+pub(super) fn path_to_uri(p: &std::path::Path) -> String {
+    let s = p.to_string_lossy().replace('\\', "/");
+    let s = s.strip_prefix("//?/").unwrap_or(&s).to_string();
+    let enc: String = s.chars().map(|c| if c == ' ' { "%20".to_string() } else { c.to_string() }).collect();
+    if enc.starts_with('/') {
+        format!("file://{}", enc)
+    } else {
+        format!("file:///{}", enc)
+    }
+}
+
 /// Finds the packages that sit next to the document, so that their block names are known: the
 /// server only parses (block content is never looked into) and never runs comptime code.
 pub(super) fn register_neighbours(uri: &str, text: &str) {

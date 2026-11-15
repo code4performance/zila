@@ -4,7 +4,7 @@ use super::json::{parse_json, Json};
 use std::io::{BufRead, Write};
 
 /// Reads one framed message, or `None` at the end of the input.
-pub(super) fn read_message(input: &mut impl BufRead) -> Option<Json> {
+pub fn read_message(input: &mut impl BufRead) -> Option<Json> {
     let mut len = None;
     loop {
         let mut line = String::new();
@@ -24,7 +24,7 @@ pub(super) fn read_message(input: &mut impl BufRead) -> Option<Json> {
     parse_json(&String::from_utf8_lossy(&body)).ok()
 }
 
-pub(super) fn send(out: &mut dyn Write, msg: &Json) {
+pub fn send(out: &mut dyn Write, msg: &Json) {
     let mut s = String::new();
     msg.write(&mut s);
     let _ = write!(out, "Content-Length: {}\r\n\r\n{}", s.len(), s);

@@ -431,7 +431,7 @@ fn text_building_compiles_for_linux_too() {
     );
     let file = parse_source(&src).unwrap();
     let out = std::env::temp_dir().join(format!("zila-textchar-linux-{}", std::process::id()));
-    let opts = zila::codegen_x64::CompileOptions { optimize: true, test_mode: false };
+    let opts = zila::codegen_x64::CompileOptions { optimize: true, test_mode: false, debug: false };
     zila::codegen_x64::compile_to_linux(&file, out.to_str().unwrap(), &opts).unwrap_or_else(|e| panic!("linux build failed: {}", e));
     let _ = std::fs::remove_file(&out);
 }

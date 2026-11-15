@@ -1175,6 +1175,7 @@ impl Compiler {
             if as_value && i + 1 == b.len() {
                 if let StmtKind::Expr(e) = &s.kind {
                     self.line = s.line;
+                    self.dbg_note(s.line);
                     let mark = self.fs.stmt_temps.len();
                     ty = self.value(e, want)?;
                     self.flush_temps(mark);

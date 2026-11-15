@@ -117,13 +117,13 @@ flowchart LR
 
 ## Where Zila Lang is going
 
-Every language change is an [OpenSpec](openspec) change: open ones live in `openspec/changes/`, finished ones in `openspec/changes/archive/`, and their result is the living specification in `openspec/specs/`. **One change is in progress:** `add-typed-tree-emission` (compiler emission consumes a typed tree instead of raw syntax). A test keeps this section from naming a change that is not open.
+Every language change is an [OpenSpec](openspec) change: open ones live in `openspec/changes/`, finished ones in `openspec/changes/archive/`, and their result is the living specification in `openspec/specs/`. **One change is in progress:** `add-editor-intelligence` (language server completion, hover, go to definition and type errors, and a debugger). A test keeps this section from naming a change that is not open.
 
 **Known gaps** (each is a place where you can help):
 
 | Area | What is missing |
 |---|---|
-| Compiler structure | Emission still walks the syntax tree instead of a typed tree, and there is no cache of checked packages (incremental builds). |
+| Compiler structure | Emission uses the typed tree only for calls, `let`/`var` types and the typing of a few expressions; the rest still works from the syntax, and there is no cache of checked packages (incremental builds). |
 | Threads | The Linux thread layer, weak references on `shared T`, a work-stealing scheduler, a thread pool, condition variables. |
 | TLS | Server side, `close_notify`, a buffered reader. |
 | Language server | Hover, go to definition, completion and type errors. |

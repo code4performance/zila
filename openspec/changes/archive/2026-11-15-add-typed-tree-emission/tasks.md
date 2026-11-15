@@ -16,28 +16,28 @@
   - [x] 2.1g `spawn_thread` and inline `asm`
   - [x] 2.1i `sql` blocks are typed as the call of `db.sql_const` or `db.sql` they expand to
   - [x] 2.1h the statement forms still `Opaque` were taken by frequency until 4,891 of 5,684 bodies in the examples (86%) were complete; what is left is C interop (`c.*` intrinsics, `extern` calls with their pointer and integer coercions, the `ws`/`tls` wrappers over them)
-- [ ] 2.2 `src/codegen_x64/expressions.rs` and `calls.rs`: refactor expression emission to consume `TypedExpr` directly, reading pre-resolved types and call target symbols; verify `cargo test --test codegen` passes
+- [x] 2.2 `src/codegen_x64/expressions.rs` and `calls.rs`: refactor expression emission to consume `TypedExpr` directly, reading pre-resolved types and call target symbols; verify `cargo test --test codegen` passes
   - [x] 2.2a calls of functions by name and enum-variant constructors are emitted from the typed node (`emit_resolved_call`); `tools/asm-snapshot.py compare`: identical
   - [x] 2.2b method calls emit to the method the checker resolved; snapshot identical
   - [x] 2.2c calls of the simple built-in functions (`print`, `println`, `error`, `abort`, `char`) are emitted from the typed node; snapshot identical
   - [x] 2.2f calls of the conversions (`int(x)`, `u8(x)`, `float(x)`, `bool(x)`...), `sleep` and `live_objects` are emitted from the typed node; snapshot identical
   - [x] 2.2g calls of methods of a text or a char (`byte`, `bytes`, `char_count`, `slice`, `to_text`, `len_utf8`, `is_ascii`) are emitted from the typed node; snapshot identical
-  - [ ] 2.2h calls of methods of lists and maps (copy-on-write places) and of `channel`, `weak`, `timeout`
-  - [ ] 2.2d operators (arithmetic, comparison, boolean)
-  - [ ] 2.2e field, index, literals and the remaining expression forms
+  - [x] 2.2h methods of lists and maps (copy-on-write places) and `channel`, `weak`, `timeout`: same as 2.2d; their emission stays on the syntax because it works on the receiver's place
+  - [x] 2.2d operators: their type comes from the typed tree wherever emission needed it before emitting (the literal side), and in every debug build emission asserts that the type it derives for each operator expression is the one `check_expr` gave; accepted as fulfilled by the checker and these assertions (decision of the maintainer, 2026-11-15)
+  - [x] 2.2e field, index, literals and the remaining forms: same as 2.2d
 
 ## 3. Statement Emission and Clean-up
 
-- [ ] 3.1 `src/codegen_x64/statements.rs`: refactor statement emission to consume `TypedStmt`, removing speculative `Snapshot` rollbacks during body emission; verify `cargo test --test statements` and `--test run` pass
+- [x] 3.1 `src/codegen_x64/statements.rs`: refactor statement emission to consume `TypedStmt`, removing speculative `Snapshot` rollbacks during body emission; verify `cargo test --test statements` and `--test run` pass
   - [x] 3.1a the speculative typing of a `sql` hole, of the literal side of an operator and of an argument of a generic call uses the checker's type when the checker covers the expression; `tools/asm-snapshot.py compare --labels`: identical (label numbers shift, see design.md)
   - [x] 3.1b the type of a `let`/`var` is read from the typed body (the checker runs for every function in every build; debug builds assert emission derives the same one). It costs 8% to 25% more compile time in a debug build
   - [x] 3.1c the speculative compiles that type a `sql` hole, the literal side of an operator and an argument of a generic call use the checker's type (closures as arguments included) and no longer run: over the 46 socket-free test targets and the 40 examples none of the three fallbacks fired. The fallbacks stay in the code for a form the checker does not cover (C interop), so that such a program still compiles
-- [ ] 3.2 Clean up redundant type checking and dead `unreachable!()` branches across `src/codegen_x64/`; verify `cargo clippy --all-targets -- -D warnings` is clean
+- [x] 3.2 Clean up redundant type checking and dead `unreachable!()` branches across `src/codegen_x64/`; verify `cargo clippy --all-targets -- -D warnings` is clean
   - [x] 3.2a the duplicate `type_of` is gone (`check_expr` is the one typing; emission asserts against it), and the repeated copy-or-retain code with its `unreachable!()` guards is one helper (`copy_or_retain`); clippy clean, `compare --labels` identical
-  - [ ] 3.2b the typing emission still repeats for forms the tree does not feed it yet, and the remaining `unreachable!()` guards of invariants (they go with 3.1b and 3.1c)
+  - [x] 3.2b the typing emission still repeats for the forms the tree does not feed it, and the `unreachable!()` guards that state an invariant after a `matches!` check, stay: they are the fallbacks of 3.1c and the assertions of 2.2d (decision of the maintainer, 2026-11-15)
 
 ## 4. Verification and Wrap-up
 
 - [x] 4.1 Run `python tools/asm-snapshot.py compare` against baseline snapshots across all `examples/*.zila` to verify byte-identical assembly output across Windows, Linux, and non-optimized targets (run for the current state with `compare --labels` against the snapshot taken before the change: identical, 40 programs, 3 variants; the release and the debug compiler also write identical assembly)
-- [ ] 4.2 Record in `CHANGELOG.md` under Internal that emission consumes the typed tree (no user-facing docs under `docs/` need modification as syntax and runtime behavior are unchanged); verify `cargo test --test docs` passes
-- [ ] 4.3 Full test suite verification (`cargo test`) and archive the change with `openspec archive`
+- [x] 4.2 Record in `CHANGELOG.md` under Internal that emission consumes the typed tree (no user-facing docs under `docs/` need modification as syntax and runtime behavior are unchanged); verify `cargo test --test docs` passes (CHANGELOG written; `cargo test --test docs` passes after the README roadmap was brought up to date)
+- [x] 4.3 Full test suite verification (`cargo test`) and archive the change with `openspec archive` (`cargo test` with every target, the socket ones and `async` included, authorized by the maintainer on 2026-11-15: 62 of 62 targets pass; clippy clean; archived)

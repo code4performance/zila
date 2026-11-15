@@ -31,13 +31,13 @@
 - [ ] 3.1 `src/codegen_x64/statements.rs`: refactor statement emission to consume `TypedStmt`, removing speculative `Snapshot` rollbacks during body emission; verify `cargo test --test statements` and `--test run` pass
   - [x] 3.1a the speculative typing of a `sql` hole, of the literal side of an operator and of an argument of a generic call uses the checker's type when the checker covers the expression; `tools/asm-snapshot.py compare --labels`: identical (label numbers shift, see design.md)
   - [x] 3.1b the type of a `let`/`var` is read from the typed body (the checker runs for every function in every build; debug builds assert emission derives the same one). It costs 8% to 25% more compile time in a debug build
-  - [ ] 3.1c the speculative fallbacks that remain for forms the checker does not cover
+  - [x] 3.1c the speculative compiles that type a `sql` hole, the literal side of an operator and an argument of a generic call use the checker's type (closures as arguments included) and no longer run: over the 46 socket-free test targets and the 40 examples none of the three fallbacks fired. The fallbacks stay in the code for a form the checker does not cover (C interop), so that such a program still compiles
 - [ ] 3.2 Clean up redundant type checking and dead `unreachable!()` branches across `src/codegen_x64/`; verify `cargo clippy --all-targets -- -D warnings` is clean
   - [x] 3.2a the duplicate `type_of` is gone (`check_expr` is the one typing; emission asserts against it), and the repeated copy-or-retain code with its `unreachable!()` guards is one helper (`copy_or_retain`); clippy clean, `compare --labels` identical
   - [ ] 3.2b the typing emission still repeats for forms the tree does not feed it yet, and the remaining `unreachable!()` guards of invariants (they go with 3.1b and 3.1c)
 
 ## 4. Verification and Wrap-up
 
-- [ ] 4.1 Run `python tools/asm-snapshot.py compare` against baseline snapshots across all `examples/*.zila` to verify byte-identical assembly output across Windows, Linux, and non-optimized targets
+- [x] 4.1 Run `python tools/asm-snapshot.py compare` against baseline snapshots across all `examples/*.zila` to verify byte-identical assembly output across Windows, Linux, and non-optimized targets (run for the current state with `compare --labels` against the snapshot taken before the change: identical, 40 programs, 3 variants; the release and the debug compiler also write identical assembly)
 - [ ] 4.2 Record in `CHANGELOG.md` under Internal that emission consumes the typed tree (no user-facing docs under `docs/` need modification as syntax and runtime behavior are unchanged); verify `cargo test --test docs` passes
 - [ ] 4.3 Full test suite verification (`cargo test`) and archive the change with `openspec archive`

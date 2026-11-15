@@ -546,7 +546,7 @@ impl Compiler {
         if is_const_int_expr(lhs) && !is_const_int_expr(rhs) && op != "<<" && op != ">>" && (is_cmp || !want.is_some_and(|w| w.is_int())) {
             // the checker's type for the right side; a form it does not cover is typed by
             // compiling it once and undoing that
-            let r = match self.check_expr(rhs, None) {
+            let r = match self.check_expr_speculative(rhs, None) {
                 Some(x) => Ok(x.ty),
                 None => {
                     let snap = self.snapshot();

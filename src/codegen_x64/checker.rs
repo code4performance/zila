@@ -73,14 +73,16 @@ impl Compiler {
                 (TypedExprKind::Binary { op, lhs: Box::new(l), rhs: Box::new(r) }, Ty::Bool)
             }
             ExprKind::Binary { op, lhs, rhs } if matches!(*op, "==" | "!=" | "<" | "<=" | ">" | ">=") => {
-                let l = self.check_expr(lhs, None)?;
+                let lit = self.literal_side(op, lhs, rhs, want);
+                let l = self.check_expr(lhs, lit.as_ref())?;
                 let r = self.check_expr(rhs, Some(&l.ty))?;
                 (TypedExprKind::Binary { op, lhs: Box::new(l), rhs: Box::new(r) }, Ty::Bool)
             }
             // bitwise operators: integers of one type; a shift keeps the type of the value shifted
             ExprKind::Binary { op, lhs, rhs } if matches!(*op, "bitand" | "bitor" | "bitxor" | "<<" | ">>") => {
                 let w = want.filter(|t| t.is_int());
-                let l = self.check_expr(lhs, w)?;
+                let lit = self.literal_side(op, lhs, rhs, want);
+                let l = self.check_expr(lhs, lit.as_ref().or(w))?;
                 let r = self.check_expr(rhs, Some(&l.ty))?;
                 let shift = matches!(*op, "<<" | ">>");
                 if !l.ty.is_int() || !r.ty.is_int() || (!shift && l.ty != r.ty) {
@@ -91,7 +93,8 @@ impl Compiler {
             }
             ExprKind::Binary { op, lhs, rhs } if matches!(*op, "+" | "-" | "*" | "/" | "%") => {
                 let w = want.filter(|t| t.is_int() || matches!(t, Ty::Float { .. }));
-                let l = self.check_expr(lhs, w)?;
+                let lit = self.literal_side(op, lhs, rhs, want);
+                let l = self.check_expr(lhs, lit.as_ref().or(w))?;
                 let r = self.check_expr(rhs, Some(&l.ty))?;
                 // pointer arithmetic: a pointer plus or minus an integer is a pointer
                 if matches!(l.ty, Ty::Ptr(_)) && r.ty.is_int() && matches!(*op, "+" | "-") {
@@ -408,6 +411,16 @@ impl Compiler {
         Some((TypedExprKind::Call { callee: TypedCallee::Builtin(name.clone()), args: typed }, ty))
     }
 
+    /// `check_expr` with the speculative paths open (a generic call is typed by building its instance
+    /// and forgetting it again): for the places where emission would otherwise compile the
+    /// expression once only to learn its type.
+    pub(super) fn check_expr_speculative(&mut self, e: &Expr, want: Option<&Ty>) -> Option<TypedExpr> {
+        let before = std::mem::replace(&mut self.checking_body, true);
+        let r = self.check_expr(e, want);
+        self.checking_body = before;
+        r
+    }
+
     /// A call of a generic function whose type arguments follow from its arguments: the type
     /// arguments are bound as emission binds them, the instance's signature is built (and
     /// forgotten again) and the arguments are typed against it. Not covered: explicit type
@@ -439,15 +452,35 @@ impl Compiler {
         let names: Vec<String> = fd.generics.iter().map(|g| g.name.clone()).collect();
         self.speculative(|c| {
             let mut b: HashMap<String, Ty> = HashMap::new();
+            // a bare number literal only binds a parameter no other argument has bound
+            let mut late: Vec<(&Type, &Expr)> = Vec::new();
             for (a, p) in args.iter().zip(&fd.params) {
                 let pt = p.ty.as_ref()?;
                 if !mentions_param(pt, &names) {
                     continue;
                 }
-                if matches!(a.value.kind, ExprKind::Lambda { .. }) || is_int_literal(&a.value) {
+                if matches!(a.value.kind, ExprKind::Lambda { .. }) {
                     return None;
                 }
+                if is_int_literal(&a.value) {
+                    if let Type::Named { path, args: pargs } = pt {
+                        if path.len() == 1 && pargs.is_empty() && b.contains_key(&path[0]) {
+                            continue;
+                        }
+                    }
+                    late.push((pt, &a.value));
+                    continue;
+                }
                 let x = c.check_expr(&a.value, None)?;
+                c.unify(pt, &x.ty, &names, &mut b, &module).ok()?;
+            }
+            for (pt, lit) in late {
+                if let Type::Named { path, args: pargs } = pt {
+                    if path.len() == 1 && pargs.is_empty() && b.contains_key(&path[0]) {
+                        continue;
+                    }
+                }
+                let x = c.check_expr(lit, None)?;
                 c.unify(pt, &x.ty, &names, &mut b, &module).ok()?;
             }
             if names.iter().any(|n| !b.contains_key(n) || b[n] == Ty::Void) {
@@ -557,6 +590,17 @@ impl Compiler {
             typed.push(TypedArg { param: i, by_ref: false, value: x });
         }
         Some((TypedExprKind::Call { callee: TypedCallee::Member { receiver: Box::new(recv), name: name.clone() }, args: typed }, ty))
+    }
+
+    /// A number literal (or arithmetic on literals) on the left adapts to the integer type of the
+    /// right side, as emission does (`0 - x` with `x: u32`): that type, when it applies.
+    fn literal_side(&mut self, op: &str, lhs: &Expr, rhs: &Expr, want: Option<&Ty>) -> Option<Ty> {
+        let is_cmp = matches!(op, "==" | "!=" | "<" | "<=" | ">" | ">=");
+        if is_const_int_expr(lhs) && !is_const_int_expr(rhs) && op != "<<" && op != ">>" && (is_cmp || !want.is_some_and(|w| w.is_int())) {
+            let t = self.check_expr(rhs, None)?.ty;
+            return t.is_int().then_some(t);
+        }
+        None
     }
 
     /// A record literal of a record that is not generic: its typed fields (each typed from the

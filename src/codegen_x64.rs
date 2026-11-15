@@ -1554,7 +1554,7 @@ end
             // the type of the value: the checker's when it covers the expression, otherwise found
             // by compiling it once and undoing that
             self.line = h.line;
-            let t = match self.check_expr(&e, None) {
+            let t = match self.check_expr_speculative(&e, None) {
                 Some(x) => x.ty,
                 None => {
                     let snap = self.snapshot();

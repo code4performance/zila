@@ -491,7 +491,7 @@ impl Compiler {
             }
             // type the argument: the checker's type when it covers the expression, otherwise by
             // compiling it into a scratch buffer
-            let aty = match self.check_expr(&a.value, None) {
+            let aty = match self.check_expr_speculative(&a.value, None) {
                 Some(x) => x.ty,
                 None => {
                     let snap = self.snapshot();

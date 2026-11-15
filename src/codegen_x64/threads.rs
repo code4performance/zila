@@ -212,14 +212,14 @@ impl Compiler {
                 continue;
             }
             let name = format!("$thr{}", i);
-            let decl = VarDecl { name: name.clone(), ty: None, value: Some(a.value.clone()), mutable: false };
-            self.stmt_inner(&Stmt { kind: StmtKind::Var(decl), line })?;
+            let decl = VarDecl { name: name.clone(), name_span: Span::default(), ty: None, value: Some(a.value.clone()), mutable: false };
+            self.stmt_inner(&Stmt { kind: StmtKind::Var(decl), line, span: a.value.span })?;
             labels.insert(name.clone(), format!("argument {}", i + 1));
             let mut na = a.clone();
-            na.value = Expr { kind: ExprKind::Ident(name), line };
+            na.value = Expr { kind: ExprKind::Ident(name), line, span: a.value.span };
             new_args.push(na);
         }
-        let rewritten = Expr { kind: ExprKind::Call { callee: callee.clone(), args: new_args, targs: targs.clone() }, line };
+        let rewritten = Expr { kind: ExprKind::Call { callee: callee.clone(), args: new_args, targs: targs.clone() }, line, span: Span::default() };
         let mut used = Vec::new();
         collect_expr(&rewritten, &mut used);
         let mut seen = HashSet::new();
@@ -233,7 +233,7 @@ impl Compiler {
             }
         }
         self.check_thread_globals(callee)?;
-        let body = vec![Stmt { kind: StmtKind::Expr(rewritten), line }];
+        let body = vec![Stmt { kind: StmtKind::Expr(rewritten), line, span: Span::default() }];
         let want = Ty::Func { params: vec![], ret: Box::new(Ty::Void), ext: false };
         self.lambda(&[], &body, Some(&want))?;
         let t = self.temp();
@@ -254,7 +254,7 @@ pub(super) fn type_owner(q: &str) -> &str {
 /// Single-segment type names written in `t` (the package's own types), except type parameters.
 pub(super) fn named_types(t: &Type, generics: &[&str], out: &mut Vec<String>) {
     match t {
-        Type::Named { path, args } => {
+        Type::Named { path, args, .. } => {
             if path.len() == 1 && !generics.contains(&path[0].as_str()) {
                 out.push(path[0].clone());
             }

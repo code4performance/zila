@@ -813,17 +813,27 @@ pub fn load_project(root: &Path, home: &Path) -> Result<Project, String> {
 /// The `.zila` files directly in `dir`, sorted, with the `_test.zila` files apart.
 fn br_files(dir: &Path) -> (Vec<PathBuf>, Vec<PathBuf>) {
     let (mut files, mut tests) = (Vec::new(), Vec::new());
+    let mut found: Vec<PathBuf> = Vec::new();
     if let Ok(rd) = std::fs::read_dir(dir) {
-        for e in rd.flatten() {
-            let p = e.path();
-            if !p.is_file() || p.extension().and_then(|x| x.to_str()) != Some("zila") {
-                continue;
+        found.extend(rd.flatten().map(|e| e.path()).filter(|p| p.is_file()));
+    }
+    // documents open in an editor count even when they are not saved yet
+    let here = clean_path(dir.to_path_buf());
+    OVERLAY.with(|o| {
+        for p in o.borrow().keys() {
+            if p.parent() == Some(here.as_path()) && !found.iter().any(|f| clean_path(f.clone()) == *p) {
+                found.push(p.clone());
             }
-            if p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.ends_with("_test.zila")) {
-                tests.push(p);
-            } else {
-                files.push(p);
-            }
+        }
+    });
+    for p in found {
+        if p.extension().and_then(|x| x.to_str()) != Some("zila") {
+            continue;
+        }
+        if p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.ends_with("_test.zila")) {
+            tests.push(p);
+        } else {
+            files.push(p);
         }
     }
     files.sort();
@@ -886,7 +896,7 @@ fn merge_text(dir: &Path, expected: &str, extra: &[PathBuf]) -> Result<(String, 
     let mut bodies = String::new();
     let mut parts = Vec::new();
     for f in &files {
-        let text = std::fs::read_to_string(f).map_err(|e| format!("cannot read {}: {}", f.display(), e))?;
+        let text = read_source(f)?;
         let sp = split_file(&text);
         match &sp.package {
             Some(p) if p == expected => {}
@@ -1023,6 +1033,39 @@ fn check_local_names(p: &Project) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+thread_local! {
+    /// Texts that stand in for files on disk (documents open in an editor), by cleaned path.
+    static OVERLAY: std::cell::RefCell<HashMap<PathBuf, String>> = std::cell::RefCell::new(HashMap::new());
+}
+
+/// The text of a source file: the open document when there is one, else the file.
+fn read_source(p: &Path) -> Result<String, String> {
+    if let Some(t) = OVERLAY.with(|o| o.borrow().get(&clean_path(p.to_path_buf())).cloned()) {
+        return Ok(t);
+    }
+    std::fs::read_to_string(p).map_err(|e| format!("cannot read {}: {}", p.display(), e))
+}
+
+/// Runs `f` with the project of `source` installed (its manifest and lock; none when `source` is
+/// `None` or has no project) and with the texts of `overlay` read in place of the files on disk.
+/// What was installed before comes back afterwards. The second result is why the project could not
+/// be loaded; `f` then runs with the standard library only.
+pub fn scoped<T>(source: Option<&Path>, overlay: HashMap<PathBuf, String>, f: impl FnOnce() -> T) -> (T, Option<String>) {
+    let previous = REGISTRY.with(|r| r.borrow_mut().take());
+    let previous_overlay = OVERLAY.with(|o| std::mem::replace(&mut *o.borrow_mut(), overlay.into_iter().map(|(p, t)| (clean_path(p), t)).collect()));
+    let problem = match source {
+        Some(p) => install_for(p).err(),
+        None => None,
+    };
+    if problem.is_some() {
+        clear();
+    }
+    let result = f();
+    REGISTRY.with(|r| *r.borrow_mut() = previous);
+    OVERLAY.with(|o| *o.borrow_mut() = previous_overlay);
+    (result, problem)
 }
 
 fn registry() -> Option<Arc<Registry>> {

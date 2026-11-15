@@ -99,7 +99,7 @@ impl Compiler {
                 // pointer arithmetic: a pointer plus or minus an integer is a pointer
                 if matches!(l.ty, Ty::Ptr(_)) && r.ty.is_int() && matches!(*op, "+" | "-") {
                     let t = l.ty.clone();
-                    return Some(TypedExpr { kind: TypedExprKind::Binary { op, lhs: Box::new(l), rhs: Box::new(r) }, ty: t, line: e.line });
+                    return Some(TypedExpr { kind: TypedExprKind::Binary { op, lhs: Box::new(l), rhs: Box::new(r) }, ty: t, line: e.line, span: e.span });
                 }
                 let number = l.ty.is_int() || matches!(l.ty, Ty::Float { .. });
                 if l.ty != r.ty || !(number || (*op == "+" && l.ty == Ty::Text)) {
@@ -205,7 +205,7 @@ impl Compiler {
             ExprKind::New(inner) => {
                 let ExprKind::Record { .. } = &inner.kind else { return None };
                 let (kind, rec) = self.check_record_literal(inner)?;
-                let x = TypedExpr { kind, ty: Ty::Rec(rec), line: inner.line };
+                let x = TypedExpr { kind, ty: Ty::Rec(rec), line: inner.line, span: inner.span };
                 let t = Ty::Rc(Box::new(x.ty.clone()));
                 (TypedExprKind::New(Box::new(x)), t)
             }
@@ -234,7 +234,7 @@ impl Compiler {
                 let typed = if self.checking_body {
                     self.check_lambda_body(params, ptys, ret, body)
                 } else {
-                    body.iter().map(|s| TypedStmt { kind: TypedStmtKind::Opaque(Box::new(s.clone())), line: s.line }).collect()
+                    body.iter().map(|s| TypedStmt { kind: TypedStmtKind::Opaque(Box::new(s.clone())), line: s.line, span: s.span }).collect()
                 };
                 (TypedExprKind::Lambda { params: params.clone(), body: typed }, t)
             }
@@ -270,7 +270,7 @@ impl Compiler {
             }
             _ => return None,
         };
-        Some(TypedExpr { kind, ty, line: e.line })
+        Some(TypedExpr { kind, ty, line: e.line, span: e.span })
     }
 
     /// The parameter types of a callee found by `resolve_call` (a function, a method or an enum
@@ -343,7 +343,7 @@ impl Compiler {
                     items.push(x);
                 }
                 let line = items.first().map_or(0, |x| x.line);
-                let list = TypedExpr { kind: TypedExprKind::List(items), ty: pty.clone(), line };
+                let list = TypedExpr { kind: TypedExprKind::List(items), ty: pty.clone(), line, span: Span::default() };
                 typed.push(TypedArg { param: i, by_ref: false, value: list });
                 continue;
             }
@@ -466,7 +466,7 @@ impl Compiler {
                     continue;
                 }
                 if is_int_literal(&a.value) {
-                    if let Type::Named { path, args: pargs } = pt {
+                    if let Type::Named { path, args: pargs, .. } = pt {
                         if path.len() == 1 && pargs.is_empty() && b.contains_key(&path[0]) {
                             continue;
                         }
@@ -478,7 +478,7 @@ impl Compiler {
                 c.unify(pt, &x.ty, &names, &mut b, &module).ok()?;
             }
             for (pt, lit) in late {
-                if let Type::Named { path, args: pargs } = pt {
+                if let Type::Named { path, args: pargs, .. } = pt {
                     if path.len() == 1 && pargs.is_empty() && b.contains_key(&path[0]) {
                         continue;
                     }

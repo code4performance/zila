@@ -501,9 +501,9 @@ impl Expander {
                 )
             };
             let t = match &a.value.kind {
-                ExprKind::Ident(n) if is_builtin_type(n) || self.user_type_in_main(n) => Type::Named { path: vec![n.clone()], args: vec![] },
+                ExprKind::Ident(n) if is_builtin_type(n) || self.user_type_in_main(n) => Type::Named { path: vec![n.clone()], args: vec![], span: Span::default() },
                 ExprKind::Field { expr, name, .. } => match &expr.kind {
-                    ExprKind::Ident(p) if self.uni.type_decl(p, name).is_some() => Type::Named { path: vec![p.clone(), name.clone()], args: vec![] },
+                    ExprKind::Ident(p) if self.uni.type_decl(p, name).is_some() => Type::Named { path: vec![p.clone(), name.clone()], args: vec![], span: Span::default() },
                     _ => return Err(not_type()),
                 },
                 _ => return Err(not_type()),
@@ -850,7 +850,7 @@ impl Expander {
                     // it makes are expanded in the next round. The types the template names in its
                     // signature belong to the library that wrote it: they are written qualified.
                     let public = sp.module == self.main_name && sp.template_public;
-                    let decl = Decl { attrs, public, kind: DeclKind::Func(fd), line: base };
+                    let decl = Decl { attrs, public, kind: DeclKind::Func(fd), line: base, span: Span::default() };
                     self.specs.insert(sp.key.clone(), sp.name.clone());
                     new_decls.push(decl);
                 }
@@ -964,7 +964,7 @@ impl Expander {
                                 } else if ci.comptime_idx < args.len() {
                                     args.remove(ci.comptime_idx);
                                 }
-                                let ident = Expr { kind: ExprKind::Ident(spec.clone()), line };
+                                let ident = Expr { kind: ExprKind::Ident(spec.clone()), line, span: callee.span };
                                 **callee = ident;
                             }
                         }
@@ -1094,7 +1094,7 @@ fn subst_type(fd: &mut FuncDecl, t: &str, arg: &Type) {
     struct S<'a>(&'a str, &'a Type);
     impl<'a> Visit for S<'a> {
         fn ty(&mut self, ty: &mut Type) {
-            if matches!(ty, Type::Named { path, args } if path.len() == 1 && path[0] == self.0 && args.is_empty()) {
+            if matches!(ty, Type::Named { path, args, .. } if path.len() == 1 && path[0] == self.0 && args.is_empty()) {
                 *ty = self.1.clone();
             }
         }

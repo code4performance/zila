@@ -8,7 +8,9 @@ impl Compiler {
     /// the type is checked against `check_expr` (see `checker.rs`).
     pub(super) fn expr(&mut self, e: &Expr, want: Option<&Ty>) -> R<Ty> {
         let tree = if cfg!(debug_assertions) { self.check_expr(e, want) } else { None };
+        let saved = std::mem::replace(&mut self.span, e.span);
         let r = self.expr_emit(e, want);
+        self.span = saved;
         if let (Some(t), Ok(got)) = (&tree, &r) {
             assert!(&t.ty == got, "check_expr says {} but emission gives {} (line {})", t.ty.show(), got.show(), e.line);
         }

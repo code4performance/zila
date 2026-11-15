@@ -1,4 +1,45 @@
-//! AST for Zila Lang. Every node that can be reported in an error carries a line.
+//! AST for Zila Lang. Every node that can be reported in an error carries a line, and the nodes
+//! the editor tools point at carry a `Span` (start and end, line and column).
+
+/// A range in the source: lines and columns count from 1; the end is just after the last
+/// character. `Span::default()` (all zero) means "no position", for nodes made by the compiler.
+///
+/// `Debug` prints just `Span`, whatever the range: code that compares or hashes the debug text of
+/// a tree (the generator cache key, the library parity tests) must not change when code moves.
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub struct Span {
+    pub line: u32,
+    pub col: u32,
+    pub end_line: u32,
+    pub end_col: u32,
+}
+
+impl std::fmt::Debug for Span {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Span")
+    }
+}
+
+impl Span {
+    pub fn new(line: u32, col: u32, end_line: u32, end_col: u32) -> Span {
+        Span { line, col, end_line, end_col }
+    }
+
+    /// True for a span that records no position.
+    pub fn is_none(&self) -> bool {
+        self.line == 0
+    }
+
+    /// From the start of `self` to the end of `other`.
+    pub fn to(self, other: Span) -> Span {
+        Span { line: self.line, col: self.col, end_line: other.end_line, end_col: other.end_col }
+    }
+
+    /// Whether the position (line, col) is inside the range (the end is not included).
+    pub fn contains(&self, line: u32, col: u32) -> bool {
+        !self.is_none() && (line, col) >= (self.line, self.col) && (line, col) < (self.end_line, self.end_col)
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct File {
@@ -19,6 +60,8 @@ pub struct Decl {
     pub public: bool,
     pub kind: DeclKind,
     pub line: u32,
+    /// From `pub` or the keyword to the end of the declaration (attributes not included).
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -33,6 +76,7 @@ pub enum DeclKind {
 #[derive(Debug, Clone)]
 pub struct VarDecl {
     pub name: String,
+    pub name_span: Span,
     pub ty: Option<Type>,
     pub value: Option<Expr>,
     /// `var` = true, `let` = false
@@ -43,6 +87,7 @@ pub struct VarDecl {
 pub struct FuncDecl {
     pub receiver: Option<Receiver>,
     pub name: String,
+    pub name_span: Span,
     pub generics: Vec<TypeParam>,
     pub params: Vec<Param>,
     pub ret: Option<RetType>,
@@ -59,6 +104,7 @@ pub struct FuncDecl {
 pub struct Receiver {
     pub by_ref: bool,
     pub name: String,
+    pub name_span: Span,
     pub ty: Type,
 }
 
@@ -73,6 +119,7 @@ pub struct TypeParam {
 pub struct Param {
     pub by_ref: bool,
     pub name: String,
+    pub name_span: Span,
     /// Optional only for lambda parameters (inferred).
     pub ty: Option<Type>,
     pub variadic: bool,
@@ -93,6 +140,7 @@ pub struct ExternDecl {
     /// Calling convention: "C" (default), "stdcall", "system", ...
     pub abi: String,
     pub name: String,
+    pub name_span: Span,
     pub params: Vec<Param>,
     /// C variadic function: `printf(fmt: *c.char, ...)`
     pub c_variadic: bool,
@@ -102,6 +150,7 @@ pub struct ExternDecl {
 #[derive(Debug, Clone)]
 pub struct TypeDecl {
     pub name: String,
+    pub name_span: Span,
     pub generics: Vec<TypeParam>,
     pub body: TypeBody,
 }
@@ -120,6 +169,7 @@ pub struct Field {
     pub attrs: Vec<Attr>,
     pub public: bool,
     pub name: String,
+    pub name_span: Span,
     pub ty: Type,
     pub line: u32,
 }
@@ -128,6 +178,7 @@ pub struct Field {
 pub struct Variant {
     pub attrs: Vec<Attr>,
     pub name: String,
+    pub name_span: Span,
     pub fields: Vec<Type>,
     /// The names of the payload fields (`Circle(r: float)`); empty text for a positional one.
     pub field_names: Vec<String>,
@@ -137,13 +188,15 @@ pub struct Variant {
 #[derive(Debug, Clone)]
 pub struct MethodSig {
     pub name: String,
+    pub name_span: Span,
     pub params: Vec<Param>,
     pub ret: Option<RetType>,
 }
 
 #[derive(Debug, Clone)]
 pub enum Type {
-    Named { path: Vec<String>, args: Vec<Type> },
+    /// `span` covers the name and its type arguments; it is empty for types the compiler makes.
+    Named { path: Vec<String>, args: Vec<Type>, span: Span },
     Optional(Box<Type>),
     Pointer(Box<Type>),
     /// `shared T`: atomic reference counts, immutable content.
@@ -183,6 +236,7 @@ pub enum AsmDir {
 pub struct Stmt {
     pub kind: StmtKind,
     pub line: u32,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -207,6 +261,8 @@ pub enum StmtKind {
 pub struct Expr {
     pub kind: ExprKind,
     pub line: u32,
+    /// The whole expression; for `a.b` the name `b` ends the span, for a call the `)` does.
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]

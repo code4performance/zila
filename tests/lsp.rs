@@ -239,3 +239,140 @@ func main()
     let r = open(&mut docs, "file:///sql_ident.zila", "package main\n\nfunc f(sql: text) -> text\n    return sql\nend\n\nfunc main()\n    print(f(\"x\"))\nend\n");
     assert_eq!(r[0].get("params").get("diagnostics"), &Json::Arr(vec![]));
 }
+
+fn change(docs: &mut HashMap<String, String>, uri: &str, text: &str) -> Vec<Json> {
+    let mut j = String::new();
+    Json::Str(text.into()).write(&mut j);
+    send(docs, &format!(r#"{{"jsonrpc":"2.0","method":"textDocument/didChange","params":{{"textDocument":{{"uri":"{}"}},"contentChanges":[{{"text":{}}}]}}}}"#, uri, j))
+}
+
+fn published<'a>(msgs: &'a [Json], uri: &str) -> &'a Json {
+    msgs.iter().find(|m| m.get("params").get("uri").str() == Some(uri)).unwrap_or_else(|| panic!("nothing published for {}", uri)).get("params").get("diagnostics")
+}
+
+#[test]
+fn a_type_error_is_one_error_on_the_expression_and_goes_away_when_fixed() {
+    let mut docs = HashMap::new();
+    let uri = "file:///t.zila";
+    // line 4 (index 3): a text where an int is wanted
+    let r = open(&mut docs, uri, "package main\n\nfunc main()\n    let x: int = \"text\"\nend\n");
+    let Json::Arr(d) = published(&r, uri) else { panic!() };
+    assert_eq!(d.len(), 1, "{:?}", d);
+    assert_eq!(d[0].get("severity"), &Json::Num(1.0));
+    assert_eq!(d[0].get("source").str(), Some("zila"));
+    let (start, end) = (d[0].get("range").get("start"), d[0].get("range").get("end"));
+    assert_eq!((start.get("line"), end.get("line")), (&Json::Num(3.0), &Json::Num(3.0)));
+    // the range is the text literal: `    let x: int = "text"` has it at characters 17 to 23
+    assert_eq!((start.get("character"), end.get("character")), (&Json::Num(17.0), &Json::Num(23.0)));
+    let r = change(&mut docs, uri, "package main\n\nfunc main()\n    let x: int = 4\nend\n");
+    assert_eq!(published(&r, uri), &Json::Arr(vec![]));
+}
+
+#[test]
+fn an_edit_of_another_open_file_changes_the_diagnostics_of_the_first_without_saving() {
+    let dir = std::env::temp_dir().join(format!("zila_lsp_other_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("util")).unwrap();
+    std::fs::write(dir.join("zila.toml"), "[package]\nname = \"app\"\n").unwrap();
+    let util_ok = "package util\n\npub func twice(n: int) -> int\n    return n * 2\nend\n";
+    std::fs::write(dir.join("util/util.zila"), util_ok).unwrap();
+    let p = dir.to_string_lossy().replace('\\', "/").replace(' ', "%20");
+    let uri = |f: &str| if p.starts_with('/') { format!("file://{}/{}", p, f) } else { format!("file:///{}/{}", p, f) };
+    let (main_uri, util_uri) = (uri("main.zila"), uri("util/util.zila"));
+    let mut docs = HashMap::new();
+    let r = open(&mut docs, &util_uri, util_ok);
+    assert_eq!(published(&r, &util_uri), &Json::Arr(vec![]));
+    let main = "package main\n\nuse util\n\nfunc main()\n    print(\"{util.twice(2)}\")\nend\n";
+    let r = open(&mut docs, &main_uri, main);
+    assert_eq!(published(&r, &main_uri), &Json::Arr(vec![]));
+    // rename the function in the other file; nothing is saved
+    let r = change(&mut docs, &util_uri, &util_ok.replace("twice", "double"));
+    let Json::Arr(d) = published(&r, &main_uri) else { panic!() };
+    assert_eq!(d.len(), 1, "{:?}", d);
+    assert_eq!(d[0].get("range").get("start").get("line"), &Json::Num(5.0));
+    assert_eq!(std::fs::read_to_string(dir.join("util/util.zila")).unwrap(), util_ok, "the file on disk is untouched");
+    // renaming back clears it
+    let r = change(&mut docs, &util_uri, util_ok);
+    assert_eq!(published(&r, &main_uri), &Json::Arr(vec![]));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_warning_of_the_compiler_is_published_with_severity_2() {
+    // a package of the project that takes the name of a standard library that is not core
+    let dir = std::env::temp_dir().join(format!("zila_lsp_warn_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("ui")).unwrap();
+    std::fs::write(dir.join("zila.toml"), "[package]\nname = \"app\"\n").unwrap();
+    std::fs::write(dir.join("ui/ui.zila"), "package ui\n\npub func one() -> int\n    return 1\nend\n").unwrap();
+    let p = dir.to_string_lossy().replace('\\', "/").replace(' ', "%20");
+    let uri = if p.starts_with('/') { format!("file://{}/main.zila", p) } else { format!("file:///{}/main.zila", p) };
+    let mut docs = HashMap::new();
+    let r = open(&mut docs, &uri, "package main\n\nuse ui\n\nfunc main()\n    print(\"{ui.one()}\")\nend\n");
+    let Json::Arr(d) = published(&r, &uri) else { panic!() };
+    assert_eq!(d.len(), 1, "{:?}", d);
+    assert_eq!(d[0].get("severity"), &Json::Num(2.0));
+    assert!(d[0].get("message").str().unwrap().contains("shadows the standard library"), "{:?}", d);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_file_cut_anywhere_gets_only_its_syntax_error_and_never_stops_the_server() {
+    let mut tried = 0;
+    for entry in std::fs::read_dir("examples").unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_none_or(|e| e != "zila") {
+            continue;
+        }
+        let src = std::fs::read_to_string(&path).unwrap();
+        let chars: Vec<usize> = src.char_indices().map(|(i, _)| i).collect();
+        for pct in [15, 35, 55, 80] {
+            let text = &src[..chars[chars.len() * pct / 100]];
+            let mut docs = HashMap::new();
+            let r = open(&mut docs, "file:///cut.zila", text);
+            let Json::Arr(d) = r[0].get("params").get("diagnostics") else { panic!() };
+            tried += 1;
+            if zila::parse_source(text).is_err() {
+                assert_eq!(d.len(), 1, "{} at {}%: {:?}", path.display(), pct, d);
+                assert_eq!(d[0].get("severity"), &Json::Num(1.0));
+            }
+        }
+    }
+    assert!(tried > 100, "{}", tried);
+}
+
+#[test]
+fn rapid_edits_publish_only_the_diagnostics_of_the_last_text() {
+    use std::time::Duration;
+    let uri = "file:///fast.zila";
+    let msg = move |method: &str, text: &str| {
+        let mut j = String::new();
+        Json::Str(text.into()).write(&mut j);
+        let doc = if method == "didOpen" { format!(r#"{{"uri":"{}","text":{}}}"#, uri, j) } else { format!(r#"{{"uri":"{}"}}"#, uri) };
+        let changes = if method == "didChange" { format!(r#","contentChanges":[{{"text":{}}}]"#, j) } else { String::new() };
+        parse_json(&format!(r#"{{"jsonrpc":"2.0","method":"textDocument/{}","params":{{"textDocument":{}{}}}}}"#, method, doc, changes)).unwrap()
+    };
+    let (tx, rx) = std::sync::mpsc::channel();
+    let sender = std::thread::spawn(move || {
+        tx.send(msg("didOpen", "package main\n\nfunc main()\nend\n")).unwrap();
+        // five edits one after the other, the first four wrong in different ways, the last with a type error
+        for text in ["package main\n\nfunc main()\n    let = 1\n", "package main\n\nfunc main(\n", "pack", "package main\n\nfunc main()\n    let a: int = 1\nend\n"] {
+            tx.send(msg("didChange", text)).unwrap();
+        }
+        tx.send(msg("didChange", "package main\n\nfunc main()\n    let a: int = \"x\"\nend\n")).unwrap();
+        std::thread::sleep(Duration::from_millis(800));
+        tx.send(parse_json(r#"{"jsonrpc":"2.0","id":1,"method":"shutdown"}"#).unwrap()).unwrap();
+        tx.send(parse_json(r#"{"jsonrpc":"2.0","method":"exit"}"#).unwrap()).unwrap();
+    });
+    let mut out: Vec<u8> = Vec::new();
+    let code = zila::lsp::serve(rx, &mut out, Duration::from_millis(100));
+    sender.join().unwrap();
+    assert_eq!(code, 0);
+    let text = String::from_utf8(out).unwrap();
+    let msgs: Vec<Json> = text.split("Content-Length: ").skip(1).map(|p| parse_json(p.split_once("\r\n\r\n").unwrap().1).unwrap()).collect();
+    let published: Vec<&Json> = msgs.iter().filter(|m| m.get("method").str() == Some("textDocument/publishDiagnostics")).collect();
+    assert_eq!(published.len(), 1, "{} diagnostics were published", published.len());
+    let Json::Arr(d) = published[0].get("params").get("diagnostics") else { panic!() };
+    assert_eq!(d.len(), 1, "{:?}", d);
+    assert_eq!(d[0].get("range").get("start").get("line"), &Json::Num(3.0), "the error of the last text");
+}

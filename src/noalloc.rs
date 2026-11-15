@@ -360,7 +360,7 @@ pub fn check_program(
 fn type_to_string(ty: &Type) -> String {
     match ty {
         Type::Shared(i) => format!("shared {}", type_to_string(i)),
-        Type::Named { path, args } => {
+        Type::Named { path, args, .. } => {
             let base = path.join(".");
             if args.is_empty() {
                 base

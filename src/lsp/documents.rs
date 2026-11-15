@@ -11,10 +11,9 @@ pub(super) fn position(line: i64, character: i64) -> Json {
     obj(vec![("line", num(line)), ("character", num(character))])
 }
 
-/// Finds the packages that sit next to the document, so that their block names are known: the
-/// server only parses (block content is never looked into) and never runs comptime code.
-pub(super) fn register_neighbours(uri: &str, text: &str) {
-    let Some(rest) = uri.strip_prefix("file://") else { return };
+/// The file a `file://` URI names (`file:///c:/dir/x.zila` is `c:/dir/x.zila`).
+pub(super) fn uri_to_path(uri: &str) -> Option<std::path::PathBuf> {
+    let rest = uri.strip_prefix("file://")?;
     let mut path = String::new();
     let b = rest.as_bytes();
     let mut i = 0;
@@ -29,11 +28,17 @@ pub(super) fn register_neighbours(uri: &str, text: &str) {
         path.push(b[i] as char);
         i += 1;
     }
-    // `file:///c:/dir/x.zila` -> `c:/dir/x.zila`
     let path = if path.len() > 2 && path.as_bytes()[0] == b'/' && path.as_bytes()[2] == b':' { path[1..].to_string() } else { path };
+    Some(std::path::PathBuf::from(path))
+}
+
+/// Finds the packages that sit next to the document, so that their block names are known: the
+/// server only parses (block content is never looked into) and never runs comptime code.
+pub(super) fn register_neighbours(uri: &str, text: &str) {
+    let Some(path) = uri_to_path(uri) else { return };
     // the editor never fetches; a project that does not check out simply has no dependencies here
-    if crate::package::install_for(std::path::Path::new(&path)).is_err() {
+    if crate::package::install_for(&path).is_err() {
         crate::package::clear();
     }
-    crate::comptime::register_siblings(std::path::Path::new(&path), text);
+    crate::comptime::register_siblings(&path, text);
 }

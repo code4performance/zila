@@ -28,7 +28,7 @@ impl Compiler {
         if !matches!(e.kind, ExprKind::Call { .. }) {
             return self.err("`defer` needs a call, like `defer file.close()`");
         }
-        let body = vec![Stmt { kind: StmtKind::Expr(e.clone()), line }];
+        let body = vec![Stmt { kind: StmtKind::Expr(e.clone()), line, span: e.span }];
         let want = Ty::Func { params: vec![], ret: Box::new(Ty::Void), ext: false };
         // records are shared (not copied) so the call sees them as they are at exit;
         // the result of a call that can fail is discarded
@@ -232,9 +232,9 @@ impl Compiler {
             return self.err("channel() takes the element type: `channel(int)`");
         }
         let ty = match &args[0].value.kind {
-            ExprKind::Ident(n) => Type::Named { path: vec![n.clone()], args: vec![] },
+            ExprKind::Ident(n) => Type::Named { path: vec![n.clone()], args: vec![], span: Span::default() },
             ExprKind::Field { expr, name, .. } => match &expr.kind {
-                ExprKind::Ident(m) => Type::Named { path: vec![m.clone(), name.clone()], args: vec![] },
+                ExprKind::Ident(m) => Type::Named { path: vec![m.clone(), name.clone()], args: vec![], span: Span::default() },
                 _ => return self.err("channel() takes a type, like `channel(int)`"),
             },
             _ => return self.err("channel() takes a type, like `channel(int)`"),

@@ -14,8 +14,11 @@ impl Compiler {
 
     pub(super) fn stmt(&mut self, s: &Stmt) -> R<()> {
         self.line = s.line;
+        let saved = std::mem::replace(&mut self.span, s.span);
         let mark = self.fs.stmt_temps.len();
-        self.stmt_inner(s)?;
+        let r = self.stmt_inner(s);
+        self.span = saved;
+        r?;
         self.flush_temps(mark);
         Ok(())
     }
@@ -31,7 +34,7 @@ impl Compiler {
                     Some(e) => {
                         let t = self.value(e, ann.as_ref())?;
                         if let Some(a) = &ann {
-                            self.check(a, &t, &format!("'{}'", vd.name))?;
+                            self.check_at(e, a, &t, &format!("'{}'", vd.name))?;
                             a.clone()
                         } else if t == Ty::Nil || t == Ty::Void {
                             return self.err(format!("cannot infer the type of '{}'", vd.name));
@@ -87,7 +90,7 @@ impl Compiler {
                                 if **inner == Ty::Void {
                                     return self.err("this function returns no value; write `return` or `return error(\"...\")`");
                                 }
-                                self.check(inner, &t, "return value")?;
+                                self.check_at(e, inner, &t, "return value")?;
                                 self.norm(inner);
                                 self.mk_ok(inner);
                             }
@@ -100,7 +103,7 @@ impl Compiler {
                     (Ty::Void, Some(_)) => return self.err("this function does not return a value"),
                     (_, Some(e)) => {
                         let t = self.value(e, Some(&ret))?;
-                        self.check(&ret, &t, "return value")?;
+                        self.check_at(e, &ret, &t, "return value")?;
                         self.norm(&ret);
                     }
                     (_, None) => {}
@@ -169,7 +172,7 @@ impl Compiler {
                 if !matches!(call.kind, ExprKind::Call { .. }) {
                     return self.err("'spawn' needs a function call, like `spawn work(x)`");
                 }
-                let body = vec![Stmt { kind: StmtKind::Expr(call.clone()), line: s.line }];
+                let body = vec![Stmt { kind: StmtKind::Expr(call.clone()), line: s.line, span: s.span }];
                 let want = Ty::Func { params: vec![], ret: Box::new(Ty::Void), ext: false };
                 self.lambda(&[], &body, Some(&want))?;
                 let t = self.temp();
@@ -536,6 +539,7 @@ impl Compiler {
             rhs_owned = Expr {
                 kind: ExprKind::Binary { op: binop_static(&op[..op.len() - 1]), lhs: Box::new(target.clone()), rhs: Box::new(value.clone()) },
                 line: value.line,
+                span: target.span.to(value.span),
             };
             &rhs_owned
         };
@@ -549,7 +553,7 @@ impl Compiler {
                         return self.err(format!("cannot assign to '{}': declared with 'let'", name));
                     }
                     let t = self.value(rhs, Some(&l.ty))?;
-                    self.check(&l.ty, &t, &format!("'{}'", name))?;
+                    self.check_at(rhs, &l.ty, &t, &format!("'{}'", name))?;
                     self.norm(&l.ty);
                     if l.ind {
                         // a `ref` list or map: the caller's own variable is replaced
@@ -573,7 +577,7 @@ impl Compiler {
                 }
                 let (sym, ty) = (g.sym.clone(), g.ty.clone());
                 let t = self.value(rhs, Some(&ty))?;
-                self.check(&ty, &t, &format!("'{}'", name))?;
+                self.check_at(rhs, &ty, &t, &format!("'{}'", name))?;
                 self.norm(&ty);
                 if self.is_rc(&ty) {
                     self.e(format!("mov rcx, qword ptr {}", sym));

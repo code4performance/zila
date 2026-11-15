@@ -49,6 +49,9 @@ pub struct Token {
     pub tok: Tok,
     pub line: u32,
     pub col: u32,
+    /// Where the token ends: the line and column just after its last character.
+    pub end_line: u32,
+    pub end_col: u32,
     /// Where the token is in the source, as character offsets (start, end).
     pub span: (usize, usize),
 }
@@ -133,7 +136,7 @@ impl Lexer {
     }
 
     fn push(&mut self, tok: Tok, line: u32, col: u32) {
-        self.out.push(Token { tok, line, col, span: (self.tok_start, self.pos) });
+        self.out.push(Token { tok, line, col, end_line: self.line, end_col: self.col, span: (self.tok_start, self.pos) });
     }
 
     pub fn tokenize(self) -> Result<Vec<Token>, Diag> {

@@ -140,14 +140,14 @@ impl Compiler {
         for s in b {
             if w.stopped {
                 w.complete = false;
-                out.push(TypedStmt { kind: TypedStmtKind::Opaque(Box::new(s.clone())), line: s.line });
+                out.push(TypedStmt { kind: TypedStmtKind::Opaque(Box::new(s.clone())), line: s.line, span: s.span });
                 continue;
             }
             match self.check_stmt(s, w) {
                 Some(t) => out.push(t),
                 None => {
                     w.complete = false;
-                    out.push(TypedStmt { kind: TypedStmtKind::Opaque(Box::new(s.clone())), line: s.line });
+                    out.push(TypedStmt { kind: TypedStmtKind::Opaque(Box::new(s.clone())), line: s.line, span: s.span });
                 }
             }
         }
@@ -255,7 +255,7 @@ impl Compiler {
             },
             _ => return None,
         };
-        Some(TypedStmt { kind, line })
+        Some(TypedStmt { kind, line, span: s.span })
     }
 
     /// An expression in a value position (a `let` or `return` value, an assigned value, the last
@@ -308,11 +308,11 @@ impl Compiler {
                     None => None,
                 };
                 let ty = if as_value { ty.unwrap_or(Ty::Void) } else { Ty::Void };
-                Some(TypedExpr { kind: TypedExprKind::If { branches: typed, else_body: else_typed }, ty, line: e.line })
+                Some(TypedExpr { kind: TypedExprKind::If { branches: typed, else_body: else_typed }, ty, line: e.line, span: e.span })
             }
             ExprKind::Match { scrutinee, arms } => {
                 let (kind, ty) = self.check_match(scrutinee, arms, want, as_value, w)?;
-                Some(TypedExpr { kind, ty, line: e.line })
+                Some(TypedExpr { kind, ty, line: e.line, span: e.span })
             }
             _ => None,
         }
@@ -342,7 +342,7 @@ impl Compiler {
             }
             let x = self.check_value(e, want, w)?;
             ty = x.ty.clone();
-            out.push(TypedStmt { kind: TypedStmtKind::Expr(x), line: s.line });
+            out.push(TypedStmt { kind: TypedStmtKind::Expr(x), line: s.line, span: s.span });
         }
         Some((out, ty))
     }
@@ -445,7 +445,7 @@ impl Compiler {
             }
             let t = l.ty.clone();
             let line = iter.line;
-            let range = TypedExpr { kind: TypedExprKind::Binary { op: "..", lhs: Box::new(l), rhs: Box::new(r) }, ty: t.clone(), line };
+            let range = TypedExpr { kind: TypedExprKind::Binary { op: "..", lhs: Box::new(l), rhs: Box::new(r) }, ty: t.clone(), line, span: iter.span };
             (range, vec![(vars[0].clone(), t)])
         } else {
             let x = self.check_expr(iter, None)?;

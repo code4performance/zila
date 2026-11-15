@@ -626,3 +626,170 @@ fn a_misplaced_pub_is_a_parse_error_that_names_what_it_cannot_apply_to() {
     assert!(parse_err("package t\nfunc f(pub x: int)\nend\n").contains("'pub' cannot be applied to a parameter"));
     assert!(parse_err("package t\npub use x\n").contains("'pub' cannot be applied to 'use'"));
 }
+
+fn sp(s: Span) -> (u32, u32, u32, u32) {
+    (s.line, s.col, s.end_line, s.end_col)
+}
+
+/// Ranges of declarations, names, statements, calls and types: lines and columns count from 1 and
+/// the end is just after the last character.
+#[test]
+fn nodes_carry_source_ranges() {
+    let src = r#"package t
+
+pub func add(a: int, b: int) -> int
+    let sum = a + b
+    return sum
+end
+
+type Point = record
+    x: int
+end
+
+func main()
+    let r = add(1,
+        2)
+    let n = r.value
+end
+"#;
+    let file = parse_source(src).unwrap();
+
+    // `pub func add ... end`
+    let add = &file.decls[0];
+    assert_eq!(sp(add.span), (3, 1, 6, 4));
+    let DeclKind::Func(f) = &add.kind else { panic!("not a func") };
+    assert_eq!(sp(f.name_span), (3, 10, 3, 13));
+    assert_eq!((sp(f.params[0].name_span), sp(f.params[1].name_span)), ((3, 14, 3, 15), (3, 22, 3, 23)));
+    let Some(Type::Named { span, .. }) = &f.params[0].ty else { panic!("not a named type") };
+    assert_eq!(sp(*span), (3, 17, 3, 20));
+
+    // `let sum = a + b`
+    let StmtKind::Var(v) = &f.body[0].kind else { panic!("not a let") };
+    assert_eq!(sp(f.body[0].span), (4, 5, 4, 20));
+    assert_eq!(sp(v.name_span), (4, 9, 4, 12));
+    let value = v.value.as_ref().unwrap();
+    assert_eq!(sp(value.span), (4, 15, 4, 20));
+    let ExprKind::Binary { lhs, rhs, .. } = &value.kind else { panic!("not binary") };
+    assert_eq!((sp(lhs.span), sp(rhs.span)), ((4, 15, 4, 16), (4, 19, 4, 20)));
+
+    // the record type and its field
+    let DeclKind::Type(t) = &file.decls[1].kind else { panic!("not a type") };
+    assert_eq!(sp(t.name_span), (8, 6, 8, 11));
+    let TypeBody::Record(fields) = &t.body else { panic!("not a record") };
+    assert_eq!(sp(fields[0].name_span), (9, 5, 9, 6));
+
+    // a call that goes over two lines, and a member access
+    let DeclKind::Func(m) = &file.decls[2].kind else { panic!("not a func") };
+    let StmtKind::Var(r) = &m.body[0].kind else { panic!("not a let") };
+    let call = r.value.as_ref().unwrap();
+    assert_eq!(sp(call.span), (13, 13, 14, 11));
+    let ExprKind::Call { callee, .. } = &call.kind else { panic!("not a call") };
+    assert_eq!(sp(callee.span), (13, 13, 13, 16));
+    let StmtKind::Var(n) = &m.body[1].kind else { panic!("not a let") };
+    let field = n.value.as_ref().unwrap();
+    assert_eq!(sp(field.span), (15, 13, 15, 20));
+    assert!(field.span.contains(15, 19) && !field.span.contains(15, 20));
+}
+
+// ---- recovery (`parse_partial`) ----
+
+use zila::parser::parse_partial;
+
+fn func_body_len(file: &File, i: usize) -> usize {
+    match &file.decls[i].kind {
+        DeclKind::Func(f) => f.body.len(),
+        _ => panic!("not a func"),
+    }
+}
+
+#[test]
+fn a_statement_that_does_not_parse_is_skipped_and_the_rest_is_kept() {
+    let p = parse_partial("package t\n\nfunc f()\n    let a = 1\n    let = 2\n    let c = 3\nend\n\nfunc g()\nend\n");
+    assert_eq!(p.errors.len(), 1, "{:?}", p.errors);
+    assert_eq!(p.errors[0].line, 5);
+    let file = p.file.unwrap();
+    assert_eq!(file.decls.len(), 2);
+    assert_eq!(func_body_len(&file, 0), 2);
+}
+
+#[test]
+fn a_block_left_open_at_the_end_of_the_text_is_closed_there() {
+    let p = parse_partial("package t\n\nfunc f()\n    let a = 1\n    if a == 1\n        print(\"x\")\n");
+    assert_eq!(p.errors.len(), 1, "{:?}", p.errors);
+    assert!(p.errors[0].msg.contains("'end'"), "{:?}", p.errors);
+    let file = p.file.unwrap();
+    assert_eq!(file.decls.len(), 1);
+    assert_eq!(func_body_len(&file, 0), 2, "the let and the open if are both there");
+}
+
+#[test]
+fn a_broken_declaration_is_skipped_to_the_next_one() {
+    let p = parse_partial("package t\n\nfunc (\n    nonsense here\n\ntype P = record\n    x: int\nend\n\nfunc ok()\nend\n");
+    assert_eq!(p.errors[0].line, 3, "{:?}", p.errors);
+    let file = p.file.unwrap();
+    let names: Vec<String> = file
+        .decls
+        .iter()
+        .map(|d| match &d.kind {
+            DeclKind::Func(f) => f.name.clone(),
+            DeclKind::Type(t) => t.name.clone(),
+            _ => String::new(),
+        })
+        .collect();
+    assert_eq!(names, ["P", "ok"]);
+}
+
+#[test]
+fn a_text_the_lexer_cannot_finish_keeps_what_came_before() {
+    let p = parse_partial("package t\n\nfunc f()\n    let a = 1\n    let s = \"never closed\nend\n");
+    assert!(p.errors.iter().any(|e| e.line == 5), "{:?}", p.errors);
+    let file = p.file.unwrap();
+    assert_eq!(file.decls.len(), 1);
+}
+
+#[test]
+fn a_correct_file_has_the_same_tree_and_no_errors() {
+    let src = "package t\n\nfunc f(a: int) -> int\n    return a + 1\nend\n";
+    let p = parse_partial(src);
+    assert!(p.errors.is_empty());
+    assert_eq!(format!("{:?}", p.file.unwrap()), format!("{:?}", parse_source(src).unwrap()));
+}
+
+/// The cut points used on the examples: a few fractions of the text and the end of some lines.
+fn cuts(src: &str) -> Vec<usize> {
+    let chars: Vec<(usize, char)> = src.char_indices().collect();
+    let mut v: Vec<usize> = [10, 25, 40, 50, 60, 75, 90].iter().map(|pct| chars[chars.len() * pct / 100].0).collect();
+    let lines: Vec<usize> = src.match_indices('\n').map(|(i, _)| i).collect();
+    for k in [3usize, 7, 11] {
+        if let Some(i) = lines.get(lines.len() * k / 12) {
+            v.push(*i);
+        }
+    }
+    v
+}
+
+#[test]
+fn every_example_cut_anywhere_gives_a_tree_and_the_error_the_strict_parser_gives() {
+    let mut tried = 0;
+    for entry in fs::read_dir("examples").unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_none_or(|e| e != "zila") {
+            continue;
+        }
+        let src = fs::read_to_string(&path).unwrap();
+        for at in cuts(&src) {
+            let text = &src[..at];
+            let p = parse_partial(text);
+            tried += 1;
+            match parse_source(text) {
+                Ok(_) => assert!(p.errors.is_empty() && p.file.is_some(), "{} cut at {}: {:?}", path.display(), at, p.errors),
+                Err(d) => {
+                    // without a `package` line there is nothing to build a tree on
+                    assert!(p.file.is_some() || d.msg.contains("'package'"), "{} cut at {}: no tree", path.display(), at);
+                    assert_eq!((p.errors[0].line, p.errors[0].col), (d.line, d.col), "{} cut at {}", path.display(), at);
+                }
+            }
+        }
+    }
+    assert!(tried > 200, "{}", tried);
+}

@@ -605,7 +605,7 @@ end
     pub(super) fn resolve(&mut self, t: &Type, m: &str) -> R<Ty> {
         match t {
             Type::Shared(inner) => self.resolve(inner, m),
-            Type::Named { path, args } => {
+            Type::Named { path, args, .. } => {
                 if path.len() == 1 {
                     let n = path[0].as_str();
                     if args.is_empty() {

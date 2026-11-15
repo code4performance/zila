@@ -24,6 +24,55 @@ pub fn parse_source_with(src: &str, blocks: std::collections::HashSet<String>) -
     Parser::new(toks).parse_file()
 }
 
+/// What `parse_partial` found: the tree of what could be read (none when not even the `package`
+/// line could) and every syntax error met, by position.
+#[derive(Debug, Clone)]
+pub struct Partial {
+    pub file: Option<File>,
+    pub errors: Vec<Diag>,
+}
+
+/// Parses `src` as far as it can, for tools that work on text being typed. A statement that does not
+/// parse is skipped to the end of its line and a declaration to the next line that starts one at
+/// the left margin; a block left open at the end of the text is closed there. The tree has what was
+/// read and none of what was skipped, so its meaning can differ from the writer's intent: use it to
+/// answer questions about the code that is there, never to compile.
+pub fn parse_partial(src: &str) -> Partial {
+    let blocks = crate::comptime::block_names(src);
+    match Lexer::new(src).with_blocks(blocks.clone()).tokenize() {
+        Ok(toks) => recover(toks),
+        Err(d) => {
+            // a text the lexer cannot read to the end: what comes before the line it stopped on
+            let before: String = src.split_inclusive('\n').take(d.line.saturating_sub(1) as usize).collect();
+            let mut p = match Lexer::new(&before).with_blocks(blocks).tokenize() {
+                Ok(toks) => recover(toks),
+                Err(_) => Partial { file: None, errors: Vec::new() },
+            };
+            // what the cut-off text lacks at its end (a closing `end`) is a result of the cut
+            p.errors.retain(|e| e.line < d.line);
+            p.errors.push(d);
+            p.errors.sort_by_key(|e| (e.line, e.col));
+            p
+        }
+    }
+}
+
+fn recover(toks: Vec<Token>) -> Partial {
+    let mut p = Parser::new(toks);
+    p.recover = true;
+    let file = p.parse_file().ok();
+    let mut errors = std::mem::take(&mut p.errors);
+    if file.is_none() {
+        // the error that stopped the parse is the one the strict parser would give
+        if let Err(d) = Parser::new(p.toks.clone()).parse_file() {
+            errors.push(d);
+        }
+    }
+    errors.sort_by_key(|e| (e.line, e.col));
+    errors.dedup();
+    Partial { file, errors }
+}
+
 /// Where the blocks of a file are, by token index, for tools that rewrite source.
 #[derive(Debug, Clone, Default)]
 pub struct Layout {
@@ -47,6 +96,9 @@ pub struct Parser {
     toks: Vec<Token>,
     pos: usize,
     layout: Layout,
+    /// Keep going after a syntax error (see `parse_partial`); the errors are collected in `errors`.
+    recover: bool,
+    errors: Vec<Diag>,
 }
 
 const ASSIGN_OPS: &[&str] = &["=", "+=", "-=", "*=", "/=", "%="];
@@ -54,12 +106,19 @@ const CMP_OPS: &[&str] = &["==", "!=", "<", "<=", ">", ">="];
 
 impl Parser {
     pub fn new(toks: Vec<Token>) -> Self {
-        Parser { toks, pos: 0, layout: Layout::default() }
+        Parser { toks, pos: 0, layout: Layout::default(), recover: false, errors: Vec::new() }
     }
 
     /// Consumes the `end` that closes the block opened at token `open`.
     fn end_block(&mut self, open: usize) -> R<()> {
         let at = self.pos;
+        if self.recover && matches!(self.cur(), Tok::Eof) {
+            // the text ends inside the block: close it here
+            let d = Diag { line: self.toks[at].line, col: self.toks[at].col, msg: "expected 'end', found end of file".into() };
+            self.errors.push(d);
+            self.layout.blocks.insert(open, at);
+            return Ok(());
+        }
         self.expect_kw("end")?;
         self.layout.blocks.insert(open, at);
         Ok(())
@@ -90,6 +149,31 @@ impl Parser {
 
     fn line(&self) -> u32 {
         self.toks[self.pos].line
+    }
+
+    /// Line and column where the current token starts.
+    fn start(&self) -> (u32, u32) {
+        let t = &self.toks[self.pos];
+        (t.line, t.col)
+    }
+
+    /// The range of the current token.
+    fn tok_span(&self) -> Span {
+        let t = &self.toks[self.pos];
+        Span::new(t.line, t.col, t.end_line, t.end_col)
+    }
+
+    /// From `start` to the end of the last token consumed (line ends do not count).
+    fn span_from(&self, start: (u32, u32)) -> Span {
+        let mut i = self.pos;
+        while i > 0 && matches!(self.toks[i - 1].tok, Tok::Newline) {
+            i -= 1;
+        }
+        if i == 0 {
+            return Span::default();
+        }
+        let t = &self.toks[i - 1];
+        Span::new(start.0, start.1, t.end_line, t.end_col)
     }
 
     fn bump(&mut self) {
@@ -246,13 +330,25 @@ impl Parser {
         loop {
             self.skip_nl();
             if self.eat_kw("use") {
-                loop {
-                    uses.push(self.qname()?);
-                    if !self.eat_op(",") {
-                        break;
+                let line_uses = (|| -> R<Vec<Vec<String>>> {
+                    let mut v = Vec::new();
+                    loop {
+                        v.push(self.qname()?);
+                        if !self.eat_op(",") {
+                            break;
+                        }
                     }
+                    self.stmt_end()?;
+                    Ok(v)
+                })();
+                match line_uses {
+                    Ok(v) => uses.extend(v),
+                    Err(d) if self.recover => {
+                        self.errors.push(d);
+                        self.skip_line();
+                    }
+                    Err(d) => return Err(d),
                 }
-                self.stmt_end()?;
             } else {
                 break;
             }
@@ -263,10 +359,41 @@ impl Parser {
             if matches!(self.cur(), Tok::Eof) {
                 break;
             }
-            decls.push(self.decl()?);
-            self.stmt_end()?;
+            let at = self.pos;
+            match self.decl().and_then(|d| self.stmt_end().map(|_| d)) {
+                Ok(d) => decls.push(d),
+                Err(d) if self.recover => {
+                    self.errors.push(d);
+                    self.skip_to_declaration(at);
+                }
+                Err(d) => return Err(d),
+            }
         }
         Ok(File { package, uses, decls })
+    }
+
+    /// After a syntax error in a declaration that started at token `from`: skips to the next line
+    /// that starts a declaration at the left margin.
+    fn skip_to_declaration(&mut self, from: usize) {
+        if self.pos <= from {
+            self.pos = from;
+            self.bump();
+        }
+        while !matches!(self.cur(), Tok::Eof) {
+            let t = &self.toks[self.pos];
+            let starts = matches!(t.tok, Tok::Kw("func" | "type" | "let" | "var" | "pub" | "extern" | "embed" | "async" | "comptime") | Tok::Op("#["));
+            if starts && t.col == 1 && self.pos > 0 && matches!(self.toks[self.pos - 1].tok, Tok::Newline) {
+                break;
+            }
+            self.bump();
+        }
+    }
+
+    /// After a syntax error in a statement: skips the rest of its line.
+    fn skip_line(&mut self) {
+        while !matches!(self.cur(), Tok::Newline | Tok::Eof) {
+            self.bump();
+        }
     }
 
     fn qname(&mut self) -> R<Vec<String>> {
@@ -309,6 +436,7 @@ impl Parser {
         let attrs = self.attrs()?;
         self.skip_nl();
         let line = self.line();
+        let start = self.start();
         let public = self.eat_kw("pub");
         if public && self.is_kw("embed") {
             return self.err("'pub' cannot be applied to 'embed'");
@@ -362,12 +490,13 @@ impl Parser {
         if let DeclKind::Func(f) = &mut kind {
             f.public = public;
         }
-        Ok(Decl { attrs, public, kind, line })
+        Ok(Decl { attrs, public, kind, line, span: self.span_from(start) })
     }
 
     fn var_decl(&mut self) -> R<VarDecl> {
         let mutable = self.is_kw("var");
         self.bump();
+        let name_span = self.tok_span();
         let name = self.expect_ident()?;
         let ty = if self.eat_op(":") { Some(self.ty()?) } else { None };
         let value = if self.eat_op("=") {
@@ -379,19 +508,20 @@ impl Parser {
         if !mutable && value.is_none() {
             return self.err("'let' requires an initial value");
         }
-        Ok(VarDecl { name, ty, value, mutable })
+        Ok(VarDecl { name, name_span, ty, value, mutable })
     }
 
     fn extern_decl(&mut self) -> R<ExternDecl> {
         self.expect_kw("extern")?;
         let abi = self.abi_string()?.unwrap_or_else(|| "C".to_string());
         self.expect_kw("func")?;
+        let name_span = self.tok_span();
         let name = self.expect_ident()?;
         self.expect_op("(")?;
         let (params, c_variadic) = self.extern_params()?;
         self.expect_op(")")?;
         let ret = if self.eat_op("->") { Some(self.ty()?) } else { None };
-        Ok(ExternDecl { abi, name, params, c_variadic, ret })
+        Ok(ExternDecl { abi, name, name_span, params, c_variadic, ret })
     }
 
     /// Optional ABI string after `extern`: `extern "C" func ...`
@@ -462,6 +592,7 @@ impl Parser {
 
     fn type_decl(&mut self) -> R<TypeDecl> {
         self.expect_kw("type")?;
+        let name_span = self.tok_span();
         let name = self.expect_ident()?;
         let generics = self.generics()?;
         self.expect_op("=")?;
@@ -481,10 +612,11 @@ impl Parser {
                     }
                     let line = self.line();
                     let public = self.eat_kw("pub");
+                    let name_span = self.tok_span();
                     let name = self.expect_ident()?;
                     self.expect_op(":")?;
                     let ty = self.ty()?;
-                    fields.push(Field { attrs, public, name, ty, line });
+                    fields.push(Field { attrs, public, name, name_span, ty, line });
                     self.eat_op(",");
                     self.stmt_end()?;
                 }
@@ -507,6 +639,7 @@ impl Parser {
                     if self.is_kw("pub") {
                         return self.err("'pub' cannot be applied to an enum variant; a 'pub' enum exports all its variants");
                     }
+                    let name_span = self.tok_span();
                     let name = self.expect_ident()?;
                     let mut fields = Vec::new();
                     let mut field_names = Vec::new();
@@ -525,7 +658,7 @@ impl Parser {
                         }
                         self.expect_op(")")?;
                     }
-                    variants.push(Variant { attrs, name, fields, field_names, line });
+                    variants.push(Variant { attrs, name, name_span, fields, field_names, line });
                     if !self.eat_op(",") && !matches!(self.cur(), Tok::Newline) {
                         return self.err(format!("expected ',' or a new line after a variant, found {}", self.describe()));
                     }
@@ -545,6 +678,7 @@ impl Parser {
                         return self.err("'pub' cannot be applied to an interface method signature");
                     }
                     self.expect_kw("func")?;
+                    let name_span = self.tok_span();
                     let name = self.expect_name()?;
                     self.expect_op("(")?;
                     self.expect_kw("self")?;
@@ -554,14 +688,14 @@ impl Parser {
                     }
                     self.expect_op(")")?;
                     let ret = if self.eat_op("->") { Some(self.result()?) } else { None };
-                    sigs.push(MethodSig { name, params, ret });
+                    sigs.push(MethodSig { name, name_span, params, ret });
                     self.stmt_end()?;
                 }
                 TypeBody::Interface(sigs)
             }
             _ => TypeBody::Alias(self.ty()?),
         };
-        Ok(TypeDecl { name, generics, body })
+        Ok(TypeDecl { name, name_span, generics, body })
     }
 
     /// `body_less`: a `#[generated]` function has no body; the generator writes it.
@@ -570,14 +704,16 @@ impl Parser {
         self.expect_kw("func")?;
         let receiver = if self.eat_op("(") {
             let by_ref = self.eat_kw("ref");
+            let name_span = self.tok_span();
             let name = self.expect_ident()?;
             self.expect_op(":")?;
             let ty = self.ty()?;
             self.expect_op(")")?;
-            Some(Receiver { by_ref, name, ty })
+            Some(Receiver { by_ref, name, name_span, ty })
         } else {
             None
         };
+        let name_span = self.tok_span();
         let name = if receiver.is_some() { self.expect_name()? } else { self.expect_ident()? };
         let generics = self.generics()?;
         self.expect_op("(")?;
@@ -585,11 +721,11 @@ impl Parser {
         self.expect_op(")")?;
         let ret = if self.eat_op("->") { Some(self.result()?) } else { None };
         if body_less {
-            return Ok(FuncDecl { receiver, name, generics, params, ret, body: Vec::new(), is_async, comptime: false, public: false });
+            return Ok(FuncDecl { receiver, name, name_span, generics, params, ret, body: Vec::new(), is_async, comptime: false, public: false });
         }
         let body = self.block()?;
         self.end_block(open)?;
-        Ok(FuncDecl { receiver, name, generics, params, ret, body, is_async, comptime: false, public: false })
+        Ok(FuncDecl { receiver, name, name_span, generics, params, ret, body, is_async, comptime: false, public: false })
     }
 
     /// Parameters up to (not including) `)`. Lambdas may omit types.
@@ -616,6 +752,7 @@ impl Parser {
             return self.err("'comptime' parameters are only allowed in function declarations");
         }
         let by_ref = self.eat_kw("ref");
+        let name_span = self.tok_span();
         let name = self.expect_ident()?;
         let mut variadic = false;
         let mut ty = None;
@@ -626,7 +763,7 @@ impl Parser {
             return self.err(format!("expected ':' and a type for parameter '{}'", name));
         }
         let default = if self.eat_op("=") { Some(self.expr()?) } else { None };
-        Ok(Param { by_ref, name, ty, variadic, default, comptime })
+        Ok(Param { by_ref, name, name_span, ty, variadic, default, comptime })
     }
 
     // ---------- types ----------
@@ -634,7 +771,7 @@ impl Parser {
     /// `T`, `T or error` or `error`
     fn result(&mut self) -> R<RetType> {
         let ty = self.ty()?;
-        if matches!(&ty, Type::Named { path, args } if path.len() == 1 && path[0] == "error" && args.is_empty()) {
+        if matches!(&ty, Type::Named { path, args, .. } if path.len() == 1 && path[0] == "error" && args.is_empty()) {
             return Ok(RetType { ty: None, fallible: true });
         }
         if self.eat_kw("or") {
@@ -738,6 +875,7 @@ impl Parser {
                 self.func_type(Some(abi))
             }
             Tok::Ident(_) => {
+                let start = self.start();
                 let path = self.qname()?;
                 let mut args = Vec::new();
                 if self.eat_op("<") {
@@ -749,7 +887,7 @@ impl Parser {
                     }
                     self.expect_gt()?;
                 }
-                Ok(Type::Named { path, args })
+                Ok(Type::Named { path, args, span: self.span_from(start) })
             }
             _ => self.err(format!("expected a type, found {}", self.describe())),
         }
@@ -764,14 +902,25 @@ impl Parser {
             if matches!(self.cur(), Tok::Eof) || self.is_kw("end") || self.is_kw("else") {
                 break;
             }
-            v.push(self.stmt()?);
-            self.stmt_end()?;
+            let at = self.pos;
+            match self.stmt().and_then(|s| self.stmt_end().map(|_| s)) {
+                Ok(s) => v.push(s),
+                Err(d) if self.recover => {
+                    self.errors.push(d);
+                    if self.pos == at {
+                        self.bump();
+                    }
+                    self.skip_line();
+                }
+                Err(d) => return Err(d),
+            }
         }
         Ok(v)
     }
 
     fn stmt(&mut self) -> R<Stmt> {
         let line = self.line();
+        let start = self.start();
         let kind = match self.kw() {
             Some("let") | Some("var") => StmtKind::Var(self.var_decl()?),
             Some("return") => {
@@ -856,7 +1005,7 @@ impl Parser {
                 }
             }
         };
-        Ok(Stmt { kind, line })
+        Ok(Stmt { kind, line, span: self.span_from(start) })
     }
 
     /// `asm` block: text lines, then `in|out|inout name = expr` and `clobber "reg", ...`.
@@ -933,9 +1082,11 @@ impl Parser {
             self.bump();
             self.skip_nl();
             let rhs = next(self)?;
+            let span = lhs.span.to(rhs.span);
             lhs = Expr {
                 kind: ExprKind::Binary { op, lhs: Box::new(lhs), rhs: Box::new(rhs) },
                 line,
+                span,
             };
         }
         Ok(lhs)
@@ -967,7 +1118,8 @@ impl Parser {
         if matches!(self.cur(), Tok::Op(o) if CMP_OPS.contains(o)) {
             return self.err("comparison operators cannot be chained; use 'and'");
         }
-        Ok(Expr { kind: ExprKind::Binary { op, lhs: Box::new(lhs), rhs: Box::new(rhs) }, line })
+        let span = lhs.span.to(rhs.span);
+        Ok(Expr { kind: ExprKind::Binary { op, lhs: Box::new(lhs), rhs: Box::new(rhs) }, line, span })
     }
 
     fn range_expr(&mut self) -> R<Expr> {
@@ -976,9 +1128,11 @@ impl Parser {
             let line = self.line();
             self.bump();
             let rhs = self.add_expr()?;
+            let span = lhs.span.to(rhs.span);
             return Ok(Expr {
                 kind: ExprKind::Binary { op: "..", lhs: Box::new(lhs), rhs: Box::new(rhs) },
                 line,
+                span,
             });
         }
         Ok(lhs)
@@ -994,6 +1148,7 @@ impl Parser {
 
     fn unary(&mut self) -> R<Expr> {
         let line = self.line();
+        let start = self.start();
         let op = match self.cur() {
             Tok::Kw("not") => "not",
             Tok::Kw("bitnot") => "bitnot",
@@ -1003,24 +1158,25 @@ impl Parser {
             Tok::Kw("try") => {
                 self.bump();
                 let e = self.unary()?;
-                return Ok(Expr { kind: ExprKind::Propagate(Box::new(e)), line });
+                return Ok(Expr { kind: ExprKind::Propagate(Box::new(e)), line, span: self.span_from(start) });
             }
             Tok::Kw("await") => {
                 self.bump();
                 let e = self.unary()?;
-                return Ok(Expr { kind: ExprKind::Await(Box::new(e)), line });
+                return Ok(Expr { kind: ExprKind::Await(Box::new(e)), line, span: self.span_from(start) });
             }
             _ => return self.postfix(),
         };
         self.bump();
         let e = self.unary()?;
-        Ok(Expr { kind: ExprKind::Unary { op, expr: Box::new(e) }, line })
+        Ok(Expr { kind: ExprKind::Unary { op, expr: Box::new(e) }, line, span: self.span_from(start) })
     }
 
     fn postfix(&mut self) -> R<Expr> {
         let mut e = self.primary()?;
         loop {
             let line = self.line();
+            let start = (e.span.line, e.span.col);
             // method chain continued on the next line
             if matches!(self.cur(), Tok::Newline)
                 && matches!(self.at(1), Tok::Op(".") | Tok::Op("?."))
@@ -1032,7 +1188,7 @@ impl Parser {
                     let safe = self.is_op("?.");
                     self.bump();
                     let name = self.expect_name()?;
-                    e = Expr { kind: ExprKind::Field { expr: Box::new(e), name, safe }, line };
+                    e = Expr { kind: ExprKind::Field { expr: Box::new(e), name, safe }, line, span: self.span_from(start) };
                 }
                 Tok::Op("[") => {
                     self.bump();
@@ -1043,22 +1199,23 @@ impl Parser {
                     e = Expr {
                         kind: ExprKind::Index { expr: Box::new(e), index: Box::new(index) },
                         line,
+                        span: self.span_from(start),
                     };
                 }
                 Tok::Op("(") => {
                     self.bump();
                     let args = self.args()?;
-                    e = Expr { kind: ExprKind::Call { callee: Box::new(e), args, targs: Vec::new() }, line };
+                    e = Expr { kind: ExprKind::Call { callee: Box::new(e), args, targs: Vec::new() }, line, span: self.span_from(start) };
                 }
                 Tok::Op("<") if path_of(&e).is_some() => {
                     let Some(targs) = self.try_type_args() else { break };
                     self.bump();
                     let args = self.args()?;
-                    e = Expr { kind: ExprKind::Call { callee: Box::new(e), args, targs }, line };
+                    e = Expr { kind: ExprKind::Call { callee: Box::new(e), args, targs }, line, span: self.span_from(start) };
                 }
                 Tok::Op("^") => {
                     self.bump();
-                    e = Expr { kind: ExprKind::Deref(Box::new(e)), line };
+                    e = Expr { kind: ExprKind::Deref(Box::new(e)), line, span: self.span_from(start) };
                 }
                 Tok::Op("?") => {
                     return self.err("postfix '?' was replaced by 'try': write `try call()`");
@@ -1067,7 +1224,7 @@ impl Parser {
                     let path = path_of(&e).unwrap();
                     self.bump();
                     let fields = self.record_fields()?;
-                    e = Expr { kind: ExprKind::Record { path, fields }, line };
+                    e = Expr { kind: ExprKind::Record { path, fields }, line, span: self.span_from(start) };
                 }
                 _ => break,
             }
@@ -1127,6 +1284,7 @@ impl Parser {
 
     fn primary(&mut self) -> R<Expr> {
         let line = self.line();
+        let start = self.start();
         let kind = match self.cur().clone() {
             Tok::Int(n) => {
                 self.bump();
@@ -1199,7 +1357,7 @@ impl Parser {
                 }
                 self.bump();
                 let fields = self.record_fields()?;
-                ExprKind::New(Box::new(Expr { kind: ExprKind::Record { path, fields }, line }))
+                ExprKind::New(Box::new(Expr { kind: ExprKind::Record { path, fields }, line, span: self.span_from(start) }))
             }
             Tok::Op("(") => {
                 self.bump();
@@ -1245,7 +1403,7 @@ impl Parser {
             }
             _ => return self.err(format!("expected an expression, found {}", self.describe())),
         };
-        Ok(Expr { kind, line })
+        Ok(Expr { kind, line, span: self.span_from(start) })
     }
 
     fn text_parts(&self, parts: Vec<StrPart>) -> R<Vec<TextPart>> {
@@ -1274,6 +1432,7 @@ impl Parser {
 
     fn lambda(&mut self) -> R<Expr> {
         let line = self.line();
+        let start = self.start();
         let open = self.pos;
         self.expect_kw("func")?;
         self.expect_op("(")?;
@@ -1284,11 +1443,12 @@ impl Parser {
         }
         let body = self.block()?;
         self.end_block(open)?;
-        Ok(Expr { kind: ExprKind::Lambda { params, body }, line })
+        Ok(Expr { kind: ExprKind::Lambda { params, body }, line, span: self.span_from(start) })
     }
 
     fn if_expr(&mut self) -> R<Expr> {
         let line = self.line();
+        let start = self.start();
         let open = self.pos;
         self.expect_kw("if")?;
         let mut branches = Vec::new();
@@ -1314,11 +1474,12 @@ impl Parser {
                 break;
             }
         }
-        Ok(Expr { kind: ExprKind::If { branches, else_body }, line })
+        Ok(Expr { kind: ExprKind::If { branches, else_body }, line, span: self.span_from(start) })
     }
 
     fn match_expr(&mut self) -> R<Expr> {
         let line = self.line();
+        let start = self.start();
         let open = self.pos;
         self.expect_kw("match")?;
         let scrutinee = Box::new(self.expr()?);
@@ -1329,6 +1490,11 @@ impl Parser {
                 break;
             }
             if matches!(self.cur(), Tok::Eof) {
+                if self.recover {
+                    let d = Diag { line: self.toks[self.pos].line, col: self.toks[self.pos].col, msg: "unterminated 'match': expected 'end'".into() };
+                    self.errors.push(d);
+                    break;
+                }
                 return self.err("unterminated 'match': expected 'end'");
             }
             let pattern = self.pattern()?;
@@ -1345,7 +1511,7 @@ impl Parser {
             };
             arms.push(MatchArm { pattern, body });
         }
-        Ok(Expr { kind: ExprKind::Match { scrutinee, arms }, line })
+        Ok(Expr { kind: ExprKind::Match { scrutinee, arms }, line, span: self.span_from(start) })
     }
 
     /// Multi-line arm body: runs until the next arm or the closing `end`.
@@ -1356,8 +1522,18 @@ impl Parser {
             if matches!(self.cur(), Tok::Eof) || self.is_kw("end") || self.is_arm_start() {
                 break;
             }
-            v.push(self.stmt()?);
-            self.stmt_end()?;
+            let at = self.pos;
+            match self.stmt().and_then(|s| self.stmt_end().map(|_| s)) {
+                Ok(s) => v.push(s),
+                Err(d) if self.recover => {
+                    self.errors.push(d);
+                    if self.pos == at {
+                        self.bump();
+                    }
+                    self.skip_line();
+                }
+                Err(d) => return Err(d),
+            }
         }
         Ok(v)
     }
@@ -1379,6 +1555,7 @@ impl Parser {
 
     fn pat_atom(&mut self) -> R<PatAtom> {
         let line = self.line();
+        let start = self.start();
         match self.cur().clone() {
             Tok::Ident(n) => {
                 self.bump();
@@ -1412,6 +1589,7 @@ impl Parser {
                 Ok(PatAtom::Literal(Expr {
                     kind: ExprKind::Unary { op: "-", expr: Box::new(e) },
                     line,
+                    span: self.span_from(start),
                 }))
             }
             _ => self.err(format!("expected a pattern, found {}", self.describe())),

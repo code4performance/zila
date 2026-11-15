@@ -64,10 +64,13 @@ mod threads;
 mod bodies;
 mod typed;
 mod checker;
-use typed::{TypedArg, TypedBody, TypedCallee, TypedExpr, TypedExprKind, TypedMatchArm, TypedProgram, TypedStmt, TypedStmtKind};
+mod check_program;
+pub use typed::{TypedBody, TypedProgram};
+use typed::{TypedArg, TypedCallee, TypedExpr, TypedExprKind, TypedMatchArm, TypedStmt, TypedStmtKind};
 use analysis::*;
 use fold::*;
 use generics::*;
+pub use check_program::{check_program, CheckError, Checked};
 pub use output::*;
 use runtime::*;
 use threads::*;
@@ -797,6 +800,10 @@ pub struct Compiler {
     lambda_vars: HashMap<(u32, String), Ty>,
     cur_mod: String,
     line: u32,
+    /// The range of the statement or expression being compiled (empty when unknown).
+    span: Span,
+    /// The range `err` last saw; `check_program` reads it to give an error a range.
+    err_span: std::cell::Cell<Span>,
     fs: FnState,
     uses_ui: bool,
     /// `use thread` was written; counts become atomic only if a function of it is reachable.
@@ -883,6 +890,8 @@ impl Compiler {
             lambda_vars: HashMap::new(),
             cur_mod: String::new(),
             line: 0,
+            span: Span::default(),
+            err_span: std::cell::Cell::new(Span::default()),
             fs: FnState::new(Ty::Void, String::new()),
             uses_ui: false,
             uses_thread_lib: false,
@@ -917,6 +926,9 @@ impl Compiler {
     }
 
     fn err<T>(&self, msg: impl Into<String>) -> R<T> {
+        // the range only counts while it still holds the line the error is reported on
+        let s = self.span;
+        self.err_span.set(if !s.is_none() && s.line <= self.line && self.line <= s.end_line { s } else { Span::default() });
         Err(format!("{}.zila:{}: {}", self.cur_mod, self.line, msg.into()))
     }
 
@@ -1056,7 +1068,7 @@ impl Compiler {
                 "assert_eq takes two values"
             });
         }
-        let mk = |kind: ExprKind| Expr { kind, line };
+        let mk = |kind: ExprKind| Expr { kind, line, span: Span::default() };
         let fail = |parts: Vec<TextPart>| {
             let call = mk(ExprKind::Call {
                 callee: Box::new(mk(ExprKind::Ident(if returns { "error" } else { "__abort" }.into()))),
@@ -1064,9 +1076,9 @@ impl Compiler {
                 targs: Vec::new(),
             });
             if returns {
-                vec![Stmt { kind: StmtKind::Return(Some(call)), line }]
+                vec![Stmt { kind: StmtKind::Return(Some(call)), line, span: Span::default() }]
             } else {
-                vec![Stmt { kind: StmtKind::Expr(call), line }]
+                vec![Stmt { kind: StmtKind::Expr(call), line, span: Span::default() }]
             }
         };
         // the abort message carries the location already
@@ -1082,7 +1094,7 @@ impl Compiler {
             (mk(ExprKind::Unary { op: "not", expr: Box::new(args[0].value.clone()) }), fail(parts))
         } else {
             for (var, arg) in [("__assert_left", &args[0]), ("__assert_right", &args[1])] {
-                stmts.push(Stmt { kind: StmtKind::Var(VarDecl { name: var.into(), ty: None, value: Some(arg.value.clone()), mutable: false }), line });
+                stmts.push(Stmt { kind: StmtKind::Var(VarDecl { name: var.into(), name_span: Span::default(), ty: None, value: Some(arg.value.clone()), mutable: false }), line, span: Span::default() });
             }
             let id = |n: &str| mk(ExprKind::Ident(n.into()));
             let parts = vec![
@@ -1094,7 +1106,7 @@ impl Compiler {
             ];
             (mk(ExprKind::Binary { op: "!=", lhs: Box::new(id("__assert_left")), rhs: Box::new(id("__assert_right")) }), fail(parts))
         };
-        stmts.push(Stmt { kind: StmtKind::Expr(mk(ExprKind::If { branches: vec![(cond, body)], else_body: None })), line });
+        stmts.push(Stmt { kind: StmtKind::Expr(mk(ExprKind::If { branches: vec![(cond, body)], else_body: None })), line, span: Span::default() });
         self.push_scope();
         for st in &stmts {
             self.stmt(st)?;
@@ -1538,7 +1550,7 @@ end
                 return self.err(e.msg);
             }
         };
-        let mk = |kind: ExprKind, line: u32| Expr { kind, line };
+        let mk = |kind: ExprKind, line: u32| Expr { kind, line, span: Span::default() };
         let db = |name: &str, line: u32| mk(ExprKind::Field { expr: Box::new(mk(ExprKind::Ident("db".to_string()), line)), name: name.to_string(), safe: false }, line);
         let call = |callee: Expr, args: Vec<Expr>, line: u32| mk(ExprKind::Call { callee: Box::new(callee), args: args.into_iter().map(|value| Arg { name: None, by_ref: false, spread: false, value }).collect(), targs: Vec::new() }, line);
         let text = |s: &str, line: u32| mk(ExprKind::Text(vec![TextPart::Lit(s.to_string())]), line);
@@ -1824,6 +1836,14 @@ end
         let shown = if neg { format!("-{}", n) } else { n.to_string() };
         let hint = if *t == Ty::int() && lit_fits(n, neg, &Ty::i64()) { "; write it as a long (`let x: long = ...`)" } else { "" };
         self.err(format!("integer literal {} is out of range for {}{}", shown, t.show(), hint))
+    }
+
+    /// `check`, with a mismatch reported on the range of the expression `e` that has the type `got`.
+    fn check_at(&mut self, e: &Expr, want: &Ty, got: &Ty, what: &str) -> R<()> {
+        let saved = std::mem::replace(&mut self.span, e.span);
+        let r = self.check(want, got, what);
+        self.span = saved;
+        r
     }
 
     fn check(&self, want: &Ty, got: &Ty, what: &str) -> R<()> {

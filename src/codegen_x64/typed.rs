@@ -22,6 +22,8 @@ pub(super) struct TypedExpr {
     pub(super) kind: TypedExprKind,
     pub(super) ty: Ty,
     pub(super) line: u32,
+    /// The source range (empty for a node the compiler made up).
+    pub(super) span: Span,
 }
 
 /// The shape of a typed expression.
@@ -108,6 +110,7 @@ pub(super) enum TypedCallee {
 pub(super) struct TypedStmt {
     pub(super) kind: TypedStmtKind,
     pub(super) line: u32,
+    pub(super) span: Span,
 }
 
 /// The shape of a typed statement.
@@ -133,7 +136,7 @@ pub(super) enum TypedStmtKind {
 /// A type-checked function body: the sequence of typed statements and the declared return type.
 #[derive(Debug, Clone)]
 #[allow(dead_code)] // until emission consumes the tree (tasks 2.2, 3.1)
-pub(super) struct TypedBody {
+pub struct TypedBody {
     pub(super) stmts: Vec<TypedStmt>,
     /// The declared return type of the function (`Ty::Void` for `-> void` or no return clause).
     pub(super) ret: Ty,
@@ -141,12 +144,27 @@ pub(super) struct TypedBody {
     pub(super) complete: bool,
 }
 
+impl TypedBody {
+    /// How many statements the body has at its top level.
+    pub fn statements(&self) -> usize {
+        self.stmts.len()
+    }
+
+    /// True when the checker understood every statement (none is `Opaque`).
+    pub fn is_complete(&self) -> bool {
+        self.complete
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Declaration tables
 // ---------------------------------------------------------------------------
 
+/// What the compiler knows about a program before it emits anything: the declaration tables and
+/// the checked body of every function. `check_program` returns it; the fields stay inside the
+/// code generator, the methods below are what the rest of the crate may ask.
 #[derive(Default)]
-pub(super) struct TypedProgram {
+pub struct TypedProgram {
     pub(super) rec_decls: HashMap<String, (String, Vec<Field>)>,
     pub(super) records: HashMap<String, RecInfo>,
     pub(super) enum_decls: HashMap<String, (String, Vec<Variant>)>,
@@ -182,4 +200,21 @@ pub(super) struct TypedProgram {
     pub(super) map_thunks: BTreeMap<String, (String, String)>,
     /// Checked function bodies by symbol (see `bodies.rs`).
     pub(super) bodies: HashMap<String, TypedBody>,
+}
+
+impl TypedProgram {
+    /// The checked bodies with the symbol of their function.
+    pub fn bodies(&self) -> impl Iterator<Item = (&str, &TypedBody)> {
+        self.bodies.iter().map(|(k, v)| (k.as_str(), v))
+    }
+
+    /// The checked body of the function with this symbol.
+    pub fn body(&self, symbol: &str) -> Option<&TypedBody> {
+        self.bodies.get(symbol)
+    }
+
+    /// The symbol of the function `name` of `module`, when it was declared.
+    pub fn function_symbol(&self, module: &str, name: &str) -> Option<&str> {
+        self.funcs.get(&(module.to_string(), name.to_string())).map(|s| s.sym.as_str())
+    }
 }

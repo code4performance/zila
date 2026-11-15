@@ -474,7 +474,7 @@ pub fn link_report(file: &File, options: &CompileOptions, target: Target) -> Res
                     }
                     let name = match &f.receiver {
                         Some(r) => match &r.ty {
-                            Type::Named { path, args } if args.is_empty() => format!("B_{}_{}_{}", ms, path.last().cloned().unwrap_or_default(), f.name),
+                            Type::Named { path, args, .. } if args.is_empty() => format!("B_{}_{}_{}", ms, path.last().cloned().unwrap_or_default(), f.name),
                             _ => return true,
                         },
                         None => format!("B_{}_{}", ms, f.name),

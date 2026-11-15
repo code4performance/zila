@@ -30,7 +30,7 @@ pub(super) fn ty_full(t: &Ty) -> String {
 /// Does the type mention one of the type parameters?
 pub(super) fn mentions_param(t: &Type, names: &[String]) -> bool {
     match t {
-        Type::Named { path, args } => {
+        Type::Named { path, args, .. } => {
             (path.len() == 1 && args.is_empty() && names.contains(&path[0])) || args.iter().any(|a| mentions_param(a, names))
         }
         Type::Optional(i) | Type::Shared(i) | Type::Pointer(i) | Type::Slice(i) | Type::Array(_, i) => mentions_param(i, names),
@@ -47,7 +47,7 @@ impl Compiler {
     /// Qualified name of the generic record whose methods `fd` belongs to.
     pub(super) fn generic_receiver(&self, m: &str, fd: &FuncDecl) -> Option<String> {
         let r = fd.receiver.as_ref()?;
-        let Type::Named { path, args } = &r.ty else { return None };
+        let Type::Named { path, args, .. } = &r.ty else { return None };
         if args.is_empty() {
             return None;
         }
@@ -315,7 +315,7 @@ impl Compiler {
         let mut binds = HashMap::new();
         for (a, t) in rargs.iter().zip(tys) {
             match a {
-                Type::Named { path, args } if path.len() == 1 && args.is_empty() => {
+                Type::Named { path, args, .. } if path.len() == 1 && args.is_empty() => {
                     binds.insert(path[0].clone(), t.clone());
                 }
                 _ => return self.err("the receiver of a method of a generic record must list its type parameters, like Stack<T>"),
@@ -372,7 +372,7 @@ impl Compiler {
     pub(super) fn unify(&mut self, pat: &Type, actual: &Ty, params: &[String], b: &mut HashMap<String, Ty>, m: &str) -> R<()> {
         match pat {
             Type::Shared(inner) => self.unify(inner, actual, params, b, m),
-            Type::Named { path, args } => {
+            Type::Named { path, args, .. } => {
                 if path.len() == 1 && args.is_empty() && params.contains(&path[0]) {
                     match b.get(&path[0]) {
                         Some(prev) if prev != actual => {
@@ -481,7 +481,7 @@ impl Compiler {
             }
             // a bare number literal adapts to a type another argument fixed: it only binds an open parameter
             if is_int_literal(&a.value) {
-                if let Type::Named { path, args: pargs } = pt {
+                if let Type::Named { path, args: pargs, .. } = pt {
                     if path.len() == 1 && pargs.is_empty() && b.contains_key(&path[0]) {
                         continue;
                     }
@@ -503,7 +503,7 @@ impl Compiler {
             self.unify(pt, &aty, &names, &mut b, module)?;
         }
         for (pt, lit) in late_lits {
-            if let Type::Named { path, args: pargs } = &pt {
+            if let Type::Named { path, args: pargs, .. } = &pt {
                 if path.len() == 1 && pargs.is_empty() && b.contains_key(&path[0]) {
                     continue;
                 }
@@ -673,7 +673,7 @@ impl Compiler {
         self.line = 0;
         let binds = self.param_bindings(&td.generics, &tm)?;
         self.bindings = binds;
-        let args: Vec<Type> = td.generics.iter().map(|g| Type::Named { path: vec![g.name.clone()], args: vec![] }).collect();
+        let args: Vec<Type> = td.generics.iter().map(|g| Type::Named { path: vec![g.name.clone()], args: vec![], span: Span::default() }).collect();
         self.instantiate_record(q, &args, &tm)?;
         // the methods of this instance are the template's own
         let todo = std::mem::take(&mut self.tp.pending);

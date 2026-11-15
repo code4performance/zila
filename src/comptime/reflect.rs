@@ -142,7 +142,7 @@ pub fn attr_data(attrs: &[Attr]) -> Vec<AttrData> {
 pub fn show_type(t: &Type, subst: &Subst) -> String {
     match t {
         Type::Shared(i) => format!("shared {}", show_type(i, subst)),
-        Type::Named { path, args } => {
+        Type::Named { path, args, .. } => {
             if path.len() == 1 && args.is_empty() {
                 if let Some((s, _)) = subst.get(&path[0]) {
                     return show_type(s, &Subst::new());
@@ -168,7 +168,7 @@ pub fn show_type(t: &Type, subst: &Subst) -> String {
 fn qualified(t: &Type, module: &str, subst: &Subst) -> String {
     match t {
         Type::Shared(i) => qualified(i, module, subst),
-        Type::Named { path, args } => {
+        Type::Named { path, args, .. } => {
             if path.len() == 1 && args.is_empty() {
                 if let Some((s, m)) = subst.get(&path[0]) {
                     return qualified(s, m, &Subst::new());
@@ -210,7 +210,7 @@ impl<'a> Reflector<'a> {
     /// The type declared as `name` in `module`.
     pub fn declared(&mut self, module: &str, name: &str) -> Option<usize> {
         self.uni.type_decl(module, name)?;
-        let ty = Type::Named { path: vec![name.to_string()], args: vec![] };
+        let ty = Type::Named { path: vec![name.to_string()], args: vec![], span: Span::default() };
         Some(self.reflect(&ty, module))
     }
 
@@ -220,7 +220,7 @@ impl<'a> Reflector<'a> {
 
     fn reflect_in(&mut self, ty: &Type, module: &str, subst: &Subst) -> usize {
         // a type parameter stands for the type it is bound to
-        if let Type::Named { path, args } = ty {
+        if let Type::Named { path, args, .. } = ty {
             if path.len() == 1 && args.is_empty() {
                 if let Some((s, m)) = subst.get(&path[0]) {
                     let (s, m) = (s.clone(), m.clone());
@@ -238,7 +238,7 @@ impl<'a> Reflector<'a> {
         self.table.types.push(TypeEntry::new(name.clone(), "record", 0));
         let mut entry = TypeEntry::new(name, "record", 0);
         match ty {
-            Type::Named { path, args } => {
+            Type::Named { path, args, .. } => {
                 let last = path.last().unwrap().as_str();
                 let single = path.len() == 1;
                 if single && INT_NAMES.contains(&last) {
@@ -269,7 +269,7 @@ impl<'a> Reflector<'a> {
                         let mut inner_subst = Subst::new();
                         for (g, a) in td.generics.iter().zip(args.iter()) {
                             let (at, am) = match a {
-                                Type::Named { path, args: aa } if path.len() == 1 && aa.is_empty() => match subst.get(&path[0]) {
+                                Type::Named { path, args: aa, .. } if path.len() == 1 && aa.is_empty() => match subst.get(&path[0]) {
                                     Some((s, m)) => (s.clone(), m.clone()),
                                     None => (a.clone(), module.to_string()),
                                 },

@@ -808,7 +808,7 @@ impl Compiler {
                             self.e(format!("jmp {}", done));
                             self.label(&miss);
                             let at = self.line;
-                            let mk = |kind: ExprKind| Expr { kind, line: at };
+                            let mk = |kind: ExprKind| Expr { kind, line: at, span: Span::default() };
                             let lit = |s: &str| Arg { name: None, by_ref: false, spread: false, value: mk(ExprKind::Text(vec![TextPart::Lit(s.into())])) };
                             let kind = mk(ExprKind::Call { callee: Box::new(mk(ExprKind::Ident("__kind".into()))), args: vec![lit("std.InvalidInput")], targs: Vec::new() });
                             let failed = mk(ExprKind::Call {

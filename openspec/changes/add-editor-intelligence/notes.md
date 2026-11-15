@@ -25,6 +25,8 @@ Checked against the code at the commit that archived `add-typed-tree-emission`.
 9. **Other files.** Definition into `std` and other packages needs their text and positions; module files are parsed from disk (or the package cache) and carry lines only.
 10. **Cost.** The whole program is checked on each run, standard library included; the budget and debounce in `design.md` apply. The body check adds roughly a tenth to a quarter to a debug-build compile.
 
+11. **Lines of a package are lines of its merged text.** The files of a project package are merged into one module (`package.rs`, `merge_text`: one `package` line, the `use` lines, then the bodies), so an error or a node in a package reports a line of that merged text, not of the file. Definition, references and diagnostics in other packages (4.1, 2.1) need a map from merged lines back to file and line. Found while writing 1.4.
+
 ### Consequence for the plan
 
-Tasks 2.x and 3.1 start by adding spans to the AST and an entry point that returns the tree and the errors; the typed tree itself does not need to change shape.
+Tasks 1.3 (spans on the AST, the parser and the typed nodes; gap 1) and 1.4 (the check-only entry point; gap 3) come first, then 2.x and 3.1 build on them. The typed tree itself does not need to change shape.

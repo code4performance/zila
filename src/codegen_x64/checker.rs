@@ -454,13 +454,16 @@ impl Compiler {
             let mut b: HashMap<String, Ty> = HashMap::new();
             // a bare number literal only binds a parameter no other argument has bound
             let mut late: Vec<(&Type, &Expr)> = Vec::new();
+            // closures are typed last: their parameter types come from the bindings so far
+            let mut lambdas: Vec<(&Type, &Expr)> = Vec::new();
             for (a, p) in args.iter().zip(&fd.params) {
                 let pt = p.ty.as_ref()?;
                 if !mentions_param(pt, &names) {
                     continue;
                 }
                 if matches!(a.value.kind, ExprKind::Lambda { .. }) {
-                    return None;
+                    lambdas.push((pt, &a.value));
+                    continue;
                 }
                 if is_int_literal(&a.value) {
                     if let Type::Named { path, args: pargs } = pt {
@@ -482,6 +485,24 @@ impl Compiler {
                 }
                 let x = c.check_expr(lit, None)?;
                 c.unify(pt, &x.ty, &names, &mut b, &module).ok()?;
+            }
+            for (pt, lam) in lambdas {
+                let Type::Func { params: fps, .. } = pt else { continue };
+                let ExprKind::Lambda { params: lps, body } = &lam.kind else { continue };
+                let unbound: Vec<String> = names.iter().filter(|n| !b.contains_key(*n)).cloned().collect();
+                if fps.iter().any(|fp| mentions_param(fp, &unbound)) {
+                    continue;
+                }
+                let saved = std::mem::replace(&mut c.bindings, b.clone());
+                let ptys: Option<Vec<Ty>> = fps.iter().map(|fp| c.resolve(fp, &module).ok()).collect();
+                c.bindings = saved;
+                let ptys = ptys?;
+                if lps.len() != ptys.len() || lps.iter().any(|p| p.ty.is_some() || p.by_ref) {
+                    return None;
+                }
+                let ret = c.infer_lambda_ret(lps, &ptys, body)?;
+                let lt = Ty::Func { params: ptys, ret: Box::new(ret), ext: false };
+                c.unify(pt, &lt, &names, &mut b, &module).ok()?;
             }
             if names.iter().any(|n| !b.contains_key(n) || b[n] == Ty::Void) {
                 return None;

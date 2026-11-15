@@ -100,6 +100,28 @@ impl Compiler {
         stmts
     }
 
+    /// The result type of a closure whose parameter types are known and whose result is worked out
+    /// from its body (the last expression), as emission does for a generic call. `None` when the
+    /// body cannot be typed that far.
+    pub(super) fn infer_lambda_ret(&mut self, params: &[Param], ptys: &[Ty], body: &[Stmt]) -> Option<Ty> {
+        let before = self.fs.clone();
+        self.fs.scopes.push(Scope::default());
+        for (p, t) in params.iter().zip(ptys) {
+            self.declare_checked(&p.name, t.clone(), true, false);
+        }
+        let saved_ret = std::mem::replace(&mut self.fs.ret, Ty::Void);
+        let mut w = Walk { complete: true, ..Walk::default() };
+        let r = self.check_arm_in_scope(body, None, true, &mut w);
+        self.fs.ret = saved_ret;
+        self.fs.scopes.pop();
+        if let Some(snap) = w.snap.take() {
+            self.restore(snap);
+            self.fs = before;
+        }
+        self.lambda_vars.extend(w.vars);
+        r.map(|(_, t)| t)
+    }
+
     fn declare_checked(&mut self, name: &str, ty: Ty, mutable: bool, is_ref: bool) {
         let local = Local { off: 0, ty, mutable, captured: false, reg: None, imm: None, is_ref, ind: false };
         self.fs.scopes.last_mut().unwrap().vars.insert(name.to_string(), local);

@@ -562,7 +562,10 @@ impl Session {
     fn on_stop(&mut self, stop: Stop, out: &mut dyn Write) {
         self.flush_output(out);
         self.running = false;
-        let Some(mut st) = self.step.take() else { return self.report(stop, "breakpoint", out) };
+        let Some(mut st) = self.step.take() else {
+            let reason = if stop == Stop::Paused { "pause" } else { "breakpoint" };
+            return self.report(stop, reason, out);
+        };
         match stop {
             Stop::Exited(_) | Stop::Fault { .. } | Stop::Paused => {
                 if let Some(t) = st.temp.take() {

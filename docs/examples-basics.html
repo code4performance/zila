@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Basics — Examples — Zila Lang</title>
+  <meta name="description" content="Annotated walkthroughs of Zila Lang's core language examples: hello world, the type system, defer, maps, text, generics and floats.">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="assets/zila.svg" type="image/svg+xml">
+</head>
+<body>
+  <a class="skip" href="#content">Skip to content</a>
+  <header class="site-header">
+    <a class="brand" href="index.html"><img src="assets/zila.svg" alt="" width="28" height="28"><span>Zila Lang</span><small>docs</small></a>
+    <input type="checkbox" id="menu" class="menu-toggle">
+    <label for="menu" class="menu-button">Menu</label>
+    <nav class="site-nav">
+      <a href="index.html">Overview</a>
+
+      <p class="nav-group">Language</p>
+      <a href="getting-started.html">Getting Started</a>
+      <a href="syntax.html">Syntax</a>
+      <a href="examples.html">Examples</a>
+      <a class="nav-sub" href="examples-basics.html" aria-current="page">Basics</a>
+      <a class="nav-sub" href="examples-comptime.html">Comptime</a>
+      <a class="nav-sub" href="examples-native.html">Native &amp; async</a>
+      <a class="nav-sub" href="examples-web-and-ai.html">Web &amp; AI</a>
+
+      <p class="nav-group">Standard Library</p>
+      <a href="stdlib.html">Library</a>
+      <a href="databases.html">Databases</a>
+      <a href="ai.html">AI</a>
+
+      <p class="nav-group">Runtime &amp; Native</p>
+      <a href="native.html">Native</a>
+      <a href="concurrency.html">Tasks</a>
+      <a href="async.html">Async</a>
+
+      <p class="nav-group">Tooling</p>
+      <a href="packages.html">Packages</a>
+      <a href="editors.html">Editors</a>
+
+      <p class="nav-group">Zila Lang OS</p>
+      <a href="os.html">Zila Lang OS</a>
+    </nav>
+  </header>
+
+  <main id="content">
+    <h1>Examples: Basics</h1>
+    <p>Core language examples: the smallest complete program, a tour of the type system, cleanup with <code>defer</code>, maps, text and lists, Unicode text, generics, and floating point. See <a href="examples.html">all examples</a> or <a href="getting-started.html">Getting Started</a> for how to run them.</p>
+
+    <nav class="toc">
+      <h2>On this page</h2>
+      <ul>
+        <li><a href="#hello">Hello world</a></li>
+        <li><a href="#types">Type system tour</a></li>
+        <li><a href="#defer-example">defer</a></li>
+        <li><a href="#maps-example">Maps</a></li>
+        <li><a href="#words-example">Text and lists</a></li>
+        <li><a href="#unicode-example">Text and characters</a></li>
+        <li><a href="#generics-example">Generics</a></li>
+        <li><a href="#floats-example">Floats</a></li>
+      </ul>
+    </nav>
+
+    <section id="hello">
+      <h2>Hello world</h2>
+      <div class="file-label">examples/hello.zila</div>
+      <pre><code><span class="kw">package</span> main
+
+<span class="kw">type</span> Customer = <span class="kw">record</span>
+    id: i32
+    name: text
+    email: text?
+<span class="kw">end</span>
+
+<span class="kw">func</span> greet(c: Customer) -&gt; text
+    <span class="kw">return</span> <span class="str">"Hello, {c.name}!"</span>
+<span class="kw">end</span>
+
+<span class="kw">func</span> main()
+    <span class="kw">var</span> c = Customer{ id: 1, name: <span class="str">"Ana"</span> }
+    print(greet(c))
+
+    <span class="kw">var</span> result = greet(Customer{ id: 2, name: <span class="str">"John"</span> })
+    print(result)
+
+    <span class="kw">for</span> i <span class="kw">in</span> 1..5
+        <span class="kw">if</span> i % 2 == 0
+            print(<span class="str">"{i} is even"</span>)
+        <span class="kw">end</span>
+    <span class="kw">end</span>
+<span class="kw">end</span></code></pre>
+      <p>This is the smallest complete Zila Lang program that still shows most of the language's flavor: a <code>record</code> type with an optional field (<code>email: text?</code>), a free function (<code>greet</code>) that builds a string with interpolation, a <code>record</code> literal (<code>Customer{ id: 1, name: "Ana" }</code>), and a <code>for ... in</code> loop over a range (<code>1..5</code>) with an <code>if</code> inside it. Running it with <code>--run</code> prints <code>Hello, Ana!</code> followed by the even numbers from 1 to 5.</p>
+    </section>
+
+    <section id="types">
+      <h2>Type system tour</h2>
+      <div class="file-label">examples/types.zila</div>
+      <pre><code><span class="kw">package</span> main
+
+<span class="kw">type</span> Printable = <span class="kw">interface</span>
+    <span class="kw">func</span> to_text(<span class="kw">self</span>) -&gt; text
+<span class="kw">end</span>
+
+<span class="kw">type</span> Shape = <span class="kw">enum</span>
+    Circle(float)
+    Rect(float, float)
+    Empty
+<span class="kw">end</span>
+
+<span class="kw">type</span> Color = <span class="kw">enum</span>
+    Red, Green, Blue
+<span class="kw">end</span>
+
+<span class="kw">type</span> Stack&lt;T&gt; = <span class="kw">record</span>
+    items: []T
+<span class="kw">end</span>
+
+<span class="kw">type</span> Handler = <span class="kw">func</span>(Request) -&gt; Response <span class="kw">or</span> error
+<span class="kw">type</span> Middleware = <span class="kw">func</span>(Request, next: Handler) -&gt; Response <span class="kw">or</span> error
+<span class="kw">type</span> Table = Map&lt;text, List&lt;i32&gt;&gt;
+
+<span class="kw">type</span> User = <span class="kw">record</span>
+    id: i32
+    #[json(<span class="str">"full_name"</span>)] name: text
+    #[json(skip)] password: text
+    email: text?
+<span class="kw">end</span>
+
+<span class="kw">func</span> first&lt;T&gt;(items: []T) -&gt; T?
+    <span class="kw">if</span> items.len == 0
+        <span class="kw">return</span> <span class="kw">nil</span>
+    <span class="kw">end</span>
+    <span class="kw">return</span> items[0]
+<span class="kw">end</span>
+
+<span class="kw">func</span> show&lt;T: Printable&gt;(x: T)
+    print(x.to_text())
+<span class="kw">end</span>
+
+<span class="kw">func</span> (c: Customer) greet() -&gt; text
+    <span class="kw">return</span> <span class="str">"Hello, {c.name}"</span>
+<span class="kw">end</span>
+
+<span class="kw">func</span> (<span class="kw">ref</span> s: Server) <span class="kw">use</span>(m: Middleware)
+    s.chain.add(m)
+<span class="kw">end</span>
+
+<span class="kw">func</span> area(s: Shape) -&gt; float
+    <span class="kw">match</span> s
+        Circle(r)  -&gt; <span class="kw">return</span> 3.14159 * r * r
+        Rect(w, h) -&gt; <span class="kw">return</span> w * h
+        Empty      -&gt; <span class="kw">return</span> 0.0
+    <span class="kw">end</span>
+<span class="kw">end</span>
+
+<span class="kw">func</span> classify(n: i32) -&gt; text
+    <span class="kw">match</span> n
+        0 -&gt; <span class="kw">return</span> <span class="str">"zero"</span>
+        1 | 2 | 3 -&gt;
+            <span class="kw">let</span> s = <span class="str">"small"</span>
+            <span class="kw">return</span> s
+        -1 -&gt; <span class="kw">return</span> <span class="str">"minus one"</span>
+        _ -&gt; <span class="kw">return</span> <span class="str">"many"</span>
+    <span class="kw">end</span>
+<span class="kw">end</span>
+
+<span class="kw">func</span> fill(<span class="kw">ref</span> buf: Buffer, n: i32 = 4)
+    buf.n = n
+<span class="kw">end</span>
+
+<span class="kw">func</span> log(msg: text, args: ...any)
+    print(msg)
+<span class="kw">end</span>
+
+<span class="kw">func</span> main()
+    <span class="kw">var</span> b = Buffer{}
+    fill(<span class="kw">ref</span> b)
+    fill(<span class="kw">ref</span> b, n: 8)
+    <span class="kw">let</span> xs = [1, 2, 3]
+    log(<span class="str">"x"</span>, ...xs)
+<span class="kw">end</span></code></pre>
+      <p>This file is a tour of Zila Lang's type declarations in one place: a structural <code>interface</code> (<code>Printable</code>), an <code>enum</code> with data (<code>Shape</code>) consumed exhaustively by <code>match</code> in <code>area</code>, an <code>enum</code> (<code>Color</code>), a generic <code>record</code> (<code>Stack&lt;T&gt;</code>), function-type aliases (<code>Handler</code>, <code>Middleware</code>), and a record with field attributes controlling JSON (de)serialization (<code>User</code>). It also demonstrates generic functions with an interface bound (<code>show&lt;T: Printable&gt;</code>), a method with a <code>ref</code> receiver (<code>(ref s: Server) use(...)</code>), multi-way <code>match</code> patterns (<code>1 | 2 | 3</code>), a default parameter (<code>n: i32 = 4</code>), and a variadic parameter spread at the call site (<code>log("x", ...xs)</code>).</p>
+    </section>
+
+    <section id="defer-example">
+      <h2>defer: cleanup that cannot be forgotten</h2>
+      <div class="file-label">examples/defer.zila</div>
+      <pre><code><span class="cm">// defer: run a call when the function ends, however it ends.</span>
+<span class="cm">//</span>
+<span class="cm">//   zila examples/defer.zila -o defer.exe</span>
+<span class="cm">//</span>
+<span class="cm">// Deferred calls run last in, first out, on `return`, at the end of the</span>
+<span class="cm">// function, and when a `try` fails.</span>
+
+<span class="kw">package</span> main
+
+<span class="kw">type</span> Log = <span class="kw">record</span>
+    name: text
+<span class="kw">end</span>
+
+<span class="kw">func</span> (l: Log) line(message: text)
+    print(<span class="str">"[{l.name}] {message}"</span>)
+<span class="kw">end</span>
+
+<span class="kw">func</span> process(id: int) -&gt; int <span class="kw">or</span> error
+    <span class="kw">let</span> log = Log{ name: <span class="str">"job {id}"</span> }
+    log.line(<span class="str">"start"</span>)
+    <span class="kw">defer</span> log.line(<span class="str">"finished"</span>)      <span class="cm">// runs when process() ends, however it ends</span>
+
+    <span class="kw">if</span> id &lt; 0
+        <span class="kw">return</span> error(<span class="str">"negative id"</span>)
+    <span class="kw">end</span>
+    <span class="kw">defer</span> log.line(<span class="str">"cleaning up"</span>)   <span class="cm">// runs first: last in, first out</span>
+    <span class="kw">return</span> id * 2
+<span class="kw">end</span>
+
+<span class="kw">func</span> main() -&gt; error
+    print(<span class="str">"result: {try process(21)}"</span>)
+    <span class="kw">match</span> process(-1)
+        ok(v)  -&gt; print(<span class="str">"result: {v}"</span>)
+        err(e) -&gt; print(<span class="str">"failed: {e.message}"</span>)
+    <span class="kw">end</span>
+    <span class="kw">return</span>
+<span class="kw">end</span></code></pre>
+      <p>Each <code>defer</code> schedules a call for the moment <code>process</code> ends. They run last in, first out, so "cleaning up" comes before "finished". They run whether the function returns normally, returns early, or fails with <code>try</code>: the failed call for <code>-1</code> still prints "finished". See the <a href="syntax.html#defer">syntax guide</a> for the exact rules.</p>
+    </section>
+
+    <section id="maps-example">
+      <h2>Maps: look values up by key</h2>
+      <div class="file-label">examples/maps.zila</div>
+      <pre><code><span class="cm">// Maps: look values up by key.</span>
+<span class="cm">//</span>
+<span class="cm">//   zila examples/maps.zila -o maps.exe</span>
+<span class="cm">//</span>
+<span class="cm">// A Map&lt;K, V&gt; keeps values under keys (any type that is Hash: text, integers, records,</span>
+<span class="cm">// enums, lists...) and remembers the order</span>
+<span class="cm">// in which the keys were first added.</span>
+
+<span class="kw">package</span> main
+
+<span class="kw">func</span> count_words(words: List&lt;text&gt;) -&gt; Map&lt;text, int&gt;
+    <span class="kw">var</span> counts: Map&lt;text, int&gt; = {}
+    <span class="kw">for</span> w <span class="kw">in</span> words
+        counts[w] = counts.get(w, 0) + 1
+    <span class="kw">end</span>
+    <span class="kw">return</span> counts
+<span class="kw">end</span>
+
+<span class="kw">func</span> main()
+    <span class="kw">let</span> words = [<span class="str">"red"</span>, <span class="str">"green"</span>, <span class="str">"red"</span>, <span class="str">"blue"</span>, <span class="str">"green"</span>, <span class="str">"red"</span>]
+    <span class="kw">let</span> counts = count_words(words)
+
+    <span class="kw">for</span> word, n <span class="kw">in</span> counts
+        print(<span class="str">"{word}: {n}"</span>)
+    <span class="kw">end</span>
+
+    <span class="kw">let</span> prices = { <span class="str">"apple"</span>: 3, <span class="str">"pear"</span>: 5 }
+    prices[<span class="str">"plum"</span>] = 4
+    prices.remove(<span class="str">"pear"</span>)
+    print(<span class="str">"{prices.len} prices, apple costs {prices["apple"]}"</span>)
+
+    <span class="kw">if</span> prices.has(<span class="str">"pear"</span>)
+        print(<span class="str">"pears are back"</span>)
+    <span class="kw">else</span>
+        print(<span class="str">"no pears today"</span>)
+    <span class="kw">end</span>
+
+    print(<span class="str">"kiwi costs {prices.get("kiwi", 0)}"</span>)
+<span class="kw">end</span></code></pre>
+      <p><code>count_words</code> builds a <code>Map&lt;text, int&gt;</code> that counts how often each word appears: <code>counts.get(w, 0)</code> is the current count, or <code>0</code> for a word not seen yet. The <code>for word, n in counts</code> loop visits the entries in the order the words were first added (red, green, blue), so the output never changes between runs. The second half shows a literal (<code>{ "apple": 3, "pear": 5 }</code>), adding and removing keys, <code>len</code> and <code>has</code>. See the <a href="syntax.html#maps">syntax guide</a> for the exact rules.</p>
+    </section>
+
+    <section id="words-example">
+      <h2>Text and lists: count the words</h2>
+      <div class="file-label">examples/words.zila</div>
+      <pre><code><span class="cm">// Text and list helpers: count the words in a sentence.</span>
+<span class="cm">//</span>
+<span class="cm">//   zila examples/words.zila -o words.exe</span>
+<span class="cm">//</span>
+<span class="cm">// `use text` and `use list` are libraries written in Zila Lang. Their functions are called with</span>
+<span class="cm">// the module name in front, like text.split(...) and list.sort_by(...).</span>
+
+<span class="kw">package</span> main
+
+<span class="kw">use</span> text
+<span class="kw">use</span> list
+
+<span class="kw">type</span> Entry = <span class="kw">record</span>
+    word: text
+    count: int
+<span class="kw">end</span>
+
+<span class="kw">func</span> main()
+    <span class="kw">let</span> sentence = <span class="str">"The quick brown fox jumps over the lazy dog. The dog barks; the fox runs."</span>
+
+    <span class="cm">// lower-case it, turn punctuation into spaces and cut it into words</span>
+    <span class="kw">var</span> cleaned = text.lower(sentence)
+    cleaned = text.replace(cleaned, <span class="str">"."</span>, <span class="str">" "</span>)
+    cleaned = text.replace(cleaned, <span class="str">";"</span>, <span class="str">" "</span>)
+    <span class="kw">let</span> words = list.filter(text.split(cleaned, <span class="str">" "</span>), <span class="kw">func</span>(w) w.len &gt; 0 <span class="kw">end</span>)
+
+    <span class="kw">var</span> counts: Map&lt;text, int&gt; = {}
+    <span class="kw">for</span> w <span class="kw">in</span> words
+        counts[w] = counts.get(w, 0) + 1
+    <span class="kw">end</span>
+
+    <span class="kw">let</span> entries: []Entry = []
+    <span class="kw">for</span> w, n <span class="kw">in</span> counts
+        entries.add(Entry { word: w, count: n })
+    <span class="kw">end</span>
+
+    <span class="cm">// most frequent first, ties in alphabetical order</span>
+    <span class="kw">let</span> ranked = list.sort_by(entries, <span class="kw">func</span>(a, b) a.count &gt; b.count <span class="kw">or</span> (a.count == b.count <span class="kw">and</span> text.compare(a.word, b.word) &lt; 0) <span class="kw">end</span>)
+    <span class="kw">for</span> i <span class="kw">in</span> 0..3
+        <span class="kw">let</span> e = ranked[i]
+        print(<span class="str">"{text.pad_right(e.word, 6, " ")} {e.count}"</span>)
+    <span class="kw">end</span>
+
+    <span class="kw">let</span> total = list.reduce(list.map(ranked, <span class="kw">func</span>(e) e.count <span class="kw">end</span>), 0, <span class="kw">func</span>(sum, n) sum + n <span class="kw">end</span>)
+    print(<span class="str">"{words.len} words, {ranked.len} different, {total} counted"</span>)
+
+    <span class="kw">let</span> first = text.join(list.map(list.slice(ranked, 0, 3), <span class="kw">func</span>(e) text.upper(e.word) <span class="kw">end</span>), <span class="str">", "</span>)
+    print(<span class="str">"top three: {first}"</span>)
+
+    <span class="cm">// numbers typed as text</span>
+    <span class="kw">let</span> n = text.parse_int(<span class="str">"42"</span>) ?? 0
+    <span class="kw">let</span> bad = text.parse_int(<span class="str">"4x2"</span>) ?? 0 - 1
+    <span class="kw">let</span> price = text.parse_float(<span class="str">"19.99"</span>) ?? 0.0
+    print(<span class="str">"{n} {bad} {price * 2.0}"</span>)
+<span class="kw">end</span></code></pre>
+      <p>This program cuts a sentence into words with <code>text.split</code>, drops the empty pieces with <code>list.filter</code>, counts them in a map, and ranks them with <code>list.sort_by</code>: the function you pass says that a higher count goes first and ties go in alphabetical order (<code>text.compare</code>). The last lines show <code>text.parse_int</code> and <code>text.parse_float</code>, which give a default with <code>??</code> when the text is not a number. The <a href="stdlib.html">Library page</a> lists every function.</p>
+    </section>
+
+    <section id="unicode-example">
+      <h2>Text and characters: ação in bytes and characters</h2>
+      <div class="file-label">examples/unicode.zila</div>
+      <pre><code><span class="cm">// Text is UTF-8: `len` counts bytes, `char_count()` counts characters, `for c in s` visits the</span>
+<span class="cm">// characters and `slice` cuts by byte positions (it aborts inside a character).</span>
+<span class="cm">//</span>
+<span class="cm">//   zila examples/unicode.zila -o unicode.exe</span>
+
+<span class="kw">package</span> main
+
+<span class="kw">use</span> text
+
+<span class="kw">func</span> show(word: text)
+    print(<span class="str">"{word}: len {word.len}, char_count {word.char_count()}, reversed {text.reverse(word)}"</span>)
+    <span class="kw">for</span> c <span class="kw">in</span> word
+        print(<span class="str">"  {c} U+{c.code} ({c.len_utf8()} bytes)"</span>)
+    <span class="kw">end</span>
+<span class="kw">end</span>
+
+<span class="kw">func</span> main()
+    show(<span class="str">"ação"</span>)
+    show(<span class="str">"coração"</span>)
+    show(<span class="str">"São Paulo"</span>)
+
+    <span class="cm">// a safe cut: byte positions 0 to 3 are the whole of "aç"</span>
+    <span class="kw">let</span> word = <span class="str">"ação"</span>
+    print(<span class="str">"slice(0, 3) = {word.slice(0, 3)}"</span>)
+    print(<span class="str">"first byte {word.byte(0)}, bytes {word.bytes().len}"</span>)
+    print(<span class="str">"pad: [{text.pad_right(word, 6, ".")}]"</span>)
+<span class="kw">end</span></code></pre>
+      <p><code>len</code> counts bytes and <code>char_count()</code> counts characters, so <code>"ação"</code> is 6 bytes and 4 characters. <code>for c in word</code> visits the characters, <code>c.code</code> is the code point and <code>c.len_utf8()</code> the bytes it takes, and <code>text.reverse</code> reverses characters, so the accents stay on their letters. <code>slice(0, 3)</code> cuts by byte positions and is safe here because position 3 is the start of <code>ã</code>; <code>slice(0, 2)</code> would abort because position 2 is inside <code>ç</code>. See <a href="syntax.html#text">Text and characters</a>.</p>
+    </section>
+
+    <section id="generics-example">
+      <h2>Generics: one function, many types</h2>
+      <div class="file-label">examples/generics.zila</div>
+      <pre><code><span class="cm">// Generics and interfaces: write code once, use it with many types.</span>
+<span class="cm">//</span>
+<span class="cm">//   zila examples/generics.zila -o generics.exe</span>
+<span class="cm">//</span>
+<span class="cm">// &lt;T&gt; is a placeholder for a type. The compiler works out T from the arguments and</span>
+<span class="cm">// makes one copy of the code for each type you use. An interface lists methods, and a</span>
+<span class="cm">// bound (&lt;T: Printable&gt;) says "any type that has these methods".</span>
+
+<span class="kw">package</span> main
+
+<span class="kw">type</span> Printable = <span class="kw">interface</span>
+    <span class="kw">func</span> to_text(<span class="kw">self</span>) -&gt; text
+<span class="kw">end</span>
+
+<span class="kw">type</span> Point = <span class="kw">record</span>
+    x: int
+    y: int
+<span class="kw">end</span>
+
+<span class="kw">type</span> Dog = <span class="kw">record</span>
+    name: text
+<span class="kw">end</span>
+
+<span class="kw">func</span> (p: Point) to_text() -&gt; text
+    <span class="kw">return</span> <span class="str">"({p.x}, {p.y})"</span>
+<span class="kw">end</span>
+
+<span class="kw">func</span> (d: Dog) to_text() -&gt; text
+    <span class="kw">return</span> <span class="str">"dog {d.name}"</span>
+<span class="kw">end</span>
+
+<span class="kw">func</span> (n: int) to_text() -&gt; text
+    <span class="kw">return</span> <span class="str">"the number {n}"</span>
+<span class="kw">end</span>
+
+<span class="kw">type</span> Stack&lt;T&gt; = <span class="kw">record</span>
+    items: []T
+<span class="kw">end</span>
+
+<span class="kw">func</span> (s: Stack&lt;T&gt;) push(x: T)
+    s.items.add(x)
+<span class="kw">end</span>
+
+<span class="kw">func</span> (s: Stack&lt;T&gt;) pop() -&gt; T
+    <span class="kw">return</span> s.items.take()
+<span class="kw">end</span>
+
+<span class="kw">func</span> first&lt;T&gt;(items: []T) -&gt; T
+    <span class="kw">return</span> items[0]
+<span class="kw">end</span>
+
+<span class="kw">func</span> show&lt;T: Printable&gt;(x: T)
+    print(<span class="str">"showing {x.to_text()}"</span>)
+<span class="kw">end</span>
+
+<span class="kw">func</span> main()
+    <span class="kw">let</span> numbers: Stack&lt;int&gt; = Stack { items: [] }
+    numbers.push(3)
+    numbers.push(4)
+    print(<span class="str">"popped {numbers.pop()}"</span>)
+
+    <span class="kw">let</span> names: Stack&lt;text&gt; = Stack { items: [<span class="str">"ada"</span>] }
+    names.push(<span class="str">"alan"</span>)
+    print(<span class="str">"popped {names.pop()}"</span>)
+
+    print(<span class="str">"first of two lists: {first([10, 20])} and {first(["x", "y"])}"</span>)
+
+    show(Point { x: 1, y: 2 })
+    show(Dog { name: <span class="str">"rex"</span> })
+    show(42)
+<span class="kw">end</span></code></pre>
+      <p><code>Stack&lt;T&gt;</code> and <code>first&lt;T&gt;</code> are written once and used with <code>int</code> and <code>text</code>; the compiler works out <code>T</code> from the arguments and the declared type of the variable. <code>Printable</code> lists one method, and <code>show&lt;T: Printable&gt;</code> accepts anything that has it: a record with a <code>to_text</code> method, or even <code>int</code>, because <code>func (n: int) to_text()</code> gives it one. There is no <code>implements</code> keyword. See the <a href="syntax.html#generics">syntax guide</a> for the exact rules.</p>
+    </section>
+
+    <section id="floats-example">
+      <h2>Floats: fractional numbers</h2>
+      <div class="file-label">examples/floats.zila</div>
+      <pre><code><span class="cm">// Floating point: fractional numbers.</span>
+<span class="cm">//</span>
+<span class="cm">//   zila examples/floats.zila -o floats.exe</span>
+<span class="cm">//</span>
+<span class="cm">// `float` is a 64-bit number with a fractional part. It never mixes with `int`</span>
+<span class="cm">// by accident: convert with float(n) and int(x).</span>
+
+<span class="kw">package</span> main
+
+<span class="kw">func</span> average(values: List&lt;float&gt;) -&gt; float
+    <span class="kw">var</span> total = 0.0
+    <span class="kw">for</span> v <span class="kw">in</span> values
+        total += v
+    <span class="kw">end</span>
+    <span class="kw">return</span> total / float(values.len)
+<span class="kw">end</span>
+
+<span class="kw">func</span> compound(principal: float, rate: float, years: int) -&gt; float
+    <span class="kw">var</span> amount = principal
+    <span class="kw">for</span> year <span class="kw">in</span> 0..years
+        amount = amount * (1.0 + rate)
+    <span class="kw">end</span>
+    <span class="kw">return</span> amount
+<span class="kw">end</span>
+
+<span class="kw">func</span> main()
+    <span class="kw">let</span> temps = [21.5, 19.0, 23.25, 18.75]
+    print(<span class="str">"average {average(temps)}"</span>)
+
+    <span class="cm">// 0.1 has no exact binary form, and Zila Lang shows the shortest text that reads back exactly</span>
+    print(<span class="str">"0.1 + 0.2 = {0.1 + 0.2}"</span>)
+    print(<span class="str">"1 / 3 = {1.0 / 3.0}"</span>)
+
+    print(<span class="str">"savings {compound(1000.0, 0.05, 10)}"</span>)
+
+    <span class="kw">let</span> whole = 7
+    print(<span class="str">"half of {whole} is {float(whole) / 2.0}"</span>)
+    print(<span class="str">"cut off: {int(3.99)} and {int(-3.99)}"</span>)
+
+    <span class="cm">// division by zero is not an error for floats</span>
+    <span class="kw">let</span> zero = 0.0
+    print(<span class="str">"{1.0 / zero} {-1.0 / zero} {zero / zero}"</span>)
+
+    <span class="cm">// NaN is never equal to anything, itself included</span>
+    <span class="kw">let</span> nan = zero / zero
+    print(<span class="str">"{nan == nan} {nan != nan} {1.5 &lt; 2.5}"</span>)
+<span class="kw">end</span></code></pre>
+      <p><code>average</code> adds up a list of <code>float</code> values and divides by <code>float(values.len)</code>: a <code>float</code> never mixes with an <code>int</code> by accident, so the count is converted on purpose. Printing gives the shortest text that reads back as exactly the same number, which is why <code>0.1 + 0.2</code> shows <code>0.30000000000000004</code>. Dividing by zero is not an error for floats (it gives <code>inf</code>, <code>-inf</code> or <code>NaN</code>), and <code>NaN</code> is not equal to anything, itself included. See the <a href="syntax.html#floats">syntax guide</a> for the exact rules.</p>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    Zila Lang &middot; A small, readable language that compiles straight to machine code. The examples are checked against <code>examples/*.zila</code>; the grammar is <code>docs/zila.ebnf</code>.
+  </footer>
+</body>
+</html>

@@ -440,7 +440,8 @@ fn a_crash_stops_the_program_as_an_exception() {
     c.request("configurationDone", "{}");
     let e = c.event("stopped");
     assert_eq!(e.get("body").get("reason").str(), Some("exception"));
-    assert!(e.get("body").get("description").str().unwrap().contains("access violation"), "{:?}", e);
+    let what = if cfg!(unix) { "segmentation fault" } else { "access violation" };
+    assert!(e.get("body").get("description").str().unwrap().contains(what), "{:?}", e);
     c.close();
     let _ = std::fs::remove_dir_all(&dir);
 }

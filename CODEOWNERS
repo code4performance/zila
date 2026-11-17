@@ -1,0 +1,8 @@
+# Default reviewer for pull requests. See CONTRIBUTING.md and GOVERNANCE.md
+# for how review and decisions work.
+
+*               @pbarrosnj
+
+/src/           @pbarrosnj
+/openspec/      @pbarrosnj
+/docs/          @pbarrosnj

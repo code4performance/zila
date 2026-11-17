@@ -71,6 +71,8 @@ extern "system" {
     fn FlushInstructionCache(h: Handle, addr: *const c_void, n: usize) -> i32;
     fn GetThreadContext(h: Handle, ctx: *mut Context) -> i32;
     fn SetThreadContext(h: Handle, ctx: *const Context) -> i32;
+    fn SuspendThread(h: Handle) -> u32;
+    fn ResumeThread(h: Handle) -> u32;
     fn GetLastError() -> u32;
 }
 
@@ -137,10 +139,15 @@ struct Windows {
     base: u64,
     pid: u32,
     threads: HashMap<u32, Handle>,
+    /// The id of the program's own thread (the only one it creates itself).
+    main: u32,
     /// The thread of the last event, which is stopped: its registers are the ones asked for.
     current: u32,
     /// An event waits to be continued (`ContinueDebugEvent` is owed).
     pending: Option<(u32, u32)>,
+    /// `main` was suspended by hand because the pending event is on another thread
+    /// (`DebugBreakProcess`'s own, for a `pause`); `release` resumes it.
+    suspended_main: bool,
     /// The exception that stopped the program was a crash: continuing passes it on.
     fault: bool,
     /// The process has ended.
@@ -261,7 +268,7 @@ pub(super) fn launch_backend(exe: &Path, args: &[String], cwd: Option<&Path>, ou
     pump(out_r, false, out.clone());
     pump(err_r, true, out);
     unsafe { CloseHandle(info.thread) };
-    let mut w = Windows { process: info.process, base: 0, pid: info.pid, threads: HashMap::new(), current: 0, pending: None, fault: false, exited: false };
+    let mut w = Windows { process: info.process, base: 0, pid: info.pid, threads: HashMap::new(), main: 0, current: 0, pending: None, suspended_main: false, fault: false, exited: false };
     // run to the system's first breakpoint, after the image is loaded and before its code runs
     match w.wait(10_000)? {
         Some(Raw::Trap) => {}
@@ -295,6 +302,12 @@ impl Windows {
 
     /// Hands the stopped program back to the system.
     fn release(&mut self, status: u32) -> R<()> {
+        if self.suspended_main {
+            self.suspended_main = false;
+            if let Some(&h) = self.threads.get(&self.main) {
+                unsafe { ResumeThread(h) };
+            }
+        }
         if let Some((pid, tid)) = self.pending.take() {
             if unsafe { ContinueDebugEvent(pid, tid, status) } == 0 {
                 return Err(last_error("ContinueDebugEvent"));
@@ -416,6 +429,7 @@ impl Backend for Windows {
                     if !file.is_null() {
                         unsafe { CloseHandle(file) };
                     }
+                    self.main = tid;
                     self.current = tid;
                     unsafe { ContinueDebugEvent(pid, tid, DBG_CONTINUE) };
                 }
@@ -442,7 +456,17 @@ impl Backend for Windows {
                 }
                 EXCEPTION_EVENT => {
                     let (ex, addr, first_chance) = (u32_at(u, 0), u64_at(u, 16), u32_at(u, 152));
-                    self.current = tid;
+                    if ex == STATUS_BREAKPOINT && tid != self.main {
+                        // `DebugBreakProcess` raises this on a thread of its own: the program's
+                        // own thread is still running and must be stopped by hand to read it.
+                        if let Some(&h) = self.threads.get(&self.main) {
+                            unsafe { SuspendThread(h) };
+                        }
+                        self.suspended_main = true;
+                        self.current = self.main;
+                    } else {
+                        self.current = tid;
+                    }
                     self.pending = Some((pid, tid));
                     return Ok(Some(match ex {
                         STATUS_BREAKPOINT | STATUS_SINGLE_STEP => Raw::Trap,

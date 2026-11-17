@@ -168,6 +168,22 @@ fn every_page_shares_the_navigation_and_is_linked() {
 }
 
 #[test]
+fn every_example_is_reachable_from_the_examples_index() {
+    let index_links = hrefs(&page("examples.html").html);
+    let mut unreachable = Vec::new();
+    for p in pages() {
+        if p.name == "examples.html" || !p.name.starts_with("examples-") {
+            continue;
+        }
+        let has_example = !elements(&p.html, "<div class=\"file-label\">", "</div>").is_empty();
+        if has_example && !index_links.contains(&p.name) {
+            unreachable.push(p.name);
+        }
+    }
+    assert!(unreachable.is_empty(), "examples not reachable from examples.html: {:?}", unreachable);
+}
+
+#[test]
 fn internal_links_and_anchors_resolve() {
     let all = pages();
     let mut broken = Vec::new();
@@ -210,7 +226,7 @@ fn the_web_library_is_documented() {
         assert!(text.contains(needed), "docs/stdlib.html does not mention `{}`", needed);
     }
     // the examples page and the async and native pages point at it
-    assert!(page("examples.html").html.contains("stdlib.html#web"));
+    assert!(page("examples-web-and-ai.html").html.contains("stdlib.html#web"));
     assert!(page("async.html").html.contains("stdlib.html#web"));
     assert!(plain(&page("native.html").html).contains("web: HTTP server"));
     assert!(std::fs::read_to_string("README.md").unwrap().contains("(`use web`)"));
@@ -520,7 +536,7 @@ fn open_changes() -> Vec<String> {
 }
 
 fn is_change_name(t: &str) -> bool {
-    const PREFIXES: [&str; 10] = ["add-", "remove-", "restrict-", "split-", "rename-", "use-", "keep-", "redesign-", "language-", "fix-"];
+    const PREFIXES: [&str; 11] = ["add-", "remove-", "restrict-", "split-", "rename-", "use-", "keep-", "redesign-", "language-", "fix-", "verify-"];
     PREFIXES.iter().any(|p| t.starts_with(p)) && t.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 

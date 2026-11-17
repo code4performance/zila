@@ -16,19 +16,34 @@
     <label for="menu" class="menu-button">Menu</label>
     <nav class="site-nav">
       <a href="index.html">Overview</a>
+
+      <p class="nav-group">Language</p>
+      <a href="getting-started.html">Getting Started</a>
       <a href="syntax.html" aria-current="page">Syntax</a>
       <a href="examples.html">Examples</a>
-      <a href="native.html">Native</a>
-      <a href="concurrency.html">Tasks</a>
-      <a href="async.html">Async</a>
+      <a class="nav-sub" href="examples-basics.html">Basics</a>
+      <a class="nav-sub" href="examples-comptime.html">Comptime</a>
+      <a class="nav-sub" href="examples-native.html">Native &amp; async</a>
+      <a class="nav-sub" href="examples-web-and-ai.html">Web &amp; AI</a>
+
+      <p class="nav-group">Standard Library</p>
       <a href="stdlib.html">Library</a>
       <a href="databases.html">Databases</a>
       <a href="ai.html">AI</a>
+
+      <p class="nav-group">Runtime &amp; Native</p>
+      <a href="native.html">Native</a>
+      <a href="concurrency.html">Tasks</a>
+      <a href="async.html">Async</a>
+
+      <p class="nav-group">Tooling</p>
       <a href="packages.html">Packages</a>
       <a href="editors.html">Editors</a>
+
+      <p class="nav-group">Zila Lang OS</p>
       <a href="os.html">Zila Lang OS</a>
-      <a href="getting-started.html">Getting Started</a>
     </nav>
+
   </header>
 
   <main id="content">
@@ -446,7 +461,7 @@ print(s.char_count())         <span class="cm">// 4   (characters, counted by wa
 print(s.slice(0, 3))          <span class="cm">// aç   (byte positions 0 up to 3)</span>
 print(char(231).to_text())    <span class="cm">// ç</span></code></pre>
       <p><code>for c in s</code> visits the characters in order. A byte that is not valid UTF-8 (possible only in text that came from outside the program, such as a file or a socket, which is not checked when it is read) is visited as U+FFFD, one per bad byte, and the loop never aborts. <code>s.slice(a, b)</code> takes <strong>byte</strong> positions and aborts, naming the position, when <code>a</code> or <code>b</code> is out of range, when <code>a &gt; b</code>, or when a position falls inside a character: <code>"ação".slice(0, 2)</code> aborts with <code>text position 2 is not on a character boundary</code>. So a text built by the program is always valid UTF-8. <code>s.bytes()</code> returns a copy of the bytes as a <code>[]byte</code>, <code>s.byte(i)</code> returns one byte in constant time without copying (and aborts out of range), and <code>s.char_count()</code> counts the characters (an invalid byte counts as one). <code>text.from_bytes(b)</code> in the <a href="stdlib.html#text">text library</a> turns bytes back into text and checks that they are valid UTF-8.</p>
-      <p><strong>There is no <code>s[i]</code></strong> on a text: <code>"ação"[2]</code> would be half of a character. The compiler says <code>text cannot be indexed</code> and points to <code>s.bytes()</code>, <code>s.slice(a, b)</code> and <code>for c in s</code>. In a loop that reads many bytes, use <code>s.byte(i)</code> rather than calling <code>bytes()</code> every time. There is no normalization, grapheme or locale support: a character is a code point, and <code>upper</code> and <code>lower</code> in the library change ASCII letters only. <code>chr(n)</code> is gone; write <code>char(n).to_text()</code>. See <a href="examples.html#unicode-example">the unicode example</a>.</p>
+      <p><strong>There is no <code>s[i]</code></strong> on a text: <code>"ação"[2]</code> would be half of a character. The compiler says <code>text cannot be indexed</code> and points to <code>s.bytes()</code>, <code>s.slice(a, b)</code> and <code>for c in s</code>. In a loop that reads many bytes, use <code>s.byte(i)</code> rather than calling <code>bytes()</code> every time. There is no normalization, grapheme or locale support: a character is a code point, and <code>upper</code> and <code>lower</code> in the library change ASCII letters only. <code>chr(n)</code> is gone; write <code>char(n).to_text()</code>. See <a href="examples-basics.html#unicode-example">the unicode example</a>.</p>
     </section>
 
     <section id="interpolation">
@@ -558,7 +573,7 @@ print(char(231).to_text())    <span class="cm">// ç</span></code></pre>
     <span class="kw">return</span> u64(hi) &lt;&lt; 32 bitor u64(lo)
 <span class="kw">end</span></code></pre>
       <p>SQL is written the same way, in a <code>sql</code> block: <code>sql postgres</code> or <code>sql tsql</code> on a line, the statement as raw lines, and a line that is just <code>end</code>. The block is a value (<code>db.Sql</code>); a <code>{value}</code> in it becomes a bound parameter and is never pasted into the text. <code>sql</code> opens a block only when a dialect name and the end of the line follow, so a variable or parameter called <code>sql</code> still works. See <a href="databases.html#sql">Databases</a>.</p>
-      <p>See the <a href="examples.html#ffi">FFI &amp; low-level example</a> for a fuller walkthrough, and the project's <code>docs/zila-ffi.md</code> for the full specification (ABIs, <code>#[c_layout]</code>, <code>#[link]</code>/<code>#[link_src]</code>, <code>#[cfg]</code>, and naked functions).</p>
+      <p>See the <a href="examples-native.html#ffi">FFI &amp; low-level example</a> for a fuller walkthrough, and the project's <code>docs/zila-ffi.md</code> for the full specification (ABIs, <code>#[c_layout]</code>, <code>#[link]</code>/<code>#[link_src]</code>, <code>#[cfg]</code>, and naked functions).</p>
     </section>
 
     <section id="testing">

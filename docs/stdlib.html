@@ -16,19 +16,34 @@
     <label for="menu" class="menu-button">Menu</label>
     <nav class="site-nav">
       <a href="index.html">Overview</a>
+
+      <p class="nav-group">Language</p>
+      <a href="getting-started.html">Getting Started</a>
       <a href="syntax.html">Syntax</a>
       <a href="examples.html">Examples</a>
-      <a href="native.html">Native</a>
-      <a href="concurrency.html">Tasks</a>
-      <a href="async.html">Async</a>
+      <a class="nav-sub" href="examples-basics.html">Basics</a>
+      <a class="nav-sub" href="examples-comptime.html">Comptime</a>
+      <a class="nav-sub" href="examples-native.html">Native &amp; async</a>
+      <a class="nav-sub" href="examples-web-and-ai.html">Web &amp; AI</a>
+
+      <p class="nav-group">Standard Library</p>
       <a href="stdlib.html" aria-current="page">Library</a>
       <a href="databases.html">Databases</a>
       <a href="ai.html">AI</a>
+
+      <p class="nav-group">Runtime &amp; Native</p>
+      <a href="native.html">Native</a>
+      <a href="concurrency.html">Tasks</a>
+      <a href="async.html">Async</a>
+
+      <p class="nav-group">Tooling</p>
       <a href="packages.html">Packages</a>
       <a href="editors.html">Editors</a>
+
+      <p class="nav-group">Zila Lang OS</p>
       <a href="os.html">Zila Lang OS</a>
-      <a href="getting-started.html">Getting Started</a>
     </nav>
+
   </header>
 
   <main id="content">
@@ -243,7 +258,7 @@ scores.put(<span class="str">"ana"</span>, 90)
 <span class="kw">let</span> cfg = json.parse(Config, raw)               <span class="cm">// Config or error</span>
 <span class="kw">let</span> out = json.encode(Config, cfg)               <span class="cm">// text or error; also json.encode&lt;Config&gt;(cfg)</span>
 <span class="kw">let</span> tree = json.parse_value(raw)                <span class="cm">// a json.Value, when there is no type</span></code></pre>
-      <p>Reads and writes JSON (strict RFC 8259) as a free-form tree or directly into and out of your own types. The mapping is derived while compiling, by library code that reads the type through comptime reflection (see <a href="syntax.html#comptime">the syntax guide</a>): there is no registration and the compiler knows nothing about JSON. The type is passed as an argument, <code>json.parse(Config, raw)</code>, or as a type argument, <code>json.encode&lt;Config&gt;(cfg)</code>, which is the only way to write a generic type such as <code>Map&lt;text, int&gt;</code>. See <a href="examples.html#json-example">the example</a>.</p>
+      <p>Reads and writes JSON (strict RFC 8259) as a free-form tree or directly into and out of your own types. The mapping is derived while compiling, by library code that reads the type through comptime reflection (see <a href="syntax.html#comptime">the syntax guide</a>): there is no registration and the compiler knows nothing about JSON. The type is passed as an argument, <code>json.parse(Config, raw)</code>, or as a type argument, <code>json.encode&lt;Config&gt;(cfg)</code>, which is the only way to write a generic type such as <code>Map&lt;text, int&gt;</code>. See <a href="examples-web-and-ai.html#json-example">the example</a>.</p>
       <table>
         <thead><tr><th>Function</th><th>What it does</th></tr></thead>
         <tbody>
@@ -287,7 +302,7 @@ app.get(<span class="str">"/hello/:name"</span>, <span class="kw">func</span>(re
 <span class="kw">try</span> app.run()                                  <span class="cm">// or: let running = try app.start()</span>
 
 <span class="kw">let</span> reply = <span class="kw">try</span> web.get(<span class="str">"http://127.0.0.1:8080/hello/ana"</span>)   <span class="cm">// reply.status, reply.body</span></code></pre>
-      <p><code>use web</code> is an HTTP/1.1 server, a router, a middleware chain, JSON helpers, an HTTP client and HTML templates, all written in Zila Lang on <code>net</code>, <code>tls</code>, <code>task</code> and <code>json</code>; the compiler only knows the name. It works on Windows and Linux alike and is not available in a bare-metal kernel. See <a href="examples.html#rest-api">the REST API example</a> and <a href="examples.html#web-example">the web example</a>.</p>
+      <p><code>use web</code> is an HTTP/1.1 server, a router, a middleware chain, JSON helpers, an HTTP client and HTML templates, all written in Zila Lang on <code>net</code>, <code>tls</code>, <code>task</code> and <code>json</code>; the compiler only knows the name. It works on Windows and Linux alike and is not available in a bare-metal kernel. See <a href="examples-web-and-ai.html#rest-api">the REST API example</a> and <a href="examples-web-and-ai.html#web-example">the web example</a>.</p>
       <h3>Server</h3>
       <p>The server runs one task per connection on the scheduler, so a slow client never delays the others. <code>web.server(port: 8080)</code> makes a <code>Server</code> (port 0 picks a free one). It listens on every network interface unless <code>host</code> says otherwise: <code>web.server(port: 8080, host: "127.0.0.1")</code> (or <code>"localhost"</code>) accepts connections from this machine only, and <code>net.listen_on(host, port)</code> does the same for a raw listener. Its limits are fields you can set before starting: <code>max_head</code> (16 KiB of header lines; <code>431</code>), <code>max_line</code> (8 KiB request line; <code>414</code>), <code>max_body</code> (1 MiB; <code>413</code>, answered without reading the body), <code>read_timeout</code> (10 s for a request that has started; <code>408</code>), <code>idle_timeout</code> (5 s between requests on a kept-alive connection; closed silently), <code>write_timeout</code> (10 s) and <code>max_connections</code> (1024; a connection beyond that gets <code>503</code> and is closed). Times are in milliseconds, sizes in bytes. A malformed request gets <code>400</code>, an unsupported method <code>501</code>. Bodies are read with <code>Content-Length</code> or <code>Transfer-Encoding: chunked</code> (both at once is <code>400</code>); HTTP/1.1 connections are kept alive unless either side says <code>Connection: close</code>, HTTP/1.0 ones close unless they ask to keep alive; requests on one connection are answered in order. <code>app.run()</code> serves until the program ends; <code>app.start()</code> serves in the background and returns a <code>Running</code> with <code>.port</code> and <code>.stop()</code>.</p>
       <table>

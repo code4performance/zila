@@ -14,6 +14,9 @@ func main()
     var c = Customer{ id: 1, name: "Ana" }
     print(greet(c))
 
+    var result = greet(Customer{ id: 2, name: "John" })
+    print(result)
+
     for i in 1..5
         if i % 2 == 0
             print("{i} is even")

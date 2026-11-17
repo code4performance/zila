@@ -117,7 +117,7 @@ flowchart LR
 
 ## Where Zila Lang is going
 
-Every language change is an [OpenSpec](openspec) change: open ones live in `openspec/changes/`, finished ones in `openspec/changes/archive/`, and their result is the living specification in `openspec/specs/`. **One change is in progress:** `verify-linux-debugger-and-editor` (the debugger on Linux and a check of the extension in a real editor; the editor features and the Windows debugger are done and archived as `add-editor-intelligence`). A test keeps this section from naming a change that is not open.
+Every language change is an [OpenSpec](openspec) change: open ones live in `openspec/changes/`, finished ones in `openspec/changes/archive/`, and their result is the living specification in `openspec/specs/`. **There are no open changes right now.** A test keeps this section from naming a change that is not open.
 
 **Known gaps** (each is a place where you can help):
 

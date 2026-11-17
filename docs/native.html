@@ -16,19 +16,34 @@
     <label for="menu" class="menu-button">Menu</label>
     <nav class="site-nav">
       <a href="index.html">Overview</a>
+
+      <p class="nav-group">Language</p>
+      <a href="getting-started.html">Getting Started</a>
       <a href="syntax.html">Syntax</a>
       <a href="examples.html">Examples</a>
-      <a href="native.html" aria-current="page">Native</a>
-      <a href="concurrency.html">Tasks</a>
-      <a href="async.html">Async</a>
+      <a class="nav-sub" href="examples-basics.html">Basics</a>
+      <a class="nav-sub" href="examples-comptime.html">Comptime</a>
+      <a class="nav-sub" href="examples-native.html">Native &amp; async</a>
+      <a class="nav-sub" href="examples-web-and-ai.html">Web &amp; AI</a>
+
+      <p class="nav-group">Standard Library</p>
       <a href="stdlib.html">Library</a>
       <a href="databases.html">Databases</a>
       <a href="ai.html">AI</a>
+
+      <p class="nav-group">Runtime &amp; Native</p>
+      <a href="native.html" aria-current="page">Native</a>
+      <a href="concurrency.html">Tasks</a>
+      <a href="async.html">Async</a>
+
+      <p class="nav-group">Tooling</p>
       <a href="packages.html">Packages</a>
       <a href="editors.html">Editors</a>
+
+      <p class="nav-group">Zila Lang OS</p>
       <a href="os.html">Zila Lang OS</a>
-      <a href="getting-started.html">Getting Started</a>
     </nav>
+
   </header>
 
   <main id="content">
@@ -110,7 +125,7 @@
       <p><code>new Node{ value: 1 }</code> allocates one reference-counted object (non-atomic in a program without threads; an <code>Rc</code> is not transferable to another thread) and has type <code>Rc&lt;Node&gt;</code>. The record <code>Node</code> itself stays a value type; only an <code>Rc</code> is shared. <code>new</code> needs a record literal, and an <code>Rc</code> cannot be used where a plain <code>Node</code> is expected.</p>
       <p><code>Weak&lt;T&gt;</code> refers to an object without keeping it alive. <code>weak(x)</code> takes an <code>Rc&lt;T&gt;</code> and returns a <code>Weak&lt;T&gt;</code>; <code>w.upgrade()</code> returns an <code>Rc&lt;T&gt;?</code>, <code>nil</code> once the last strong reference is gone. A <code>Weak&lt;T&gt;</code> may be <code>nil</code> (a root node has no parent) and <code>upgrade()</code> on it returns <code>nil</code>. A child that holds <code>parent: Weak&lt;Node&gt;</code> while the parent holds <code>children: []Rc&lt;Node&gt;</code> is freed completely, which <code>live_objects()</code> shows; two objects that hold each other with <code>Rc</code> fields still leak. A closure holds an <code>Rc</code> it uses strongly and a <code>Weak</code> weakly, so capturing <code>weak(node)</code> breaks the cycle between a node and a callback stored in it.</p>
       <p>Memory layout: a shared object is the record followed by one extra word, the <em>cell</em>, which is <code>0</code> until the first <code>weak(x)</code>. The cell is a small counted heap object holding a pointer to the object; the object owns one reference to it and every <code>Weak</code> value owns another, so a <code>Weak</code> stays valid after the object is freed (and shows up in <code>live_objects()</code> until the last one goes). When the strong count reaches zero the order is: the cell is cleared (so <code>upgrade()</code> is <code>nil</code> from now on, also inside <code>drop</code>), the record's <code>drop</code> method runs once, then the heap fields are released. Releasing a <code>Weak</code> never runs <code>drop</code>.</p>
-      <p>See <a href="examples.html#tree-example">examples/tree.zila</a>.</p>
+      <p>See <a href="examples-native.html#tree-example">examples/tree.zila</a>.</p>
     </section>
 
     <section id="optimizer">

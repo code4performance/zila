@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Comptime — Examples — Zila Lang</title>
+  <meta name="description" content="An annotated walkthrough of Zila Lang's compile-time code generation example: derive, generated functions and blocks.">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="assets/zila.svg" type="image/svg+xml">
+</head>
+<body>
+  <a class="skip" href="#content">Skip to content</a>
+  <header class="site-header">
+    <a class="brand" href="index.html"><img src="assets/zila.svg" alt="" width="28" height="28"><span>Zila Lang</span><small>docs</small></a>
+    <input type="checkbox" id="menu" class="menu-toggle">
+    <label for="menu" class="menu-button">Menu</label>
+    <nav class="site-nav">
+      <a href="index.html">Overview</a>
+
+      <p class="nav-group">Language</p>
+      <a href="getting-started.html">Getting Started</a>
+      <a href="syntax.html">Syntax</a>
+      <a href="examples.html">Examples</a>
+      <a class="nav-sub" href="examples-basics.html">Basics</a>
+      <a class="nav-sub" href="examples-comptime.html" aria-current="page">Comptime</a>
+      <a class="nav-sub" href="examples-native.html">Native &amp; async</a>
+      <a class="nav-sub" href="examples-web-and-ai.html">Web &amp; AI</a>
+
+      <p class="nav-group">Standard Library</p>
+      <a href="stdlib.html">Library</a>
+      <a href="databases.html">Databases</a>
+      <a href="ai.html">AI</a>
+
+      <p class="nav-group">Runtime &amp; Native</p>
+      <a href="native.html">Native</a>
+      <a href="concurrency.html">Tasks</a>
+      <a href="async.html">Async</a>
+
+      <p class="nav-group">Tooling</p>
+      <a href="packages.html">Packages</a>
+      <a href="editors.html">Editors</a>
+
+      <p class="nav-group">Zila Lang OS</p>
+      <a href="os.html">Zila Lang OS</a>
+    </nav>
+  </header>
+
+  <main id="content">
+    <h1>Examples: Comptime</h1>
+    <p>Compile-time code generation: a function that writes code for your types. See <a href="examples.html">all examples</a> or the <a href="syntax.html#comptime">syntax guide</a> for the full rules.</p>
+
+    <nav class="toc">
+      <h2>On this page</h2>
+      <ul>
+        <li><a href="#comptime-example">comptime: code that writes code</a></li>
+      </ul>
+    </nav>
+
+    <section id="comptime-example">
+      <h2>comptime: code that writes code</h2>
+      <div class="file-label">examples/comptime.zila</div>
+      <pre><code><span class="cm">// Compile-time code generation: a function that writes code for your types.</span>
+<span class="cm">//</span>
+<span class="cm">//   zila examples/comptime.zila -o comptime.exe</span>
+<span class="cm">//</span>
+<span class="cm">// A `comptime func` receives a `Type` (what the compiler knows about a type: its name, kind,</span>
+<span class="cm">// fields, variants and attributes) and returns Zila Lang source text. The compiler builds the</span>
+<span class="cm">// generators into a program for this machine, runs it while compiling, and compiles what it</span>
+<span class="cm">// returned as if you had written it:</span>
+<span class="cm">//</span>
+<span class="cm">//   #[derive(name)]   on a type: adds the declarations the derive `name` generates (methods)</span>
+<span class="cm">//   #[generated(g)]   on a function without a body: `g` writes the body for each type it is called with</span>
+<span class="cm">//   #[block]          a function that gives a name its own block syntax: the name, raw lines, `end`</span>
+<span class="cm">//</span>
+<span class="cm">// Generators may only use text, lists, maps, records, enums, loops and calls to code that does</span>
+<span class="cm">// the same: no files, network, clock, `spawn`, `unsafe`, `asm` or global variables.</span>
+
+<span class="kw">package</span> main
+
+<span class="kw">use</span> reflect
+<span class="kw">use</span> text
+
+<span class="kw">type</span> Point = <span class="kw">record</span>
+    x: int
+    y: int
+<span class="kw">end</span>
+
+<span class="kw">type</span> Config = <span class="kw">record</span>
+    port: int
+    name: text
+<span class="kw">end</span>
+
+<span class="cm">// `#[derive(describe)]` gives a type a `describe()` method that lists its fields.</span>
+#[derive]
+<span class="kw">comptime</span> <span class="kw">func</span> describe(t: Type) -&gt; text
+    <span class="kw">var</span> parts = <span class="str">""</span>
+    <span class="kw">for</span> f <span class="kw">in</span> t.fields()
+        <span class="kw">if</span> parts != <span class="str">""</span>
+            parts = parts + <span class="str">", "</span>
+        <span class="kw">end</span>
+        parts = parts + <span class="str">"{f.name}=\{v.{f.name}\}"</span>
+    <span class="kw">end</span>
+    <span class="kw">return</span> <span class="str">"func (v: {t.name()}) describe() -&gt; text\n    return \"{t.name()}({parts})\"\nend\n"</span>
+<span class="kw">end</span>
+
+<span class="cm">// A function whose body is written by `zero_gen` for each type it is called with.</span>
+#[generated(zero_gen)]
+<span class="kw">func</span> zero(<span class="kw">comptime</span> t: Type) -&gt; t
+
+<span class="kw">comptime</span> <span class="kw">func</span> zero_gen(t: Type) -&gt; text
+    <span class="kw">var</span> fields = <span class="str">""</span>
+    <span class="kw">for</span> f <span class="kw">in</span> t.fields()
+        <span class="kw">var</span> value = <span class="str">"0"</span>
+        <span class="kw">if</span> f.ty.kind() == <span class="str">"text"</span>
+            value = <span class="str">"\"\""</span>
+        <span class="kw">end</span>
+        <span class="kw">if</span> fields != <span class="str">""</span>
+            fields = fields + <span class="str">", "</span>
+        <span class="kw">end</span>
+        fields = fields + <span class="str">"{f.name}: {value}"</span>
+    <span class="kw">end</span>
+    <span class="kw">return</span> <span class="str">"return t \{ {fields} \}"</span>
+<span class="kw">end</span>
+
+<span class="cm">// A block: everything between the name and `end` is handed to `shout` as text.</span>
+#[block]
+<span class="kw">comptime</span> <span class="kw">func</span> shout(raw: text) -&gt; text
+    <span class="kw">return</span> <span class="str">"\"{text.upper(text.trim(raw))}\""</span>
+<span class="kw">end</span>
+
+#[derive(describe)]
+<span class="kw">type</span> Pair = <span class="kw">record</span>
+    left: text
+    right: text
+<span class="kw">end</span>
+
+<span class="kw">func</span> main()
+    <span class="kw">let</span> p = Point{ x: 3, y: 4 }
+    <span class="kw">let</span> pair = Pair{ left: <span class="str">"a"</span>, right: <span class="str">"b"</span> }
+    print(pair.describe())
+    <span class="kw">let</span> c = zero(Config)
+    print(<span class="str">"zero(Config): port {c.port}, name length {c.name.len}"</span>)
+    <span class="kw">let</span> banner = shout
+        hello from a block
+    <span class="kw">end</span>
+    print(banner)
+    print(p.x + p.y)
+<span class="kw">end</span></code></pre>
+      <p><code>describe</code> is a <code>#[derive]</code> generator: it receives the type <code>Pair</code> and returns the source of a <code>describe()</code> method that lists the fields, which the compiler then compiles into the program. <code>zero</code> has no body: <code>zero_gen</code> writes one for each type it is called with (here <code>Config</code>, with <code>t</code> standing for the type). <code>shout</code> is a block: the lines between the name and <code>end</code> are handed to it as text and its result replaces the block. Everything runs while compiling, so the program is plain native code. See <a href="syntax.html#comptime">Compile-time code generation</a>.</p>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    Zila Lang &middot; A small, readable language that compiles straight to machine code. The examples are checked against <code>examples/*.zila</code>; the grammar is <code>docs/zila.ebnf</code>.
+  </footer>
+</body>
+</html>

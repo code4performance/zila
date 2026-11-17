@@ -315,7 +315,8 @@ end
     );
     assert_eq!(run(&src), "3 2\n{\"a\":1,\"b\":[\"z\"]}\n");
     // the compiler proper has no JSON in it: the only mention is the line that registers the library
-    // (the language server speaks the JSON of its protocol with a small reader of its own)
+    // (the language server and the debug adapter speak the JSON of their own protocols with a small
+    // reader of their own, and the debug adapter's debug info is written as JSON too)
     let mut hits = Vec::new();
     let mut files = vec![std::path::PathBuf::from("src")];
     while let Some(p) = files.pop() {
@@ -323,7 +324,12 @@ end
             let path = e.unwrap().path();
             if path.is_dir() {
                 files.push(path);
-            } else if path.extension().map(|x| x == "rs").unwrap_or(false) && path.file_name().unwrap() != "lsp.rs" {
+            } else if path.extension().map(|x| x == "rs").unwrap_or(false) {
+                let top = path.strip_prefix("src").unwrap().components().next().and_then(|c| c.as_os_str().to_str());
+                let name = path.file_name().unwrap().to_str().unwrap();
+                if matches!(top, Some("lsp") | Some("dap")) || (top == Some("codegen_x64") && matches!(name, "debuginfo.rs" | "output.rs")) {
+                    continue;
+                }
                 let text = std::fs::read_to_string(&path).unwrap();
                 for (i, l) in text.lines().enumerate() {
                     if l.to_lowercase().contains("json") {

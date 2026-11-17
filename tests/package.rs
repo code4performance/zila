@@ -662,10 +662,12 @@ fn the_build_path_never_references_git() {
     // the git runner lives in src/fetch.rs; only the package commands import it
     let pkg = std::fs::read_to_string("src/package.rs").unwrap();
     assert!(!pkg.contains("Command::new") && !pkg.contains("fetch::"), "src/package.rs must not run programs or use the fetch module");
-    for f in ["src/codegen_x64.rs", "src/lsp.rs", "src/testrun.rs", "src/run.rs", "src/comptime.rs", "src/fmt.rs"] {
-        let text = std::fs::read_to_string(f).unwrap();
-        assert!(!text.contains("fetch::"), "{} imports the fetch module", f);
-        assert!(!text.contains("ls_remote") && !text.contains("clone_commit"), "{} references the git runner", f);
+    let mut files: Vec<std::path::PathBuf> = ["src/codegen_x64.rs", "src/testrun.rs", "src/run.rs", "src/comptime.rs", "src/fmt.rs"].iter().map(std::path::PathBuf::from).collect();
+    files.extend(std::fs::read_dir("src/lsp").unwrap().map(|e| e.unwrap().path()));
+    for f in files {
+        let text = std::fs::read_to_string(&f).unwrap();
+        assert!(!text.contains("fetch::"), "{} imports the fetch module", f.display());
+        assert!(!text.contains("ls_remote") && !text.contains("clone_commit"), "{} references the git runner", f.display());
     }
     let main = std::fs::read_to_string("src/main.rs").unwrap();
     assert_eq!(main.matches("fetch::run").count(), 1, "main.rs reaches the fetch module only to dispatch the package commands");

@@ -120,6 +120,18 @@ nav.site-nav a[aria-current="page"] {
   font-weight: 600;
 }
 
+nav.site-nav p.nav-group {
+  margin: 0.9rem 0 0.1rem;
+  padding: 0 0.6rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+nav.site-nav p.nav-group:first-child { margin-top: 0.25rem; }
+nav.site-nav a.nav-sub { padding-left: 1.2rem; font-size: 0.9rem; }
+
 /* ---- content ---- */
 
 main {

@@ -7,6 +7,8 @@ The version lives in `Cargo.toml` and at the top of `README.md`. To release: mov
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-17
+
 ### Added
 - Editor intelligence (OpenSpec change `add-editor-intelligence`): the language server (`zila --lsp`) now reports the errors and warnings of the compiler's checking on the expression they are about, with the unsaved text of every open file, and answers completion, hover, signature help, go to definition (also into the standard library), references, document and workspace symbols and rename; a text with a syntax error elsewhere still gets completion and hover, and checks wait for a quiet moment after typing.
 - A debugger. `zila --debug` writes `<program>.zdbg` (a line table, functions, locals and type descriptors) next to the executable, which is byte-identical with and without the flag. `zila --dap` is a Debug Adapter Protocol server for Windows and Linux programs (breakpoints, continue, pause, step over/in/out, call stack, variables and values of every kind, the debug console, stopping on `abort` and on crashes); the Linux part uses `ptrace` and its tests pass on Linux (WSL2). A pause with no step in progress is now reported to the editor with the reason `pause`, not `breakpoint`.

@@ -2,7 +2,7 @@
 
 # Zila Lang
 
-**Version 0.1.0** · [Changelog](CHANGELOG.md)
+**Version 0.5.0** · [Changelog](CHANGELOG.md)
 
 **A small, readable language that compiles straight to machine code.**
 
@@ -126,8 +126,6 @@ Every language change is an [OpenSpec](openspec) change: open ones live in `open
 | Compiler structure | Emission uses the typed tree only for calls, `let`/`var` types and the typing of a few expressions; the rest still works from the syntax, and there is no cache of checked packages (incremental builds). |
 | Threads | The Linux thread layer, weak references on `shared T`, a work-stealing scheduler, a thread pool, condition variables. |
 | TLS | Server side, `close_notify`, a buffered reader. |
-| Language server | Hover, go to definition, completion and type errors. |
-| VS Code extension | Packaging the `.vsix` and the manual smoke test. |
 | Windows/Linux parity | The differences in `tests/data/std_parity_known.txt`; the list may only shrink. |
 | New targets | macOS, ARM64 (Apple Silicon, Android, iOS), WebAssembly. Not specified yet. |
 | More libraries | Oracle, MySQL and SQLite as packages. |

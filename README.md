@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/assets/zila.svg" alt="Zila Lang" width="96" height="96"></p>
+<p align="center"><img src="docs/assets/zila_logo_banner.svg" alt="Zila Lang" width="96" height="96"></p>
 
 # Zila Lang
 
@@ -122,7 +122,7 @@ Every language change is an [OpenSpec](openspec) change: open ones live in `open
 **Known gaps** (each is a place where you can help):
 
 | Area | What is missing |
-|---|---|
+| --- | --- |
 | Compiler structure | Emission uses the typed tree only for calls, `let`/`var` types and the typing of a few expressions; the rest still works from the syntax, and there is no cache of checked packages (incremental builds). |
 | Threads | The Linux thread layer, weak references on `shared T`, a work-stealing scheduler, a thread pool, condition variables. |
 | TLS | Server side, `close_notify`, a buffered reader. |

@@ -73,7 +73,7 @@ end
 $ zila demo.zila -o demo.exe
 $ ./demo.exe
 areas: 12 and 12
-doubled in parallel: 10 and 12
+doubled in parallel: 8 and 10
 failed: cannot parse 'bad'
 ```
 

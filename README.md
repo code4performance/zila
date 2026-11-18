@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/assets/zila_logo_banner.svg" alt="Zila Lang" width="96" height="96"></p>
+<p align="center"><img src="docs/assets/zila_logo_banner.svg" alt="Zila Lang"></p>
 
 # Zila Lang
 
